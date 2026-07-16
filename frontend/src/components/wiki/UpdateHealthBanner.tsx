@@ -2,7 +2,7 @@
 
 import { Button, MessageCard } from "@onyx-ai/opal/components";
 
-import { useUpdateHealth } from "@/lib/wiki";
+import { useUpdateHealth } from "@/lib/wiki/hooks";
 
 interface Props {
   path: string;

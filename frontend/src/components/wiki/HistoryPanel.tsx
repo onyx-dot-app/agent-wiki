@@ -6,12 +6,8 @@ import type { ComponentType } from "react";
 
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { relativeTime } from "@/lib/time";
-import {
-  type CommitAgent,
-  type CommitInfo,
-  parseCommitAuthor,
-  parseCommitSource,
-} from "@/lib/wiki";
+import type { CommitAgent, CommitInfo } from "@/lib/wiki/types";
+import { parseCommitAuthor, parseCommitSource } from "@/lib/wiki/utils";
 
 export interface HistoryPanelProps {
   commits: CommitInfo[] | null;

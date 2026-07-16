@@ -15,7 +15,7 @@ import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { absoluteTime, relativeTime } from "@/lib/time";
-import type { FileDiffResponse } from "@/lib/wiki";
+import type { FileDiffResponse } from "@/lib/wiki/types";
 
 import { DiffHunk } from "./DiffHunk";
 import { annotateHunks } from "./diffEntries";

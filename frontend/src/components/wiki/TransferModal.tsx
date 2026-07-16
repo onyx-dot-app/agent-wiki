@@ -21,7 +21,7 @@ import {
   useUserSearch,
   type UserLite,
 } from "@/lib/users";
-import { lastSegment } from "@/lib/wiki";
+import { lastSegment } from "@/lib/wiki/utils";
 
 import styles from "./TransferModal.module.css";
 

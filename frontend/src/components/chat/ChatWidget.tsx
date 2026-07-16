@@ -42,7 +42,7 @@ import { useDrafting, type DraftingState } from "@/lib/drafting";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 import { presentTool } from "@/lib/tools";
-import { reviseDraft } from "@/lib/wiki";
+import { reviseDraft } from "@/lib/wiki/svc";
 
 // Items in the chat transcript. Tool calls are first-class entries
 // (rather than a transient hint) so they stay visible in the scrollback

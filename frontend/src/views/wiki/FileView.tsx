@@ -52,7 +52,7 @@ import type {
   CommentDraft,
   CommentHighlightTarget,
 } from "@/lib/editor/comments";
-import { pageTitle } from "@/lib/wiki";
+import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
 import {
   Coeditor,
@@ -75,12 +75,8 @@ import {
 } from "@/lib/templates";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
-import {
-  type CommitInfo,
-  fetchFileDiff,
-  fetchFileHistory,
-  type FileDiffResponse,
-} from "@/lib/wiki";
+import { fetchFileDiff, fetchFileHistory } from "@/lib/wiki/svc";
+import type { CommitInfo, FileDiffResponse } from "@/lib/wiki/types";
 import type {
   CommentThreadView,
   DocumentActivity,

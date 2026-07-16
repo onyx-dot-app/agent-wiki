@@ -44,14 +44,14 @@ import {
   DestinationSelect,
   FilenameRow,
 } from "@/views/wiki/FileView";
+import { AI_DRAFT_KEY } from "@/lib/wiki/constants";
+import { pageTitle } from "@/lib/wiki/utils";
 import {
-  AI_DRAFT_KEY,
-  pageTitle,
   useWikiTree,
   useDeletedTombstone,
   useDocIdResolve,
   usePathToId,
-} from "@/lib/wiki";
+} from "@/lib/wiki/hooks";
 import { useRequireAuth } from "@/lib/auth";
 import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
