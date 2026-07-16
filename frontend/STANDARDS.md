@@ -19,13 +19,14 @@ mobile breakpoint (`useIsMobile()` from `src/lib/viewport.ts`).
   chrome with `isMobile`, and avoid hardcoded widths that overflow
   narrow viewports.
 
-## Component styling — CSS Modules adjacent, tokens via CSS vars
+## Component styling — Tailwind inline, tokens via CSS vars
 
-New components MUST use **CSS Modules**: `Component.module.css` adjacent
-to `Component.tsx`, imported as `import styles from "./Component.module.css"`,
-applied with `className={styles.foo}`. Next.js scopes class names at
-build time so component-local class names (`.card`, `.header`) can stay
-short without collision risk.
+**No CSS Modules.** Style components with Tailwind utility classes directly
+on the element (`className="flex items-center gap-2 text-(--text-05)"`);
+pull Opal tokens via the `var(--...)` / `text-(--...)` Tailwind-arbitrary-value
+form. If you touch a file that still has an adjacent `Component.module.css`,
+migrate its rules to Tailwind utilities on the JSX and delete the module file
+once it's empty — don't add new `.module.css` files.
 
 Cross-cutting rules (page background, native input themes) live in
 `src/app/globals.css`. It also defines composite shadow vars (`--shadow-sm`,
