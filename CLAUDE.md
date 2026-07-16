@@ -5,7 +5,7 @@ As you make progress, make sure to periodically update the wiki so that nothing 
 
 ## Stack at a glance
 
-- **Backend** — FastAPI (uvicorn) + Postgres 17 (with `pg_textsearch` for BM25 search and `pgmq` for the task queue) + custom workers. Git is shelled out to.
+- **Backend** — FastAPI (uvicorn) + Postgres 17 + OpenSearch (BM25 search) + Redis (Streams-backed task queues) + custom workers. Git is shelled out to.
 - **Frontend** — Next.js 14 (App Router) + TypeScript.
 - **Nginx** in front, reverse-proxying `/api/*` → backend, everything else → frontend.
 - App state and queues both live in Postgres (connection via `DATABASE_URL`). Wiki working tree on volume `wiki-data`.
@@ -50,7 +50,7 @@ Add new checks as hooks here, not as one-off CI steps.
 backend/app/
   api/            FastAPI routers — thin HTTP layer, no business logic
   auth/           sessions, bcrypt, whitelist, admin flags
-  db/             SQLAlchemy ORM models (Postgres + pg_textsearch BM25)
+  db/             SQLAlchemy ORM models (Postgres); OpenSearch BM25 client (fts.py)
   llm/            provider-agnostic LLM client + DB-backed settings + agents
   models/         pydantic schemas (request/response shapes)
   tasks/          tasks (workers run in their own container)
@@ -248,16 +248,17 @@ working dir, identity, and commit-on-write. Path validation goes through
 - For any user/agent write to the wiki: `commit_file()`, then enqueue
   `tasks.reindex.reindex_document`. The web request shouldn't index inline.
 
-### Background work — pgmq queues, not threads
+### Background work — Redis Streams queues, not threads
 
 If something might take more than ~100ms, queue it. Tasks live under
-`app/tasks/` and bind to one of three `TaskQueue` instances in
+`app/tasks/` and bind to one of four `TaskQueue` instances in
 `app/tasks/queues.py` — `documents_queue` (LLM doc-reconciliation),
-`triggers_queue` (NL trigger eval, delta + scheduled), or
-`lightweight_maintenance_queue` (sub-second upkeep — BM25 reindex,
-agent-activity expiration cleanup). Each queue's messages live in
-`pgmq.q_<name>` in the same Postgres as app state; the abstraction
-itself is in `app/tasks/queue.py`. Each queue has its own worker
+`triggers_queue` (NL trigger eval, delta + scheduled), `coedit_queue`
+(co-edit session checkpoints — commits a live buffer, AI-merges on a
+concurrent commit), or `lightweight_maintenance_queue` (sub-second
+upkeep — BM25 reindex, agent-activity expiration cleanup). Each queue is
+a Redis Stream (`queue:<name>`), so each queue's backlog is isolated; the
+abstraction itself is in `app/tasks/queue.py`. Each queue has its own worker
 process (`python -m app.tasks.run_worker <queue>`); make sure new
 task modules are imported by `run_worker.py` so they register on
 boot. The variable names and the `queues.py` filename are kept
