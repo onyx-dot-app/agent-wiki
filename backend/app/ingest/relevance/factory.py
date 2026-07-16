@@ -1,7 +1,7 @@
 """Assemble the relevance filter for this deployment from config.
 
 Cold start (no model configured) → :class:`CosineSimilarityFilter`. Once a
-deployment has a trained model, ``INGEST_RELEVANCE_MODEL_PATH`` points at the
+deployment has a trained model, ``INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH`` points at the
 exported two-tower ONNX graph → :class:`TwoTowerFilter`. The two are
 interchangeable behind :class:`RelevanceFilter`, so callers just take whatever
 this returns.
@@ -24,7 +24,7 @@ def build_relevance_filter(config: Config | None = None) -> RelevanceFilter:
     """Return the relevance filter to run, per config (defaults to ``CONFIG``)."""
     cfg = config if config is not None else CONFIG
     return _select(
-        model_path=cfg.ingest_relevance_model_path,
+        model_path=cfg.ingest_relevance_two_tower_model_path,
         cosine_threshold=cfg.ingest_relevance_cosine_threshold,
     )
 
@@ -46,7 +46,7 @@ def _select(*, model_path: str, cosine_threshold: float) -> RelevanceFilter:
             return TwoTowerFilter(scorer, threshold=threshold)
         # A missing artifact shouldn't take the filter down — fall back to cosine.
         log.warning(
-            "INGEST_RELEVANCE_MODEL_PATH=%s does not exist; falling back to cosine",
+            "INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH=%s does not exist; falling back to cosine",
             model_path,
         )
     return CosineSimilarityFilter(threshold=cosine_threshold)
