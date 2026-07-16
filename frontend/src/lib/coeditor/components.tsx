@@ -25,9 +25,9 @@ import {
 } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import { ApiError } from "@/lib/api";
-import type { CoeditFrame, CoeditPeer, CoeditSessionHandle } from "@/lib/coediting/types";
-import { getOps, sendOp } from "@/lib/coediting/svc";
-import { changeSetToChanges, colorFor, syncedDocLength } from "@/lib/coediting/utils";
+import type { CoeditFrame, CoeditPeer, CoeditSessionHandle } from "@/lib/coeditor/types";
+import { getOps, sendOp } from "@/lib/coeditor/svc";
+import { changeSetToChanges, colorFor, syncedDocLength } from "@/lib/coeditor/utils";
 
 /** A remote peer's caret: a thin colored bar with a small name label above it. */
 class CaretWidget extends WidgetType {
@@ -170,7 +170,7 @@ const baseTheme = EditorView.theme({
  * push is confirmed locally on 200 and the SSE echo is skipped as already-seen.
  * On a 409 or a version gap we pull the missed ops from `/coedit/ops`.
  */
-export function CoeditEditor({
+export function Coeditor({
   session,
   peers,
   onSelectionChange,

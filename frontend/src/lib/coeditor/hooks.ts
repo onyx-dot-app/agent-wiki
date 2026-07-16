@@ -1,3 +1,5 @@
+"use client";
+
 /** React hook that owns a live co-edit session's lifecycle + presence.
  *
  * On `enabled` it joins the session for `path`, streams inbound frames, and
@@ -12,15 +14,15 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { CoeditFrame, CoeditParticipant, CoeditPeer, UseCoeditSession, CoeditSessionHandle } from "@/lib/coediting/types";
+import type { CoeditFrame, CoeditParticipant, CoeditPeer, UseCoeditSession, CoeditSessionHandle } from "@/lib/coeditor/types";
 import {
   checkpointSession,
   joinSession,
   leaveSession,
   sendCursor,
   streamSession,
-} from "@/lib/coediting/svc";
-import { CURSOR_THROTTLE_MS, TYPING_EXPIRY_MS, TYPING_IDLE_MS } from "@/lib/coediting/constants";
+} from "@/lib/coeditor/svc";
+import { CURSOR_THROTTLE_MS, TYPING_EXPIRY_MS, TYPING_IDLE_MS } from "@/lib/coeditor/constants";
 
 /** Generate a fresh per-connection collab clientId (UUID v4).
  * Used to filter out our own op echoes from the SSE stream. */

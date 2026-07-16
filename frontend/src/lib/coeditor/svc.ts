@@ -16,7 +16,7 @@ import type {
   CoeditFrame,
   CoeditOps,
   CoeditSession,
-} from "@/lib/coediting/types";
+} from "@/lib/coeditor/types";
 
 /** Join (or re-join) the live session for `path`, returning the initial buffer + roster. */
 export function joinSession(path: string): Promise<CoeditSession> {

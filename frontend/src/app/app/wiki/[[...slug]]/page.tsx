@@ -83,9 +83,9 @@ import {
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import { useAuth, useRequireAuth } from "@/lib/auth";
-import { CoeditEditor } from "@/lib/coediting/components";
-import type { CoeditParticipant } from "@/lib/coediting/types";
-import { useCoeditSession } from "@/lib/coediting/hooks";
+import { Coeditor } from "@/lib/coeditor/components";
+import type { CoeditParticipant } from "@/lib/coeditor/types";
+import { useCoeditSession } from "@/lib/coeditor/hooks";
 import {
   useHeaderActionsHost,
   useRightPanelHost,
@@ -2402,7 +2402,7 @@ function FileViewer({ path }: { path: string }) {
                       );
                     })()}
                     {coedit.session ? (
-                      <CoeditEditor
+                      <Coeditor
                         key={coedit.session.id}
                         session={coedit.session}
                         peers={coedit.peers}
