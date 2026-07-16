@@ -5,7 +5,9 @@ import { Divider, LineItemButton, Popover } from "@onyx-ai/opal/components";
 import {
   SvgEdit,
   SvgFolderIn,
+  SvgFolderPlus,
   SvgLink,
+  SvgPlus,
   SvgShare,
   SvgSparkle,
   SvgTrash,
@@ -23,8 +25,8 @@ export interface WikiItemMenuProps {
 
 /**
  * Per-item "⋯" actions menu. Spec: 160px wide, compact line items, dividers,
- * Delete in danger red. Folders omit "Launch Agent". The caller supplies the
- * trigger as `children`.
+ * Delete in danger red. Folders lead with New Page / New Folder and omit
+ * "Launch Agent". The caller supplies the trigger as `children`.
  */
 export default function WikiItemMenu({
   path,
@@ -44,6 +46,25 @@ export default function WikiItemMenu({
       <Popover.Trigger asChild>{children}</Popover.Trigger>
       <Popover.Content align={align} sideOffset={4} width="fit">
         <div className="box-border flex w-[160px] flex-col gap-[2px]">
+          {isFolder && (
+            <>
+              <LineItemButton
+                variant="body"
+                sizePreset="main-ui"
+                icon={SvgPlus}
+                title="New Page"
+                onClick={run(actions.newPage)}
+              />
+              <LineItemButton
+                variant="body"
+                sizePreset="main-ui"
+                icon={SvgFolderPlus}
+                title="New Folder"
+                onClick={run(actions.newFolder)}
+              />
+              <Divider />
+            </>
+          )}
           <LineItemButton
             variant="body"
             sizePreset="main-ui"

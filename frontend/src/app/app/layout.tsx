@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { RootLayout, SidebarStateProvider } from "@onyx-ai/opal/layouts";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  RootLayout,
+  SidebarStateProvider,
+  useSidebarState,
+} from "@onyx-ai/opal/layouts";
 import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
@@ -108,11 +112,38 @@ function AgentsBarHost() {
   return <div ref={host?.setEl} className="shrink-0" />;
 }
 
+// Folds the app sidebar to its icon rail while the folder tree is open (the
+// mock pairs the tree panel with a folded sidebar), and restores the user's
+// pre-tree fold state when the tree closes. Manual unfolding while the tree
+// is open is respected until the next open.
+function SidebarAutoFold() {
+  const { view } = useLeftPanel();
+  const { folded, setFolded } = useSidebarState();
+  // "init" makes the mount count as a transition, so a session that loads
+  // with the tree already open still folds.
+  const prevView = useRef<string>("init");
+  const foldedBeforeTree = useRef(folded);
+  useEffect(() => {
+    const was = prevView.current;
+    prevView.current = view ?? "closed";
+    if (view === "wiki-tree" && was !== "wiki-tree") {
+      foldedBeforeTree.current = was === "init" ? false : folded;
+      setFolded(true);
+    } else if (view !== "wiki-tree" && was === "wiki-tree") {
+      setFolded(foldedBeforeTree.current);
+    }
+    // `folded` is read only at the open transition, not a reactive input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, setFolded]);
+  return null;
+}
+
 function AppContent({ children }: AppContentProps) {
   const { view, isOnWikiRoute } = useLeftPanel();
   return (
     <WikiHeaderActionsProvider>
       <WikiItemActionsProvider active={isOnWikiRoute}>
+        <SidebarAutoFold />
         {view !== null && (
           <RootLayout.LeftPanel>
             {view === "wiki-tree" && <WikiTree />}

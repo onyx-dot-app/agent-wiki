@@ -1,27 +1,38 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 
 import {
   Button,
+  Divider,
   InputTypeIn,
   SidebarTab,
   Text,
 } from "@onyx-ai/opal/components";
 import {
+  SvgCheck,
+  SvgChevronDown,
+  SvgChevronRight,
   SvgFileText,
+  SvgFold,
   SvgFolder,
   SvgFolderOpen,
   SvgFolderPlus,
   SvgMoreHorizontal,
   SvgPlus,
+  SvgTextLines,
 } from "@onyx-ai/opal/icons";
 
 import { apiFetch } from "@/lib/api";
 import { revalidateWiki } from "@/lib/wikiHref";
-import { useActiveFolder } from "@/providers/WikiItemActionsProvider";
+import { useLeftPanel } from "@/providers/LeftPanelProvider";
+import {
+  useActiveFolder,
+  useFolderCreate,
+  useRowActions,
+} from "@/providers/WikiItemActionsProvider";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";
 import styles from "@/components/wiki/WikiTree.module.css";
 
@@ -55,22 +66,33 @@ function childrenOf(entries: Entry[], dir: string) {
   };
 }
 
-type IconComponent = React.ComponentProps<typeof SidebarTab>["icon"];
+type IconComponent = NonNullable<
+  React.ComponentProps<typeof SidebarTab>["icon"]
+>;
+
+/** Invisible icon-slot filler so file rows keep the chevron column's exact
+ * geometry and their glyph aligns with folder glyphs. */
+const GlyphSpacer: IconComponent = (props) => (
+  <svg {...props} aria-hidden="true" />
+);
 
 /**
- * One tree row: an OPAL SidebarTab plus the hover-/open-revealed "⋯" menu. The
- * row goes to its `selected` state while its menu is open, matching the mock's
- * selected `Projects` row (657:29879).
+ * One tree row. Folders lead with an expand chevron (icon slot) + a folder
+ * glyph inline with the label. Files fill the chevron slot with a spacer so
+ * their glyph aligns with folder glyphs. The "⋯" menu sits in SidebarTab's
+ * right slot, revealed on the tab's own group hover or while its menu is open.
  */
 function Row({
-  icon,
+  chevron,
+  glyph: Glyph,
   label,
   path,
   isFolder,
   active = false,
   onClick,
 }: {
-  icon: IconComponent;
+  chevron?: IconComponent;
+  glyph: React.ComponentType<{ size?: number }>;
   label: string;
   path: string;
   isFolder: boolean;
@@ -79,69 +101,154 @@ function Row({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
-    <div className={styles.rowWrap}>
-      <div className={styles.tab}>
-        <SidebarTab
-          variant="sidebar-light"
-          icon={icon}
-          selected={menuOpen || active}
-          onClick={onClick}
+    <SidebarTab
+      variant="sidebar-light"
+      icon={chevron ?? GlyphSpacer}
+      selected={menuOpen || active}
+      onClick={onClick}
+      rightChildren={
+        <span
+          className={`flex transition-opacity duration-100 ${
+            menuOpen
+              ? "opacity-100"
+              : "opacity-0 group-hover/SidebarTab:opacity-100 focus-within:opacity-100"
+          }`}
+          onClick={(e) => e.stopPropagation()}
         >
-          {label}
-        </SidebarTab>
-      </div>
-      {/* "⋯" overlays the leading file/folder icon, revealed on hover. */}
-      <div className={styles.rowMenu} data-open={menuOpen || undefined}>
-        <WikiItemMenu
-          path={path}
-          isFolder={isFolder}
-          open={menuOpen}
-          onOpenChange={setMenuOpen}
-        >
-          <button
-            type="button"
-            className={styles.moreBtn}
-            aria-label="More actions"
-            onClick={(e) => e.stopPropagation()}
+          <WikiItemMenu
+            path={path}
+            isFolder={isFolder}
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            align="start"
           >
-            <SvgMoreHorizontal size={16} />
-          </button>
-        </WikiItemMenu>
-      </div>
+            <Button
+              prominence="tertiary"
+              size="sm"
+              icon={SvgMoreHorizontal}
+              aria-label="More actions"
+            />
+          </WikiItemMenu>
+        </span>
+      }
+    >
+      <span className={styles.rowLabel}>
+        <Glyph size={16} />
+        <span>{label}</span>
+      </span>
+    </SidebarTab>
+  );
+}
+
+/**
+ * Inline folder-create row (mock 852:350261): a prefilled input, text
+ * selected, confirmed with the check button / Enter, cancelled with Escape.
+ */
+function NewFolderRow({
+  dir,
+  onDone,
+  onCancel,
+}: {
+  dir: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState("New Folder");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => inputRef.current?.select(), []);
+
+  async function submit() {
+    const clean = name.trim().replace(/^\/+|\/+$/g, "");
+    if (!clean || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch("/wiki/folder", {
+        method: "POST",
+        body: JSON.stringify({ path: dir ? `${dir}/${clean}` : clean }),
+      });
+      void revalidateWiki();
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "create failed");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={styles.newFolderRow}>
+      <InputTypeIn
+        ref={inputRef}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        aria-label="New folder name"
+        autoFocus
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void submit();
+          if (e.key === "Escape") onCancel();
+        }}
+        rightChildren={
+          // Keep focus in the input across the click so Enter/Escape still work
+          // if the request errors.
+          <span onMouseDown={(e) => e.preventDefault()}>
+            <Button
+              prominence="tertiary"
+              size="sm"
+              icon={SvgCheck}
+              aria-label="Create folder"
+              disabled={busy}
+              onClick={() => void submit()}
+            />
+          </span>
+        }
+      />
+      {error && <div className={styles.folderError}>{error}</div>}
     </div>
   );
 }
 
 /** A folder row that expands inline to show its children, indented one level
- * (8px) via `.nested` — matching the mock's "Folded" group. */
+ * with the mock's vertical guide line. */
 function FolderNode({
   entries,
   dir,
   name,
   onOpenFile,
   expanded,
+  searchOpen,
   onToggle,
   activeFolder,
   onSetActive,
+  creatingIn,
+  onCreateDone,
+  onCreateCancel,
 }: {
   entries: Entry[];
   dir: string;
   name: string;
   onOpenFile: (path: string) => void;
   expanded: Set<string>;
+  searchOpen: boolean;
   onToggle: (path: string) => void;
   activeFolder: string;
   onSetActive: (path: string) => void;
+  creatingIn: string | null;
+  onCreateDone: () => void;
+  onCreateCancel: () => void;
 }) {
   const full = dir ? `${dir}/${name}` : name;
-  const open = expanded.has(full);
+  const creatingHere = creatingIn === full;
+  const open = searchOpen || expanded.has(full) || creatingHere;
   const { folders, files } = open
     ? childrenOf(entries, full)
     : { folders: [], files: [] };
   return (
     <>
       <Row
-        icon={open ? SvgFolderOpen : SvgFolder}
+        chevron={open ? SvgChevronDown : SvgChevronRight}
+        glyph={open ? SvgFolderOpen : SvgFolder}
         label={name}
         path={full}
         isFolder
@@ -152,8 +259,15 @@ function FolderNode({
           onToggle(full);
         }}
       />
-      {open && (folders.length > 0 || files.length > 0) && (
+      {open && (
         <div className={styles.nested}>
+          {creatingHere && (
+            <NewFolderRow
+              dir={full}
+              onDone={onCreateDone}
+              onCancel={onCreateCancel}
+            />
+          )}
           {folders.map((f) => (
             <FolderNode
               key={f}
@@ -162,15 +276,19 @@ function FolderNode({
               name={f}
               onOpenFile={onOpenFile}
               expanded={expanded}
+              searchOpen={searchOpen}
               onToggle={onToggle}
               activeFolder={activeFolder}
               onSetActive={onSetActive}
+              creatingIn={creatingIn}
+              onCreateDone={onCreateDone}
+              onCreateCancel={onCreateCancel}
             />
           ))}
           {files.map((f) => (
             <Row
               key={f}
-              icon={SvgFileText}
+              glyph={SvgFileText}
               label={f.replace(/\.md$/, "")}
               path={`${full}/${f}`}
               isFolder={false}
@@ -184,28 +302,32 @@ function FolderNode({
 }
 
 /**
- * Permanent directory sidebar — a nested, expandable tree. Per-row contextual
- * actions come from the surrounding WikiItemActionsProvider (shared with the
- * recent-pages grid). The list scrolls rather than the panel growing.
+ * Directory tree panel (mock 319:26456): "Wiki" header with a collapse
+ * control, a search row with new-page / new-folder actions, then the nested
+ * tree. Search filters the tree to matching paths with ancestors held open.
  */
 export function WikiTree() {
   const router = useRouter();
+  const { toggleTree } = useLeftPanel();
+  const actions = useRowActions();
   const { data } = useSWR<{ entries: Entry[] }>("/wiki");
   const entries = data?.entries ?? [];
-  const { folders, files } = childrenOf(entries, "");
-  // Navigates to a page or a folder — the same /app/wiki/<path> route renders
+
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const visible = q
+    ? entries.filter((e) => e.path.toLowerCase().includes(q))
+    : entries;
+  const { folders, files } = childrenOf(visible, "");
+  // Navigates to a page or a folder. The same /app/wiki/<path> route renders
   // both (a folder shows its directory listing).
   const openFile = (path: string) => router.push(`/app/wiki/${path}`);
 
-  const [addingFolder, setAddingFolder] = useState(false);
-  const [folderName, setFolderName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   // The folder new pages/folders are created inside ("" = wiki root). State
-  // lives in the provider so deletes can reset it. Clicking a folder row makes
-  // it active; the active row is highlighted (`selected`).
+  // lives in the provider so deletes can reset it and the "⋯" menu can start
+  // an inline create from any row.
   const { activeFolder, setActiveFolder } = useActiveFolder();
+  const { creatingIn, setCreatingIn } = useFolderCreate();
   const activeLabel = activeFolder.split("/").pop() ?? "";
 
   // Expanded folders, persisted to sessionStorage so they survive a refresh.
@@ -215,131 +337,114 @@ export function WikiTree() {
       const raw = sessionStorage.getItem(EXPANDED_KEY);
       if (raw) setExpanded(new Set(JSON.parse(raw) as string[]));
     } catch {
-      // sessionStorage unavailable (private mode) — start collapsed.
+      // sessionStorage unavailable (private mode), start collapsed.
     }
   }, []);
+  const persistExpanded = (next: Set<string>) => {
+    try {
+      sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...next]));
+    } catch {
+      // ignore persistence failure
+    }
+  };
   const toggleFolder = (path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
-      try {
-        sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...next]));
-      } catch {
-        // ignore persistence failure
-      }
+      persistExpanded(next);
       return next;
     });
   };
 
-  // Expand a folder (idempotent) so a freshly-created child is visible.
-  const expandFolder = (path: string) => {
-    if (!path) return;
+  // Hold every ancestor of the create-target open so the inline row is
+  // reachable when a row menu's New Folder fires from a collapsed subtree.
+  useEffect(() => {
+    if (!creatingIn) return;
     setExpanded((prev) => {
-      if (prev.has(path)) return prev;
-      const next = new Set(prev).add(path);
-      try {
-        sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...next]));
-      } catch {
-        // ignore persistence failure
+      const next = new Set(prev);
+      let cur = "";
+      for (const seg of creatingIn.split("/").filter(Boolean)) {
+        cur = cur ? `${cur}/${seg}` : seg;
+        next.add(cur);
       }
+      persistExpanded(next);
       return next;
     });
-  };
-
-  const refresh = () => void revalidateWiki();
-
-  // New pages route to NewDocView for the active folder; new folders create
-  // inside it. Both fall back to the wiki root when nothing is active.
-  const newPage = () =>
-    router.push(
-      activeFolder ? `/app/wiki/${activeFolder}?new=1` : "/app/wiki?new=1",
-    );
-
-  async function createFolder(e: FormEvent) {
-    e.preventDefault();
-    const name = folderName.trim().replace(/^\/+|\/+$/g, "");
-    if (!name) return;
-    const path = activeFolder ? `${activeFolder}/${name}` : name;
-    setBusy(true);
-    setError(null);
-    try {
-      await apiFetch("/wiki/folder", {
-        method: "POST",
-        body: JSON.stringify({ path }),
-      });
-      setFolderName("");
-      setAddingFolder(false);
-      expandFolder(activeFolder);
-      refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "create failed");
-    } finally {
-      setBusy(false);
-    }
-  }
+  }, [creatingIn]);
 
   return (
     <div className={styles.panel}>
       <div className={styles.header}>
-        <Text font="secondary-body" color="text-03">
-          Directory
-        </Text>
-        <div className={styles.actions}>
-          <Button
-            prominence="tertiary"
-            size="sm"
-            icon={SvgPlus}
-            tooltip={activeFolder ? `New page in ${activeLabel}` : "New page"}
-            onClick={newPage}
-          />
-          <Button
-            prominence="tertiary"
-            size="sm"
-            icon={SvgFolderPlus}
-            tooltip={
-              activeFolder ? `New folder in ${activeLabel}` : "New folder"
-            }
-            onClick={() => setAddingFolder((v) => !v)}
-          />
-        </div>
+        <span className={styles.headerTitle}>
+          {/* Mock icon is `list-tree` (SvgListTree once @onyx-ai/opal ships it,
+              with SvgFold below becoming SvgArrowWallLeft). */}
+          <SvgTextLines size={16} />
+          <Text font="main-ui-action" color="text-05">
+            Wiki
+          </Text>
+        </span>
+        <Button
+          prominence="tertiary"
+          icon={SvgFold}
+          tooltip="Close Panel"
+          onClick={toggleTree}
+        />
       </div>
 
-      {addingFolder && (
-        <form className={styles.folderForm} onSubmit={createFolder}>
-          <InputTypeIn
-            value={folderName}
-            onChange={(e) => setFolderName(e.target.value)}
-            placeholder={
-              activeFolder
-                ? `folder-name (in ${activeLabel})`
-                : "folder-name (or subdir/folder-name)"
-            }
-            aria-label="New folder name"
-            autoFocus
-          />
-        </form>
-      )}
-      {error && <div className={styles.folderError}>{error}</div>}
+      <div className={styles.searchRow}>
+        <InputTypeIn
+          searchIcon
+          clearButton
+          placeholder="Search wiki..."
+          aria-label="Search wiki"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <Button
+          prominence="tertiary"
+          icon={SvgPlus}
+          tooltip={activeFolder ? `New page in ${activeLabel}` : "New page"}
+          onClick={() => actions.newPage(activeFolder)}
+        />
+        <Button
+          prominence="tertiary"
+          icon={SvgFolderPlus}
+          tooltip={activeFolder ? `New folder in ${activeLabel}` : "New folder"}
+          onClick={() => setCreatingIn(activeFolder)}
+        />
+      </div>
+      <Divider />
 
       <div className={styles.list}>
+        {creatingIn === "" && (
+          <NewFolderRow
+            dir=""
+            onDone={() => setCreatingIn(null)}
+            onCancel={() => setCreatingIn(null)}
+          />
+        )}
         {folders.map((f) => (
           <FolderNode
             key={f}
-            entries={entries}
+            entries={visible}
             dir=""
             name={f}
             onOpenFile={openFile}
             expanded={expanded}
+            searchOpen={q !== ""}
             onToggle={toggleFolder}
             activeFolder={activeFolder}
             onSetActive={setActiveFolder}
+            creatingIn={creatingIn}
+            onCreateDone={() => setCreatingIn(null)}
+            onCreateCancel={() => setCreatingIn(null)}
           />
         ))}
         {files.map((f) => (
           <Row
             key={f}
-            icon={SvgFileText}
+            glyph={SvgFileText}
             label={f.replace(/\.md$/, "")}
             path={f}
             isFolder={false}
@@ -349,7 +454,7 @@ export function WikiTree() {
         {folders.length === 0 && files.length === 0 && (
           <div className={styles.empty}>
             <Text font="secondary-body" color="text-03">
-              No pages yet
+              {q ? "No matches" : "No pages yet"}
             </Text>
           </div>
         )}
