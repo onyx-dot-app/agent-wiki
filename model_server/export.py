@@ -13,11 +13,12 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+import onnx
 import onnxruntime as ort
 import torch
 from torch import nn
 
-from two_tower.bundle import load_inference_bundle
+from two_tower.bundle import LoadedBundle, load_inference_bundle
 
 # Two-tower output classes: index 1 == "update" (i.e. relevant).
 _UPDATE_CLASS_INDEX = 1
@@ -64,7 +65,25 @@ def export_onnx(bundle_path: Path, out_path: Path) -> None:
         # is overkill for this plain MLP.
         dynamo=False,
     )
+    _embed_metadata(out_path, bundle)
     _assert_parity(head, out_path, example)
+
+
+def _embed_metadata(out_path: Path, bundle: LoadedBundle) -> None:
+    """Carry the model's serving config in the ONNX graph itself, so the served
+    artifact is self-describing: the calibrated ``cutoff`` (the backend reads it
+    as the two-tower threshold) and the ``embedding_model`` its vectors must
+    come from. Keeps the threshold with the model instead of hand-configured.
+    """
+    model = onnx.load(str(out_path))
+    props = {"embedding_model": bundle.embedding_model}
+    if bundle.cutoff is not None:
+        props["cutoff"] = str(bundle.cutoff)
+    for key, value in props.items():
+        entry = model.metadata_props.add()
+        entry.key = key
+        entry.value = value
+    onnx.save(model, str(out_path))
 
 
 def _assert_parity(

@@ -18,6 +18,14 @@ def test_export_matches_torch(make_bundle: Callable[..., Path], embed_dim: int, 
     export_onnx(bundle_path, onnx_path)  # raises if parity fails
     assert onnx_path.exists()
 
+    # The calibrated cutoff and embedding model ride in the graph so the served
+    # artifact is self-describing — the backend reads cutoff as its threshold.
+    meta = ort.InferenceSession(
+        str(onnx_path), providers=["CPUExecutionProvider"]
+    ).get_modelmeta().custom_metadata_map
+    assert meta["cutoff"] == str(0.4)  # make_bundle's default cutoff
+    assert meta["embedding_model"] == "text-embedding-3-small"
+
     doc = [0.1] * embed_dim
     pages = [[0.2] * embed_dim, [0.5] * embed_dim, [-0.3] * embed_dim]
 
