@@ -24,3 +24,8 @@ class OnnxModel:
     def run(self, feed: dict[str, np.ndarray], output: str) -> np.ndarray:
         """Run the graph on ``feed`` and return the named ``output`` tensor."""
         return np.asarray(self._session.run([output], feed)[0])
+
+    def metadata(self) -> dict[str, str]:
+        """Custom key/value metadata embedded in the graph (e.g. the cutoff)."""
+        meta: dict[str, str] = dict(self._session.get_modelmeta().custom_metadata_map)
+        return meta

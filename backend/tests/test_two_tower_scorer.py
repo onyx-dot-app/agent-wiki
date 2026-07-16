@@ -20,19 +20,23 @@ from app.ingest.relevance.two_tower_scorer import TwoTowerScorer
 class _FakeSession:
     """Captures the feed and returns a preset ``prob`` array."""
 
-    def __init__(self, probs: list[float]) -> None:
+    def __init__(self, probs: list[float], meta: dict[str, str] | None = None) -> None:
         self._probs = probs
+        self._meta = meta or {}
         self.feed: dict[str, Any] | None = None
 
     def run(self, output_names: list[str], feed: dict[str, Any]) -> list[Any]:
         self.feed = feed
         return [np.asarray(self._probs, dtype=np.float32)]
 
+    def get_modelmeta(self) -> Any:
+        return type("_Meta", (), {"custom_metadata_map": self._meta})()
+
 
 def _scorer(
-    monkeypatch: pytest.MonkeyPatch, probs: list[float]
+    monkeypatch: pytest.MonkeyPatch, probs: list[float], meta: dict[str, str] | None = None
 ) -> tuple[TwoTowerScorer, _FakeSession]:
-    fake = _FakeSession(probs)
+    fake = _FakeSession(probs, meta)
     monkeypatch.setattr(onnx_model.onnxruntime, "InferenceSession", lambda *a, **k: fake)
     return TwoTowerScorer("unused.onnx"), fake
 
@@ -64,3 +68,13 @@ def test_satisfies_scorer_protocol(monkeypatch: pytest.MonkeyPatch):
     scorer, _ = _scorer(monkeypatch, [0.5])
     s: Scorer = scorer  # structural conformance
     assert hasattr(s, "score_batch")
+
+
+def test_cutoff_read_from_model_metadata(monkeypatch: pytest.MonkeyPatch):
+    scorer, _ = _scorer(monkeypatch, [0.5], meta={"cutoff": "0.0016"})
+    assert scorer.cutoff == pytest.approx(0.0016)
+
+
+def test_cutoff_absent_is_none(monkeypatch: pytest.MonkeyPatch):
+    scorer, _ = _scorer(monkeypatch, [0.5], meta={})
+    assert scorer.cutoff is None
