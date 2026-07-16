@@ -83,7 +83,7 @@ import {
 import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import { useAuth, useRequireAuth } from "@/lib/auth";
-import { CoeditEditor } from "@/components/coedit/CoeditEditor";
+import { CoeditEditor } from "@/lib/coediting/components";
 import type { CoeditParticipant } from "@/lib/coediting/types";
 import { useCoeditSession } from "@/lib/coediting/hooks";
 import {

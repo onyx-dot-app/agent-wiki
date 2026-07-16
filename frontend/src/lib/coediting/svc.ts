@@ -18,6 +18,7 @@ import type {
   CoeditSession,
 } from "./types";
 
+/** Join (or re-join) the live session for `path`, returning the initial buffer + roster. */
 export function joinSession(path: string): Promise<CoeditSession> {
   return apiFetch("/coedit/join", {
     method: "POST",
@@ -25,10 +26,12 @@ export function joinSession(path: string): Promise<CoeditSession> {
   });
 }
 
+/** Fetch the current session snapshot (buffer + roster) without joining. */
 export function getSession(sessionId: number): Promise<CoeditSession> {
   return apiFetch(`/coedit/session?session_id=${sessionId}`);
 }
 
+/** Leave the session, allowing the server to clean up presence + buffer if empty. */
 export function leaveSession(sessionId: number): Promise<void> {
   return apiFetch("/coedit/leave", {
     method: "POST",
@@ -57,6 +60,7 @@ export function sendOp(
   });
 }
 
+/** Report the local caret/selection to the server so peers see live presence. */
 export function sendCursor(
   sessionId: number,
   anchor: number,
@@ -69,6 +73,8 @@ export function sendCursor(
   });
 }
 
+/** Commit the session buffer to git. Returns `queued: true` when the write was
+ * handed off to the background worker rather than applied inline. */
 export function checkpointSession(
   sessionId: number,
 ): Promise<{ queued: boolean }> {
@@ -78,6 +84,8 @@ export function checkpointSession(
   });
 }
 
+/** Fetch all ops after `sinceVersion` (oldest first) plus the current head
+ * version. Used to rebase un-acked local edits after a 409 or a version gap. */
 export function getOps(
   sessionId: number,
   sinceVersion: number,

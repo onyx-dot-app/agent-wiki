@@ -1,5 +1,26 @@
 import type { CoeditChange } from "./types";
 
+/** Opal-ish hues that read on both themes, one per peer slot. */
+export const PEER_COLORS = [
+  "#e5484d",
+  "#0090ff",
+  "#30a46c",
+  "#f76b15",
+  "#8e4ec6",
+  "#e5b000",
+  "#00a2c7",
+  "#e93d82",
+];
+
+/** Deterministically map a `userId` to a color from `PEER_COLORS` so a given
+ * peer keeps the same color for the full session. */
+export function colorFor(userId: string): string {
+  let h = 0;
+  for (let i = 0; i < userId.length; i++)
+    h = (h * 31 + userId.charCodeAt(i)) | 0;
+  return PEER_COLORS[Math.abs(h) % PEER_COLORS.length]!;
+}
+
 /** Diff `oldStr` → `newStr` into one range change (trim common prefix/suffix),
  * or null if unchanged. Offsets are UTF-16 code units (JS-native), matching the
  * server. Coarse (one span), which is all the server needs. */

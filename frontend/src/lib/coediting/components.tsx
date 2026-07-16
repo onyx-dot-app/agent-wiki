@@ -1,18 +1,6 @@
 "use client";
 
-/** CodeMirror 6 editor that owns the co-edit document via `@codemirror/collab`.
- *
- * The editor is the source of truth for the doc + version; local edits push to
- * the server as ops and inbound ops/resync are fed to collab's `receiveUpdates`,
- * which rebases un-acked local edits through them — so your keystrokes never
- * revert on a concurrent remote edit. It also renders remote peers' carets and
- * selection highlights and reports the local caret. Offsets are UTF-16 code
- * units end-to-end (JS-native, matching the server + `coedit.ts`).
- *
- * Ops are pushed one-per-version (our `/coedit/op` is one op per version); a
- * push is confirmed locally on 200 and the SSE echo is skipped as already-seen.
- * On a 409 or a version gap we pull the missed ops from `/coedit/ops`.
- */
+/** CodeMirror rendering extensions and the co-edit editor component. */
 import {
   collab,
   getSyncedVersion,
@@ -36,32 +24,14 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import { useEffect, useRef } from "react";
-
 import { ApiError } from "@/lib/api";
-import type { CoeditChange, CoeditFrame, CoeditPeer, CoeditSessionHandle } from "@/lib/coediting/types";
-import { getOps, sendOp } from "@/lib/coediting/svc";
+import type { CoeditFrame, CoeditPeer, CoeditSessionHandle } from "./types";
+import { getOps, sendOp } from "./svc";
+import { changeSetToChanges, syncedDocLength } from "./codemirror";
+import { colorFor } from "./utils";
 
-// Stable per-user color from a small palette (Opal-ish hues that read on both
-// themes). Hash the id so a given peer keeps one color across the session.
-const PEER_COLORS = [
-  "#e5484d",
-  "#0090ff",
-  "#30a46c",
-  "#f76b15",
-  "#8e4ec6",
-  "#e5b000",
-  "#00a2c7",
-  "#e93d82",
-];
-function colorFor(userId: string): string {
-  let h = 0;
-  for (let i = 0; i < userId.length; i++)
-    h = (h * 31 + userId.charCodeAt(i)) | 0;
-  return PEER_COLORS[Math.abs(h) % PEER_COLORS.length]!;
-}
-
-// A remote caret: a thin colored bar with a small name label above it.
-class CaretWidget extends WidgetType {
+/** A remote peer's caret: a thin colored bar with a small name label above it. */
+export class CaretWidget extends WidgetType {
   constructor(
     readonly color: string,
     readonly label: string,
@@ -82,22 +52,24 @@ class CaretWidget extends WidgetType {
     wrap.appendChild(tag);
     return wrap;
   }
-  // Zero-width; never let the editor treat it as an edit boundary.
+  /** Zero-width; never let the editor treat it as an edit boundary. */
   ignoreEvent() {
     return true;
   }
 }
 
-const setPeersEffect = StateEffect.define<CoeditPeer[]>();
+/** Dispatched to update the peer list in `peersField`. */
+export const setPeersEffect = StateEffect.define<CoeditPeer[]>();
 
-function buildPeerDecorations(
+/** Build a `DecorationSet` from the current peer list: one selection highlight
+ * per non-collapsed selection and one `CaretWidget` per peer head position.
+ * Offsets are clamped to `docLen` so a stale frame never lands out of range. */
+export function buildPeerDecorations(
   peers: CoeditPeer[],
   docLen: number,
 ): DecorationSet {
   const ranges = [];
   for (const p of peers) {
-    // Clamp to the current doc so a caret from a slightly-stale frame can't
-    // land out of range (which CodeMirror would throw on).
     const anchor = Math.max(0, Math.min(p.anchor, docLen));
     const head = Math.max(0, Math.min(p.head, docLen));
     const from = Math.min(anchor, head);
@@ -120,10 +92,10 @@ function buildPeerDecorations(
   return Decoration.set(ranges, true);
 }
 
-// Holds the peer list + its decorations. Rebuilds when the peers change or the
-// doc changes (so offsets stay in range as text is edited); provides the
-// decorations to the view.
-const peersField = StateField.define<{
+/** Holds the peer list + its decorations. Rebuilds when peers change or the doc
+ * changes (keeps offsets in range as text is edited); provides decorations to
+ * the view via `EditorView.decorations`. */
+export const peersField = StateField.define<{
   peers: CoeditPeer[];
   deco: DecorationSet;
 }>({
@@ -137,7 +109,9 @@ const peersField = StateField.define<{
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
 });
 
-const baseTheme = EditorView.theme({
+/** Base CodeMirror theme: full-height layout, monospace scroller, Opal tokens,
+ * and styles for the `.cm-coedit-caret` / `.cm-coedit-caret-label` widgets. */
+export const baseTheme = EditorView.theme({
   "&": {
     height: "100%",
     fontSize: "0.875rem",
@@ -155,8 +129,6 @@ const baseTheme = EditorView.theme({
   },
   ".cm-content": { padding: "1rem", caretColor: "var(--text-05)" },
   ".cm-line": { padding: "0" },
-  // Own caret + drawn cursor follow the theme token; native selection uses a
-  // theme tint for contrast.
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text-05)" },
   "&.cm-focused .cm-selectionBackground, ::selection": {
     backgroundColor: "var(--background-tint-03)",
@@ -186,26 +158,19 @@ const baseTheme = EditorView.theme({
   },
 });
 
-// The changes a collab ChangeSet makes, as our wire ops ({from,to,insert} in
-// the *old* doc coords — exactly what iterChanges yields).
-function changeSetToChanges(cs: ChangeSet): CoeditChange[] {
-  const out: CoeditChange[] = [];
-  cs.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-    out.push({ from: fromA, to: toA, insert: inserted.toString() });
-  });
-  return out;
-}
-
-// Length of the confirmed (synced) doc = current doc minus the net length of
-// un-acked local edits. Inbound op ChangeSets are built against this.
-function syncedDocLength(state: EditorState): number {
-  let len = state.doc.length;
-  for (const u of sendableUpdates(state)) {
-    len -= u.changes.newLength - u.changes.length;
-  }
-  return len;
-}
-
+/** CodeMirror 6 editor that owns the co-edit document via `@codemirror/collab`.
+ *
+ * The editor is the source of truth for the doc + version; local edits push to
+ * the server as ops and inbound ops/resync are fed to collab's `receiveUpdates`,
+ * which rebases un-acked local edits through them — so your keystrokes never
+ * revert on a concurrent remote edit. It also renders remote peers' carets and
+ * selection highlights and reports the local caret. Offsets are UTF-16 code
+ * units end-to-end (JS-native, matching the server).
+ *
+ * Ops are pushed one-per-version (our `/coedit/op` is one op per version); a
+ * push is confirmed locally on 200 and the SSE echo is skipped as already-seen.
+ * On a 409 or a version gap we pull the missed ops from `/coedit/ops`.
+ */
 export function CoeditEditor({
   session,
   peers,

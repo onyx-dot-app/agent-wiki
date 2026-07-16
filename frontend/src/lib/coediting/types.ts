@@ -7,6 +7,7 @@ export interface CoeditChange {
   insert: string;
 }
 
+/** A session participant as returned by join / presence frames. */
 export interface CoeditParticipant {
   user_id: string;
   user_display: string;
@@ -78,14 +79,17 @@ export interface CoeditSessionHandle {
   startDoc: string;
 }
 
+/** Return type of `useCoeditSession`. */
 export interface UseCoeditSession {
+  /** True once the join handshake completes and the SSE stream is live. */
   active: boolean;
   /** Read-only mirror of the editor's doc, for non-editor UI. */
   buffer: string;
+  /** All current session participants (including self). */
   participants: CoeditParticipant[];
   /** user_ids of peers currently typing (excludes self). */
   typing: string[];
-  /** peers' live carets/selections (excludes self), for editor decorations. */
+  /** Peers' live carets/selections (excludes self), for editor decorations. */
   peers: CoeditPeer[];
   /** Set once joined; the editor mounts its collab document from it. */
   session: CoeditSessionHandle | null;
@@ -104,5 +108,6 @@ export interface UseCoeditSession {
    * marks "typing…" + arms its auto-clear; `isEdit=false` (a caret move) reports
    * position without changing the typing state. Throttled + coalesced. */
   reportSelection: (anchor: number, head: number, isEdit: boolean) => void;
+  /** Flush pending ops, checkpoint the buffer to git, then leave the session. */
   save: () => Promise<void>;
 }

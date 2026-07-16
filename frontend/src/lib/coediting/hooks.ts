@@ -21,19 +21,23 @@ import {
   streamSession,
 } from "./svc";
 
-// Pace outbound cursor/typing pings; drop intermediates (design: ~75ms).
+/** Max ms between outbound cursor/typing pings; intermediates are coalesced. */
 const CURSOR_THROTTLE_MS = 80;
-// Send a final "stopped typing" ping this long after the last keystroke.
+
+/** Ms of keystroke silence before sending a "stopped typing" ping. */
 const TYPING_IDLE_MS = 1500;
-// Clear a peer's "typing" badge if their pings go silent (crash / lost tab).
+
+/** Ms without a ping before a peer's "typing" badge is cleared (covers crash / lost tab). */
 const TYPING_EXPIRY_MS = 4000;
 
-// Per-editor connection id (collab clientID) — distinguishes our own echoed op
-// from a peer's. `crypto.randomUUID` is available in every browser we target.
+/** Generate a fresh per-connection collab clientId (UUID v4).
+ * Used to filter out our own op echoes from the SSE stream. */
 function newClientId(): string {
   return crypto.randomUUID();
 }
 
+/** Manage the full lifecycle of a co-edit session: join, stream, presence, and save.
+ * Disable with `enabled: false` to leave the session and tear down the stream. */
 export function useCoeditSession(opts: {
   path: string;
   enabled: boolean;
