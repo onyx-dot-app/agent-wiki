@@ -16,11 +16,14 @@ tests) construct a scorer directly, via ``app.ingest.relevance.two_tower_scorer`
 from app.ingest.relevance.cosine_filter import CosineSimilarityFilter
 from app.ingest.relevance.factory import build_relevance_filter
 from app.ingest.relevance.filter import RelevanceFilter
+from app.ingest.relevance.service import RelevanceResult, RelevanceService
 from app.ingest.relevance.two_tower_filter import Scorer, TwoTowerFilter
 
 __all__ = [
     "CosineSimilarityFilter",
     "RelevanceFilter",
+    "RelevanceResult",
+    "RelevanceService",
     "Scorer",
     "TwoTowerFilter",
     "build_relevance_filter",
