@@ -10,8 +10,6 @@ import {
   type FormEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import useSWR from "swr";
 import { Content } from "@onyx-ai/opal/layouts";
 import {
@@ -80,9 +78,8 @@ import {
   scrollCommentIntoView,
   selectionToAnchor,
   type CommentDraft,
-} from "@/lib/commentAnchor";
-import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
-import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
+} from "@/lib/fileview/commentAnchor";
+import { MarkdownRenderer } from "@/lib/fileview/components";
 import { useAuth, useRequireAuth } from "@/lib/auth";
 import { Coeditor } from "@/lib/coeditor/components";
 import type { CoeditParticipant } from "@/lib/coeditor/types";
@@ -1601,22 +1598,11 @@ function FileViewer({ path }: { path: string }) {
     void refreshComments();
   }, [refreshComments]);
 
-  // Render the markdown once per body change and reuse the element on every
-  // unrelated re-render (panel open/close, active-comment change, …). A fresh
-  // <ReactMarkdown> element would let React reconcile and replace the article's
-  // text nodes, which silently invalidates the CSS Highlight Ranges painted
-  // over them — the bug where highlights vanished until you clicked a comment.
-  const renderedBody = useMemo(
-    () => (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}
-        rehypePlugins={[rehypeSourcePos]}
-      >
-        {body}
-      </ReactMarkdown>
-    ),
-    [body],
-  );
+  // MarkdownRenderer is React.memo'd on body — reuses the same element across
+  // unrelated re-renders (panel open/close, active-comment change, …) so CSS
+  // Highlight API ranges painted over its text nodes are never silently
+  // invalidated (the bug where highlights vanished until a click re-ran the paint).
+  const renderedBody = <MarkdownRenderer body={body} />;
 
   // Paint Google-Docs-style highlights over the rendered article for each
   // (non-orphaned) anchored comment. Cleared in edit/diff mode (no article).
