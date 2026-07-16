@@ -52,7 +52,7 @@ class Scope(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     trigger: TriggerKind
-    paths: list[str] = Field(default_factory=list)
+    paths: tuple[str, ...] = Field(default_factory=tuple)
     run_id: str | None = None
     head_sha: str | None = None
 

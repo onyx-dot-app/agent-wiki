@@ -22,6 +22,7 @@ directories deepest-first within that folder.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 from app.wiki import git
@@ -53,7 +54,7 @@ def _parent_dir(folder: str) -> str:
     return folder.rsplit("/", 1)[0] if "/" in folder else ""
 
 
-def _maximal_empty_folders(paths: list[str]) -> list[str]:
+def _maximal_empty_folders(paths: Sequence[str]) -> list[str]:
     """The maximal empty folders among ``paths``, sorted for determinism.
 
     Pure over the tracked-file list. A folder is empty when every tracked file
