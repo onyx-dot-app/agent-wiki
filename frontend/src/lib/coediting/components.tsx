@@ -31,7 +31,7 @@ import { changeSetToChanges, syncedDocLength } from "./codemirror";
 import { colorFor } from "./utils";
 
 /** A remote peer's caret: a thin colored bar with a small name label above it. */
-export class CaretWidget extends WidgetType {
+class CaretWidget extends WidgetType {
   constructor(
     readonly color: string,
     readonly label: string,
@@ -59,12 +59,12 @@ export class CaretWidget extends WidgetType {
 }
 
 /** Dispatched to update the peer list in `peersField`. */
-export const setPeersEffect = StateEffect.define<CoeditPeer[]>();
+const setPeersEffect = StateEffect.define<CoeditPeer[]>();
 
 /** Build a `DecorationSet` from the current peer list: one selection highlight
  * per non-collapsed selection and one `CaretWidget` per peer head position.
  * Offsets are clamped to `docLen` so a stale frame never lands out of range. */
-export function buildPeerDecorations(
+function buildPeerDecorations(
   peers: CoeditPeer[],
   docLen: number,
 ): DecorationSet {
@@ -95,7 +95,7 @@ export function buildPeerDecorations(
 /** Holds the peer list + its decorations. Rebuilds when peers change or the doc
  * changes (keeps offsets in range as text is edited); provides decorations to
  * the view via `EditorView.decorations`. */
-export const peersField = StateField.define<{
+const peersField = StateField.define<{
   peers: CoeditPeer[];
   deco: DecorationSet;
 }>({
@@ -111,7 +111,7 @@ export const peersField = StateField.define<{
 
 /** Base CodeMirror theme: full-height layout, monospace scroller, Opal tokens,
  * and styles for the `.cm-coedit-caret` / `.cm-coedit-caret-label` widgets. */
-export const baseTheme = EditorView.theme({
+const baseTheme = EditorView.theme({
   "&": {
     height: "100%",
     fontSize: "0.875rem",
