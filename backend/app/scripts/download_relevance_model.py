@@ -48,18 +48,18 @@ class ModelDownloadConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     s3_uri: str
-    dest: str
+    download_to: str
     endpoint_url: str | None = None
     region: str | None = None
 
     @staticmethod
     def from_env() -> "ModelDownloadConfig":
-        dest = os.environ.get("INGEST_RELEVANCE_MODEL_PATH", "")
-        if not dest:
+        download_to = os.environ.get("INGEST_RELEVANCE_MODEL_PATH", "")
+        if not download_to:
             raise SystemExit("INGEST_RELEVANCE_MODEL_PATH is required")
         return ModelDownloadConfig(
             s3_uri=os.environ.get("INGEST_RELEVANCE_MODEL_S3_URI", ""),
-            dest=dest,
+            download_to=download_to,
             endpoint_url=os.environ.get("INGEST_RELEVANCE_MODEL_S3_ENDPOINT") or None,
             region=os.environ.get("INGEST_RELEVANCE_MODEL_S3_REGION") or None,
         )
@@ -87,14 +87,24 @@ def _s3_client(cfg: ModelDownloadConfig) -> Any:
 
 
 def download(client: Any, cfg: ModelDownloadConfig) -> None:
-    """Fetch the model to a ``.part`` file, then rename it into ``cfg.dest``."""
+    """Fetch the model to a ``.part`` file, then rename it into ``cfg.download_to``."""
     bucket, key = parse_s3_uri(cfg.s3_uri)
-    dest = Path(cfg.dest)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    part = dest.with_suffix(dest.suffix + ".part")
-    client.download_file(bucket, key, str(part))  # pyright: ignore[reportUnknownMemberType]
-    part.replace(dest)
-    log.info("relevance model ready: s3://%s/%s -> %s (%d bytes)", bucket, key, dest, dest.stat().st_size)
+    download_to = Path(cfg.download_to)
+    download_to.parent.mkdir(parents=True, exist_ok=True)
+    part = download_to.with_suffix(download_to.suffix + ".part")
+    try:
+        client.download_file(bucket, key, str(part))  # pyright: ignore[reportUnknownMemberType]
+    except Exception:
+        part.unlink(missing_ok=True)  # don't leave a truncated sibling behind
+        raise
+    part.replace(download_to)
+    log.info(
+        "relevance model ready: s3://%s/%s -> %s (%d bytes)",
+        bucket,
+        key,
+        download_to,
+        download_to.stat().st_size,
+    )
 
 
 def main() -> int:

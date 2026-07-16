@@ -44,7 +44,7 @@ def test_parse_s3_uri_rejects_bad(bad: str):
 def test_download_writes_dest_and_leaves_no_part(tmp_path: Path):
     dest = tmp_path / "sub" / "model.onnx"  # parent doesn't exist yet
     client = FakeS3({("b", "k/model.onnx"): b"onnx-bytes"})
-    cfg = ModelDownloadConfig(s3_uri="s3://b/k/model.onnx", dest=str(dest))
+    cfg = ModelDownloadConfig(s3_uri="s3://b/k/model.onnx", download_to=str(dest))
 
     download(client, cfg)
 
@@ -54,17 +54,19 @@ def test_download_writes_dest_and_leaves_no_part(tmp_path: Path):
 
 def test_failed_download_leaves_no_partial_file(tmp_path: Path):
     dest = tmp_path / "model.onnx"
+    part = dest.with_suffix(".onnx.part")
 
     class Boom:
         def download_file(self, *a: object, **k: object) -> None:
             Path(a[2] if len(a) > 2 else k["filename"]).write_bytes(b"partial")  # type: ignore[index]
             raise RuntimeError("network died mid-transfer")
 
-    cfg = ModelDownloadConfig(s3_uri="s3://b/k.onnx", dest=str(dest))
+    cfg = ModelDownloadConfig(s3_uri="s3://b/k.onnx", download_to=str(dest))
     with pytest.raises(RuntimeError):
         download(Boom(), cfg)
-    # The truncated .part never got promoted to dest.
+    # Neither the promoted dest nor the truncated .part is left behind.
     assert not dest.exists()
+    assert not part.exists()
 
 
 def test_main_soft_fails_on_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
