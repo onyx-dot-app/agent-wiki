@@ -1,18 +1,7 @@
 import type { ChangeSet, EditorState } from "@codemirror/state";
 import { sendableUpdates } from "@codemirror/collab";
 import type { CoeditChange } from "@/lib/coediting/types";
-
-/** Opal-ish hues that read on both themes, one per peer slot. */
-export const PEER_COLORS = [
-  "#e5484d",
-  "#0090ff",
-  "#30a46c",
-  "#f76b15",
-  "#8e4ec6",
-  "#e5b000",
-  "#00a2c7",
-  "#e93d82",
-];
+import { PEER_COLORS } from "@/lib/coediting/constants";
 
 /** Deterministically map a `userId` to a color from `PEER_COLORS` so a given
  * peer keeps the same color for the full session. */
