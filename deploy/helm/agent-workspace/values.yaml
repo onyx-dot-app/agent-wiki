@@ -47,7 +47,7 @@ opensearchUrl: ""
 allowedEmails: ""
 
 # Per-queue max backlog. New enqueues fail fast with HTTP 503 when a queue
-# reaches this size. Applies to all three queues. Default 1000.
+# reaches this size. Applies to every queue. Default 1000.
 maxQueueSize: 1000
 
 # Surface the coding-tool launchers API (/api/launchers, /api/launch,
@@ -130,13 +130,14 @@ worker:
   # co-schedule, AND the per-queue periodic-task scheduler runs in-process
   # (running multiple replicas would double-fire the cron tasks).
   replicaCount: 1
-  # Four Redis Stream queues, one consumer process each. Match
+  # Five Redis Stream queues, one consumer process each. Match
   # `backend/app/tasks/queues.py:QUEUES` (and the $metricsPorts dict in
   # worker-deployment.yaml). Adding one requires corresponding code.
   queues:
     - documents
     - triggers
     - coedit
+    - detection
     - lightweight_maintenance
   resources:
     requests:

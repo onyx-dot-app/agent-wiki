@@ -1,12 +1,12 @@
 {{- /*
 One Deployment per queue. The backend's `app.tasks.run_worker`
-requires a queue argument (`documents`, `triggers`, `coedit`, or
-`lightweight_maintenance`), and each queue gets its own consumer
-process to keep slow LLM doc work from backpressuring fast paths like
-the BM25 reindex, co-edit checkpoints, or agent-activity cleanup.
+requires a queue argument (`documents`, `triggers`, `coedit`,
+`detection`, or `lightweight_maintenance`), and each queue gets its own
+consumer process to keep slow LLM doc work from backpressuring fast paths
+like the BM25 reindex, co-edit checkpoints, or agent-activity cleanup.
 */ -}}
 {{- /* Per-queue Prometheus port — must match _METRICS_PORT in app/tasks/run_worker.py. */ -}}
-{{- $metricsPorts := dict "documents" 9091 "triggers" 9092 "lightweight_maintenance" 9093 "coedit" 9094 -}}
+{{- $metricsPorts := dict "documents" 9091 "triggers" 9092 "lightweight_maintenance" 9093 "coedit" 9094 "detection" 9095 -}}
 {{- range $queue := .Values.worker.queues }}
 ---
 apiVersion: apps/v1
