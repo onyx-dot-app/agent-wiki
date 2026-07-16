@@ -7,6 +7,7 @@
 import useSWR from "swr";
 
 import { apiFetch, apiFetchBlob } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 export interface UserLite {
   id: string;
@@ -17,9 +18,7 @@ export interface UserLite {
 /** Typeahead search. Pass `enabled=false` to suspend the request (e.g.
  * when the picker is closed). SWR dedupes identical keys. */
 export function useUserSearch(query: string, enabled = true) {
-  const key = enabled
-    ? `/users/search?q=${encodeURIComponent(query.trim())}`
-    : null;
+  const key = enabled ? SWR_KEYS.userSearch(query) : null;
   const { data, error, isLoading } = useSWR<{ users: UserLite[] }>(key);
   return {
     users: data?.users ?? [],
@@ -64,8 +63,9 @@ const EMPTY_COUNTS: AdminUserCounts = { active: 0, inactive: 0, invited: 0 };
  * groups), pending invites, and counts. Distinct from `useUserSearch`, which
  * any signed-in user can hit. */
 export function useAdminUsers() {
-  const { data, error, isLoading, mutate } =
-    useSWR<AdminUsersResponse>("/admin/users");
+  const { data, error, isLoading, mutate } = useSWR<AdminUsersResponse>(
+    SWR_KEYS.adminUsers,
+  );
   return {
     users: data?.users ?? [],
     invited: data?.invited ?? [],

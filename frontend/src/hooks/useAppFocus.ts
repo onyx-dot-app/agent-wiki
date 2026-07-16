@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import useSWR from "swr";
 
+import { SWR_KEYS } from "@/lib/swr-keys";
 import { isDocId, resolveDocId } from "@/lib/wikiHref";
 
 const WIKI_PREFIX = "/app/wiki/";
@@ -90,7 +91,7 @@ export function useAppFocus(): AppFocus {
     : "";
   const idInUrl = isDocId(firstSeg) ? firstSeg : null;
   const { data: resolved } = useSWR(
-    idInUrl ? `/wiki/id/${idInUrl}` : null,
+    idInUrl ? SWR_KEYS.docIdResolve(idInUrl) : null,
     () => resolveDocId(idInUrl as string),
     { revalidateOnFocus: false },
   );

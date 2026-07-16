@@ -1,6 +1,7 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 export interface DocumentTemplate {
   id: string;
@@ -50,7 +51,7 @@ export async function listTemplateSummaries(): Promise<
 export function useTemplateSummaries() {
   const { data, error, isLoading, mutate } = useSWR<{
     templates: DocumentTemplateSummary[];
-  }>("/templates");
+  }>(SWR_KEYS.templates);
   return {
     templates: data?.templates ?? [],
     error: error as Error | undefined,
@@ -67,7 +68,7 @@ export function getTemplate(id: string): Promise<DocumentTemplate> {
 export function useAdminTemplates() {
   const { data, error, isLoading, mutate } = useSWR<{
     templates: DocumentTemplate[];
-  }>("/admin/templates");
+  }>(SWR_KEYS.adminTemplates);
   return {
     templates: data?.templates ?? [],
     error: error as Error | undefined,

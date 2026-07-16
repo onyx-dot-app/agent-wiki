@@ -5,6 +5,7 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 export type LauncherKind = "local_cli" | "in_app" | "web_handoff";
 
@@ -88,12 +89,9 @@ export function useLauncherCatalog(
     wikiPath?: string | null;
   } = {},
 ) {
-  const params = new URLSearchParams();
-  if (opts.machineId) params.set("machine_id", opts.machineId);
-  if (opts.wikiPath) params.set("wiki_path", opts.wikiPath);
-  const qs = params.toString();
-  const key = qs ? `/launchers?${qs}` : "/launchers";
-  const { data, error, isLoading, mutate } = useSWR<LauncherCatalog>(key);
+  const { data, error, isLoading, mutate } = useSWR<LauncherCatalog>(
+    SWR_KEYS.launcherCatalog(opts),
+  );
   return {
     launchers: data?.launchers ?? [],
     error: error as Error | undefined,
@@ -103,12 +101,10 @@ export function useLauncherCatalog(
 }
 
 export function useAgentSessions(wikiPath?: string) {
-  const key = wikiPath
-    ? `/agent-sessions?wiki_path=${encodeURIComponent(wikiPath)}`
-    : "/agent-sessions";
-  const { data, error, isLoading, mutate } = useSWR<AgentSessionList>(key, {
-    refreshInterval: 5000,
-  });
+  const { data, error, isLoading, mutate } = useSWR<AgentSessionList>(
+    SWR_KEYS.agentSessions(wikiPath),
+    { refreshInterval: 5000 },
+  );
   return {
     sessions: data?.sessions ?? [],
     error: error as Error | undefined,

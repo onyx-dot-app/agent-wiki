@@ -1,5 +1,7 @@
 import useSWR from "swr";
 
+import { SWR_KEYS } from "@/lib/swr-keys";
+
 export interface LLMStatus {
   configured: boolean;
   provider: string;
@@ -7,7 +9,7 @@ export interface LLMStatus {
 
 export function useLLMStatus(opts: { skip?: boolean } = {}) {
   const { data, error, isLoading, mutate } = useSWR<LLMStatus>(
-    opts.skip ? null : "/llm/status",
+    opts.skip ? null : SWR_KEYS.llmStatus,
   );
   return {
     status: data,
