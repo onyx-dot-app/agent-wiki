@@ -40,7 +40,7 @@
 .toggle {
   display: inline-flex;
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
   overflow: hidden;
   flex-shrink: 0;
 }

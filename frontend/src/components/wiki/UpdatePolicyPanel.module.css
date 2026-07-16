@@ -10,7 +10,7 @@
   max-width: 400px;
   min-height: 0;
   background: var(--background-tint-01);
-  border-radius: var(--border-radius-12);
+  border-radius: var(--radius-12);
   padding: 8px;
   gap: 8px;
 }
@@ -47,7 +47,7 @@
 /* One floating card holding both controls, matching the mockup. */
 .card {
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-12);
+  border-radius: var(--radius-12);
   padding: 16px;
   background: var(--background-tint-00);
   box-shadow: var(--shadow-sm);
@@ -99,7 +99,7 @@
   font-size: 13px;
   padding: 8px 10px;
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
   background: var(--background-tint-00);
   color: var(--text-05);
 }

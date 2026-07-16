@@ -78,7 +78,7 @@ export function ChatHistoryPanel({
           onClick={onClose}
           title="Back to chat"
           aria-label="Back to chat"
-          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-(--border-radius-04) border-none bg-transparent text-(--text-04)"
+          className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-(--radius-04) border-none bg-transparent text-(--text-04)"
         >
           <SvgArrowLeft size={16} />
         </button>
@@ -87,7 +87,7 @@ export function ChatHistoryPanel({
         </div>
         <button
           onClick={onNewChat}
-          className="cursor-pointer rounded-(--border-radius-04) border-none bg-(--background-tint-inverted-00) px-[10px] py-[5px] text-xs font-semibold text-(--text-inverted-05)"
+          className="cursor-pointer rounded-(--radius-04) border-none bg-(--background-tint-inverted-00) px-[10px] py-[5px] text-xs font-semibold text-(--text-inverted-05)"
         >
           + New chat
         </button>
@@ -97,7 +97,7 @@ export function ChatHistoryPanel({
         {error && (
           <div
             role="alert"
-            className="mx-1 mt-1 mb-2 rounded-(--border-radius-04) border border-(--status-error-02) bg-(--status-error-01) px-[10px] py-2 text-xs text-(--status-text-error-05)"
+            className="mx-1 mt-1 mb-2 rounded-(--radius-04) border border-(--status-error-02) bg-(--status-error-01) px-[10px] py-2 text-xs text-(--status-text-error-05)"
           >
             {error}
           </div>
@@ -155,7 +155,7 @@ function SessionRow({
           onClick();
         }
       }}
-      className={`flex cursor-pointer items-center gap-[6px] rounded-(--border-radius-04) px-[10px] py-2 ${
+      className={`flex cursor-pointer items-center gap-[6px] rounded-(--radius-04) px-[10px] py-2 ${
         active
           ? "bg-(--background-tint-04)"
           : hover
@@ -178,7 +178,7 @@ function SessionRow({
           onClick={onDelete}
           title="Delete"
           aria-label="Delete chat"
-          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-(--border-radius-04) border-none bg-transparent text-(--text-02)"
+          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-(--radius-04) border-none bg-transparent text-(--text-02)"
         >
           <SvgTrash size={14} />
         </button>

@@ -437,7 +437,7 @@ function Explorer({ dir }: { dir: string }) {
         {creating && (
           <form
             onSubmit={onCreate}
-            className="mb-4 flex gap-2 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-3"
+            className="mb-4 flex gap-2 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) p-3"
           >
             <input
               autoFocus
@@ -445,7 +445,7 @@ function Explorer({ dir }: { dir: string }) {
               onChange={(e) => setNewName(e.target.value)}
               placeholder="folder-name (or subdir/folder-name)"
               disabled={createBusy}
-              className="flex-1 rounded-(--border-radius-04) border border-(--border-01) p-2 text-sm"
+              className="flex-1 rounded-(--radius-04) border border-(--border-01) p-2 text-sm"
             />
             <Button
               type="submit"
@@ -467,7 +467,7 @@ function Explorer({ dir }: { dir: string }) {
         )}
 
         {error && (
-          <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+          <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
             {error}
           </div>
         )}
@@ -594,7 +594,7 @@ function Explorer({ dir }: { dir: string }) {
           header button + drawer. */}
       {!isMobile && (
         <aside className="w-[360px] shrink-0 overflow-y-auto p-2">
-          <div className="overflow-hidden rounded-(--border-radius-12) border border-(--border-01)">
+          <div className="overflow-hidden rounded-(--radius-12) border border-(--border-01)">
             <UpdatePolicyPanel path={dir} />
           </div>
         </aside>
@@ -885,7 +885,7 @@ function NewDocView({ dir }: { dir: string }) {
       />
 
       {error && (
-        <div className="rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+        <div className="rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {error}
         </div>
       )}
@@ -910,7 +910,7 @@ function NewDocView({ dir }: { dir: string }) {
             ? "Start typing, or pick a template above…"
             : "Start typing your new document…"
         }
-        className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
+        className="box-border min-h-0 w-full flex-1 resize-none rounded-(--radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
       />
     </main>
   );
@@ -920,7 +920,7 @@ type SortMode = "name-asc" | "name-desc" | "recent";
 
 /* Shared card-row chrome for the folder listing (mock table rows 0:599). */
 const ROW_CLASS =
-  "mb-1 flex h-11 items-center rounded-(--border-radius-08) border border-(--border-01) px-2";
+  "mb-1 flex h-11 items-center rounded-(--radius-08) border border-(--border-01) px-2";
 
 function BackRow({ onClick }: { onClick: () => void }) {
   return (
@@ -1069,7 +1069,7 @@ function Row({
               }
             }}
             disabled={busy}
-            className="flex-1 rounded-(--border-radius-04) border border-(--border-01) px-2 py-1 text-sm"
+            className="flex-1 rounded-(--radius-04) border border-(--border-01) px-2 py-1 text-sm"
           />
           <Button
             type="submit"

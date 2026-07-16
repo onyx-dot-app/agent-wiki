@@ -229,7 +229,7 @@ export function WikiItemActionsProvider({
               wikiPath={agentPath}
             />
             {toast && (
-              <div className="fixed bottom-8 left-1/2 z-(--z-toast) -translate-x-1/2 rounded-(--border-radius-08) bg-(--background-tint-04) px-3.5 py-2 text-[13px] text-text-05 shadow-(--shadow-popover)">
+              <div className="fixed bottom-8 left-1/2 z-(--z-toast) -translate-x-1/2 rounded-(--radius-08) bg-(--background-tint-04) px-3.5 py-2 text-[13px] text-text-05 shadow-(--shadow-popover)">
                 {toast}
               </div>
             )}

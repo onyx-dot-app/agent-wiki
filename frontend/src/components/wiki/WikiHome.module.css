@@ -32,7 +32,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: var(--border-radius-12);
+  border-radius: var(--radius-12);
   background: var(--background-tint-03);
   color: var(--text-05);
 }
