@@ -8,20 +8,18 @@
  * `op`/`resync` frames to it (`onServerFrame`), and keeps a read-only `buffer`
  * mirror for non-editor UI (the template gallery, the optimistic Done render).
  *
- * Offsets are UTF-16 (JS-native), matching the server — see `coedit.ts`.
+ * Offsets are UTF-16 (JS-native), matching the server — see `svc.ts`.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { CoeditFrame, CoeditParticipant, CoeditPeer, UseCoeditSession, CoeditSessionHandle } from "./types";
 import {
-  type CoeditFrame,
-  type CoeditParticipant,
-  type CoeditPeer,
   checkpointSession,
   joinSession,
   leaveSession,
   sendCursor,
   streamSession,
-} from "./coedit";
+} from "./svc";
 
 // Pace outbound cursor/typing pings; drop intermediates (design: ~75ms).
 const CURSOR_THROTTLE_MS = 80;
@@ -29,43 +27,6 @@ const CURSOR_THROTTLE_MS = 80;
 const TYPING_IDLE_MS = 1500;
 // Clear a peer's "typing" badge if their pings go silent (crash / lost tab).
 const TYPING_EXPIRY_MS = 4000;
-
-/** What the editor needs to run collab, available once the session is joined. */
-export interface CoeditSessionHandle {
-  id: number;
-  clientId: string;
-  startVersion: number;
-  startDoc: string;
-}
-
-export interface UseCoeditSession {
-  active: boolean;
-  /** Read-only mirror of the editor's doc, for non-editor UI. */
-  buffer: string;
-  participants: CoeditParticipant[];
-  /** user_ids of peers currently typing (excludes self). */
-  typing: string[];
-  /** peers' live carets/selections (excludes self), for editor decorations. */
-  peers: CoeditPeer[];
-  /** Set once joined; the editor mounts its collab document from it. */
-  session: CoeditSessionHandle | null;
-  /** Register a handler the hook calls with each inbound `op`/`resync` frame. */
-  onServerFrame: (handler: ((frame: CoeditFrame) => void) | null) => void;
-  /** Editor reports its current doc so the hook's `buffer` mirror stays fresh. */
-  reportDoc: (doc: string) => void;
-  /** Register the editor's "flush pending ops" fn, awaited by `save`. */
-  registerFlush: (fn: (() => Promise<void>) | null) => void;
-  /** Register the editor's "replace whole doc" fn (template pick / blank). */
-  registerSetDoc: (fn: ((text: string) => void) | null) => void;
-  /** Replace the document (goes through the editor as an edit). No-op until
-   * the editor has mounted. */
-  setDoc: (text: string) => void;
-  /** Report the local caret/selection so peers see presence. `isEdit=true`
-   * marks "typing…" + arms its auto-clear; `isEdit=false` (a caret move) reports
-   * position without changing the typing state. Throttled + coalesced. */
-  reportSelection: (anchor: number, head: number, isEdit: boolean) => void;
-  save: () => Promise<void>;
-}
 
 // Per-editor connection id (collab clientID) — distinguishes our own echoed op
 // from a peer's. `crypto.randomUUID` is available in every browser we target.

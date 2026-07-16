@@ -84,8 +84,8 @@ import { rehypeSourcePos } from "@/lib/rehypeSourcePos";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import { useAuth, useRequireAuth } from "@/lib/auth";
 import { CoeditEditor } from "@/components/coedit/CoeditEditor";
-import type { CoeditParticipant } from "@/lib/coedit";
-import { useCoeditSession } from "@/lib/useCoeditSession";
+import type { CoeditParticipant } from "@/lib/coediting/types";
+import { useCoeditSession } from "@/lib/coediting/hooks";
 import {
   useHeaderActionsHost,
   useRightPanelHost,

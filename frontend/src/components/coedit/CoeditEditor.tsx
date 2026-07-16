@@ -38,14 +38,8 @@ import {
 import { useEffect, useRef } from "react";
 
 import { ApiError } from "@/lib/api";
-import {
-  type CoeditChange,
-  type CoeditFrame,
-  type CoeditPeer,
-  getOps,
-  sendOp,
-} from "@/lib/coedit";
-import type { CoeditSessionHandle } from "@/lib/useCoeditSession";
+import type { CoeditChange, CoeditFrame, CoeditPeer, CoeditSessionHandle } from "@/lib/coediting/types";
+import { getOps, sendOp } from "@/lib/coediting/svc";
 
 // Stable per-user color from a small palette (Opal-ish hues that read on both
 // themes). Hash the id so a given peer keeps one color across the session.
