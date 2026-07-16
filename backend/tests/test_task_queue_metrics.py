@@ -97,7 +97,13 @@ def test_task_queue_collector_labels_every_queue(monkeypatch):
 
     depth = families["task_queue_depth"]
     seen = {s.labels["queue"] for s in depth.samples}
-    assert seen == {"documents", "triggers", "coedit", "lightweight_maintenance"}
+    assert seen == {
+        "documents",
+        "triggers",
+        "coedit",
+        "detection",
+        "lightweight_maintenance",
+    }
     assert all(s.value == 2 for s in depth.samples)
 
     age = families["task_queue_oldest_age_seconds"]
