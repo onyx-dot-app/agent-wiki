@@ -7,12 +7,15 @@ import useSWR from "swr";
 
 import { getDeletedTombstone } from "@/lib/trash";
 import type { ListResponse } from "@/lib/fileview/types";
+import { SWR_KEYS } from "@/lib/swr-keys";
 import { resolveDocId, resolveIds } from "@/lib/wikiHref";
 
 /** The full flat wiki listing — backs the folder Explorer and the New Doc
  * destination picker. */
 export function useWikiTree() {
-  const { data, error, isLoading, mutate } = useSWR<ListResponse>("/wiki");
+  const { data, error, isLoading, mutate } = useSWR<ListResponse>(
+    SWR_KEYS.wikiTree,
+  );
   return { entries: data?.entries ?? [], error, isLoading, mutate };
 }
 
@@ -20,7 +23,7 @@ export function useWikiTree() {
  * deleted-URL panel. Enabled whenever `path` is non-null. */
 export function useDeletedTombstone(path: string | null) {
   const { data, error, isLoading } = useSWR(
-    path ? `/wiki/deleted?path=${encodeURIComponent(path)}` : null,
+    path ? SWR_KEYS.deletedTombstone(path) : null,
     () => getDeletedTombstone(path as string),
     { revalidateOnFocus: false },
   );
@@ -31,7 +34,7 @@ export function useDeletedTombstone(path: string | null) {
  * Enabled whenever `id` is non-null. */
 export function useDocIdResolve(id: string | null) {
   const { data, error, isLoading } = useSWR(
-    id ? `/wiki/id/${id}` : null,
+    id ? SWR_KEYS.docIdResolve(id) : null,
     () => resolveDocId(id as string),
     { revalidateOnFocus: false },
   );
@@ -45,7 +48,7 @@ export function useDocIdResolve(id: string | null) {
  * `wikiHref.ts:revalidateWiki`. */
 export function usePathToId(tag: string, path: string | null) {
   const { data, error, isLoading } = useSWR(
-    path ? [tag, path] : null,
+    path ? SWR_KEYS.pathToId(tag, path) : null,
     () => resolveIds([path as string]).then((m) => m[path as string] ?? null),
     { revalidateOnFocus: false },
   );

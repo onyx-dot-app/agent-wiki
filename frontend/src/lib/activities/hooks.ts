@@ -1,12 +1,7 @@
 import useSWR from "swr";
-import type { AppEvent } from "./types";
 
-function eventsPath(opts: { kind?: string; limit?: number }): string {
-  const qs = new URLSearchParams();
-  if (opts.kind) qs.set("kind", opts.kind);
-  if (opts.limit) qs.set("limit", String(opts.limit));
-  return `/events${qs.toString() ? `?${qs}` : ""}`;
-}
+import { SWR_KEYS } from "@/lib/swr-keys";
+import type { AppEvent } from "./types";
 
 export function useEvents(
   opts: { kind?: string; limit?: number } = {},
@@ -14,7 +9,7 @@ export function useEvents(
 ) {
   const { data, error, isLoading, isValidating, mutate } = useSWR<{
     events: AppEvent[];
-  }>(eventsPath(opts), swrConfig);
+  }>(SWR_KEYS.events(opts), swrConfig);
   return {
     events: data?.events ?? [],
     error: error as Error | undefined,

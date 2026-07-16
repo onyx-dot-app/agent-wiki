@@ -3,6 +3,7 @@
 import useSWR from "swr";
 
 import { apiFetch, ApiError } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 import {
   createDestinationConfig,
   type DestinationConfig,
@@ -27,8 +28,9 @@ export interface CraftLaunchResponse {
 /** Connection status for the current user. `data` is undefined while the
  * feature is dark (the endpoint 404s) — callers treat that as "unavailable". */
 export function useCraftConnect() {
-  const { data, error, isLoading, mutate } =
-    useSWR<CraftConnectStatus>("/craft/connect");
+  const { data, error, isLoading, mutate } = useSWR<CraftConnectStatus>(
+    SWR_KEYS.craftConnect,
+  );
   // The endpoint 404s when Craft is dark; expose that as a typed flag so
   // callers don't have to cast `error` and check the status themselves.
   const isUnavailable = error instanceof ApiError && error.status === 404;

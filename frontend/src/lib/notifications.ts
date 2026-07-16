@@ -3,6 +3,7 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 // Mirrors app/models/notifications.py.
 export interface NotificationView {
@@ -32,7 +33,7 @@ export interface NotificationList {
  */
 export function useNotifications(opts: { activePoll?: boolean } = {}) {
   const { data, error, isLoading, mutate } = useSWR<NotificationList>(
-    "/notifications",
+    SWR_KEYS.notifications,
     { refreshInterval: opts.activePoll ? 5000 : 0 },
   );
   return {

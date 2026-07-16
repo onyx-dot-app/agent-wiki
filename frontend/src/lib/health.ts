@@ -1,5 +1,7 @@
 import useSWR from "swr";
 
+import { SWR_KEYS } from "@/lib/swr-keys";
+
 export interface QueueHealth {
   name: string;
   // Per-state breakdown. `ready` is what a worker can pick up right now;
@@ -21,7 +23,7 @@ export interface HealthResponse {
 
 export function useHealth(opts: { refreshIntervalMs?: number } = {}) {
   const { data, error, isLoading, isValidating, mutate } =
-    useSWR<HealthResponse>("/health", {
+    useSWR<HealthResponse>(SWR_KEYS.health, {
       refreshInterval: opts.refreshIntervalMs,
     });
   return {

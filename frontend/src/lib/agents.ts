@@ -12,6 +12,7 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 export interface TokenSummary {
   id: string;
@@ -30,7 +31,7 @@ export interface CreatedToken {
 
 export function useTokens() {
   const { data, error, isLoading, mutate } = useSWR<{ tokens: TokenSummary[] }>(
-    "/mcp/tokens",
+    SWR_KEYS.mcpTokens,
   );
   return {
     tokens: data?.tokens ?? [],

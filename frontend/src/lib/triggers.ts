@@ -1,6 +1,7 @@
 import useSWR from "swr";
 
 import { ApiError, apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 export type TriggerKind = "delta" | "schedule";
 
@@ -71,7 +72,7 @@ export interface TriggerUpdateInput {
 
 export function useTriggers() {
   const { data, error, isLoading, mutate } = useSWR<{ triggers: Trigger[] }>(
-    "/triggers",
+    SWR_KEYS.triggers,
   );
   return {
     triggers: data?.triggers ?? [],
@@ -172,7 +173,7 @@ export async function getTriggerDestinations(): Promise<TriggerDestination[]> {
 
 export function useTriggerDestinations() {
   const { data } = useSWR<{ destinations: TriggerDestination[] }>(
-    "/triggers/destinations",
+    SWR_KEYS.triggerDestinations,
   );
   return data?.destinations ?? [];
 }
@@ -193,7 +194,7 @@ export interface DestinationConfig {
 export function useDestinationConfigs() {
   const { data, error, isLoading, mutate } = useSWR<{
     configs: DestinationConfig[];
-  }>("/triggers/destination-configs");
+  }>(SWR_KEYS.destinationConfigs);
   return {
     configs: data?.configs ?? [],
     error: error as Error | undefined,

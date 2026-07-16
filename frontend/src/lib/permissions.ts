@@ -20,6 +20,7 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 export type PrincipalKind = "user" | "group" | "everyone";
 export type ResourceKind = "page" | "folder";
@@ -84,7 +85,7 @@ export interface PageAcl {
 
 export function useGroups() {
   const { data, error, isLoading, mutate } = useSWR<{ groups: Group[] }>(
-    "/groups",
+    SWR_KEYS.groups,
   );
   return {
     groups: data?.groups ?? [],
@@ -98,7 +99,7 @@ export function useGroup(id: string | null) {
   const { data, error, isLoading, mutate } = useSWR<{
     group: Group;
     members: GroupMember[];
-  }>(id ? `/groups/${id}` : null);
+  }>(id ? SWR_KEYS.group(id) : null);
   return {
     group: data?.group ?? null,
     members: data?.members ?? [],
@@ -135,7 +136,7 @@ export interface WikiPathEntry {
 
 export function useWikiPaths() {
   const { data, error, isLoading } = useSWR<{ entries: WikiPathEntry[] }>(
-    "/wiki",
+    SWR_KEYS.wikiTree,
   );
   return {
     entries: data?.entries ?? [],
@@ -148,7 +149,7 @@ export function useWikiPaths() {
  * revalidates after a revoke. */
 export function useGroupShares(id: string | null) {
   const { data, error, isLoading, mutate } = useSWR<{ shares: GroupShare[] }>(
-    id ? `/groups/${id}/shares` : null,
+    id ? SWR_KEYS.groupShares(id) : null,
   );
   return {
     shares: data?.shares ?? [],
@@ -183,7 +184,7 @@ export function removeGroupMember(
 // --------------------------------------------------------------------------- //
 
 export function usePageAcl(path: string | null) {
-  const key = path ? `/wiki/acl?path=${encodeURIComponent(path)}` : null;
+  const key = path ? SWR_KEYS.pageAcl(path) : null;
   const { data, error, isLoading, mutate } = useSWR<PageAcl>(key);
   return {
     acl: data ?? null,

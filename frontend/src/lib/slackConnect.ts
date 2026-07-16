@@ -1,6 +1,7 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 import {
   createDestinationConfig,
   type DestinationConfig,
@@ -23,8 +24,9 @@ export interface SlackChannel {
 }
 
 export function useSlackConnectStatus() {
-  const { data, error, isLoading, mutate } =
-    useSWR<SlackConnectStatus>("/connectors/slack");
+  const { data, error, isLoading, mutate } = useSWR<SlackConnectStatus>(
+    SWR_KEYS.slackConnectStatus,
+  );
   return {
     status: data ?? null,
     error: error as Error | undefined,

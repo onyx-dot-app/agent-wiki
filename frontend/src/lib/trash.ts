@@ -1,6 +1,7 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 /** One soft-deleted item in the Trash (a page or a folder root). Mirrors the
  * backend `TrashEntryView`. `path` is where it lived; a restore moves it back
@@ -17,7 +18,7 @@ export interface TrashEntry {
 /** The Trash list, newest-first. ACL-filtered server-side. */
 export function useTrash() {
   const { data, error, isLoading, mutate } = useSWR<{ items: TrashEntry[] }>(
-    "/wiki/trash",
+    SWR_KEYS.wikiTrash,
   );
   return {
     items: data?.items ?? [],

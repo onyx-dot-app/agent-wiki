@@ -1,6 +1,7 @@
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 /** Last path segment as a display name — drops a trailing `.md`. Shared by the
  * share + transfer dialogs so the two copies don't drift. */
@@ -173,9 +174,7 @@ export interface UpdateHealth {
  * reload — the count moves slowly, so a coarser interval than the doc body's
  * is plenty. Pass `null` to disable (no path selected). */
 export function useUpdateHealth(path: string | null) {
-  const key = path
-    ? `/wiki/update-health?path=${encodeURIComponent(path)}`
-    : null;
+  const key = path ? SWR_KEYS.updateHealth(path) : null;
   const { data, error, isLoading, mutate } = useSWR<UpdateHealth>(key, {
     refreshInterval: 15_000,
   });
