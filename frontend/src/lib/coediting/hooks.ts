@@ -20,15 +20,7 @@ import {
   sendCursor,
   streamSession,
 } from "./svc";
-
-/** Max ms between outbound cursor/typing pings; intermediates are coalesced. */
-const CURSOR_THROTTLE_MS = 80;
-
-/** Ms of keystroke silence before sending a "stopped typing" ping. */
-const TYPING_IDLE_MS = 1500;
-
-/** Ms without a ping before a peer's "typing" badge is cleared (covers crash / lost tab). */
-const TYPING_EXPIRY_MS = 4000;
+import { CURSOR_THROTTLE_MS, TYPING_EXPIRY_MS, TYPING_IDLE_MS } from "./constants";
 
 /** Generate a fresh per-connection collab clientId (UUID v4).
  * Used to filter out our own op echoes from the SSE stream. */
