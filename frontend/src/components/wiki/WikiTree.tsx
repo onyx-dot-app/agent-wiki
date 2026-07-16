@@ -12,11 +12,11 @@ import {
   Text,
 } from "@onyx-ai/opal/components";
 import {
+  SvgArrowWallRight,
   SvgCheck,
   SvgChevronDown,
   SvgChevronRight,
   SvgFileText,
-  SvgFold,
   SvgFolder,
   SvgFolderOpen,
   SvgFolderPlus,
@@ -69,6 +69,13 @@ function childrenOf(entries: Entry[], dir: string) {
 type IconComponent = NonNullable<
   React.ComponentProps<typeof SidebarTab>["icon"]
 >;
+
+/** The mock's `arrow-wall-left` collapse glyph. The published icon set ships
+ * only the right-facing variant, whose 180° rotation is the exact mirror.
+ * Swap for SvgArrowWallLeft once @onyx-ai/opal publishes it. */
+const ArrowWallLeft: IconComponent = (props) => (
+  <SvgArrowWallRight {...props} style={{ transform: "rotate(180deg)" }} />
+);
 
 /** Invisible icon-slot filler so file rows keep the chevron column's exact
  * geometry and their glyph aligns with folder glyphs. */
@@ -386,7 +393,7 @@ export function WikiTree() {
         </span>
         <Button
           prominence="tertiary"
-          icon={SvgFold}
+          icon={ArrowWallLeft}
           tooltip="Close Panel"
           onClick={toggleTree}
         />

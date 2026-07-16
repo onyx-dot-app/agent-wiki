@@ -6,9 +6,11 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  /* Fixed panel width per the annotated mock (comment on 705:142872). */
+  /* Fixed 312px card inset 4px from its region (mock 705:142934 sits at
+     x=4,y=4 in the 320 frame) so the border and radius read as a card. */
   width: 312px;
-  height: 100%;
+  height: calc(100% - 8px);
+  margin: 4px;
   box-sizing: border-box;
   background: var(--background-tint-01);
   border: 1px solid var(--border-01);
