@@ -157,6 +157,17 @@ const baseTheme = EditorView.theme({
   },
 });
 
+interface CoeditorProps {
+  session: CoeditSessionHandle;
+  peers: CoeditPeer[];
+  onSelectionChange: (anchor: number, head: number, isEdit: boolean) => void;
+  onServerFrame: (handler: ((frame: CoeditFrame) => void) | null) => void;
+  reportDoc: (doc: string) => void;
+  registerFlush: (fn: (() => Promise<void>) | null) => void;
+  registerSetDoc: (fn: ((text: string) => void) | null) => void;
+  placeholder?: string;
+}
+
 /** CodeMirror 6 editor that owns the co-edit document via `@codemirror/collab`.
  *
  * The editor is the source of truth for the doc + version; local edits push to
@@ -179,16 +190,7 @@ export function Coeditor({
   registerFlush,
   registerSetDoc,
   placeholder,
-}: {
-  session: CoeditSessionHandle;
-  peers: CoeditPeer[];
-  onSelectionChange: (anchor: number, head: number, isEdit: boolean) => void;
-  onServerFrame: (handler: ((frame: CoeditFrame) => void) | null) => void;
-  reportDoc: (doc: string) => void;
-  registerFlush: (fn: (() => Promise<void>) | null) => void;
-  registerSetDoc: (fn: ((text: string) => void) | null) => void;
-  placeholder?: string;
-}) {
+}: CoeditorProps) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
   // Latest callbacks without re-creating the editor.
