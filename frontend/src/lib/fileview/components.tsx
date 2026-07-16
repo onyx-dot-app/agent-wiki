@@ -22,6 +22,7 @@ import {
   SvgChevronRight,
   SvgEdit,
   SvgExternalLink,
+  SvgDocFile,
   SvgFolder,
   SvgHistory,
   SvgShare,
@@ -105,14 +106,27 @@ interface DocEntry {
   updated_at: string;
 }
 
+interface DocTitleProps {
+  path: string;
+}
+
 /** Renders the page title and a divider below it. */
-export function DocTitle({ path }: { path: string }) {
+export function DocTitle({ path }: DocTitleProps) {
   return (
-    <>
-      <Content sizePreset="main-ui" variant="section" title={pageTitle(path)} />
-      <Divider />
-    </>
+    <div className="flex flex-col gap-6 px-4 pb-6">
+      <Content
+        icon={SvgDocFile}
+        sizePreset="headline"
+        variant="heading"
+        title={pageTitle(path)}
+      />
+      <Divider paddingParallel="fit" paddingPerpendicular="fit" />
+    </div>
   );
+}
+
+interface MarkdownRendererProps {
+  body: string;
 }
 
 /** Memoized markdown renderer for wiki file content.
@@ -124,9 +138,7 @@ export function DocTitle({ path }: { path: string }) {
  */
 export const MarkdownRenderer = memo(function MarkdownRenderer({
   body,
-}: {
-  body: string;
-}) {
+}: MarkdownRendererProps) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}
@@ -137,7 +149,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   );
 });
 
-export function FileView({ path }: { path: string }) {
+interface FileViewProps {
+  path: string;
+}
+
+export function FileView({ path }: FileViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
@@ -1262,6 +1278,15 @@ export function FileView({ path }: { path: string }) {
   );
 }
 
+interface ActiveAgentsBarProps {
+  agents: DocumentActivity[];
+  sessions: AgentSessionSummary[];
+  error: string | null;
+  open: boolean;
+  onToggle: () => void;
+  onCloseSession: (id: string) => void;
+}
+
 function ActiveAgentsBar({
   agents,
   sessions,
@@ -1269,14 +1294,7 @@ function ActiveAgentsBar({
   open,
   onToggle,
   onCloseSession,
-}: {
-  agents: DocumentActivity[];
-  sessions: AgentSessionSummary[];
-  error: string | null;
-  open: boolean;
-  onToggle: () => void;
-  onCloseSession: (id: string) => void;
-}) {
+}: ActiveAgentsBarProps) {
   const count = agents.length + sessions.length;
   const expandable = count > 0;
   return (
@@ -1332,13 +1350,12 @@ function ActiveAgentsBar({
   );
 }
 
-function ActiveAgentRow({
-  a,
-  isLast,
-}: {
+interface ActiveAgentRowProps {
   a: DocumentActivity;
   isLast: boolean;
-}) {
+}
+
+function ActiveAgentRow({ a, isLast }: ActiveAgentRowProps) {
   return (
     <li
       className={
@@ -1385,15 +1402,13 @@ function ActiveAgentRow({
   );
 }
 
-function ActiveSessionRow({
-  s,
-  isLast,
-  onClose,
-}: {
+interface ActiveSessionRowProps {
   s: AgentSessionSummary;
   isLast: boolean;
   onClose: () => void;
-}) {
+}
+
+function ActiveSessionRow({ s, isLast, onClose }: ActiveSessionRowProps) {
   return (
     <li
       className={
@@ -1451,6 +1466,15 @@ function ActiveSessionRow({
   );
 }
 
+interface TemplateGalleryProps {
+  templates: DocumentTemplateSummary[];
+  activeId: string | null;
+  applyingId: string | null;
+  blankActive: boolean;
+  onPick: (t: DocumentTemplateSummary) => void;
+  onBlank: () => void;
+}
+
 export function TemplateGallery({
   templates,
   activeId,
@@ -1458,14 +1482,7 @@ export function TemplateGallery({
   blankActive,
   onPick,
   onBlank,
-}: {
-  templates: DocumentTemplateSummary[];
-  activeId: string | null;
-  applyingId: string | null;
-  blankActive: boolean;
-  onPick: (t: DocumentTemplateSummary) => void;
-  onBlank: () => void;
-}) {
+}: TemplateGalleryProps) {
   // Always a single-row strip — the picker never wraps to a second
   // line. On wide screens the user scrolls / clicks chevrons through
   // the row; on narrow screens the same layout becomes a swipe strip.
@@ -1491,6 +1508,15 @@ export function TemplateGallery({
   );
 }
 
+interface TemplateStripProps {
+  templates: DocumentTemplateSummary[];
+  activeId: string | null;
+  applyingId: string | null;
+  blankActive: boolean;
+  onPick: (t: DocumentTemplateSummary) => void;
+  onBlank: () => void;
+}
+
 function TemplateStrip({
   templates,
   activeId,
@@ -1498,14 +1524,7 @@ function TemplateStrip({
   blankActive,
   onPick,
   onBlank,
-}: {
-  templates: DocumentTemplateSummary[];
-  activeId: string | null;
-  applyingId: string | null;
-  blankActive: boolean;
-  onPick: (t: DocumentTemplateSummary) => void;
-  onBlank: () => void;
-}) {
+}: TemplateStripProps) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [edges, setEdges] = useState<{ left: boolean; right: boolean }>({
     left: false,
@@ -1593,13 +1612,12 @@ function TemplateStrip({
   );
 }
 
-function StripArrow({
-  direction,
-  onClick,
-}: {
+interface StripArrowProps {
   direction: "left" | "right";
   onClick: () => void;
-}) {
+}
+
+function StripArrow({ direction, onClick }: StripArrowProps) {
   return (
     <button
       type="button"
@@ -1616,6 +1634,15 @@ function StripArrow({
   );
 }
 
+interface TemplateCardProps {
+  title: string;
+  description: string | null;
+  note?: string;
+  active: boolean;
+  busy: boolean;
+  onClick: () => void;
+}
+
 function TemplateCard({
   title,
   description,
@@ -1623,14 +1650,7 @@ function TemplateCard({
   active,
   busy,
   onClick,
-}: {
-  title: string;
-  description: string | null;
-  note?: string;
-  active: boolean;
-  busy: boolean;
-  onClick: () => void;
-}) {
+}: TemplateCardProps) {
   return (
     <button
       type="button"
@@ -1676,18 +1696,20 @@ export function collectFolders(entries: DocEntry[]): string[] {
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
+interface DestinationSelectProps {
+  value: string;
+  folders: string[];
+  onChange: (v: string) => void;
+  disabled: boolean;
+}
+
 /** Folder picker for the new-doc destination. "" is the wiki root ("Home"). */
 export function DestinationSelect({
   value,
   folders,
   onChange,
   disabled,
-}: {
-  value: string;
-  folders: string[];
-  onChange: (v: string) => void;
-  disabled: boolean;
-}) {
+}: DestinationSelectProps) {
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -1727,6 +1749,12 @@ export function DestinationSelect({
   );
 }
 
+interface CoeditPresenceBarProps {
+  participants: CoeditParticipant[];
+  typing: string[];
+  selfUserId: string | null;
+}
+
 // Co-editing presence while editing: who else is in the session and who's
 // typing right now. Remote carets aren't drawn in a plain textarea (that waits
 // for CodeMirror) — but edits already merge into the shared buffer live, so
@@ -1735,11 +1763,7 @@ export function CoeditPresenceBar({
   participants,
   typing,
   selfUserId,
-}: {
-  participants: CoeditParticipant[];
-  typing: string[];
-  selfUserId: string | null;
-}) {
+}: CoeditPresenceBarProps) {
   const others = participants.filter((p) => p.user_id !== selfUserId);
   if (others.length === 0) return null;
   const typingSet = new Set(typing);
@@ -1762,6 +1786,15 @@ export function CoeditPresenceBar({
   );
 }
 
+interface FilenameRowProps {
+  parent: string;
+  value: string;
+  onChange: (v: string) => void;
+  disabled: boolean;
+  autoFocus?: boolean;
+  placeholder?: string;
+}
+
 export function FilenameRow({
   parent,
   value,
@@ -1769,14 +1802,7 @@ export function FilenameRow({
   disabled,
   autoFocus = false,
   placeholder = "filename",
-}: {
-  parent: string;
-  value: string;
-  onChange: (v: string) => void;
-  disabled: boolean;
-  autoFocus?: boolean;
-  placeholder?: string;
-}) {
+}: FilenameRowProps) {
   return (
     <div className="flex shrink-0 items-stretch overflow-hidden rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00)">
       {parent && (
