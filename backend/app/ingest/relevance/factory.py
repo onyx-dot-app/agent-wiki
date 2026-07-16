@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 
 def build_relevance_filter(config: Config | None = None) -> RelevanceFilter:
     """Return the relevance filter to run, per config (defaults to ``CONFIG``)."""
-    cfg = config or CONFIG
+    cfg = config if config is not None else CONFIG
     return _select(
         model_path=cfg.ingest_relevance_model_path,
         cosine_threshold=cfg.ingest_relevance_cosine_threshold,

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from app.config import Config
 from app.ingest.relevance import (
     CosineSimilarityFilter,
     TwoTowerFilter,
@@ -69,6 +70,8 @@ def test_no_cutoff_no_override_keeps_all(tmp_path: Path, monkeypatch: pytest.Mon
     assert f.threshold == 0.0  # keep everything
 
 
-def test_build_defaults_to_cosine():
-    # Default config has no model path configured.
-    assert isinstance(build_relevance_filter(), CosineSimilarityFilter)
+def test_build_defaults_to_cosine(tmp_config: Config):
+    # With no model path configured, the factory falls back to cosine. Pass the
+    # fixture config (model_path="") so the test doesn't read the ambient CONFIG,
+    # which a CI worker may point at a real model.
+    assert isinstance(build_relevance_filter(tmp_config), CosineSimilarityFilter)
