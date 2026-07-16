@@ -45,7 +45,7 @@ def _pages(*paths: str) -> list[CandidatePage]:
     return [CandidatePage(path=p, body=f"body {p}") for p in paths]
 
 
-def test_partitions_kept_and_dropped_in_input_order():
+def test_partitions_kept_and_dropped_in_input_order() -> None:
     svc = RelevanceService(_DropByPath({"b.md"}))
     pages = _pages("a.md", "b.md", "c.md")
 
@@ -58,18 +58,18 @@ def test_partitions_kept_and_dropped_in_input_order():
     assert result.dropped[0] is pages[1]
 
 
-def test_empty_pages_is_empty_result():
+def test_empty_pages_is_empty_result() -> None:
     result = RelevanceService(_DropByPath(set())).evaluate(_doc(), [])
     assert result == RelevanceResult(kept=[], dropped=[])
 
 
-def test_keep_all_when_filter_keeps_all():
+def test_keep_all_when_filter_keeps_all() -> None:
     result = RelevanceService(_DropByPath(set())).evaluate(_doc(), _pages("a.md", "b.md"))
     assert [p.path for p in result.kept] == ["a.md", "b.md"]
     assert result.dropped == []
 
 
-def test_fails_open_on_filter_error():
+def test_fails_open_on_filter_error() -> None:
     pages = _pages("a.md", "b.md")
     result = RelevanceService(_Boom()).evaluate(_doc(), pages)
     # Any failure keeps every page — never drops a candidate.
@@ -77,7 +77,7 @@ def test_fails_open_on_filter_error():
     assert result.dropped == []
 
 
-def test_fails_open_on_enrich_error(monkeypatch: pytest.MonkeyPatch):
+def test_fails_open_on_enrich_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(_d: IngestionDocument) -> IngestionDocument:
         raise RuntimeError("embed API down")
 
