@@ -319,9 +319,10 @@ installed in `app/main.py:_install_error_handlers`. The frontend's
 
 ## Frontend rules
 
-See `frontend/STANDARDS.md` for the complete styling guide: Opal tokens,
-CSS Modules, button variants, modal patterns, and input rules. The prohibitions
-are summarized in **What not to do** below.
+See `frontend/AGENTS.md` for the complete frontend guide: directory layout,
+Opal components/tokens, button variants, modal patterns, input rules, SWR
+data-fetching, and code-style conventions. The prohibitions are summarized in
+**What not to do** below.
 
 ### Network — only via `src/lib/api.ts:apiFetch`
 
