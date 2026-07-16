@@ -39,35 +39,28 @@ def _use_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, meta: dict[str, 
 
 
 def test_cosine_when_no_model_path():
-    f = _select(model_path="", cosine_threshold=0.42, two_tower_threshold=None)
+    f = _select(model_path="", cosine_threshold=0.42)
     assert isinstance(f, CosineSimilarityFilter)
     assert f.threshold == 0.42
 
 
 def test_cosine_when_model_path_missing():
-    f = _select(model_path="/no/such/model.onnx", cosine_threshold=0.42, two_tower_threshold=None)
+    f = _select(model_path="/no/such/model.onnx", cosine_threshold=0.42)
     assert isinstance(f, CosineSimilarityFilter)
 
 
 def test_two_tower_uses_model_cutoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     path = _use_model(monkeypatch, tmp_path, {"cutoff": "0.25"})
-    f = _select(model_path=path, cosine_threshold=0.42, two_tower_threshold=None)
+    f = _select(model_path=path, cosine_threshold=0.42)
     assert isinstance(f, TwoTowerFilter)
-    assert f.threshold == 0.25  # from the model, not config
+    assert f.threshold == 0.25  # the model's embedded cutoff is the source of truth
 
 
-def test_config_override_beats_model_cutoff(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    path = _use_model(monkeypatch, tmp_path, {"cutoff": "0.25"})
-    f = _select(model_path=path, cosine_threshold=0.42, two_tower_threshold=0.4)
+def test_no_cutoff_keeps_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = _use_model(monkeypatch, tmp_path, {})  # misconfigured: model carries no cutoff
+    f = _select(model_path=path, cosine_threshold=0.42)
     assert isinstance(f, TwoTowerFilter)
-    assert f.threshold == 0.4  # override wins
-
-
-def test_no_cutoff_no_override_keeps_all(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    path = _use_model(monkeypatch, tmp_path, {})  # model carries no cutoff
-    f = _select(model_path=path, cosine_threshold=0.42, two_tower_threshold=None)
-    assert isinstance(f, TwoTowerFilter)
-    assert f.threshold == 0.0  # keep everything
+    assert f.threshold == 0.0  # fail open — keep everything
 
 
 def test_build_defaults_to_cosine(tmp_config: Config):

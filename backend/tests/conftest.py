@@ -122,7 +122,6 @@ def tmp_config(tmp_path, monkeypatch):
         ingest_embed_model="text-embedding-3-small",
         ingest_relevance_model_path="",
         ingest_relevance_cosine_threshold=0.4334,
-        ingest_relevance_two_tower_threshold=None,
         ingest_eval_logging=False,
         ingest_eval_retention_days=90,
         launchers_enabled=True,

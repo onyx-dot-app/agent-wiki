@@ -28,26 +28,24 @@ def build_relevance_filter(config: Config | None = None) -> RelevanceFilter:
     return _select(
         model_path=cfg.ingest_relevance_model_path,
         cosine_threshold=cfg.ingest_relevance_cosine_threshold,
-        two_tower_threshold=cfg.ingest_relevance_two_tower_threshold,
     )
 
 
-def _select(
-    *, model_path: str, cosine_threshold: float, two_tower_threshold: float | None
-) -> RelevanceFilter:
+def _select(*, model_path: str, cosine_threshold: float) -> RelevanceFilter:
     if model_path:
         if Path(model_path).exists():
             # Lazy import: only pulls onnxruntime when a model is actually used.
             from app.ingest.relevance.two_tower_scorer import TwoTowerScorer
 
             scorer = TwoTowerScorer(model_path)
-            # The calibrated threshold ships with the model (its embedded cutoff);
-            # config is an optional override. Neither present => keep everything.
-            threshold = two_tower_threshold if two_tower_threshold is not None else scorer.cutoff
+            # The calibrated threshold ships with the model (its embedded cutoff) —
+            # it's the single source of truth. A model that carries none is
+            # misconfigured; fail open (keep everything) rather than guess.
+            threshold = scorer.cutoff
             if threshold is None:
                 log.warning(
-                    "two-tower model has no embedded cutoff and none is configured; "
-                    "keeping all candidates (set INGEST_RELEVANCE_TWO_TOWER_THRESHOLD)"
+                    "two-tower model has no embedded cutoff; keeping all candidates "
+                    "(re-export the model with its calibrated cutoff)"
                 )
                 threshold = 0.0
             return TwoTowerFilter(scorer, threshold=threshold)
