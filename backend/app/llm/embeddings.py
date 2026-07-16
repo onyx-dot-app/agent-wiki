@@ -32,6 +32,15 @@ PAGE_CHAR_CAP = 24_000
 
 _BATCH = 128
 
+# The char caps above bound *characters*, but the model limits *tokens* (8192
+# for text-embedding-3-small). Dense/technical content tokenizes below the ~4
+# chars/token the caps assume, so a capped body can still exceed the token
+# limit. Rather than pick a char cap that's safe for every possible content
+# (impossible), shrink the input in fixed steps on a token-limit rejection and
+# retry — so no page is ever silently unembeddable.
+_STEP_DOWN_CHARS = 4_000
+_MIN_EMBED_CHARS = 4_000
+
 
 def model_name() -> str:
     return CONFIG.ingest_embed_model or DEFAULT_MODEL
@@ -93,7 +102,35 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
         return None
 
 
+def _is_token_limit_error(e: Exception) -> bool:
+    """A token-limit 400 from the embeddings endpoint (vs. auth/network/etc.),
+    e.g. ``Invalid 'input[0]': maximum input length is 8192 tokens.``"""
+    return "maximum input length" in str(e).lower()
+
+
 def embed_text(text: str) -> list[float] | None:
-    """Embed a single text. ``None`` on failure / disabled / unconfigured."""
-    res = embed_texts([text])
-    return res[0] if res else None
+    """Embed a single text. ``None`` on failure / disabled / unconfigured.
+
+    On a token-limit rejection, retry with the input truncated in
+    ``_STEP_DOWN_CHARS`` steps down to ``_MIN_EMBED_CHARS`` — the char caps
+    can't guarantee the model's token limit, so shrink-and-retry rather than
+    drop the vector. Every other error is swallowed (best-effort → ``None``),
+    same as the batch path.
+    """
+    key = _api_key()
+    if not key:
+        return None
+    model = model_name()
+    limit = len(text)
+    while True:
+        try:
+            return openai_provider.embed(key, model, [text[:limit]])[0]
+        except Exception as e:
+            if _is_token_limit_error(e) and limit > _MIN_EMBED_CHARS:
+                limit = max(_MIN_EMBED_CHARS, limit - _STEP_DOWN_CHARS)
+                log.warning(
+                    "embeddings: input over the token limit, retrying at %d chars", limit
+                )
+                continue
+            log.warning("embeddings: embed_text failed", exc_info=True)
+            return None
