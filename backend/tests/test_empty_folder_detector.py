@@ -85,10 +85,10 @@ def repo(tmp_repo, tmp_config):
     return tmp_config
 
 
-def _paths(cfg) -> list[str]:
+def _paths(cfg) -> tuple[str, ...]:
     from app.wiki import git as wiki_git
 
-    return wiki_git.list_paths()
+    return tuple(wiki_git.list_paths())
 
 
 def test_detect_emits_delete_for_empty_folders(repo):
