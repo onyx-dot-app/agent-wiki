@@ -80,6 +80,7 @@ import {
   type CommentDraft,
 } from "@/lib/fileview/commentAnchor";
 import { MarkdownRenderer } from "@/lib/fileview/components";
+import { pageTitle } from "@/lib/fileview/utils";
 import { useAuth, useRequireAuth } from "@/lib/auth";
 import { Coeditor } from "@/lib/coeditor/components";
 import type { CoeditParticipant } from "@/lib/coeditor/types";
@@ -229,7 +230,7 @@ export default function WikiRoute() {
   useEffect(() => {
     if (effectivePath === null) return;
     const last = effectivePath.split("/").pop() ?? "";
-    const label = isFile ? last.replace(/\.md$/i, "") : last;
+    const label = isFile ? pageTitle(effectivePath) : last;
     document.title = label || "agent-wiki";
     return () => {
       document.title = "agent-wiki";
@@ -346,10 +347,7 @@ function WikiTombstone({ path }: { path: string }) {
   if (error || !entry)
     return <WikiUnknownLink status={(error as ApiError)?.status} />;
 
-  const label = (entry.path.split("/").pop() ?? entry.path).replace(
-    /\.md$/i,
-    "",
-  );
+  const label = pageTitle(entry.path);
   const restore = async () => {
     setBusy(true);
     setErr(null);
@@ -2277,7 +2275,7 @@ function FileViewer({ path }: { path: string }) {
           <Content
             sizePreset="main-ui"
             variant="section"
-            title={(path.split("/").pop() ?? path).replace(/\.md$/i, "")}
+            title={pageTitle(path)}
           />
           <Divider />
         </>
