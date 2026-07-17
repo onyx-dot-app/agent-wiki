@@ -2408,7 +2408,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "relevance score",
           "axisPlacement": "left",
           "unit": "short"
         }
@@ -2489,7 +2489,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "relevance score",
           "axisPlacement": "left",
           "unit": "short"
         }
@@ -2570,7 +2570,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "relevance score",
           "axisPlacement": "left",
           "unit": "short"
         }
@@ -2651,7 +2651,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "relevance score",
           "axisPlacement": "left",
           "unit": "short"
         }
@@ -2732,7 +2732,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "relevance score",
           "axisPlacement": "left",
           "unit": "short"
         }
@@ -2813,7 +2813,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "relevance score",
           "axisPlacement": "left",
           "unit": "short"
         }
@@ -2894,7 +2894,7 @@
           "yHistogram": false
         },
         "yAxis": {
-          "axisLabel": "BM25 score",
+          "axisLabel": "pages kept",
           "axisPlacement": "left",
           "unit": "short"
         }
