@@ -36,10 +36,19 @@
   flex: 0 0 auto;
 }
 
-/* Blank-page glyph, a plain OPAL plus-circle icon, not an interactive Button. */
+/* Blank-page glyph: the mock's square-plus, layered from the square and plus
+   icons. Not an interactive Button. */
 .blankGlyph {
+  position: relative;
   display: inline-flex;
   color: var(--text-03);
+}
+.blankGlyphPlus {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 @media (max-width: 720px) {

@@ -5,7 +5,7 @@ import { useState } from "react";
 import useSWR from "swr";
 import { LineItemButton, SelectCard, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
-import { SvgChevronRight, SvgPlusCircle } from "@onyx-ai/opal/icons";
+import { SvgChevronRight, SvgPlus, SvgSquare } from "@onyx-ai/opal/icons";
 import { listTemplateSummaries } from "@/lib/templates";
 import type { DocumentTemplateSummary } from "@/lib/templates";
 import styles from "@/components/wiki/StartNewPage.module.css";
@@ -48,8 +48,13 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
           <TemplateCard
             title="Blank page"
             glyph={
+              // The mock's square-plus glyph, composed from published icons
+              // until @onyx-ai/opal ships an SvgSquarePlus.
               <span className={styles.blankGlyph}>
-                <SvgPlusCircle size={22} />
+                <SvgSquare size={20} />
+                <span className={styles.blankGlyphPlus}>
+                  <SvgPlus size={12} />
+                </span>
               </span>
             }
             onClick={() => startNewPage(blankTemplate?.id)}
