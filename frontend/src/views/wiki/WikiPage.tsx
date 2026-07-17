@@ -180,6 +180,10 @@ function WikiTombstone({ path }: WikiTombstoneProps) {
   );
 }
 
+// Below this width the side-column policy card would crush the file table, so
+// the panel falls back to the header button + drawer (the mobile treatment).
+const COMPACT_EXPLORER_WIDTH = 900;
+
 interface ExplorerProps {
   dir: string;
 }
@@ -189,6 +193,21 @@ function Explorer({ dir }: ExplorerProps) {
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
   const rowActions = useRowActions();
+  // Width of this view's whole row, observed rather than media-queried: the
+  // tree and chat panels shrink it without the viewport changing.
+  const mainRef = useRef<HTMLElement>(null);
+  const [mainWidth, setMainWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) =>
+      setMainWidth(entries[0].contentRect.width),
+    );
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const compact =
+    isMobile || (mainWidth !== null && mainWidth < COMPACT_EXPLORER_WIDTH);
   const { entries, error: listError, mutate: mutatePaths } = useWikiTree();
   const [mutationError, setMutationError] = useState<string | null>(null);
   const confirmDialog = useConfirm();
@@ -408,7 +427,7 @@ function Explorer({ dir }: ExplorerProps) {
         tooltip="Launch Agent"
         onClick={() => rowActions.launchAgent(dir)}
       />
-      {isMobile && (
+      {compact && (
         <Button
           icon={SvgShield}
           prominence="tertiary"
@@ -425,11 +444,11 @@ function Explorer({ dir }: ExplorerProps) {
   const sortLabel = SORT_LABEL[sort];
 
   return (
-    <main className="flex h-full min-h-0">
+    <main ref={mainRef} className="flex h-full min-h-0 overflow-x-auto">
       {host?.el && createPortal(headerActions, host.el)}
 
       <div
-        className={`min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+        className={`flex-1 overflow-y-auto ${isMobile ? "min-w-0 px-3 py-4" : "min-w-[24rem] px-8 py-6"}`}
       >
         <TriggerPanel
           open={triggerModalOpen}
@@ -607,15 +626,16 @@ function Explorer({ dir }: ExplorerProps) {
         )}
       </div>
 
-      {/* Folder policy applies to every page under this folder. Desktop shows
-          it inline in the side column (mock 1673:32813). Mobile keeps the
-          header button + drawer. */}
-      {!isMobile && (
+      {/* Folder policy applies to every page under this folder. Wide views
+          show it inline in the side column (mock 1673:32813). Compact views
+          (mobile, or squeezed by the tree/chat panels) keep the header
+          button + drawer. */}
+      {!compact && (
         <aside className="w-[360px] shrink-0 overflow-y-auto p-2">
           <UpdatePolicyPanel path={dir} />
         </aside>
       )}
-      {policyOpen && isMobile && (
+      {policyOpen && compact && (
         <>
           <div
             onClick={() => setPolicyOpen(false)}
