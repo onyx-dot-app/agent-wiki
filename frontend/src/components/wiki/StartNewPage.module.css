@@ -1,5 +1,5 @@
 /* "Start a new page" section shared by Home and folder pages: section header,
-   3-card template grid, More Templates row (mock 709:259993). */
+   3-column template grid, More Templates row (mock 709:259993). */
 
 .sectionHeader {
   display: flex;

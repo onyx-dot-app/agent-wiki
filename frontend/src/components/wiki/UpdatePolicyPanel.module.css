@@ -4,8 +4,8 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  /* Drawer hosts pin their own width (400px slide-ins). Inline hosts (the
-     folder page's side column) size the panel via their container. */
+  /* Drawer hosts pin their own width. Inline hosts (the folder page's side
+     column) size the panel via their container. */
   width: 100%;
   max-width: 400px;
   min-height: 0;

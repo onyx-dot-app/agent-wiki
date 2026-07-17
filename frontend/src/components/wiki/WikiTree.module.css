@@ -1,6 +1,6 @@
-/* Directory tree panel (mock 319:26456): tint card, "Wiki" header with a
-   collapse control, search + create actions, nested tree with indent guides.
-   The list scrolls instead of the panel growing. */
+/* Directory tree panel (mock 319:26456): tint card, "Wiki Directory" header
+   with a collapse control, search + create actions, nested tree with indent
+   guides. The list scrolls instead of the panel growing. */
 
 .panel {
   display: flex;
@@ -58,8 +58,8 @@
 }
 
 /* Tree list. The header/search zone above stays fixed and only this list
-   scrolls, vertically. Long names truncate with an ellipsis (OPAL's default)
-   so the panel never scrolls horizontally (annotated mock on 705:142872). */
+   scrolls, vertically. Long names truncate with an ellipsis (.rowLabel) so
+   the panel never scrolls horizontally (annotated mock on 705:142872). */
 .list {
   flex: 1;
   min-height: 0;

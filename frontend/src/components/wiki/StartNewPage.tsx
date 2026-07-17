@@ -26,8 +26,9 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
   // The "Blank" template is the empty-start entry point (carries an
   // auto-update policy). Route the blank card through it when present, and
   // keep it out of the featured row so it isn't shown twice.
-  const blankTemplate = (templates ?? []).find((t) => t.name === "Blank");
-  const nonBlank = (templates ?? []).filter((t) => t.name !== "Blank");
+  const all = templates ?? [];
+  const blankTemplate = all.find((t) => t.name === "Blank");
+  const nonBlank = all.filter((t) => t.name !== "Blank");
   const featured = expanded ? nonBlank : nonBlank.slice(0, 2);
   const hasMore = !expanded && nonBlank.length > 2;
 

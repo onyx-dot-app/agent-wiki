@@ -115,7 +115,7 @@ function AgentsBarHost() {
 // Folds the app sidebar to its icon rail while the folder tree is open (the
 // mock pairs the tree panel with a folded sidebar), and restores the user's
 // pre-tree fold state when the tree closes. Manual unfolding while the tree
-// is open is respected until the next open.
+// is open is respected until the tree closes.
 function SidebarAutoFold() {
   const { view } = useLeftPanel();
   const { folded, setFolded } = useSidebarState();

@@ -90,13 +90,6 @@
   padding: 8px 16px 4px;
 }
 
-.secHead {
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 600;
-  color: var(--text-04);
-}
-
 .secHeadLg {
   font-size: 18px;
   line-height: 28px;
@@ -104,8 +97,6 @@
   letter-spacing: -0.18px;
   color: var(--text-04);
 }
-
-/* Templates strip */
 
 /* AI input — box left edge aligns with the card grid (padding 8px); the octagon
    mark hangs into the left gutter, vertically centered, out of the input flow. */

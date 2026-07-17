@@ -198,9 +198,7 @@ function Explorer({ dir }: { dir: string }) {
   const [createBusy, setCreateBusy] = useState(false);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
-  const [sort, setSort] = useState<"name-asc" | "name-desc" | "recent">(
-    "name-asc",
-  );
+  const [sort, setSort] = useState<SortMode>("name-asc");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -356,9 +354,9 @@ function Explorer({ dir }: { dir: string }) {
   }
 
   // Folder-level actions portal into the single pinned header (mock
-  // 705:142993): New Page + new-folder, then share / trigger past a divider.
-  // The update policy lives inline in the side column. Mobile keeps it behind
-  // a header button + drawer instead.
+  // 705:142993): New Page + new-folder, then share / trigger / launch-agent
+  // past a divider. The update policy lives inline in the side column. Mobile
+  // keeps it behind a header button + drawer instead.
   const headerActions = (
     <>
       <Button
@@ -410,19 +408,8 @@ function Explorer({ dir }: { dir: string }) {
 
   const parentDir = dir.split("/").slice(0, -1).join("/");
   const cycleSort = () =>
-    setSort((s) =>
-      s === "name-asc"
-        ? "name-desc"
-        : s === "name-desc"
-          ? "recent"
-          : "name-asc",
-    );
-  const sortLabel =
-    sort === "name-asc"
-      ? "Name (A → Z)"
-      : sort === "name-desc"
-        ? "Name (Z → A)"
-        : "Recently updated";
+    setSort((s) => SORT_ORDER[(SORT_ORDER.indexOf(s) + 1) % SORT_ORDER.length]);
+  const sortLabel = SORT_LABEL[sort];
 
   return (
     <main className="flex h-full min-h-0">
@@ -527,7 +514,7 @@ function Explorer({ dir }: { dir: string }) {
             {(() => {
               const dirEntries = subdirs.map((d) => ({ ...d, isFile: false }));
               const fileEntries = files.map((f) => ({ ...f, isFile: true }));
-              // Folders always above docs; ordering within each group is set by `sort`.
+              // Folders always above docs. Ordering within each group is set by `sort`.
               const ordered = [...dirEntries, ...fileEntries];
               return ordered.map(({ name, updated_at, isFile }) => {
                 const childPath = (dir ? dir + "/" : "") + name;
@@ -932,6 +919,12 @@ function NewDocView({ dir }: { dir: string }) {
 }
 
 type SortMode = "name-asc" | "name-desc" | "recent";
+const SORT_ORDER: SortMode[] = ["name-asc", "name-desc", "recent"];
+const SORT_LABEL: Record<SortMode, string> = {
+  "name-asc": "Name (A → Z)",
+  "name-desc": "Name (Z → A)",
+  recent: "Recently updated",
+};
 
 /* Shared card-row chrome for the folder listing: borderless white cards on
    the table's tint background (mock rows 4857:368063). */

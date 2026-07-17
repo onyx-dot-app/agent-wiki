@@ -310,7 +310,7 @@ function FolderNode({
 }
 
 /**
- * Directory tree panel (mock 319:26456): "Wiki" header with a collapse
+ * Directory tree panel (mock 319:26456): "Wiki Directory" header with a collapse
  * control, a search row with new-page / new-folder actions, then the nested
  * tree. Search filters the tree to matching paths with ancestors held open.
  */
