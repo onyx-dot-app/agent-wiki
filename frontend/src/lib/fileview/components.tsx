@@ -207,12 +207,12 @@ export function FileView({ path }: FileViewProps) {
   // A `?comment=<id>` deep-link is focused once per id (reset on path change).
   const focusedCommentRef = useRef<string | null>(null);
 
-  // The side panel is mutually exclusive with the history and triggers
-  // surfaces. Every path that opens one closes the others (toolbar
-  // toggles, the comments auto-open, the health banner, the selection
-  // "💬 Comment" tool).
+  // The side panel is mutually exclusive with the triggers surfaces. Every
+  // path that opens one closes the other (every opener routes through
+  // here). The version-history list lives inside the Updates tab and
+  // collapses with the panel, so opening the panel leaves `historyOpen`
+  // alone.
   const openPanel = useCallback((tab: DocPanelTab) => {
-    setHistoryOpen(false);
     setAutomationsOpen(false);
     setTriggerModalOpen(false);
     setEditingTrigger(null);
@@ -220,9 +220,12 @@ export function FileView({ path }: FileViewProps) {
     // A pending selection draft only makes sense on the Comments tab.
     if (tab !== "comments") setCommentDraft(null);
   }, []);
+  // Closing the panel also collapses the history list. An active diff
+  // stays in the doc area (closing chrome never switches the document).
   const closePanel = useCallback(() => {
     setPanelTab(null);
     setCommentDraft(null);
+    setHistoryOpen(false);
   }, []);
   const openComments = useCallback(() => openPanel("comments"), [openPanel]);
 
@@ -643,9 +646,9 @@ export function FileView({ path }: FileViewProps) {
 
   function closeHistory() {
     setHistoryOpen(false);
-    // Closing the panel exits history mode entirely — back to the rendered
-    // latest version. Skip while editing: `viewingSha` is the fork base the
-    // save needs, and the textarea is showing the user's draft anyway.
+    // Collapsing the history list exits history mode entirely, back to the
+    // rendered latest version. Skip while editing: `viewingSha` is the fork
+    // base the save needs, and the textarea is showing the user's draft anyway.
     if (!editing && viewingSha !== null) {
       setViewingSha(null);
       setDiffData(null);
@@ -653,18 +656,17 @@ export function FileView({ path }: FileViewProps) {
   }
 
   async function toggleHistory() {
-    if (historyOpen) {
+    // Close only when the list is actually visible. With history open but
+    // another tab focused, the toggle refocuses Updates instead of
+    // silently discarding the diff.
+    if (historyOpen && panelTab === "updates") {
       closeHistory();
       return;
     }
     setHistoryOpen(true);
-    // Mutual exclusion with the side panel and the docked trigger editor
-    // (see ``openPanel``).
-    setPanelTab(null);
-    setAutomationsOpen(false);
-    setTriggerModalOpen(false);
-    setEditingTrigger(null);
-    setCommentDraft(null);
+    // The list renders inside the Updates tab, so opening history opens
+    // the panel there (which also closes the trigger surfaces).
+    openPanel("updates");
     // Opening history: show the newest commit's diff immediately rather
     // than leaving the rendered body up until the user clicks a row.
     const loaded = commits ?? (await refreshHistory())?.commits ?? null;
@@ -900,11 +902,25 @@ export function FileView({ path }: FileViewProps) {
       tab={panelTab}
       onTabChange={openPanel}
       updates={
-        <UpdatePolicyPanel
-          path={path}
-          onShowHistory={toggleHistory}
-          fullHeight
-        />
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <UpdatePolicyPanel path={path} onShowHistory={toggleHistory} />
+          {historyOpen && (
+            // Version list expands under the policy cards (mock 1855:273363).
+            // The fixed-height clipped wrapper hosts HistoryPanel's
+            // full-height layout as an in-tab card.
+            <div className="flex min-h-[480px] w-full flex-1 flex-col overflow-hidden rounded-(--radius-12) border border-(--border-01)">
+              <HistoryPanel
+                commits={commits}
+                error={historyError}
+                headSha={headSha}
+                viewingSha={viewingSha}
+                onPick={onPickCommit}
+                onClose={closeHistory}
+                fullHeight
+              />
+            </div>
+          )}
+        </div>
       }
       comments={
         <CommentsPanel
@@ -1132,23 +1148,6 @@ export function FileView({ path }: FileViewProps) {
               beside the header) by portaling into the shell's right-panel host,
               so they never eat into the reading column above. Mobile keeps the
               fixed sheet rendered below. */}
-          {historyOpen &&
-            !isMobile &&
-            rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <HistoryPanel
-                  commits={commits}
-                  error={historyError}
-                  headSha={headSha}
-                  viewingSha={viewingSha}
-                  onPick={onPickCommit}
-                  onClose={closeHistory}
-                  fullHeight
-                />
-              </div>,
-              rightHost.el,
-            )}
           {panelTab &&
             !isMobile &&
             rightHost?.el &&
@@ -1167,35 +1166,6 @@ export function FileView({ path }: FileViewProps) {
               </div>,
               rightHost.el,
             )}
-        </>
-      )}
-      {historyOpen && isMobile && (
-        // Mobile: render history as a fixed slide-in sheet over the
-        // markdown content rather than a 320px side-panel that would
-        // squeeze the body to nothing on a 375px screen.
-        <>
-          <div
-            onClick={closeHistory}
-            aria-hidden
-            className="fixed inset-0 z-[60] bg-(--mask-03)"
-          />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <HistoryPanel
-              commits={commits}
-              error={historyError}
-              headSha={headSha}
-              viewingSha={viewingSha}
-              onPick={(sha) => {
-                onPickCommit(sha);
-                // Plain close (no reset): the sheet covers the content, so a
-                // deliberate pick must keep the chosen version visible. The
-                // banner's "Back to latest" is the way back.
-                setHistoryOpen(false);
-              }}
-              onClose={closeHistory}
-              fullHeight
-            />
-          </div>
         </>
       )}
       {panelTab && isMobile && (
