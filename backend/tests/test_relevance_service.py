@@ -29,6 +29,23 @@ class _Boom(RelevanceFilter):
         raise RuntimeError("scorer exploded")
 
 
+class _ScoredFilter(RelevanceFilter):
+    """Fake scoring filter: per-path scores; a None score = unscorable (kept)."""
+
+    def __init__(self, scores: dict[str, float | None], cutoff: float) -> None:
+        self._scores = scores
+        self._cutoff = cutoff
+
+    def is_relevant(self, doc: IngestionDocument, page: CandidatePage) -> bool:
+        s = self._scores.get(page.path)
+        return s is None or s >= self._cutoff
+
+    def score_pages(
+        self, doc: IngestionDocument, pages: list[CandidatePage]
+    ) -> list[float | None] | None:
+        return [self._scores.get(p.path) for p in pages]
+
+
 @pytest.fixture(autouse=True)
 def _no_embedding_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enrichment hits the embedding API / store; make it a pass-through so the
@@ -85,3 +102,63 @@ def test_fails_open_on_enrich_error(monkeypatch: pytest.MonkeyPatch) -> None:
     pages = _pages("a.md", "b.md")
     result = RelevanceService(_DropByPath({"a.md"})).evaluate(_doc(), pages)
     assert result.kept == pages and result.dropped == []
+
+
+def test_kept_ordered_most_relevant_first_with_scores_exposed() -> None:
+    svc = RelevanceService(
+        _ScoredFilter({"lo.md": 0.2, "hi.md": 0.9, "mid.md": 0.5, "out.md": 0.01}, cutoff=0.1)
+    )
+    result = svc.evaluate(_doc(), _pages("lo.md", "hi.md", "mid.md", "out.md"))
+
+    # Kept sorted by score descending; the below-cutoff page dropped.
+    assert [p.path for p in result.kept] == ["hi.md", "mid.md", "lo.md"]
+    assert [p.path for p in result.dropped] == ["out.md"]
+    # Every scored pair is exposed — including dropped ones (calibration data).
+    assert result.scores == {"lo.md": 0.2, "hi.md": 0.9, "mid.md": 0.5, "out.md": 0.01}
+
+
+def test_unscored_kept_pages_sort_last_in_input_order() -> None:
+    svc = RelevanceService(
+        _ScoredFilter({"a.md": 0.3, "n1.md": None, "b.md": 0.8, "n2.md": None}, cutoff=0.1)
+    )
+    result = svc.evaluate(_doc(), _pages("a.md", "n1.md", "b.md", "n2.md"))
+    # Scored first (desc), then fail-open unscored pages in input order.
+    assert [p.path for p in result.kept] == ["b.md", "a.md", "n1.md", "n2.md"]
+    assert set(result.scores) == {"a.md", "b.md"}  # None entries not exposed
+
+
+def test_scoreless_filter_keeps_input_order_and_empty_scores() -> None:
+    result = RelevanceService(_DropByPath(set())).evaluate(_doc(), _pages("a.md", "b.md"))
+    assert [p.path for p in result.kept] == ["a.md", "b.md"]
+    assert result.scores == {}
+
+
+def test_relevant_pages_sources_the_embedding_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dataclasses
+
+    from app.db.page_embeddings import PageVector
+    from app.llm import embeddings as llm_embeddings
+
+    vec = [0.1, 0.2]
+    monkeypatch.setattr(
+        "app.db.page_embeddings.load_all",
+        lambda model: [PageVector("a.md", llm_embeddings.pack(vec)),
+                       PageVector("b.md", llm_embeddings.pack(vec))],
+    )
+    monkeypatch.setattr(
+        enrich, "with_document_embedding", lambda d: dataclasses.replace(d, embedding=vec)
+    )
+    result = RelevanceService(_DropByPath({"b.md"})).relevant_pages(_doc())
+    assert result is not None
+    assert [p.path for p in result.kept] == ["a.md"]
+    assert [p.path for p in result.dropped] == ["b.md"]
+
+
+def test_relevant_pages_none_when_doc_cannot_embed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import MagicMock
+
+    load_all = MagicMock()
+    monkeypatch.setattr("app.db.page_embeddings.load_all", load_all)
+    # autouse fixture leaves the doc unembedded (pass-through, embedding=None)
+    assert RelevanceService(_DropByPath(set())).relevant_pages(_doc()) is None
+    load_all.assert_not_called()  # the doc gate comes before the bulk load

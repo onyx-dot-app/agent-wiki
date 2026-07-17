@@ -37,3 +37,17 @@ class RelevanceFilter(ABC):
         the document's embedding against all candidate embeddings in one pass.
         """
         return [page for page in pages if self.is_relevant(doc, page)]
+
+    def score_pages(
+        self, doc: IngestionDocument, pages: list[CandidatePage]
+    ) -> list[float | None] | None:
+        """Numeric relevance for each page (parallel to ``pages``), or ``None``.
+
+        Optional: a filter with no numeric notion of relevance (a metadata rule,
+        an LLM yes/no) returns ``None`` — the default. A scoring filter returns
+        one entry per page: its score, or ``None`` for a pair it couldn't score
+        (e.g. a missing embedding — the fail-open keeps). Scores order
+        candidates and feed telemetry/calibration; ``keep_relevant`` stays the
+        keep/drop decision.
+        """
+        return None

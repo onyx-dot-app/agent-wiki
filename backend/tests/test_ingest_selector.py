@@ -3,18 +3,13 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents.common import batch_by_chars as _batch_by_chars
 from app.llm.agents.ingest_selector import select_candidates
 
 
-def _hit(path: str, score: float = 1.0) -> SearchHit:
-    return SearchHit(doc_id=path, path=path, title=None, snippet="", score=score)
-
-
 def _candidate(path: str, body: str = "body") -> WikiUpdateCandidate:
-    return WikiUpdateCandidate(hit=_hit(path), body=body)
+    return WikiUpdateCandidate(path=path, score=1.0, body=body)
 
 
 def _llm_response(text: str) -> MagicMock:
@@ -78,7 +73,7 @@ def test_select_returns_kept_candidates(mock_client, _mock_prompt):
 
     result = select_candidates(title="T", content="doc", candidates=candidates, model="m")
 
-    assert [c.hit.path for c in result] == ["a", "c"]
+    assert [c.path for c in result] == ["a", "c"]
 
 
 @patch("app.llm.agents.ingest_selector.load_prompt", return_value="prompt")
@@ -123,7 +118,7 @@ def test_select_ignores_out_of_range_indices(mock_client, _mock_prompt):
 
     result = select_candidates(title=None, content="doc", candidates=candidates, model="m")
 
-    assert [c.hit.path for c in result] == ["a"]
+    assert [c.path for c in result] == ["a"]
 
 
 @patch("app.llm.agents.ingest_selector.load_prompt", return_value="prompt")
@@ -149,7 +144,7 @@ def test_select_merges_multiple_batches(mock_client, _mock_prompt):
 
     result = select_candidates(title=None, content="", candidates=[a, b], model="m")
 
-    assert [c.hit.path for c in result] == ["a", "b"]
+    assert [c.path for c in result] == ["a", "b"]
     assert mock_client.complete.call_count == 2
 
 
@@ -166,4 +161,4 @@ def test_select_one_batch_fails_open_other_succeeds(mock_client, _mock_prompt):
     result = select_candidates(title=None, content="", candidates=[a, b], model="m")
 
     # first batch fails open (returns a), second batch keeps b
-    assert {c.hit.path for c in result} == {"a", "b"}
+    assert {c.path for c in result} == {"a", "b"}

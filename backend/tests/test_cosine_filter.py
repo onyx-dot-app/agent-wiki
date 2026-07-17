@@ -141,3 +141,12 @@ def test_with_page_embeddings_fills_from_store(monkeypatch):
     out = {p.path: p.embedding for p in enrich.with_page_embeddings(pages)}
     assert out["a.md"] == pytest.approx([0.3, 0.4])
     assert out["b.md"] is None
+
+
+def test_score_pages_similarities_with_none_for_missing_embedding():
+    f = CosineSimilarityFilter(threshold=0.5)
+    pages = [_page(_UNIT), _page(None)]
+    scores = f.score_pages(_doc(_UNIT), pages)
+    assert scores is not None
+    assert scores[0] == pytest.approx(1.0)
+    assert scores[1] is None

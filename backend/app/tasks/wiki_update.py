@@ -22,15 +22,15 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Any, Literal
+from typing import Any
 
 from app.config import CONFIG
 from app.ingest import eval_sample as ingest_eval_sample
-from app.ingest import intent as ingest_intent
-from app.ingest import search as ingest_search
 from app.ingest import settings as ingest_settings
+from app.ingest.relevance.service import get_relevance_service
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
+from app.ingest.types import IngestionDocument
 from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.wiki import utils as wiki_utils
@@ -273,7 +273,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
 
     Pipeline:
       1. Drop filtered sources silently.
-      2. BM25 search + title boost + score threshold to find candidates.
+      2. Embed the document and run the relevance filter over every
+         auto-update-enabled page (RelevanceService) — the kept pages are the
+         candidates. No keyword retrieval, so no top-N ceiling and no
+         "no keyword hit" path that silently drops a document.
       3. Weak-model pre-filter (optional): skip if ingest_selector_model unset
          or same as the main model.
       4. Batch reconcile with the main model — one call decides and produces
@@ -306,156 +309,97 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
     metadata: dict[str, Any] = push.get("metadata") or {}
     url: str = str(push.get("url") or metadata.get("url") or "")
 
-    def _record_search_drops(
-        dropped: list[ingest_search.SearchHit],
-        outcome: Literal["filtered_by_bm25_score", "filtered_by_search_rank"],
-    ) -> None:
-        # Post-process candidates dropped before the reconciler — by the BM25
-        # score threshold (``filtered_by_bm25_score``) or by the top-N candidate
-        # cap (``filtered_by_search_rank``): the per-pair outcome metric, and
-        # (when eval logging is on) an eval row — reading the page body here
-        # since this path never reads it otherwise.
-        for hit in dropped:
-            ingest_outcomes_total.labels(outcome=outcome, wiki_path=hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome=outcome).observe(hit.score)
-            if not CONFIG.ingest_eval_logging:
-                continue
-            try:
-                body = wiki_git.read_file(hit.path)
-            except Exception:
-                log.warning(
-                    "ingest_eval_sample: failed to read %s for %s sample",
-                    hit.path, outcome,
-                    exc_info=True,
-                )
-                continue
-            try:
-                ingest_eval_sample.log_sample(
-                    source_document_id=push.get("source_document_id"),
-                    source_type=source_type,
-                    source_title=title,
-                    source_url=url if url else None,
-                    source_content=content,
-                    wiki_path=hit.path,
-                    wiki_body_before=body,
-                    outcome=outcome,
-                    bm25_score=hit.score,
-                    commit_sha=None,
-                )
-            except Exception:
-                log.warning(
-                    "ingest_eval_sample: failed to log %s sample", outcome,
-                    exc_info=True,
-                )
-
     t_start = time.monotonic()
-    used_fallback = False
-    # Widen the candidate fetch only when eval logging is on, so we can record
-    # real search hits beyond the top-N cap (filtered_by_search_rank). The kept
-    # set the pipeline acts on is unchanged either way.
-    fetch_limit = ingest_search.EVAL_WIDE_FETCH_LIMIT if CONFIG.ingest_eval_logging else None
-    try:
-        search_result = ingest_search.candidates(content, title, fetch_limit=fetch_limit)
-    except ingest_search.IngestSearchError:
-        used_fallback = True
-        # The candidate search failed — almost always because the full document
-        # body exceeds OpenSearch's boolean-clause limit. Only large documents
-        # reach here, so retry with a compact query (and pay the LLM cost only
-        # when needed): an LLM-distilled update-intent when a cheap model is
-        # configured, else a deterministic bounded-terms query.
-        selector_model = get_llm_settings().ingest_selector_model
-        query = (
-            ingest_intent.generate_search_query(title=title, content=content, model=selector_model)
-            if selector_model
-            else None
-        )
-        strategy = "llm-intent"
-        if not query:
-            query = ingest_search.bounded_query(content)
-            strategy = "bounded-terms"
-        log.info(
-            "process_pushed_document: oversized query, retrying via %s, doc_id=%s",
-            strategy, doc_id,
-        )
-        try:
-            search_result = ingest_search.candidates(query, title)
-        except ingest_search.IngestSearchError:
-            log.warning(
-                "process_pushed_document: candidate search FAILED after %s fallback "
-                "(document dropped), doc_id=%s",
-                strategy, doc_id, exc_info=True,
-            )
-            return
 
-    # Only record search drops from the primary, full-content search. The
-    # fallback scores against a lossy summary query, so its below-threshold /
-    # below-rank pages aren't comparable to the document and would mislabel the
-    # eval rows. rank_dropped is non-empty only when eval logging widened the
-    # fetch, so it's a no-op otherwise.
-    if not used_fallback:
-        _record_search_drops(search_result.dropped, "filtered_by_bm25_score")
-        _record_search_drops(search_result.rank_dropped, "filtered_by_search_rank")
-    hits = search_result.passed
-    if not hits:
-        log.info("process_pushed_document: no BM25 candidates above threshold, doc_id=%s", doc_id)
+    # Candidates: every page with a stored embedding, scored by the relevance
+    # filter (RelevanceService) — no keyword retrieval, so no top-N ceiling and
+    # no "no keyword hit" path that silently drops a document. None => the
+    # document couldn't be embedded: skip it rather than fail-open into
+    # reconciling every page (a transient embed error self-corrects on the
+    # next push).
+    relevance_result = get_relevance_service().relevant_pages(
+        IngestionDocument(
+            content=content,
+            id=push.get("source_document_id"),
+            title=title,
+            source_type=source_type,
+            url=url or None,
+            metadata=metadata or None,
+        )
+    )
+    if relevance_result is None:
+        ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
+        ingest_document_results_total.labels(result="no_candidates").inc()
+        return
+    for page in relevance_result.dropped:
+        ingest_outcomes_total.labels(
+            outcome="filtered_by_relevance", wiki_path=page.path
+        ).inc()
+    if not relevance_result.kept:
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
         ingest_document_results_total.labels(result="no_candidates").inc()
         return
 
     source_label = source_type or "external"
 
-    # Read all candidate bodies upfront — needed by both the selector and the
-    # main reconciler loop. Skip unreadable files early so the selector sees the
-    # same set the reconciler will act on. Resolve every candidate's update
-    # policy in one query: drop pages whose policy disables ingestion
-    # auto-update *before* any LLM call, and carry each kept page's resolved
-    # update instruction onto its candidate for the reconciler prompt.
-    policies = update_policy.resolve_for_paths([hit.path for hit in hits])
+    # Resolve the kept pages' update policies in one query. Policy-disabled
+    # pages are excluded below (with the cap check) rather than before the
+    # filter: recording the ingestion_auto_update_disabled outcome only for
+    # pages the filter judged relevant keeps that metric meaning "policy
+    # blocked a would-be candidate", not "a disabled page exists" (which would
+    # fire per page per document).
+    policies = update_policy.resolve_for_paths([p.path for p in relevance_result.kept])
+
+    # Read bodies only for pages the filter kept — needed by both the selector
+    # and the main reconciler loop. Skip unreadable files early so the selector
+    # sees the same set the reconciler will act on.
+    #
     # Admin hard cap: pages that already hit the cap in the trailing 24h are
     # dropped here, before any LLM call, so a runaway page stops burning tokens.
     # Dynamic — no persisted disable; a page resumes on its own once its rolling
     # window falls back under the cap. 0 disables the cap.
     #
-    # The count is a per-hit git read, only when cap > 0 — in line with the
-    # per-hit read_file below and fine for today's small candidate sets. If
-    # candidate sets grow, give ingest_update_times_24h a multi-path sibling and
-    # batch the cap reads like resolve_for_paths above.
+    # The count is a per-page git read, only when cap > 0 — in line with the
+    # per-page read_file below and fine for today's small kept sets. If kept
+    # sets grow, give ingest_update_times_24h a multi-path sibling and batch
+    # the cap reads like resolve_for_paths above.
     cap = ingest_settings.get().auto_update_cap
     readable: list[WikiUpdateCandidate] = []
-    for hit in hits:
-        policy = policies.get(hit.path)
+    for page in relevance_result.kept:
+        policy = policies.get(page.path)
         if policy is not None and policy.ingestion_auto_update_disabled:
             ingest_outcomes_total.labels(
-                outcome="ingestion_auto_update_disabled", wiki_path=hit.path
+                outcome="ingestion_auto_update_disabled", wiki_path=page.path
             ).inc()
             log.debug(
                 "process_pushed_document: ingestion auto-update disabled for %s, skipping",
-                hit.path,
+                page.path,
             )
             continue
-        cap_count = len(wiki_git.ingest_update_times_24h(hit.path)) if cap > 0 else 0
+        cap_count = len(wiki_git.ingest_update_times_24h(page.path)) if cap > 0 else 0
         if cap > 0 and cap_count >= cap:
             ingest_outcomes_total.labels(
-                outcome="auto_update_cap_exceeded", wiki_path=hit.path
+                outcome="auto_update_cap_exceeded", wiki_path=page.path
             ).inc()
             log.info(
                 "process_pushed_document: %s hit the %d/24h auto-update cap, skipping",
-                hit.path,
+                page.path,
                 cap,
             )
             # Record the (deduped) activity event from here, where we actually
             # block a push — so it fires even for pages already over the cap when
             # an admin set/lowered it (which have no future crossing commit).
-            update_frequency.record_auto_update_capped(hit.path, cap_count, cap)
+            update_frequency.record_auto_update_capped(page.path, cap_count, cap)
             continue
         try:
-            body = wiki_git.read_file(hit.path)
+            body = wiki_git.read_file(page.path)
         except Exception:
-            log.debug("process_pushed_document: skipping unreadable %s", hit.path)
+            log.debug("process_pushed_document: skipping unreadable %s", page.path)
             continue
         readable.append(
             WikiUpdateCandidate(
-                hit=hit,
+                path=page.path,
+                score=relevance_result.scores.get(page.path),
                 body=body,
                 update_instruction=policy.update_instruction if policy else None,
             )
@@ -482,14 +426,14 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         ingest_selector_duration_seconds.observe(time.monotonic() - t_selector)
         dropped = len(before_filter) - len(readable)
         ingest_selector_candidates_filtered.observe(dropped)
-        kept_paths = {c.hit.path for c in readable}
+        kept_paths = {c.path for c in readable}
         for c in before_filter:
-            if c.hit.path not in kept_paths:
+            if c.path not in kept_paths:
                 ingest_outcomes_total.labels(
-                    outcome="filtered_by_selector", wiki_path=c.hit.path
+                    outcome="filtered_by_selector", wiki_path=c.path
                 ).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.hit.score)
-                log.debug("process_pushed_document: filtered_by_selector path=%s", c.hit.path)
+                ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.score or 0.0)
+                log.debug("process_pushed_document: filtered_by_selector path=%s", c.path)
                 if CONFIG.ingest_eval_logging:
                     try:
                         ingest_eval_sample.log_sample(
@@ -498,10 +442,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                             source_title=title,
                             source_url=url if url else None,
                             source_content=content,
-                            wiki_path=c.hit.path,
+                            wiki_path=c.path,
                             wiki_body_before=c.body,
                             outcome="filtered_by_selector",
-                            bm25_score=c.hit.score,
+                            bm25_score=c.score,
                             commit_sha=None,
                         )
                     except Exception:
@@ -538,11 +482,11 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         if result == IRRELEVANT_SENTINEL:
             irrelevant += 1
             consecutive_irrelevant += 1
-            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.hit.score)
+            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.score or 0.0)
             log.debug(
                 "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
-                c.hit.path,
+                c.path,
                 consecutive_irrelevant,
             )
             if CONFIG.ingest_eval_logging:
@@ -553,10 +497,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         source_title=title,
                         source_url=url if url else None,
                         source_content=content,
-                        wiki_path=c.hit.path,
+                        wiki_path=c.path,
                         wiki_body_before=c.body,
                         outcome="irrelevant",
-                        bm25_score=c.hit.score,
+                        bm25_score=c.score,
                         commit_sha=None,
                     )
                 except Exception:
@@ -566,7 +510,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 break
         elif result is not None:
             consecutive_irrelevant = 0
-            message = f"ingest({source_label}): update {c.hit.path}"
+            message = f"ingest({source_label}): update {c.path}"
             meta_lines: list[str] = []
             if title:
                 meta_lines.append(f"Title: {title}")
@@ -576,7 +520,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 message += "\n\n" + "\n".join(meta_lines)
             try:
                 commit_result = wiki_utils.commit_and_fan_out(
-                    path=c.hit.path,
+                    path=c.path,
                     body=result,
                     message=message,
                     change_kind=ChangeKind.EDIT,
@@ -585,23 +529,23 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                     skip_acl=True,
                 )
             except CommitMaxRetriesError:
-                log.warning("process_pushed_document: max retries for %s, skipping", c.hit.path)
+                log.warning("process_pushed_document: max retries for %s, skipping", c.path)
                 continue
             except LLMError as exc:
                 # ai_merge fallback failed — skip this candidate, don't abort the batch.
-                log.warning("process_pushed_document: merge LLM error for %s: %s", c.hit.path, exc)
+                log.warning("process_pushed_document: merge LLM error for %s: %s", c.path, exc)
                 continue
             if commit_result is None:
                 # Concurrent edit produced identical content — treat as no_change.
                 no_change += 1
-                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.path).inc()
+                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.score or 0.0)
                 continue
             sha = commit_result.sha
             committed += 1
-            ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
-            log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
+            ingest_outcomes_total.labels(outcome="committed", wiki_path=c.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.score or 0.0)
+            log.info("process_pushed_document: committed %s sha=%s", c.path, sha)
             if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
@@ -610,10 +554,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         source_title=title,
                         source_url=url if url else None,
                         source_content=content,
-                        wiki_path=c.hit.path,
+                        wiki_path=c.path,
                         wiki_body_before=c.body,
                         outcome="committed",
-                        bm25_score=c.hit.score,
+                        bm25_score=c.score,
                         commit_sha=sha,
                     )
                 except Exception:
@@ -621,8 +565,8 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         else:
             consecutive_irrelevant = 0
             no_change += 1
-            ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+            ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.score or 0.0)
             if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
@@ -631,10 +575,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         source_title=title,
                         source_url=url if url else None,
                         source_content=content,
-                        wiki_path=c.hit.path,
+                        wiki_path=c.path,
                         wiki_body_before=c.body,
                         outcome="no_change",
-                        bm25_score=c.hit.score,
+                        bm25_score=c.score,
                         commit_sha=None,
                     )
                 except Exception:
@@ -650,7 +594,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         "llm_calls=%d committed=%d irrelevant=%d stopped_early=%s duration_ms=%d",
         doc_id,
         source_type,
-        len(hits),
+        len(relevance_result.kept),
         llm_calls,
         committed,
         irrelevant,

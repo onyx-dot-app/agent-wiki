@@ -221,7 +221,7 @@ def _reconcile_batch(
     today: str,
 ) -> list[str | None]:
     def _format_candidate(index: int, c: WikiUpdateCandidate) -> str:
-        header = f"[{index + 1}] {c.hit.path}"
+        header = f"[{index + 1}] {c.path}"
         # Per-page update instruction (from the page's update policy) constrains
         # *how* to edit this candidate; it never forces an edit.
         if c.update_instruction:
@@ -296,7 +296,7 @@ def _reconcile_batch(
             if not outcome:
                 log.warning(
                     "ingest_batch_reconciler: no edits for %s, treating as NO_CHANGE",
-                    c.hit.path,
+                    c.path,
                 )
             results.append(apply_edits(c.body, outcome))
     return results
