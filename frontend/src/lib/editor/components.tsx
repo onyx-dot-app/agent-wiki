@@ -503,19 +503,59 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       view.current = v;
       onServerFrame(applyFrame);
       registerFlush(async () => {
-        // Drive the push chain, then wait until every op is confirmed (sendable
-        // drained by echoes) so the server has all our edits before checkpoint.
-        // Time out rather than hang / silently checkpoint a stale buffer.
+        // Deliver every un-acked local op over plain HTTP, treating a 200 as
+        // delivered. Unlike `doPush`, this must not wait for stream echoes to
+        // drain `sendableUpdates` — flush runs during teardown, when the SSE
+        // stream (and even the view) may be gone, so an echo may never arrive.
+        // The server CAS makes a duplicate send harmless (409). Time out
+        // rather than hang / silently checkpoint a stale buffer.
         const deadline = Date.now() + 5000;
-        void doPush();
-        while (sendableUpdates(v.state).length > 0) {
+        while (true) {
           if (Date.now() > deadline) {
             throw new Error(
               "Could not sync your latest edits — check your connection.",
             );
           }
-          await new Promise((r) => setTimeout(r, 40));
-          void doPush();
+          if (pushing.current) {
+            // An op is in flight (doPush or a concurrent flush) — wait for it
+            // rather than double-sending at the same version.
+            await new Promise((r) => setTimeout(r, 40));
+            continue;
+          }
+          const updates = sendableUpdates(v.state);
+          if (updates.length === 0) return;
+          let version = getSyncedVersion(v.state);
+          let start = 0;
+          if (version === sentAtVersion.current) {
+            // updates[0] already got its 200 (it's only un-drained because its
+            // echo hasn't landed) — the rest are based one version later.
+            start = 1;
+            version += 1;
+            if (updates.length === 1) return;
+          }
+          pushing.current = true;
+          try {
+            for (let i = start; i < updates.length; i++) {
+              await sendOp(
+                session.id,
+                version,
+                changeSetToChanges(updates[i]!.changes),
+                session.clientId,
+              );
+              sentAtVersion.current = version;
+              version += 1;
+            }
+            return;
+          } catch (e) {
+            if (e instanceof ApiError && e.status === 409) {
+              // A peer's op interleaved — rebase through the op log and retry.
+              await pull();
+              continue;
+            }
+            throw e;
+          } finally {
+            pushing.current = false;
+          }
         }
       });
       registerSetDoc((text: string) => {
@@ -526,7 +566,11 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
 
       return () => {
         onServerFrame(null);
-        registerFlush(null);
+        // Deliberately NOT registerFlush(null): the session teardown in
+        // useCoeditSession runs after this cleanup on unmount and needs the
+        // flush for its final flush → checkpoint → leave sequence. The flush
+        // only reads `v.state` and POSTs — both safe after `v.destroy()` —
+        // and the hook clears it once it has taken ownership.
         registerSetDoc(null);
         v.destroy();
         view.current = null;

@@ -32,9 +32,15 @@ export function getSession(sessionId: number): Promise<CoeditSession> {
   return apiFetch(`/coedit/session?session_id=${sessionId}`);
 }
 
-/** Leave the session, allowing the server to clean up presence + buffer if empty. */
-export function leaveSession(sessionId: number): Promise<void> {
+/** Leave the session, allowing the server to clean up presence + buffer if
+ * empty. `init` lets teardown pass `{ keepalive: true }` so the request
+ * survives the page tearing down. */
+export function leaveSession(
+  sessionId: number,
+  init?: RequestInit,
+): Promise<void> {
   return apiFetch("/coedit/leave", {
+    ...init,
     method: "POST",
     body: JSON.stringify({ session_id: sessionId }),
   });

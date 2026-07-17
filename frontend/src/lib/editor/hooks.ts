@@ -4,10 +4,11 @@
  *
  * On `enabled` it joins the session for `path`, streams inbound frames, and
  * exposes presence (`participants`/`typing`/`peers`) and autosave
- * (`saveStatus`). Teardown (flush + best-effort checkpoint + leave +
- * `onEnd`) happens entirely inside the hook's own effect cleanup — driven by
- * `enabled`/`path` changing or the component unmounting, never by the caller
- * invoking a function. The *document* is owned by the editor via
+ * (`saveStatus`). Teardown (flush → checkpoint → leave → stream abort, in
+ * that order — leaving/disconnecting first would let the server's last-leave
+ * forced commit race ahead of the final ops) happens entirely inside the
+ * hook's own effect cleanup — driven by `enabled`/`path` changing or the
+ * component unmounting, never by the caller invoking a function. The *document* is owned by the editor via
  * `@codemirror/collab` (see `Coeditor`), not here — the hook just hands the
  * editor what it needs to run collab (`session` = id/clientId/start
  * version+doc), forwards inbound `op`/`resync` frames to it (`onServerFrame`),
@@ -259,10 +260,11 @@ export function useCoeditSession(opts: {
     [myUserId],
   );
 
-  // Tears the session down and fires `onEnd` — the one and only "session is
-  // over" signal. Only called from the join effect's cleanup below, so this
-  // is always a genuine end (disable, path change, or unmount), never a
-  // silent mid-session reset.
+  // Tears down the *local* session state (timers, presence, handles) and
+  // fires `onEnd` — the one and only "session is over" signal. The network
+  // side (flush, checkpoint, leave, stream abort) is NOT done here: the join
+  // effect's cleanup below — the only caller — sequences those explicitly,
+  // because their order matters (see the comment there).
   const stop = useCallback(() => {
     clearAutosaveTimers();
     if (cursorThrottle.current) {
@@ -278,13 +280,9 @@ export function useCoeditSession(opts: {
     pendingCursor.current = null;
     setTyping([]);
     setPeers([]);
-    abort.current?.abort();
-    abort.current = null;
-    const sid = sessionId.current;
     sessionId.current = null;
     setActive(false);
     setSession(null);
-    if (sid !== null) void leaveSession(sid).catch(() => {});
     onEnd?.();
   }, [clearAutosaveTimers, onEnd]);
 
@@ -331,7 +329,17 @@ export function useCoeditSession(opts: {
       });
       setActive(true);
       try {
-        await streamSession(snap.session_id, onFrame, ctrl.signal);
+        // Gate on `cancelled`: the stream outlives the effect during teardown
+        // (it's aborted only after the final flush/checkpoint/leave below), and
+        // a late frame from the old session must not leak into state a new
+        // session now owns.
+        await streamSession(
+          snap.session_id,
+          (frame) => {
+            if (!cancelled) onFrame(frame);
+          },
+          ctrl.signal,
+        );
       } catch {
         // Stream ended/dropped after a successful join (including our own
         // cleanup's abort) — the session/doc are already usable, so this
@@ -341,25 +349,48 @@ export function useCoeditSession(opts: {
 
     return () => {
       cancelled = true;
-      // Capture before the synchronous `stop()` below clears them, so a
-      // trailing checkpoint can still cover the last idle-autosave window
-      // (the periodic autosave while mounted is the primary durability path;
-      // this is best-effort for the tail end of it, e.g. a path change or
-      // unmount mid-edit — small race against `stop()`'s own `leaveSession`
-      // call, not worth blocking teardown to sequence perfectly).
+      // Teardown must run flush → checkpoint → leave → abort, in that strict
+      // order. The server force-commits and closes the session when the last
+      // participant is gone, and BOTH leaving and dropping the SSE stream
+      // count as "gone" — so leaving (or aborting) before the final ops and
+      // checkpoint have landed lets that forced commit race ahead of them:
+      // it commits a buffer missing the tail, `close_if_clean` closes the
+      // session, and the late ops bounce off a closed session (silent loss).
+      // Leaving last means the forced commit only ever sees a clean,
+      // fully-flushed buffer.
       const sid = sessionId.current;
+      // The editor never unregisters its flush (see Coeditor's cleanup) so
+      // it's still here even when the child unmounted first; clear it as we
+      // take ownership of the final call.
       const flush = flushFn.current;
+      flushFn.current = null;
+      const ctrl = abort.current;
+      abort.current = null;
       stop();
-      if (sid !== null) {
-        void (async () => {
-          try {
-            await flush?.();
-          } catch {
-            return;
-          }
-          void checkpointSession(sid, { keepalive: true }).catch(() => {});
-        })();
+      if (sid === null) {
+        ctrl?.abort();
+        return;
       }
+      void (async () => {
+        try {
+          await flush?.();
+        } catch {
+          // Best-effort: the tail couldn't be delivered (offline, or a peer's
+          // concurrent edit mid-teardown). Still checkpoint — committing what
+          // the server has beats leaving it all to the forced commit.
+        }
+        try {
+          await checkpointSession(sid, { keepalive: true });
+        } catch {
+          // The last-leave forced commit below is the backstop.
+        }
+        try {
+          await leaveSession(sid, { keepalive: true });
+        } catch {
+          // The server-side leave on SSE disconnect is the backstop.
+        }
+        ctrl?.abort();
+      })();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, path, retryToken]);
