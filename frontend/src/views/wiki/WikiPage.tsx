@@ -15,6 +15,7 @@ import {
   EmptyMessageCard,
   MessageCard,
 } from "@onyx-ai/opal/components";
+import { cn } from "@onyx-ai/opal/utils";
 import {
   SvgAlertTriangle,
   SvgDocFile,
@@ -66,10 +67,14 @@ import {
 import { relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 
+interface WikiUnknownLinkProps {
+  status?: number;
+}
+
 /** A wiki URL that no longer points at a live doc — an unknown/expired id, or
  * a page that was deleted but is no longer in Trash (purged). A deleted page
  * still in Trash renders {@link WikiTombstone} instead. */
-function WikiUnknownLink({ status }: { status?: number }) {
+function WikiUnknownLink({ status }: WikiUnknownLinkProps) {
   const router = useRouter();
   return (
     <main className="flex h-full items-center justify-center p-8 pb-[16vh]">
@@ -92,10 +97,14 @@ function WikiUnknownLink({ status }: { status?: number }) {
   );
 }
 
+interface WikiTombstoneProps {
+  path: string;
+}
+
 /** Tombstone for a deleted page/folder reached via its id URL: shows who/when
  * and offers Restore. Falls back to {@link WikiUnknownLink} when the item is no
  * longer in Trash (purged, or deleted before Trash shipped). */
-function WikiTombstone({ path }: { path: string }) {
+function WikiTombstone({ path }: WikiTombstoneProps) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -161,7 +170,11 @@ function WikiTombstone({ path }: { path: string }) {
   );
 }
 
-function Explorer({ dir }: { dir: string }) {
+interface ExplorerProps {
+  dir: string;
+}
+
+function Explorer({ dir }: ExplorerProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
@@ -381,7 +394,10 @@ function Explorer({ dir }: { dir: string }) {
 
   return (
     <main
-      className={`h-full overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={cn(
+        "h-full overflow-y-auto",
+        isMobile ? "px-3 py-4" : "px-8 py-6",
+      )}
     >
       {host?.el && createPortal(headerActions, host.el)}
 
@@ -538,7 +554,11 @@ function Explorer({ dir }: { dir: string }) {
   );
 }
 
-function NewDocView({ dir }: { dir: string }) {
+interface NewDocViewProps {
+  dir: string;
+}
+
+function NewDocView({ dir }: NewDocViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
@@ -780,7 +800,10 @@ function NewDocView({ dir }: { dir: string }) {
 
   return (
     <main
-      className={`box-border flex h-full flex-col gap-3 ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={cn(
+        "box-border flex h-full flex-col gap-3",
+        isMobile ? "px-3 py-4" : "px-8 py-6",
+      )}
     >
       {host?.el && createPortal(headerActions, host.el)}
 
@@ -837,13 +860,12 @@ function NewDocView({ dir }: { dir: string }) {
 
 type SortMode = "name-asc" | "name-desc" | "recent";
 
-function SortBar({
-  value,
-  onChange,
-}: {
+interface SortBarProps {
   value: SortMode;
   onChange: (v: SortMode) => void;
-}) {
+}
+
+function SortBar({ value, onChange }: SortBarProps) {
   return (
     <div className="mb-2 flex items-center gap-2 text-xs text-(--text-03)">
       <label htmlFor="wiki-sort">Sort:</label>
@@ -859,6 +881,28 @@ function SortBar({
       </select>
     </div>
   );
+}
+
+interface RowProps {
+  icon: React.ReactNode;
+  label: string;
+  updatedAt: string;
+  href: string;
+  path: string;
+  isFile: boolean;
+  busy: boolean;
+  onDelete: () => void;
+  onShare?: () => void;
+  renaming: boolean;
+  onStartRename: () => void;
+  onCancelRename: () => void;
+  onSubmitRename: (newName: string) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  dropActive: boolean;
+  onFolderDragOver?: () => void;
+  onFolderDragLeave?: () => void;
+  onFolderDrop?: () => void;
 }
 
 function Row({
@@ -881,27 +925,7 @@ function Row({
   onFolderDragOver,
   onFolderDragLeave,
   onFolderDrop,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  updatedAt: string;
-  href: string;
-  path: string;
-  isFile: boolean;
-  busy: boolean;
-  onDelete: () => void;
-  onShare?: () => void;
-  renaming: boolean;
-  onStartRename: () => void;
-  onCancelRename: () => void;
-  onSubmitRename: (newName: string) => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  dropActive: boolean;
-  onFolderDragOver?: () => void;
-  onFolderDragLeave?: () => void;
-  onFolderDrop?: () => void;
-}) {
+}: RowProps) {
   const router = useRouter();
   const [hover, setHover] = useState(false);
   const [draft, setDraft] = useState(label);
@@ -964,7 +988,16 @@ function Row({
       }
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className={`flex items-center border-b border-(--border-01) px-3 py-[10px] ${dropActive ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)" : hover ? "bg-(--background-tint-02)" : "bg-transparent"} ${busy ? "opacity-50" : "opacity-100"} ${renaming ? "cursor-default" : "cursor-pointer"}`}
+      className={cn(
+        "flex items-center border-b border-(--border-01) px-3 py-[10px]",
+        dropActive
+          ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)"
+          : hover
+            ? "bg-(--background-tint-02)"
+            : "bg-transparent",
+        busy ? "opacity-50" : "opacity-100",
+        renaming ? "cursor-default" : "cursor-pointer",
+      )}
     >
       <span className="mr-[10px] flex text-(--text-03)">{icon}</span>
       {renaming ? (
@@ -1025,7 +1058,11 @@ function Row({
               disabled={busy}
               title="Share"
               aria-label={`Share ${label}`}
-              className={`flex items-center border-none bg-transparent p-[6px] ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
+              className={cn(
+                "flex items-center border-none bg-transparent p-[6px]",
+                busy ? "cursor-not-allowed" : "cursor-pointer",
+                hover ? "text-(--text-04)" : "text-transparent",
+              )}
             >
               <SvgShare size={16} />
             </button>
@@ -1035,7 +1072,11 @@ function Row({
             disabled={busy}
             title="Rename"
             aria-label={`Rename ${label}`}
-            className={`flex items-center border-none bg-transparent p-[6px] ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--text-04)" : "text-transparent"}`}
+            className={cn(
+              "flex items-center border-none bg-transparent p-[6px]",
+              busy ? "cursor-not-allowed" : "cursor-pointer",
+              hover ? "text-(--text-04)" : "text-transparent",
+            )}
           >
             <SvgEdit size={16} />
           </button>
@@ -1044,7 +1085,11 @@ function Row({
             disabled={busy}
             title="Delete"
             aria-label={`Delete ${label}`}
-            className={`flex items-center border-none bg-transparent p-[6px] ${busy ? "cursor-not-allowed" : "cursor-pointer"} ${hover ? "text-(--status-text-error-05)" : "text-transparent"}`}
+            className={cn(
+              "flex items-center border-none bg-transparent p-[6px]",
+              busy ? "cursor-not-allowed" : "cursor-pointer",
+              hover ? "text-(--status-text-error-05)" : "text-transparent",
+            )}
           >
             <SvgTrash size={16} />
           </button>

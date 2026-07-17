@@ -13,6 +13,7 @@ import {
   SelectButton,
 } from "@onyx-ai/opal/components";
 import { Content } from "@onyx-ai/opal/layouts";
+import { cn } from "@onyx-ai/opal/utils";
 import {
   SvgBubbleText,
   SvgChevronLeft,
@@ -706,7 +707,10 @@ export function FileView({ path }: FileViewProps) {
 
   return (
     <main
-      className={`box-border flex h-full min-h-0 flex-col ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={cn(
+        "box-border flex h-full min-h-0 flex-col",
+        isMobile ? "px-3 py-4" : "px-8 py-6",
+      )}
     >
       {host?.el && headerActions && createPortal(headerActions, host.el)}
 
@@ -1103,11 +1107,20 @@ function ActiveAgentsBar({
         onClick={expandable ? onToggle : undefined}
         aria-expanded={expandable ? open : undefined}
         disabled={!expandable}
-        className={`flex w-full items-center gap-2 border-none bg-transparent px-3 py-2 text-left text-[13px] ${expandable ? "cursor-pointer text-(--text-05)" : "cursor-default text-(--text-03)"}`}
+        className={cn(
+          "flex w-full items-center gap-2 border-none bg-transparent px-3 py-2 text-left text-[13px]",
+          expandable
+            ? "cursor-pointer text-(--text-05)"
+            : "cursor-default text-(--text-03)",
+        )}
       >
         <span
           aria-hidden
-          className={`flex shrink-0 transition-transform duration-[120ms] ease-in-out ${open ? "rotate-90" : "rotate-0"} ${!expandable ? "text-(--text-02)" : "text-(--text-03)"}`}
+          className={cn(
+            "flex shrink-0 transition-transform duration-[120ms] ease-in-out",
+            open ? "rotate-90" : "rotate-0",
+            !expandable ? "text-(--text-02)" : "text-(--text-03)",
+          )}
         >
           <SvgChevronRight size={10} />
         </span>
@@ -1158,10 +1171,10 @@ interface ActiveAgentRowProps {
 function ActiveAgentRow({ a, isLast }: ActiveAgentRowProps) {
   return (
     <li
-      className={
-        `flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap` +
-        (isLast ? `` : ` border-b border-(--border-01)`)
-      }
+      className={cn(
+        "flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap",
+        !isLast && "border-b border-(--border-01)",
+      )}
     >
       <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
         {a.activity}
@@ -1211,10 +1224,10 @@ interface ActiveSessionRowProps {
 function ActiveSessionRow({ s, isLast, onClose }: ActiveSessionRowProps) {
   return (
     <li
-      className={
-        `flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap` +
-        (isLast ? `` : ` border-b border-(--border-01)`)
-      }
+      className={cn(
+        "flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap",
+        !isLast && "border-b border-(--border-01)",
+      )}
     >
       <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
         {s.status}
@@ -1423,7 +1436,11 @@ function StripArrow({ direction, onClick }: StripArrowProps) {
       type="button"
       onClick={onClick}
       aria-label={direction === "left" ? "Scroll left" : "Scroll right"}
-      className={`absolute top-1/2 -translate-y-1/2 ${direction === "left" ? "left-1" : "right-1"} flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-(--border-01) bg-(--background-tint-00) p-0 text-(--text-04) shadow-(--shadow-sm)`}
+      className={cn(
+        "absolute top-1/2 -translate-y-1/2",
+        direction === "left" ? "left-1" : "right-1",
+        "flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-(--border-01) bg-(--background-tint-00) p-0 text-(--text-04) shadow-(--shadow-sm)",
+      )}
     >
       {direction === "left" ? (
         <SvgChevronLeft size={14} />
@@ -1456,7 +1473,13 @@ function TemplateCard({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className={`box-border flex h-full min-h-[64px] w-full flex-col gap-1 rounded-(--border-radius-04) border px-3 py-[10px] text-left text-(--text-05) transition-[background,border-color] duration-[80ms] ease-in-out ${busy ? "cursor-wait opacity-[0.7]" : "cursor-pointer"} ${active ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+      className={cn(
+        "box-border flex h-full min-h-[64px] w-full flex-col gap-1 rounded-(--border-radius-04) border px-3 py-[10px] text-left text-(--text-05) transition-[background,border-color] duration-[80ms] ease-in-out",
+        busy ? "cursor-wait opacity-[0.7]" : "cursor-pointer",
+        active
+          ? "border-(--border-01) bg-(--background-tint-03)"
+          : "border-(--border-01) bg-(--background-tint-00)",
+      )}
       onMouseEnter={(e) => {
         if (!active && !busy) {
           e.currentTarget.style.background = "var(--background-tint-03)";
