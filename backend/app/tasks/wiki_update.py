@@ -39,7 +39,7 @@ from app.llm.errors import LLMError
 from app.llm.settings import get as get_llm_settings
 from app.metrics import (
     ingest_batch_reconciler_duration_seconds,
-    ingest_bm25_score_by_outcome,
+    ingest_relevance_score_by_outcome,
     ingest_document_chars,
     ingest_document_results_total,
     ingest_llm_calls_per_doc,
@@ -432,7 +432,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 ingest_outcomes_total.labels(
                     outcome="filtered_by_selector", wiki_path=c.path
                 ).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.score or 0.0)
+                ingest_relevance_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.score or 0.0)
                 log.debug("process_pushed_document: filtered_by_selector path=%s", c.path)
                 if CONFIG.ingest_eval_logging:
                     try:
@@ -483,7 +483,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             irrelevant += 1
             consecutive_irrelevant += 1
             ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.score or 0.0)
+            ingest_relevance_score_by_outcome.labels(outcome="irrelevant").observe(c.score or 0.0)
             log.debug(
                 "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
                 c.path,
@@ -539,12 +539,12 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 # Concurrent edit produced identical content — treat as no_change.
                 no_change += 1
                 ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.score or 0.0)
+                ingest_relevance_score_by_outcome.labels(outcome="no_change").observe(c.score or 0.0)
                 continue
             sha = commit_result.sha
             committed += 1
             ingest_outcomes_total.labels(outcome="committed", wiki_path=c.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.score or 0.0)
+            ingest_relevance_score_by_outcome.labels(outcome="committed").observe(c.score or 0.0)
             log.info("process_pushed_document: committed %s sha=%s", c.path, sha)
             if CONFIG.ingest_eval_logging:
                 try:
@@ -566,7 +566,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             consecutive_irrelevant = 0
             no_change += 1
             ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.score or 0.0)
+            ingest_relevance_score_by_outcome.labels(outcome="no_change").observe(c.score or 0.0)
             if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(

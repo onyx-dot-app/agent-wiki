@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import NamedTuple
 
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete, func, select
 
 from app.db.models import PageEmbedding
 from app.db.session import session
@@ -30,6 +30,12 @@ class PageVector(NamedTuple):
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def count() -> int:
+    """Number of pages with a stored embedding (the relevance filter's corpus)."""
+    with session() as s:
+        return s.scalar(select(func.count()).select_from(PageEmbedding)) or 0
 
 
 def get_sha(path: str) -> str | None:

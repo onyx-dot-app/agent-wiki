@@ -57,6 +57,43 @@ ingest_bm25_score_by_outcome = Histogram(
     buckets=[1.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 300.0, 500.0, 750.0, 1000.0, 1500.0],
 )
 
+# Relevance-filter scores are P(update)-style values in [0, 1]; the deployed
+# cutoff sits low (0.0307 today), so buckets are dense at the low end to
+# resolve threshold moves.
+_RELEVANCE_SCORE_BUCKETS = [0.001, 0.003, 0.01, 0.03, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9]
+
+ingest_relevance_scores = Histogram(
+    "ingest_relevance_scores",
+    "Relevance-filter score per (document, page) pair, by keep/drop decision. "
+    "The threshold-calibration signal: dropped scores near the cutoff are the "
+    "near-misses.",
+    ["decision"],  # kept | dropped
+    buckets=_RELEVANCE_SCORE_BUCKETS,
+)
+
+ingest_relevance_score_by_outcome = Histogram(
+    "ingest_relevance_score_by_outcome",
+    "Relevance-filter score of a candidate broken down by its final ingest "
+    "outcome. Successor to ingest_bm25_score_by_outcome: candidates are "
+    "selected by the relevance filter, so its score is the meaningful axis.",
+    ["outcome"],
+    buckets=_RELEVANCE_SCORE_BUCKETS,
+)
+
+ingest_relevance_candidates = Histogram(
+    "ingest_relevance_candidates",
+    "Pages scored by the relevance filter per ingested document (every stored "
+    "page embedding).",
+    buckets=[10, 30, 100, 300, 1000, 3000],
+)
+
+ingest_relevance_kept_pages = Histogram(
+    "ingest_relevance_kept_pages",
+    "Pages the relevance filter kept per ingested document — what the LLM "
+    "stages actually receive.",
+    buckets=[0, 1, 2, 3, 5, 8, 13, 21, 34, 55],
+)
+
 ingest_outcomes_total = Counter(
     "ingest_outcomes_total",
     "Ingest pipeline outcomes",
@@ -129,6 +166,29 @@ class _WikiAutoUpdateCollector:
         yield g
 
 REGISTRY.register(_WikiAutoUpdateCollector())
+
+
+class _PageEmbeddingCoverageCollector:
+    """Pages with a stored embedding, sampled at scrape time. Under
+    embedding-based candidate selection an unembedded page can never be a
+    candidate, so coverage below wiki_pages_total is silent recall loss."""
+
+    def collect(self):
+        from app.db import page_embeddings
+
+        try:
+            embedded = page_embeddings.count()
+        except Exception:
+            log.warning("metrics: page-embedding count failed", exc_info=True)
+            embedded = 0
+        g = GaugeMetricFamily(
+            "wiki_pages_embedded_total",
+            "Wiki pages with a stored embedding (the relevance filter's candidate corpus)",
+        )
+        g.add_metric([], embedded)
+        yield g
+
+REGISTRY.register(_PageEmbeddingCoverageCollector())
 
 
 class _TaskQueueCollector:

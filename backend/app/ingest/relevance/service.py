@@ -23,6 +23,11 @@ from app.ingest.relevance.factory import build_relevance_filter
 from app.ingest.relevance.filter import RelevanceFilter
 from app.ingest.types import CandidatePage, IngestionDocument
 from app.llm import embeddings
+from app.metrics import (
+    ingest_relevance_candidates,
+    ingest_relevance_kept_pages,
+    ingest_relevance_scores,
+)
 
 log = logging.getLogger(__name__)
 
@@ -116,6 +121,15 @@ class RelevanceService:
             for pv in vectors
         ]
         result = self.evaluate(enriched_doc, pages)
+        # Score/count telemetry — the threshold-calibration signal in Grafana.
+        ingest_relevance_candidates.observe(len(pages))
+        ingest_relevance_kept_pages.observe(len(result.kept))
+        for page in result.kept:
+            if page.path in result.scores:
+                ingest_relevance_scores.labels(decision="kept").observe(result.scores[page.path])
+        for page in result.dropped:
+            if page.path in result.scores:
+                ingest_relevance_scores.labels(decision="dropped").observe(result.scores[page.path])
         # Kept scores + the highest dropped scores (the near-misses) are the
         # signal for calibrating the filter threshold against real traffic.
         near_misses = sorted(
