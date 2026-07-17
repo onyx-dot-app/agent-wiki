@@ -1476,9 +1476,8 @@ function TemplateCard({
       className={cn(
         "box-border flex h-full min-h-[64px] w-full flex-col gap-1 rounded-(--border-radius-04) border px-3 py-[10px] text-left text-(--text-05) transition-[background,border-color] duration-[80ms] ease-in-out",
         busy ? "cursor-wait opacity-[0.7]" : "cursor-pointer",
-        active
-          ? "border-(--border-01) bg-(--background-tint-03)"
-          : "border-(--border-01) bg-(--background-tint-00)",
+        "border-(--border-01)",
+        active ? "bg-(--background-tint-03)" : "bg-(--background-tint-00)",
       )}
       onMouseEnter={(e) => {
         if (!active && !busy) {
