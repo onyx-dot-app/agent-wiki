@@ -98,12 +98,12 @@ function TemplatesList() {
         </Button>
       </div>
       {reorderError && (
-        <div className="rounded-(--border-radius-04) border border-(--status-error-02) bg-(--status-error-01) px-3 py-2 text-[13px] text-(--status-text-error-05)">
+        <div className="rounded-(--radius-04) border border-(--status-error-02) bg-(--status-error-01) px-3 py-2 text-[13px] text-(--status-text-error-05)">
           {reorderError}
         </div>
       )}
       {visibleTemplates.length === 0 ? (
-        <div className="rounded-(--border-radius-08) border border-dashed border-(--border-01) p-6 text-center text-(--text-03)">
+        <div className="rounded-(--radius-08) border border-dashed border-(--border-01) p-6 text-center text-(--text-03)">
           No templates yet. Click "New template" to define the first one.
         </div>
       ) : (
@@ -111,7 +111,7 @@ function TemplatesList() {
           {visibleTemplates.map((t, i) => (
             <li
               key={t.id}
-              className="flex items-center gap-3 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-3"
+              className="flex items-center gap-3 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-3"
             >
               <ReorderHandle
                 disabled={reordering !== null}
@@ -226,7 +226,7 @@ function ArrowButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className={`flex h-[18px] w-[24px] items-center justify-center rounded-(--border-radius-04) border border-(--border-01) bg-transparent p-0 text-(--text-04) ${disabled ? "cursor-not-allowed opacity-35" : "cursor-pointer"}`}
+      className={`flex h-[18px] w-[24px] items-center justify-center rounded-(--radius-04) border border-(--border-01) bg-transparent p-0 text-(--text-04) ${disabled ? "cursor-not-allowed opacity-35" : "cursor-pointer"}`}
     >
       {direction === "up" ? (
         <SvgChevronUp size={10} />
@@ -314,7 +314,7 @@ function TemplateModal({
       <form
         onSubmit={onSubmit}
         onClick={(e) => e.stopPropagation()}
-        className="flex max-h-[90vh] w-[min(640px,100%)] flex-col gap-3 overflow-y-auto rounded-(--border-radius-12) bg-(--background-tint-00) p-5 shadow-(--shadow-modal)"
+        className="flex max-h-[90vh] w-[min(640px,100%)] flex-col gap-3 overflow-y-auto rounded-(--radius-12) bg-(--background-tint-00) p-5 shadow-(--shadow-modal)"
       >
         <h2 className="m-0 text-lg">
           {initial ? "Edit template" : "New template"}
@@ -410,5 +410,5 @@ function TemplateModal({
 const BLANK_TEMPLATE_NAME = "Blank";
 
 const inputClass =
-  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--radius-04) text-sm";
 const lblClass = "mb-1 text-[13px] font-medium";

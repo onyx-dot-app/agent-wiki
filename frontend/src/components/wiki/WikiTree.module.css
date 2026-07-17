@@ -1,16 +1,20 @@
-/* Permanent directory sidebar. Shows one level at a time; the list scrolls
-   instead of the panel growing. Panel surface matches the mock: filled
-   tint card (#fafafa → bg-panel), #e6e6e6 → border-default, 12px radius. */
+/* Directory tree panel (mock 319:26456): tint card, "Wiki Directory" header
+   with a collapse control, search + create actions, nested tree with indent
+   guides. The list scrolls instead of the panel growing. */
 
 .panel {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  width: 100%;
+  /* Fixed 312px card inset 4px from its region (mock 705:142934 sits at
+     x=4,y=4 in the 320 frame) so the border and radius read as a card. */
+  width: 312px;
+  height: calc(100% - 8px);
+  margin: 4px;
   box-sizing: border-box;
   background: var(--background-tint-01);
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-12);
+  border-radius: var(--radius-12);
   padding: 4px;
 }
 
@@ -19,20 +23,33 @@
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 4px 4px 8px 12px;
+  padding: 4px 4px 4px 8px;
   box-sizing: border-box;
 }
 
-.actions {
-  display: flex;
-  flex-direction: row;
-  gap: 4px;
+.headerTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-05);
 }
 
-/* Inline new-folder input (OPAL InputTypeIn) — appears under the header when
-   the +folder button is toggled. */
-.folderForm {
-  padding: 2px 4px 6px;
+/* Search input + new-page / new-folder actions on one row. The input flexes.
+   The buttons keep their intrinsic size. */
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 4px;
+}
+.searchRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Inline folder-create row, nested inside its target folder like a tree row. */
+.newFolderRow {
+  padding: 2px 4px;
 }
 .folderError {
   padding: 2px 8px 6px;
@@ -40,79 +57,60 @@
   color: var(--status-text-error-05);
 }
 
-/* Tree list — scrolls both axes rather than growing or truncating. Vertical
-   when it outgrows the viewport; horizontal when deep nesting + long names
-   run past the panel width (labels keep their natural width below). */
+/* Tree list. The header/search zone above stays fixed and only this list
+   scrolls, vertically. Long names truncate with an ellipsis (.rowLabel) so
+   the panel never scrolls horizontally (annotated mock on 705:142872). */
 .list {
-  max-height: calc(100vh - 120px);
-  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   width: 100%;
 }
 
-/* Let row labels keep their full width (OPAL truncates with an ellipsis by
-   default) so long/deep names overflow and drive the horizontal scroll. */
-.list :global(p) {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: nowrap;
-}
-
-/* Expanded folder's children — indented one level (mock's "Folded" pl-8).
-   Recursion accumulates 8px per depth; sized to content so it can overflow. */
-.nested {
-  width: max-content;
-  min-width: 100%;
-  padding-left: 8px;
-  box-sizing: border-box;
-}
-
-/* Row wrapper — SidebarTab with the "⋯" menu overlaying its leading icon. */
-.rowWrap {
-  position: relative;
-  width: 100%;
-}
-.tab {
-  width: 100%;
-}
-/* "⋯" overlay — pinned over the leading icon slot (container p-2 = 8px + icon
-   box), hidden until the row is hovered or its menu is open. */
-.rowMenu {
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.rowWrap:hover .rowMenu,
-.rowMenu:focus-within,
-.rowMenu[data-open] {
-  opacity: 1;
-}
-/* Hide the file/folder icon while the "⋯" is showing, so it reads as a swap.
-   Scoped to .tab so the menu's own icon (in .rowMenu) is unaffected. */
-.rowWrap:hover .tab :global(svg),
-.rowWrap:has(.rowMenu[data-open]) .tab :global(svg) {
-  visibility: hidden;
-}
-/* "⋯" trigger — sized to sit in the icon slot, transparent so it reads as the
-   swapped-in icon (the real icon is hidden underneath while hovered). */
-.moreBtn {
+/* Row label: chevron column, then glyph inline with the name. Label color and
+   weight follow the mock's Main UI/Body on text-04 (705:142966). The glyph
+   strokes at text-03 and the chevron at text-02 match the mock's icon
+   opacities (0.55 / 0.45). */
+.rowLabel {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: var(--border-radius-08);
-  background: transparent;
-  color: var(--text-03);
-  cursor: pointer;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-04);
+  font-weight: 500;
 }
-.moreBtn:hover {
-  color: var(--text-05);
+.rowLabel > svg {
+  flex-shrink: 0;
+  color: var(--text-03);
+}
+.rowLabel > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 4px;
+}
+
+/* Fixed chevron column (mock's Fold slot). The internal button centers in it
+   and overhangs, so the extra margin keeps its hover pill clear of the
+   file/folder glyph. */
+.chevronSlot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  margin-right: 4px;
+  flex-shrink: 0;
+  color: var(--text-02);
+}
+
+/* Expanded folder's children, indented one level per depth with the mock's
+   vertical guide line. */
+.nested {
+  margin-left: 12px;
+  padding-left: 4px;
+  border-left: 1px solid var(--border-01);
+  box-sizing: border-box;
 }
 
 .empty {

@@ -2,7 +2,7 @@
   padding: 8px;
   background: var(--background-tint-03);
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
   font-size: 12px;
 }
 

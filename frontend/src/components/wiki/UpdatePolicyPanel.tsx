@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Switch, Text } from "@onyx-ai/opal/components";
-import { SvgEdit, SvgHistory, SvgX } from "@onyx-ai/opal/icons";
+import { SvgAddLines, SvgHistory, SvgX } from "@onyx-ai/opal/icons";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api";
@@ -16,7 +16,9 @@ import styles from "./UpdatePolicyPanel.module.css";
 
 interface Props {
   path: string;
-  onClose: () => void;
+  // Renders the close control when set. Omit when the panel is inlined in a
+  // page column (folder pages) rather than shown as a dismissable drawer.
+  onClose?: () => void;
   fullHeight?: boolean;
   // When set, the activity row shows an "Update History" link that calls this.
   // Omit on surfaces with no history view (e.g. the folder explorer drawer).
@@ -160,21 +162,27 @@ export function UpdatePolicyPanel({
   const aiSwitchOn = pendingAiOn ?? effAiManaged;
 
   return (
-    <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerTitle}>
-          <Text font="main-ui-action" color="text-04">
-            Update Policy
-          </Text>
+    <div
+      className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""} ${onClose ? "" : styles.inline}`}
+    >
+      {/* Title + close only in drawer hosts. The inline folder-page card
+          starts straight at the policy rows (mock 1673:32813). */}
+      {onClose && (
+        <div className={styles.headerRow}>
+          <div className={styles.headerTitle}>
+            <Text font="main-ui-action" color="text-04">
+              Update Policy
+            </Text>
+          </div>
+          <Button
+            icon={SvgX}
+            prominence="tertiary"
+            size="sm"
+            tooltip="Close"
+            onClick={onClose}
+          />
         </div>
-        <Button
-          icon={SvgX}
-          prominence="tertiary"
-          size="sm"
-          tooltip="Close"
-          onClick={onClose}
-        />
-      </div>
+      )}
 
       <div className={styles.scroll}>
         {loading ? (
@@ -272,9 +280,8 @@ export function UpdatePolicyPanel({
               </div>
               {!editing && (
                 <Button
-                  icon={SvgEdit}
-                  prominence="tertiary"
-                  size="sm"
+                  icon={SvgAddLines}
+                  prominence="secondary"
                   tooltip="Edit instructions"
                   onClick={() => {
                     setDraft(ownInstruction);
@@ -342,9 +349,8 @@ export function UpdatePolicyPanel({
                 </div>
                 {onShowHistory && (
                   <Button
-                    icon={SvgHistory}
+                    rightIcon={SvgHistory}
                     prominence="tertiary"
-                    size="sm"
                     onClick={onShowHistory}
                   >
                     Update History

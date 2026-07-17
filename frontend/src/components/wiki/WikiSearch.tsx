@@ -272,7 +272,7 @@ export const WikiSearch = forwardRef<WikiSearchHandle, WikiSearchProps>(
             <div
               ref={dropdownRef}
               role="listbox"
-              className="fixed z-[120] w-[360px] overflow-y-auto rounded-(--border-radius-08) border border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-modal)"
+              className="fixed z-[120] w-[360px] overflow-y-auto rounded-(--radius-08) border border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-modal)"
               // Anchor-derived geometry stays inline — it's measured at runtime,
               // not a design token. z-[120] must stack above the OPAL SidebarTab
               // hit-target anchor (absolute inset-0 z-99) on the nav tabs below

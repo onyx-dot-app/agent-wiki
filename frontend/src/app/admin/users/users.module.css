@@ -28,7 +28,7 @@
   padding: 10px 12px;
   border: none;
   background: transparent;
-  border-radius: var(--border-radius-08);
+  border-radius: var(--radius-08);
   cursor: pointer;
   text-align: left;
 }
@@ -116,7 +116,7 @@
   background: transparent;
   padding: 2px 4px;
   margin: -2px -4px;
-  border-radius: var(--border-radius-08);
+  border-radius: var(--radius-08);
   cursor: pointer;
   text-align: left;
 }
@@ -170,7 +170,7 @@
 }
 .dialog {
   background: var(--background-tint-01);
-  border-radius: var(--border-radius-12);
+  border-radius: var(--radius-12);
   width: min(460px, 100%);
   box-shadow: var(--shadow-modal);
   display: flex;
@@ -207,7 +207,7 @@
   min-height: 40px;
   padding: 6px 8px;
   border: 1px solid var(--border-02);
-  border-radius: var(--border-radius-08);
+  border-radius: var(--radius-08);
   background: var(--background-tint-00);
   cursor: text;
 }
@@ -216,7 +216,7 @@
   align-items: center;
   gap: 4px;
   padding: 2px 4px 2px 8px;
-  border-radius: var(--border-radius-full);
+  border-radius: var(--radius-round);
   background: var(--background-tint-02);
   border: 1px solid var(--border-02);
   max-width: 100%;
@@ -233,7 +233,7 @@
   height: 16px;
   border: none;
   background: transparent;
-  border-radius: var(--border-radius-full);
+  border-radius: var(--radius-round);
   color: var(--text-03);
   cursor: pointer;
 }

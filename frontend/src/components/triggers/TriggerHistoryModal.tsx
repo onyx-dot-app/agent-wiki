@@ -60,7 +60,7 @@ export function TriggerHistoryModal({
       }}
       className="fixed inset-0 z-[100] flex items-center justify-center bg-(--mask-03)"
     >
-      <div className="flex max-h-[92vh] w-[min(640px,92vw)] flex-col gap-[14px] overflow-y-auto rounded-(--border-radius-12) bg-(--background-tint-00) p-6 shadow-(--shadow-modal)">
+      <div className="flex max-h-[92vh] w-[min(640px,92vw)] flex-col gap-[14px] overflow-y-auto rounded-(--radius-12) bg-(--background-tint-00) p-6 shadow-(--shadow-modal)">
         <div className="flex items-start justify-between">
           <div>
             <h2 className="m-0 text-[18px] font-bold">Edit history</h2>
@@ -88,7 +88,7 @@ export function TriggerHistoryModal({
         {loading && <LoadingSpinner />}
 
         {error && (
-          <div className="rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+          <div className="rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
             {error}
           </div>
         )}
@@ -104,7 +104,7 @@ export function TriggerHistoryModal({
                 <button
                   type="button"
                   onClick={() => onSelectVersion(c.sha)}
-                  className="flex w-full cursor-pointer items-baseline justify-between gap-3 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) px-3 py-[10px] text-left font-[inherit]"
+                  className="flex w-full cursor-pointer items-baseline justify-between gap-3 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) px-3 py-[10px] text-left font-[inherit]"
                 >
                   <span className="text-[13px] text-(--text-05)">
                     {formatTs(c.ts)}

@@ -14,7 +14,7 @@
 
 .dialog {
   background: var(--background-tint-01);
-  border-radius: var(--border-radius-12);
+  border-radius: var(--radius-12);
   width: min(440px, 100%);
   max-height: calc(100vh - 80px);
   box-shadow: var(--shadow-modal);

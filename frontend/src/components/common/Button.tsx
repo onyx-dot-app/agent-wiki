@@ -50,13 +50,13 @@ function sizeStyle(size: ButtonSize): CSSProperties {
     return {
       padding: "6px 12px",
       fontSize: 12,
-      borderRadius: "var(--border-radius-04)",
+      borderRadius: "var(--radius-04)",
     };
   }
   return {
     padding: "8px 14px",
     fontSize: 13,
-    borderRadius: "var(--border-radius-08)",
+    borderRadius: "var(--radius-08)",
   };
 }
 

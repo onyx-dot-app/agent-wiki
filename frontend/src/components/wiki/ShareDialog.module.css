@@ -13,7 +13,7 @@
 
 .dialog {
   background: var(--background-tint-01);
-  border-radius: var(--border-radius-12);
+  border-radius: var(--radius-12);
   width: min(480px, 100%);
   max-height: calc(100vh - 80px);
   box-shadow: var(--shadow-modal);
@@ -70,7 +70,7 @@
   min-height: 48px;
   padding: 6px 8px;
   background: var(--background-tint-02);
-  border-radius: var(--border-radius-08);
+  border-radius: var(--radius-08);
 }
 /* Scope + permission are white-fill boxes on the grey container — no border.
    Scope is the wider of the two. */
@@ -79,7 +79,7 @@
   display: flex;
   min-width: 0;
   background: var(--background-tint-00);
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
 }
 .scopeBox {
   flex: 1.7 1.7 0;
@@ -120,7 +120,7 @@
   min-height: 48px;
   padding: 6px 8px;
   background: var(--background-tint-02);
-  border-radius: var(--border-radius-08);
+  border-radius: var(--radius-08);
 }
 .rowText {
   display: flex;

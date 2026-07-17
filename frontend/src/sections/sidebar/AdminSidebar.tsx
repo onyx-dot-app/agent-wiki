@@ -23,7 +23,7 @@ export default function AdminSidebar() {
 
   return (
     <SidebarLayouts.Root>
-      <SidebarLayouts.Header logo={sidebarLogo}>
+      <SidebarLayouts.Header renderAppLogo={sidebarLogo}>
         <InputTypeIn
           variant="internal"
           searchIcon

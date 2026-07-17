@@ -3,7 +3,7 @@
 import Link from "next/link";
 import useSWR from "swr";
 import { Button } from "@onyx-ai/opal/components";
-import { SvgFolder } from "@onyx-ai/opal/icons";
+import { SvgChevronRight, SvgListTree } from "@onyx-ai/opal/icons";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { CraftNotifier } from "@/components/wiki/CraftNotifier";
 import { useAppFocus } from "@/hooks/useAppFocus";
@@ -33,7 +33,7 @@ export function WikiHeader() {
     () => resolveIds(segmentPaths),
   );
   const crumbs: Array<{ label: string; href: string }> = [
-    { label: "Wiki", href: "/app/wiki" },
+    { label: "Home", href: "/app/wiki" },
   ];
   segments.forEach((seg, i) => {
     const path = segmentPaths[i];
@@ -46,18 +46,24 @@ export function WikiHeader() {
 
   return (
     <div className="flex h-14 items-center gap-3 px-4">
-      <Button
-        icon={SvgFolder}
-        prominence="tertiary"
-        tooltip={treeVisible ? "Collapse tree" : "Expand tree"}
-        onClick={toggleTree}
-      />
+      {/* The expand control lives here only while the tree is closed. When
+          open, the collapse control sits in the tree panel's own header. */}
+      {!treeVisible && (
+        <Button
+          icon={SvgListTree}
+          prominence="tertiary"
+          tooltip="Expand tree"
+          onClick={toggleTree}
+        />
+      )}
       <nav className="flex flex-wrap items-center gap-1.5 text-sm">
         {crumbs.map((c, i) => {
           const last = i === crumbs.length - 1;
           return (
             <span key={c.href} className="flex items-center gap-1.5">
-              {i > 0 && <span className="text-(--text-02)">/</span>}
+              {i > 0 && (
+                <SvgChevronRight size={12} className="text-(--text-02)" />
+              )}
               {last ? (
                 <span className="font-semibold text-(--text-05)">
                   {c.label}
@@ -77,7 +83,7 @@ export function WikiHeader() {
       {/* Page-level actions portal here from the active wiki route (see
           WikiHeaderActionsProvider). Pushed right by the flex spacer. */}
       <div className="flex-1" />
-      <div ref={host?.setEl} className="flex items-center gap-1" />
+      <div ref={host?.setEl} className="flex items-center gap-2" />
       <NotificationBell />
       <CraftNotifier />
     </div>

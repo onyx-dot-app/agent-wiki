@@ -13,7 +13,7 @@
 
 .dialog {
   background: var(--background-tint-01);
-  border-radius: var(--border-radius-12);
+  border-radius: var(--radius-12);
   width: min(420px, 100%);
   box-shadow: var(--shadow-modal);
   display: flex;

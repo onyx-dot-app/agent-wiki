@@ -236,4 +236,4 @@ function KeyField({
 }
 
 const inputClass =
-  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--radius-04) text-sm";

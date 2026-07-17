@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   createContext,
   useContext,
@@ -28,6 +29,10 @@ interface RowActions {
   copyLink: (path: string) => void;
   launchAgent: (path: string) => void;
   remove: (path: string, isFolder: boolean) => void;
+  /** Route to the new-page flow scoped to a folder ("" = wiki root). */
+  newPage: (dir: string) => void;
+  /** Start the tree's inline folder-create row inside `dir` ("" = wiki root). */
+  newFolder: (dir: string) => void;
 }
 
 const ActionsContext = createContext<RowActions | null>(null);
@@ -50,6 +55,21 @@ export function useActiveFolder(): ActiveFolder {
   if (!ctx)
     throw new Error(
       "useActiveFolder must be used within WikiItemActionsProvider",
+    );
+  return ctx;
+}
+
+interface FolderCreate {
+  /** Folder the inline create-row is open in, null when closed. "" = wiki root. */
+  creatingIn: string | null;
+  setCreatingIn: (dir: string | null) => void;
+}
+const FolderCreateContext = createContext<FolderCreate | null>(null);
+export function useFolderCreate(): FolderCreate {
+  const ctx = useContext(FolderCreateContext);
+  if (!ctx)
+    throw new Error(
+      "useFolderCreate must be used within WikiItemActionsProvider",
     );
   return ctx;
 }
@@ -84,6 +104,7 @@ export function WikiItemActionsProvider({
   children,
   active = true,
 }: WikiItemActionsProviderProps) {
+  const router = useRouter();
   const { data } = useSWR<{ entries: Entry[] }>(active ? "/wiki" : null);
   const entries = data?.entries ?? [];
 
@@ -93,6 +114,7 @@ export function WikiItemActionsProvider({
   const [agentPath, setAgentPath] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [activeFolder, setActiveFolder] = useState("");
+  const [creatingIn, setCreatingIn] = useState<string | null>(null);
 
   useEffect(() => {
     if (!toast) return;
@@ -118,6 +140,9 @@ export function WikiItemActionsProvider({
     rename: setRenamePath,
     move: setMovePath,
     launchAgent: setAgentPath,
+    newPage: (dir) =>
+      router.push(dir ? `/app/wiki/${dir}?new=1` : "/app/wiki?new=1"),
+    newFolder: setCreatingIn,
     copyLink: async (path) => {
       // Share the durable id-based URL so the link survives a later
       // rename/move (falls back to a path URL only when the page genuinely
@@ -158,7 +183,9 @@ export function WikiItemActionsProvider({
   return (
     <ActionsContext.Provider value={actions}>
       <ActiveFolderContext.Provider value={{ activeFolder, setActiveFolder }}>
-        {children}
+        <FolderCreateContext.Provider value={{ creatingIn, setCreatingIn }}>
+          {children}
+        </FolderCreateContext.Provider>
       </ActiveFolderContext.Provider>
 
       {/* Overlays are portaled to <body> so they escape any sticky/sidebar
@@ -202,7 +229,7 @@ export function WikiItemActionsProvider({
               wikiPath={agentPath}
             />
             {toast && (
-              <div className="fixed bottom-8 left-1/2 z-(--z-toast) -translate-x-1/2 rounded-(--border-radius-08) bg-(--background-tint-04) px-3.5 py-2 text-[13px] text-text-05 shadow-(--shadow-popover)">
+              <div className="fixed bottom-8 left-1/2 z-(--z-toast) -translate-x-1/2 rounded-(--radius-08) bg-(--background-tint-04) px-3.5 py-2 text-[13px] text-text-05 shadow-(--shadow-popover)">
                 {toast}
               </div>
             )}

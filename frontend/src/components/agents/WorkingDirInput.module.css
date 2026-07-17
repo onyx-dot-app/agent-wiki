@@ -2,7 +2,7 @@
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
   font-size: 14px;
   font-family: inherit;
 }
