@@ -26,9 +26,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.auth.users import AI_USER_ID
 from app.wiki import git
 from app.wiki import update_policy
-from app.wiki.automanage import runs
+from app.wiki.automanage import review, runs
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
@@ -60,12 +61,13 @@ _CREATED_VIA = {
 }
 
 
-def _forbidden_paths(drafts: list[ProposalDraft]) -> set[str]:
-    """Paths across ``drafts`` in an explicitly do-not-manage scope (effective
-    ``ai_management_allowed`` is False), resolved in a single query."""
+def _resolve_management(drafts: list[ProposalDraft]) -> dict[str, bool | None]:
+    """Effective ``ai_management_allowed`` tri-state for every path across
+    ``drafts``, resolved in one query. Per draft: any path False → skip
+    (hands-off); all paths True → auto-manage (auto-approve + execute as the AI
+    system user); otherwise → pending for human review."""
     paths = {p for d in drafts for p in d.source_paths + d.target_paths}
-    resolved = update_policy.resolve_ai_management_for_paths(paths)
-    return {p for p, v in resolved.items() if v is False}
+    return update_policy.resolve_ai_management_for_paths(paths)
 
 
 def _base_shas(source_paths: list[str]) -> dict[str, str] | None:
@@ -106,12 +108,13 @@ def run_detection(
                 continue
             drafts = detector.detect(scope)
             # One policy query per detector, not one per path per draft.
-            forbidden = _forbidden_paths(drafts)
+            mgmt = _resolve_management(drafts)
             for draft in drafts:
+                draft_paths = draft.source_paths + draft.target_paths
                 if draft.dedupe_key in taken:
                     continue
-                if any(p in forbidden for p in draft.source_paths + draft.target_paths):
-                    continue
+                if any(mgmt.get(p) is False for p in draft_paths):
+                    continue  # explicitly hands-off scope
                 if emitted >= MAX_PROPOSALS_PER_RUN:
                     log.warning(
                         "detection run %s hit per-run cap (%d); "
@@ -124,7 +127,7 @@ def run_detection(
                 base_shas = _base_shas(draft.source_paths)
                 if base_shas is None:
                     continue
-                create_proposal(
+                proposal = create_proposal(
                     op=draft.op,
                     source_paths=draft.source_paths,
                     target_paths=draft.target_paths,
@@ -136,6 +139,23 @@ def run_detection(
                 )
                 taken.add(draft.dedupe_key)
                 emitted += 1
+                # Whole operation inside an AI-managed scope → auto-apply as the
+                # AI system user (no human queue). Otherwise it waits for a
+                # human in the pending-cleanups queue.
+                if draft_paths and all(mgmt.get(p) is True for p in draft_paths):
+                    if not review.auto_approve(
+                        proposal["id"], acting_user_id=AI_USER_ID
+                    ):
+                        # Shouldn't happen for a just-created proposal; if a race
+                        # transitioned it out of pending, it stays pending (a
+                        # human can still action it) — surface the anomaly loudly.
+                        log.warning(
+                            "detection run %s: auto-approve did not take for "
+                            "proposal %s (%s); left pending",
+                            run_id,
+                            proposal["id"],
+                            draft.dedupe_key,
+                        )
         runs.mark_completed(
             run_id, paths_scanned=len(paths), proposals_emitted=emitted
         )
