@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, type KeyboardEvent } from "react";
+import { type FormEvent, type KeyboardEvent, type Ref } from "react";
 import { Button, Text } from "@onyx-ai/opal/components";
 import {
   SvgArrowUp,
@@ -31,7 +31,7 @@ const PROVIDER_LOGOS: Record<string, IconFunctionComponent> = {
 
 /** Segmented Chat | Edit | Automations selector (mock 1829:64849). Chat is
  *  the only live mode today, so the other segments render disabled. */
-function ModeSelector() {
+export function ModeSelector() {
   return (
     <div className="flex items-center rounded-(--radius-12) bg-(--background-tint-03)">
       {/* raw-ok: no Opal Tabs variant fits. Contained is an equal-width grid, pill/underline are underline-indicator styles. The mock needs chip-style content-width segments (icon+label active, icon-only inactive). */}
@@ -67,7 +67,7 @@ function ModeSelector() {
 }
 
 /** Read-only chip naming the workspace-configured provider + model. */
-function ModelChip() {
+export function ModelChip() {
   const { status } = useLLMStatus();
   if (!status?.model) return null;
   const Logo = PROVIDER_LOGOS[status.provider];
@@ -81,6 +81,72 @@ function ModelChip() {
         {status.model}
       </Text>
     </div>
+  );
+}
+
+interface ComposerProps {
+  input: string;
+  onInputChange: (v: string) => void;
+  onSubmit: () => void;
+  sending: boolean;
+  /** Forwarded to the textarea so hosts can programmatically focus it. */
+  inputRef?: Ref<HTMLTextAreaElement>;
+}
+
+/** Shared composer surface (mock 1790:52456): text area over an attach +
+ *  send toolbar. Enter sends, Shift+Enter breaks the line. */
+export function Composer({
+  input,
+  onInputChange,
+  onSubmit,
+  sending,
+  inputRef,
+}: ComposerProps) {
+  const canSend = input.trim() !== "" && !sending;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (canSend) onSubmit();
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (canSend) onSubmit();
+    }
+  };
+  // raw-ok: plain form element wiring Enter/submit. No Opal form wrapper exists.
+  return (
+    <form
+      onSubmit={submit}
+      className="flex w-full flex-col rounded-(--radius-16) bg-(--background-tint-00) shadow-(--shadow-chip)"
+    >
+      {/* raw-ok: composer needs a toolbar row below the text inside one surface. InputTextArea offers only a top-right rightSection and paints .opal-input chrome that fights the mock's radius-16 chip. */}
+      <textarea
+        ref={inputRef}
+        rows={1}
+        value={input}
+        onChange={(e) => onInputChange(e.target.value)}
+        onKeyDown={onKeyDown}
+        placeholder="Ask wiki or write with AI…"
+        className="w-full resize-none border-none bg-transparent px-3.5 pt-3 pb-2 text-base leading-6 text-(--text-05) outline-none placeholder:text-(--text-02)"
+      />
+      <div className="flex items-center justify-between p-1">
+        <Button
+          icon={SvgPlus}
+          prominence="tertiary"
+          size="sm"
+          tooltip="Attach files coming soon"
+          disabled
+        />
+        <Button
+          icon={SvgArrowUp}
+          variant="action"
+          size="sm"
+          tooltip="Send"
+          type="submit"
+          disabled={!canSend}
+        />
+      </div>
+    </form>
   );
 }
 
@@ -139,18 +205,6 @@ export function ChatBar({
     );
   }
 
-  const canSend = input.trim() !== "" && !sending;
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (canSend) onSubmit();
-  };
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (canSend) onSubmit();
-    }
-  };
-
   return (
     <div className="fixed bottom-6 left-1/2 z-[1000] w-[min(752px,calc(100vw-48px))] -translate-x-1/2">
       <div className="flex flex-col gap-1 rounded-(--radius-20) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-bar)">
@@ -178,38 +232,12 @@ export function ChatBar({
             <ModelChip />
           </div>
         </div>
-        {/* raw-ok: plain form element wiring Enter/submit. No Opal form wrapper exists. */}
-        <form
-          onSubmit={submit}
-          className="flex w-full flex-col rounded-(--radius-16) bg-(--background-tint-00) shadow-(--shadow-chip)"
-        >
-          {/* raw-ok: composer needs a toolbar row below the text inside one surface. InputTextArea offers only a top-right rightSection and paints .opal-input chrome that fights the mock's radius-16 chip. */}
-          <textarea
-            rows={1}
-            value={input}
-            onChange={(e) => onInputChange(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="Ask wiki or write with AI…"
-            className="w-full resize-none border-none bg-transparent px-3.5 pt-3 pb-2 text-base leading-6 text-(--text-05) outline-none placeholder:text-(--text-02)"
-          />
-          <div className="flex items-center justify-between p-1">
-            <Button
-              icon={SvgPlus}
-              prominence="tertiary"
-              size="sm"
-              tooltip="Attach files coming soon"
-              disabled
-            />
-            <Button
-              icon={SvgArrowUp}
-              variant="action"
-              size="sm"
-              tooltip="Send"
-              type="submit"
-              disabled={!canSend}
-            />
-          </div>
-        </form>
+        <Composer
+          input={input}
+          onInputChange={onInputChange}
+          onSubmit={onSubmit}
+          sending={sending}
+        />
       </div>
     </div>
   );

@@ -6,7 +6,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type FormEvent,
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -18,14 +17,25 @@ import styles from "./ChatWidget.module.css";
 import { Button } from "@onyx-ai/opal/components";
 import {
   SvgCheck,
+  SvgChevronDown,
+  SvgChevronRight,
+  SvgCopy,
   SvgDocFile,
   SvgEdit,
   SvgFold,
   SvgHistory,
+  SvgRefreshCw,
+  SvgThumbsDown,
+  SvgThumbsUp,
   SvgX,
   SvgXCircle,
 } from "@onyx-ai/opal/icons";
-import { ChatBar } from "@/components/chat/ChatBar";
+import {
+  ChatBar,
+  Composer,
+  ModeSelector,
+  ModelChip,
+} from "@/components/chat/ChatBar";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -486,16 +496,12 @@ export function ChatWidget() {
     [sessionId, drafting, getDraftBody, applyDraftBody, currentWikiPath],
   );
 
-  const onSend = useCallback(
-    async (e: FormEvent) => {
-      e.preventDefault();
-      const text = input.trim();
-      if (!text || sending) return;
-      setInput("");
-      await sendUserMessage(text);
-    },
-    [input, sending, sendUserMessage],
-  );
+  const sendFromPanel = useCallback(() => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput("");
+    void sendUserMessage(text);
+  }, [input, sending, sendUserMessage]);
 
   const onRetry = useCallback(async () => {
     if (sending || items.length === 0) return;
@@ -567,6 +573,8 @@ export function ChatWidget() {
     );
   }
 
+  const groups = groupChatItems(items);
+
   return (
     <div
       role="dialog"
@@ -578,8 +586,8 @@ export function ChatWidget() {
           contained and lets it cover the chat header. The resize handle
           lives outside this so it can extend past the left edge. */}
       <div className="relative flex h-full w-full flex-col overflow-hidden">
-        <header className="flex shrink-0 items-center gap-2 border-b border-(--border-01) bg-(--background-tint-01) px-3 py-[10px]">
-          <div className="text-sm font-semibold">Chat</div>
+        <header className="flex shrink-0 items-center gap-1 px-1 py-1">
+          <ModeSelector />
           <div className="flex-1" />
           <Button
             icon={SvgEdit}
@@ -596,6 +604,7 @@ export function ChatWidget() {
             tooltip="History"
             onClick={() => setHistoryOpen((v) => !v)}
           />
+          <div className="mx-1 h-4 w-px bg-(--border-01)" />
           <Button
             icon={SvgFold}
             prominence="tertiary"
@@ -625,12 +634,22 @@ export function ChatWidget() {
               anything!
             </p>
           )}
-          {items.map((it, i) => {
-            if (it.kind === "tool") return <ToolStatus key={i} item={it} />;
-            // Skip the optimistic empty assistant bubble — the "…" placeholder
-            // below renders in its place while we wait for the first delta.
+          {groups.map((g, i) => {
+            if (g.kind === "steps")
+              return <ToolSteps key={i} items={g.items} />;
+            const it = g.item;
+            // Empty assistant items render nothing. While streaming, the "…"
+            // placeholder below covers the gap until the first text arrives.
             if (it.kind === "assistant" && it.content === "") return null;
-            return <Bubble key={i} role={it.kind} content={it.content} />;
+            const streamingIntoThis = sending && i === groups.length - 1;
+            return (
+              <div key={i} className="flex min-w-0 flex-col gap-1">
+                <Bubble role={it.kind} content={it.content} />
+                {it.kind === "assistant" && !streamingIntoThis && (
+                  <AssistantActions content={it.content} />
+                )}
+              </div>
+            );
           })}
           {sending && shouldShowEllipsis(items) && (
             <Bubble role="assistant" content="…" muted />
@@ -659,34 +678,18 @@ export function ChatWidget() {
           </div>
         )}
 
-        <form
-          onSubmit={onSend}
-          className="flex shrink-0 gap-[6px] border-t border-(--border-01) p-[10px]"
-        >
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void onSend(e as unknown as FormEvent);
-              }
-            }}
-            placeholder="Send a message…"
-            rows={2}
-            disabled={sending}
-            className="box-border min-w-0 flex-1 resize-none rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) p-2 font-[inherit] text-[13px] text-(--text-05) outline-none focus:border-(--border-05)"
+        <div className="flex shrink-0 flex-col gap-1 p-1">
+          <div className="flex justify-end">
+            <ModelChip />
+          </div>
+          <Composer
+            input={input}
+            onInputChange={setInput}
+            onSubmit={sendFromPanel}
+            sending={sending}
+            inputRef={inputRef}
           />
-          <Button
-            type="submit"
-            variant="action"
-            prominence="primary"
-            disabled={sending || !input.trim()}
-          >
-            Send
-          </Button>
-        </form>
+        </div>
 
         <ChatHistoryPanel
           open={historyOpen}
@@ -756,8 +759,8 @@ function reduceEvent(items: ChatItem[], ev: StreamEvent): ChatItem[] {
 
 // Convert persisted server-side messages back into ChatItems for replay
 // on session load. Assistant rows carry the full event log under
-// ``events``; we replay those so tool calls reappear inline. Legacy
-// rows without an event log fall back to a single content bubble.
+// ``events``. We replay those so tool calls reappear in the transcript.
+// Legacy rows without an event log fall back to a single content bubble.
 function itemsFromPersisted(messages: PersistedChatMessage[]): ChatItem[] {
   let out: ChatItem[] = [];
   for (const m of messages) {
@@ -874,43 +877,144 @@ function Bubble({
   content: string;
   muted?: boolean;
 }) {
-  const isUser = role === "user";
-  const renderMarkdown = !isUser && !muted;
-  return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"} min-w-0`}>
-      <div
-        className={`max-w-[85%] min-w-0 rounded-(--radius-08) px-3 py-2 text-[13px] leading-[1.5] ${
-          isUser
-            ? "bg-(--background-tint-inverted-00) text-(--text-inverted-05)"
-            : "bg-(--background-tint-02) text-(--text-05)"
-        } ${renderMarkdown ? "whitespace-normal" : "whitespace-pre-wrap"} ${muted ? "opacity-60" : "opacity-100"}`}
-        // Without this, a long unbroken token (URL, path, hash) blows
-        // past the 85% max-width and pushes the layout horizontally.
-        style={{ overflowWrap: "anywhere" }}
-      >
-        {renderMarkdown ? (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}
-            components={markdownComponents}
-          >
-            {content}
-          </ReactMarkdown>
-        ) : (
-          content
-        )}
+  if (role === "user") {
+    return (
+      <div className="flex min-w-0 justify-end">
+        <div
+          className="max-w-[85%] min-w-0 rounded-(--radius-12) rounded-br-(--radius-04) bg-(--background-tint-02) px-3 py-2 text-base leading-6 font-[450] whitespace-pre-wrap text-(--text-04)"
+          // Without this, a long unbroken token (URL, path, hash) blows
+          // past the 85% max-width and pushes the layout horizontally.
+          style={{ overflowWrap: "anywhere" }}
+        >
+          {content}
+        </div>
       </div>
+    );
+  }
+  // Assistant replies sit directly on the panel surface, no bubble chrome.
+  return (
+    <div
+      className={`min-w-0 text-base leading-6 font-[450] text-(--text-04) ${
+        muted ? "whitespace-pre-wrap opacity-60" : "whitespace-normal"
+      }`}
+      style={{ overflowWrap: "anywhere" }}
+    >
+      {muted ? (
+        content
+      ) : (
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}
+          components={markdownComponents}
+        >
+          {content}
+        </ReactMarkdown>
+      )}
     </div>
   );
 }
 
-// Inline status line for a tool call. Lowest visual weight by design —
-// tools are ambient activity, not the main content. The state icon
-// (spinner / check / ×) carries the running/done/error semantics, so
-// the label itself stays state-neutral — a gerund phrase like
-// "Searching the wiki" that reads naturally with either a running
-// spinner or a completed check. Labels come from ``presentTool`` so
-// they live in a single registry (``src/lib/tools.ts``) — unknown
-// tools fall back to their raw name.
+/** Post-reply action row (mock 1829:74018). Copy is live. Feedback and
+ *  regenerate render disabled until their backends exist. */
+function AssistantActions({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex items-center">
+      <Button
+        icon={copied ? SvgCheck : SvgCopy}
+        prominence="tertiary"
+        size="sm"
+        tooltip={copied ? "Copied" : "Copy"}
+        onClick={() => {
+          void navigator.clipboard.writeText(content);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        }}
+      />
+      <Button
+        icon={SvgThumbsUp}
+        prominence="tertiary"
+        size="sm"
+        tooltip="Feedback coming soon"
+        disabled
+      />
+      <Button
+        icon={SvgThumbsDown}
+        prominence="tertiary"
+        size="sm"
+        tooltip="Feedback coming soon"
+        disabled
+      />
+      <Button
+        icon={SvgRefreshCw}
+        prominence="tertiary"
+        size="sm"
+        tooltip="Regenerate coming soon"
+        disabled
+      />
+    </div>
+  );
+}
+
+type ToolItem = Extract<ChatItem, { kind: "tool" }>;
+
+type RenderGroup =
+  | { kind: "steps"; items: ToolItem[] }
+  | {
+      kind: "message";
+      item: Extract<ChatItem, { kind: "user" | "assistant" }>;
+    };
+
+/** Collapse consecutive tool calls into one "steps" group so the transcript
+ *  reads as messages punctuated by a single expandable activity block. */
+function groupChatItems(items: ChatItem[]): RenderGroup[] {
+  const groups: RenderGroup[] = [];
+  for (const it of items) {
+    const last = groups[groups.length - 1];
+    if (it.kind === "tool") {
+      if (last?.kind === "steps") last.items.push(it);
+      else groups.push({ kind: "steps", items: [it] });
+    } else {
+      groups.push({ kind: "message", item: it });
+    }
+  }
+  return groups;
+}
+
+/** Expandable tool-activity block (mock 1829:74012's steps affordance).
+ *  Stays open while any step runs so live activity is never hidden. */
+function ToolSteps({ items }: { items: ToolItem[] }) {
+  const [open, setOpen] = useState(false);
+  const anyRunning = items.some((t) => t.state === "running");
+  const expanded = open || anyRunning;
+  const label = `${items.length} ${items.length === 1 ? "step" : "steps"}`;
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex">
+        <Button
+          icon={expanded ? SvgChevronDown : SvgChevronRight}
+          prominence="tertiary"
+          size="sm"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {label}
+        </Button>
+      </div>
+      {expanded && (
+        <div className="flex flex-col gap-1 pl-2">
+          {items.map((t, i) => (
+            <ToolStatus key={i} item={t} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Status row for one tool call. Lowest visual weight by design: tools
+// are ambient activity, not content. The state icon (spinner / check /
+// ×) carries running/done/error, so the label stays a state-neutral
+// gerund ("Searching the wiki"). Labels come from ``presentTool``
+// (registry in ``src/lib/tools.ts``). Unknown tools use their raw name.
 function ToolStatus({ item }: { item: Extract<ChatItem, { kind: "tool" }> }) {
   const { label } = presentTool(item.name);
   return (
