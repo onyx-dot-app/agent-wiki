@@ -1,14 +1,9 @@
-"use client";
-
-/** SWR hooks backing the wiki route views (`WikiPage`, `Explorer`, `NewDocView`,
- * `WikiTombstone`) — each wraps one `/wiki*` endpoint so its key, fetcher, and
- * shaped return live in one place instead of an inline `useSWR` call. */
 import useSWR from "swr";
 
-import { getDeletedTombstone } from "@/lib/trash";
-import type { ListResponse } from "@/lib/fileview/types";
 import { SWR_KEYS } from "@/lib/swr-keys";
+import { getDeletedTombstone } from "@/lib/trash";
 import { resolveDocId, resolveIds } from "@/lib/wikiHref";
+import type { ListResponse, UpdateHealth } from "@/lib/wiki/types";
 
 /** The full flat wiki listing — backs the folder Explorer and the New Doc
  * destination picker. */
@@ -53,4 +48,21 @@ export function usePathToId(tag: string, path: string | null) {
     { revalidateOnFocus: false },
   );
   return { id: data ?? null, error, isLoading };
+}
+
+/** Auto-update health as a live SWR subscription. Polls so the 24h count and
+ * the too-frequent-update banner reflect ingestion writes without a manual
+ * reload — the count moves slowly, so a coarser interval than the doc body's
+ * is plenty. Pass `null` to disable (no path selected). */
+export function useUpdateHealth(path: string | null) {
+  const key = path ? SWR_KEYS.updateHealth(path) : null;
+  const { data, error, isLoading, mutate } = useSWR<UpdateHealth>(key, {
+    refreshInterval: 15_000,
+  });
+  return {
+    health: data ?? null,
+    error: error as Error | undefined,
+    isLoading,
+    refresh: mutate,
+  };
 }

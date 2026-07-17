@@ -43,14 +43,15 @@ import {
   collectFolders,
   DestinationSelect,
   FilenameRow,
-} from "@/lib/fileview/components";
+} from "@/views/wiki/FileView";
+import { AI_DRAFT_KEY } from "@/lib/wiki/constants";
+import { pageTitle } from "@/lib/wiki/utils";
 import {
   useWikiTree,
   useDeletedTombstone,
   useDocIdResolve,
   usePathToId,
-} from "@/lib/fileview/hooks";
-import { pageTitle } from "@/lib/fileview/utils";
+} from "@/lib/wiki/hooks";
 import { useRequireAuth } from "@/lib/auth";
 import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
@@ -64,7 +65,6 @@ import {
 } from "@/lib/templates";
 import { relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
-import { AI_DRAFT_KEY } from "@/lib/wiki";
 
 /** A wiki URL that no longer points at a live doc — an unknown/expired id, or
  * a page that was deleted but is no longer in Trash (purged). A deleted page

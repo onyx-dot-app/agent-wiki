@@ -10,7 +10,7 @@ import {
   patchUpdatePolicy,
   type UpdatePolicyResponse,
 } from "@/lib/updatePolicy";
-import { useUpdateHealth } from "@/lib/wiki";
+import { useUpdateHealth } from "@/lib/wiki/hooks";
 
 import styles from "./UpdatePolicyPanel.module.css";
 

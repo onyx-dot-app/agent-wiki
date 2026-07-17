@@ -17,7 +17,7 @@ import type {
   CoeditFrame,
   CoeditOps,
   CoeditSession,
-} from "@/lib/coeditor/types";
+} from "@/lib/editor/types";
 
 /** Join (or re-join) the live session for `path`, returning the initial buffer + roster. */
 export function joinSession(path: string): Promise<CoeditSession> {
@@ -75,11 +75,15 @@ export function sendCursor(
 }
 
 /** Commit the session buffer to git. Returns `queued: true` when the write was
- * handed off to the background worker rather than applied inline. */
+ * handed off to the background worker rather than applied inline. `init` lets
+ * a best-effort checkpoint on unmount/tab-close pass `{ keepalive: true }` so
+ * the request survives the page tearing down. */
 export function checkpointSession(
   sessionId: number,
+  init?: RequestInit,
 ): Promise<{ queued: boolean }> {
   return apiFetch("/coedit/checkpoint", {
+    ...init,
     method: "POST",
     body: JSON.stringify({ session_id: sessionId }),
   });

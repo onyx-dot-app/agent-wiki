@@ -1,4 +1,4 @@
-import type { DiffHunk, DiffLine } from "@/lib/wiki";
+import type { DiffHunk, DiffLine } from "@/lib/wiki/types";
 
 /* Grouping + change-indexing for the diff viewer. Coalesces consecutive
    same-kind lines into render blocks, then tags the first entry of each
