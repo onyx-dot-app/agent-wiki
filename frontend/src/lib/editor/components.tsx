@@ -128,11 +128,13 @@ const peersField = StateField.define<{
 /** Base CodeMirror theme: full-height layout, borderless (the WYSIWYG surface
  * reads as part of the page, not a boxed textarea), prose-font scroller,
  * Opal tokens, and styles for the `.cm-coedit-caret` / `.cm-coedit-caret-label`
- * widgets. The scroller is full-width so its scrollbar sits flush at the
- * far-right edge (matching the old read view); the text stays capped and
- * centered by `.cm-content` (`max-width` + `margin: auto`), lining up with the
- * `max-w-[768px]` `DocTitle` above it. `.cm-scroller` carries the horizontal
- * gutter so the caret never hugs the edge on a narrow viewport. */
+ * widgets. The scroller spans the full width so its scrollbar sits flush at
+ * the far-right edge; the text is capped and centered by `.cm-content`
+ * (`max-width` + `margin: auto`) to line up with the `max-w-[768px]`
+ * `DocTitle` above it. `.cm-scroller` takes its horizontal gutter from the
+ * `--cm-gutter` custom property that the surrounding column sets (so the text
+ * gutter tracks the page's responsive padding at every breakpoint), and it
+ * uses a slim scrollbar with a transparent track. */
 const baseTheme = EditorView.theme({
   "&": {
     height: "100%",
@@ -144,7 +146,20 @@ const baseTheme = EditorView.theme({
     overflow: "auto",
     fontFamily: "var(--font-sans, system-ui, -apple-system, sans-serif)",
     lineHeight: "1.6",
-    padding: "0 2rem",
+    padding: "0 var(--cm-gutter, 2rem)",
+    scrollbarWidth: "thin",
+    scrollbarColor: "var(--border-03) transparent",
+  },
+  ".cm-scroller::-webkit-scrollbar": { width: "12px", height: "12px" },
+  ".cm-scroller::-webkit-scrollbar-track": { backgroundColor: "transparent" },
+  ".cm-scroller::-webkit-scrollbar-thumb": {
+    backgroundColor: "var(--border-03)",
+    borderRadius: "9999px",
+    border: "3px solid transparent",
+    backgroundClip: "content-box",
+  },
+  ".cm-scroller::-webkit-scrollbar-thumb:hover": {
+    backgroundColor: "var(--text-04)",
   },
   ".cm-content": {
     padding: "0.5rem 0",

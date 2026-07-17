@@ -833,17 +833,26 @@ export function FileView({ path }: FileViewProps) {
               </div>
             </div>
           ) : (
-            // Live editor: the scroll lives on the full-width editor so its
-            // scrollbar sits flush at the far-right edge (matching the old read
-            // view); the text stays capped + centered by the editor theme. The
-            // banners stay capped + centered above it, aligned with the text
-            // and DocTitle (`empty:hidden` drops the gap when none render).
+            // Live editor: the full-width editor owns the scroll, so its
+            // scrollbar sits flush at the far-right edge while the text stays
+            // capped + centered by the editor theme. `--cm-gutter` mirrors the
+            // negative margin (which cancels `<main>`'s padding) so the editor
+            // text keeps the same side gutter as the DocTitle at every
+            // breakpoint. The banners stay capped + centered above it, aligned
+            // with the text and DocTitle (`empty:hidden` drops the gap when
+            // none render).
             <div
               className={`flex min-h-0 flex-1 flex-col gap-3 ${
-                isMobile ? "-mx-3" : "-mx-8"
+                isMobile
+                  ? "-mx-3 [--cm-gutter:0.75rem]"
+                  : "-mx-8 [--cm-gutter:2rem]"
               }`}
             >
-              <div className="mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden">
+              <div
+                className={`mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
+                  isMobile ? "px-3" : ""
+                }`}
+              >
                 <UpdateHealthBanner
                   path={path}
                   onOpenPolicy={() => {
