@@ -56,16 +56,21 @@ export function WikiHeader() {
           onClick={toggleTree}
         />
       )}
-      <nav className="flex flex-wrap items-center gap-1.5 text-sm">
+      {/* min-w-0 + nowrap: on tight widths long paths truncate at the tail
+          segment instead of wrapping over the panels beside the header. */}
+      <nav className="flex min-w-0 items-center gap-1.5 text-sm whitespace-nowrap">
         {crumbs.map((c, i) => {
           const last = i === crumbs.length - 1;
           return (
-            <span key={c.href} className="flex items-center gap-1.5">
+            <span
+              key={c.href}
+              className={`flex items-center gap-1.5 ${last ? "min-w-0" : "shrink-0"}`}
+            >
               {i > 0 && (
                 <SvgChevronRight size={12} className="text-(--text-02)" />
               )}
               {last ? (
-                <span className="font-semibold text-(--text-05)">
+                <span className="overflow-hidden font-semibold text-ellipsis text-(--text-05)">
                   {c.label}
                 </span>
               ) : (
@@ -82,7 +87,7 @@ export function WikiHeader() {
       </nav>
       {/* Page-level actions portal here from the active wiki route (see
           WikiHeaderActionsProvider). Pushed right by the flex spacer. */}
-      <div className="flex-1" />
+      <div className="min-w-4 flex-1" />
       <div ref={host?.setEl} className="flex items-center gap-2" />
       <NotificationBell />
       <CraftNotifier />
