@@ -151,17 +151,21 @@ def get(proposal_id: int) -> dict[str, Any] | None:
 
 
 def list_by_status(
-    status: ProposalStatus, *, limit: int = 100
+    status: ProposalStatus, *, limit: int | None = 100
 ) -> list[dict[str, Any]]:
-    """Proposals in ``status``, oldest first (queue order)."""
+    """Proposals in ``status``, oldest first (queue order). ``limit=None``
+    returns all — the pending-cleanups list uses that so its ACL filter runs
+    over the whole set (a hard cap *before* filtering would silently hide a
+    caller's readable proposals sitting past it)."""
     with session() as s:
-        rows = s.scalars(
+        q = (
             select(ChangeProposal)
             .where(ChangeProposal.status == status.value)
             .order_by(ChangeProposal.created_at.asc(), ChangeProposal.id.asc())
-            .limit(limit)
-        ).all()
-        return [_to_dict(r) for r in rows]
+        )
+        if limit is not None:
+            q = q.limit(limit)
+        return [_to_dict(r) for r in s.scalars(q).all()]
 
 
 def list_for_run(run_id: str) -> list[dict[str, Any]]:
