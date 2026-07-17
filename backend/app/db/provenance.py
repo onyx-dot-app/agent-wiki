@@ -1,23 +1,23 @@
-"""Repo for the provenance ledger. One append-only row per
-``(commit_sha, doc_path)`` in ``provenance_ledger`` recording who produced a
-wiki commit and, for ingestion, the source document.
+"""Repo for the provenance ledger and its source ranges. One append-only row per
+``(commit_sha, doc_path)`` in ``provenance_ledger`` records who produced a wiki
+commit and, for ingestion, the source document; ``source_ranges`` maps the spans
+an ingest commit changed to that document, anchored like a comment.
 
-All provenance DB access lives here. Callers pass primitives and get ids or
-plain dicts back. The service in ``app/wiki/provenance.py`` classifies the
-writer, falls back to the git author, and maps to the pydantic read shapes on
-top of these functions.
+All provenance DB access lives here. Callers pass primitives and get ids or plain
+dicts back. The service in ``app/wiki/provenance.py`` classifies the writer,
+falls back to the git author, and maps to the pydantic read shapes on top.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from app.db.models import ProvenanceLedger, User
+from app.db.models import ProvenanceLedger, SourceRange, User
 from app.db.session import session
-from app.models.wiki import ActorKind
+from app.models.wiki import ActorKind, SourceRangeStatus
 
 # Ledger columns a reader needs; returned as a plain dict so callers don't hold
 # an ORM row past the session.
@@ -86,14 +86,12 @@ def insert_ledger(
 
 
 def rename_doc(old_path: str, new_path: str) -> None:
-    """Re-key ledger rows from a moved page's old path to its new one, so readers
-    that key on ``doc_path`` still reach commits made under the old name."""
+    """Re-key ledger rows and source ranges from a moved page's old path to its
+    new one, so readers that key on ``doc_path`` still reach commits made under
+    the old name."""
     with session() as s:
-        s.execute(
-            update(ProvenanceLedger)
-            .where(ProvenanceLedger.doc_path == old_path)
-            .values(doc_path=new_path)
-        )
+        for model in (ProvenanceLedger, SourceRange):
+            s.execute(update(model).where(model.doc_path == old_path).values(doc_path=new_path))
 
 
 def delete_for_doc(doc_path: str) -> None:
@@ -126,8 +124,21 @@ def ledger_rows_for_commits(commit_shas: list[str], doc_path: str) -> list[dict[
 
 
 def ingestion_source_rows(doc_path: str, limit: int) -> list[dict[str, Any]]:
-    """Ingestion ledger rows for a page, newest first, capped at ``limit`` — the
-    raw rows behind the Sources list, before dedup."""
+    """Ingestion ledger rows still credited to a page, newest first, capped at
+    ``limit`` — the raw rows behind the Sources list, before dedup. A row is kept
+    while it has a live span or has captured no spans at all, and drops only once
+    every span it captured is retired."""
+    live_span = (
+        select(SourceRange.id)
+        .where(
+            SourceRange.provenance_id == ProvenanceLedger.id,
+            SourceRange.status == SourceRangeStatus.LIVE.value,
+        )
+        .exists()
+    )
+    any_span = (
+        select(SourceRange.id).where(SourceRange.provenance_id == ProvenanceLedger.id).exists()
+    )
     with session() as s:
         rows = (
             s.execute(
@@ -135,6 +146,7 @@ def ingestion_source_rows(doc_path: str, limit: int) -> list[dict[str, Any]]:
                 .where(
                     ProvenanceLedger.doc_path == doc_path,
                     ProvenanceLedger.actor_kind == ActorKind.INGESTION.value,
+                    or_(live_span, ~any_span),
                 )
                 .order_by(ProvenanceLedger.id.desc())
                 .limit(limit)
@@ -143,3 +155,65 @@ def ingestion_source_rows(doc_path: str, limit: int) -> list[dict[str, Any]]:
             .all()
         )
     return [_ledger_dict(r) for r in rows]
+
+
+# --------------------------------------------------------------------------- #
+# Source ranges                                                                 #
+# --------------------------------------------------------------------------- #
+
+
+def replace_source_ranges(provenance_id: int, rows: list[dict[str, Any]]) -> None:
+    """Replace the source ranges linked to a ledger row with ``rows`` (each a
+    span dict). Idempotent per ledger row: existing ranges are cleared first, so
+    re-processing a commit does not duplicate them."""
+    with session() as s:
+        s.execute(delete(SourceRange).where(SourceRange.provenance_id == provenance_id))
+        if rows:
+            s.execute(insert(SourceRange), [{"provenance_id": provenance_id, **r} for r in rows])
+
+
+def live_ranges_needing_remap(doc_path: str, head_sha: str) -> list[dict[str, Any]]:
+    """Live source ranges on a page whose anchor is not at HEAD, for the remap
+    pass to re-derive against the current body."""
+    with session() as s:
+        rows = s.scalars(
+            select(SourceRange).where(
+                SourceRange.doc_path == doc_path,
+                SourceRange.status == SourceRangeStatus.LIVE.value,
+                SourceRange.anchor_sha != head_sha,
+            )
+        ).all()
+        return [
+            {
+                "id": r.id,
+                "anchor_sha": r.anchor_sha,
+                "start_offset": r.start_offset,
+                "end_offset": r.end_offset,
+            }
+            for r in rows
+        ]
+
+
+def apply_range_remap(
+    range_id: int, *, start_offset: int, end_offset: int, quoted_text: str, anchor_sha: str
+) -> None:
+    """Advance a source range's anchor to a new commit after a successful remap."""
+    with session() as s:
+        r = s.get(SourceRange, range_id)
+        if r is None:
+            return
+        r.start_offset = start_offset
+        r.end_offset = end_offset
+        r.quoted_text = quoted_text
+        r.anchor_sha = anchor_sha
+
+
+def retire_range(range_id: int) -> None:
+    """Mark a source range retired: its span was rewritten, so it no longer
+    points at content its source produced. The row and its span stay for history,
+    but a source drops off a page's list once none of its spans are live."""
+    with session() as s:
+        r = s.get(SourceRange, range_id)
+        if r is None:
+            return
+        r.status = SourceRangeStatus.RETIRED.value

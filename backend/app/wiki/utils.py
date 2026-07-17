@@ -330,7 +330,7 @@ def _commit_resolved(
     # Best-effort, the commit already succeeded, so a ledger failure must
     # never turn a successful save into an error.
     try:
-        provenance.record(
+        provenance_id = provenance.record(
             commit_sha=sha,
             doc_path=path,
             user_id=user.id if user is not None else None,
@@ -338,8 +338,18 @@ def _commit_resolved(
             agent_session_id=launcher_sid,
             source=source,
         )
+        # Ingestion also records which spans it changed, linked to this ledger
+        # row, so the content can later be mapped back to the document it came from.
+        if source is not None and provenance_id is not None:
+            provenance.capture_source_ranges(
+                provenance_id=provenance_id,
+                doc_path=path,
+                anchor_sha=sha,
+                old_body=old_body,
+                new_body=body,
+            )
     except Exception:
-        log.warning("provenance.record failed for %s @ %s", path, sha, exc_info=True)
+        log.warning("provenance record/capture failed for %s @ %s", path, sha, exc_info=True)
 
     if user is not None and record_activity:
         upsert_kwargs: dict[str, Any] = dict(

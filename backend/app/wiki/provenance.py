@@ -7,12 +7,16 @@ saves, agent tool calls, and connector ingestion are all captured in one place.
 Commits that bypass the gateway (seeding, ``.gitkeep`` creates, move and trash
 commits) have no row, and readers fall back to the git author. This is the
 structured record the byline, History, and the Sources tab read from.
+
+For ingestion, ``source_ranges`` maps the spans an ingest commit changed to the
+document it came from, anchored like a comment so it survives later edits.
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
+from difflib import SequenceMatcher
 from typing import Any
 
 from app.auth.users import UserKind
@@ -76,6 +80,43 @@ def record(
         agent_session_id=agent_session_id,
         source_values=source.model_dump() if source else {},
     )
+
+
+# --------------------------------------------------------------------------- #
+# Source ranges: map an ingest commit's changed spans to its source document    #
+# --------------------------------------------------------------------------- #
+
+
+def changed_spans(old_body: str, new_body: str) -> list[tuple[int, int]]:
+    """Character spans in ``new_body`` that differ from ``old_body`` (the
+    replace and insert hunks), for attributing an ingest commit's edits to the
+    document it came from."""
+    return [
+        (j1, j2)
+        for tag, _i1, _i2, j1, j2 in SequenceMatcher(
+            None, old_body, new_body, autojunk=False
+        ).get_opcodes()
+        if tag in ("replace", "insert")
+    ]
+
+
+def capture_source_ranges(
+    *, provenance_id: int, doc_path: str, anchor_sha: str, old_body: str, new_body: str
+) -> None:
+    """Record which spans of ``new_body`` an ingest commit changed, linked to its
+    ledger row. Idempotent per ledger row: the repo replaces any existing ranges,
+    so re-processing a commit does not duplicate them."""
+    rows = [
+        {
+            "doc_path": doc_path,
+            "anchor_sha": anchor_sha,
+            "start_offset": start,
+            "end_offset": end,
+            "quoted_text": new_body[start:end],
+        }
+        for start, end in changed_spans(old_body, new_body)
+    ]
+    repo.replace_source_ranges(provenance_id, rows)
 
 
 # --------------------------------------------------------------------------- #
@@ -151,9 +192,15 @@ def head_attribution(doc_path: str, head_sha: str | None) -> Attribution | None:
 
 
 def sources_for_path(doc_path: str) -> list[SourceRef]:
-    """Distinct ingested documents that have contributed to a page, newest
-    first, deduped on source document id (falling back to url or title). Rows
-    carrying none of the three cannot be told apart, so each is kept."""
+    """Distinct ingested documents still credited to a page, newest first,
+    deduped on source document id (falling back to url or title). Rows carrying
+    none of the three cannot be told apart, so each is kept.
+
+    A source stays listed until there is positive evidence its content is gone:
+    the repo drops a row only once every span its ingest captured has been
+    retired. A row whose ingest captured no spans (a no-content ingest, or one
+    made before span capture existed) carries no such evidence, so it stays.
+    """
     seen: set[str] = set()
     out: list[SourceRef] = []
     for row in repo.ingestion_source_rows(doc_path, _SOURCES_SCAN_LIMIT):

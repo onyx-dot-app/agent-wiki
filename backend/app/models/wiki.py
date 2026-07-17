@@ -74,6 +74,14 @@ class ActorKind(str, Enum):
     SYSTEM = "system"
 
 
+class SourceRangeStatus(str, Enum):
+    """Valid ``source_ranges.status`` values. Single source of truth, mirrored
+    by the CHECK constraint in ``app/db/models.py``."""
+
+    LIVE = "live"
+    RETIRED = "retired"
+
+
 class WriteProvenance(BaseModel):
     """Source facts for an ingestion write, threaded through the commit gateway
     into the provenance ledger. Set only for ingestion writes.
