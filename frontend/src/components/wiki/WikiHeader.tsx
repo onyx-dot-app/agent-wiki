@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import useSWR from "swr";
 import { Button, LineItemButton, Popover } from "@onyx-ai/opal/components";
 import {
@@ -25,6 +25,36 @@ function segmentLabel(segment: string): string {
 // Trailing crumbs kept visible when the path folds (the current page plus
 // its nearest ancestors). Home always renders separately.
 const FOLD_TRAIL = 4;
+
+/** Fold-menu row that reveals its full label via tooltip only when the
+ *  fixed-width popover truncates it. */
+function FoldedCrumb({
+  label,
+  onSelect,
+}: {
+  label: string;
+  onSelect: () => void;
+}) {
+  const rowRef = useRef<HTMLElement>(null);
+  const [clipped, setClipped] = useState(false);
+  useEffect(() => {
+    // Relies on Opal's title Text carrying a truncate class at one line.
+    const text = rowRef.current?.querySelector("[class*='truncate']");
+    if (text) setClipped(text.scrollWidth > text.clientWidth);
+  }, [label]);
+  return (
+    <LineItemButton
+      ref={rowRef}
+      title={label}
+      titleMaxLines={1}
+      icon={SvgFolder}
+      sizePreset="main-ui"
+      variant="section"
+      tooltip={clipped ? label : undefined}
+      onClick={onSelect}
+    />
+  );
+}
 
 export function WikiHeader() {
   const router = useRouter();
@@ -99,16 +129,13 @@ export function WikiHeader() {
                   />
                 </span>
               </Popover.Trigger>
-              <Popover.Content width="fit" align="start">
+              <Popover.Content width="lg" align="start">
                 <Popover.Menu>
                   {folded.map((c) => (
-                    <LineItemButton
+                    <FoldedCrumb
                       key={c.href}
-                      title={c.label}
-                      icon={SvgFolder}
-                      sizePreset="main-ui"
-                      variant="section"
-                      onClick={() => {
+                      label={c.label}
+                      onSelect={() => {
                         setFoldOpen(false);
                         router.push(c.href);
                       }}
