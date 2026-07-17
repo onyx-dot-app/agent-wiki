@@ -35,24 +35,45 @@ function FoldedCrumb({
   label: string;
   onSelect: () => void;
 }) {
-  const rowRef = useRef<HTMLElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
   const [clipped, setClipped] = useState(false);
+  // Opal 0.1.17's ContentMd re-adds a native title attr on every render,
+  // which fights the Opal tooltip. Stripped after renders and again on
+  // hover, which rerenders through the tooltip's open state.
+  const stripNativeTitle = () => {
+    rowRef.current
+      ?.querySelector("[class*='truncate']")
+      ?.removeAttribute("title");
+  };
   useEffect(() => {
-    // Relies on Opal's title Text carrying a truncate class at one line.
-    const text = rowRef.current?.querySelector("[class*='truncate']");
-    if (text) setClipped(text.scrollWidth > text.clientWidth);
-  }, [label]);
+    // The truncate class marks Opal's one-line title span, the measured element.
+    const text = rowRef.current?.querySelector<HTMLElement>(
+      "[class*='truncate']",
+    );
+    if (!text) return;
+    // Shim for @onyx-ai/opal 0.1.17, delete when Opal ships the title-row
+    // min-w-0 fix: the row refuses to shrink beside the icon, which pushes
+    // the ellipsis outside the popover's clipped box.
+    if (text.parentElement) text.parentElement.style.minWidth = "0";
+    stripNativeTitle();
+    setClipped(text.scrollWidth > text.clientWidth);
+    // clipped in the deps reruns the strip after the gating rerender puts
+    // the title attr back.
+  }, [label, clipped]);
   return (
-    <LineItemButton
-      ref={rowRef}
-      title={label}
-      titleMaxLines={1}
-      icon={SvgFolder}
-      sizePreset="main-ui"
-      variant="section"
-      tooltip={clipped ? label : undefined}
-      onClick={onSelect}
-    />
+    // The ref sits on a wrapper because LineItemButton's ref prop does not
+    // reach a DOM node in opal 0.1.17.
+    <div ref={rowRef} onPointerEnter={stripNativeTitle}>
+      <LineItemButton
+        title={label}
+        titleMaxLines={1}
+        icon={SvgFolder}
+        sizePreset="main-ui"
+        variant="section"
+        tooltip={clipped ? label : undefined}
+        onClick={onSelect}
+      />
+    </div>
   );
 }
 
