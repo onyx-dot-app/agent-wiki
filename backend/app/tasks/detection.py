@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 
 from app.tasks.queues import detection_queue
-from app.wiki.automanage import runner
+from app.wiki.automanage import executor, runner
 
 log = logging.getLogger(__name__)
 
@@ -20,3 +20,10 @@ def run_detection_sweep(triggered_by_user_id: str | None) -> None:
     """Whole-space detection sweep. ``triggered_by_user_id`` is the admin who
     kicked it off (NULL for a system/scheduled run)."""
     runner.run_sweep(triggered_by_user_id=triggered_by_user_id)
+
+
+@detection_queue.task()
+def execute_proposal(proposal_id: int) -> None:
+    """Apply an approved proposal (commits to git — hence the detection queue,
+    not a co-tenant)."""
+    executor.execute(proposal_id)
