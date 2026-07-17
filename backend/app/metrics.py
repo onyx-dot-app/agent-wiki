@@ -74,8 +74,8 @@ ingest_relevance_scores = Histogram(
 ingest_relevance_score_by_outcome = Histogram(
     "ingest_relevance_score_by_outcome",
     "Relevance-filter score of a candidate broken down by its final ingest "
-    "outcome. Successor to ingest_bm25_score_by_outcome: candidates are "
-    "selected by the relevance filter, so its score is the meaningful axis.",
+    "outcome. Candidates are selected by the relevance filter, so its score "
+    "is the meaningful axis.",
     ["outcome"],
     buckets=_RELEVANCE_SCORE_BUCKETS,
 )
