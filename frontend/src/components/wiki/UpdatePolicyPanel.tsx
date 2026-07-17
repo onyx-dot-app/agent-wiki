@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Switch, Text } from "@onyx-ai/opal/components";
-import { SvgEdit, SvgHistory, SvgX } from "@onyx-ai/opal/icons";
+import { SvgAddLines, SvgHistory, SvgX } from "@onyx-ai/opal/icons";
 import { useEffect, useRef, useState } from "react";
 
 import { ApiError } from "@/lib/api";
@@ -162,7 +162,9 @@ export function UpdatePolicyPanel({
   const aiSwitchOn = pendingAiOn ?? effAiManaged;
 
   return (
-    <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
+    <div
+      className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""} ${onClose ? "" : styles.inline}`}
+    >
       {/* Title + close only in drawer hosts. The inline folder-page card
           starts straight at the policy rows (mock 1673:32813). */}
       {onClose && (
@@ -278,9 +280,8 @@ export function UpdatePolicyPanel({
               </div>
               {!editing && (
                 <Button
-                  icon={SvgEdit}
-                  prominence="tertiary"
-                  size="sm"
+                  icon={SvgAddLines}
+                  prominence="secondary"
                   tooltip="Edit instructions"
                   onClick={() => {
                     setDraft(ownInstruction);
@@ -348,9 +349,8 @@ export function UpdatePolicyPanel({
                 </div>
                 {onShowHistory && (
                   <Button
-                    icon={SvgHistory}
+                    rightIcon={SvgHistory}
                     prominence="tertiary"
-                    size="sm"
                     onClick={onShowHistory}
                   >
                     Update History

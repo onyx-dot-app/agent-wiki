@@ -53,7 +53,16 @@
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+}
+
+/* Inline host (folder page side column): the card is the whole surface
+   (mock 1673:32813, white on border-01 at radius-12), so the drawer's tint
+   wrapper chrome drops away. */
+.inline {
+  background: transparent;
+  padding: 0;
+  max-width: none;
 }
 
 .row {
@@ -75,12 +84,10 @@
   color: var(--text-03);
 }
 
-/* The 24h auto-update count sits at the foot of the card, fenced off from the
-   settings above by a hairline and centered against its "Update History" link. */
+/* The 24h auto-update count sits at the foot of the card, centered against
+   its "Update History" link (the mock separates rows by spacing alone). */
 .activityRow {
   align-items: center;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-01);
 }
 
 .instruction {

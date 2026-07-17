@@ -602,9 +602,7 @@ function Explorer({ dir }: { dir: string }) {
           header button + drawer. */}
       {!isMobile && (
         <aside className="w-[360px] shrink-0 overflow-y-auto p-2">
-          <div className="overflow-hidden rounded-(--radius-12) border border-(--border-01)">
-            <UpdatePolicyPanel path={dir} />
-          </div>
+          <UpdatePolicyPanel path={dir} />
         </aside>
       )}
       {policyOpen && isMobile && (
@@ -931,6 +929,19 @@ type SortMode = "name-asc" | "name-desc" | "recent";
 const ROW_CLASS =
   "mb-1 flex h-11 items-center rounded-(--radius-12) py-1 pr-2 pl-1";
 
+/* The mock's row menu glyph is vertical dots. The published icon set has only
+ * the horizontal variant, whose 90° rotation is identical geometry. Swap for
+ * an SvgMoreVertical once @onyx-ai/opal ships one. Button sizes icons via the
+ * style prop, so the transform must merge with it, never replace it. */
+const MoreVertical: NonNullable<
+  React.ComponentProps<typeof Button>["icon"]
+> = ({ style, ...props }) => (
+  <SvgMoreHorizontal
+    {...props}
+    style={{ ...style, transform: "rotate(90deg)" }}
+  />
+);
+
 /* The mock's shaded leading box: a 36px tint square holding the row's
    file/folder glyph (Qualifier Container, tint-01 on radius-08). */
 function RowQualifier({ children }: { children: React.ReactNode }) {
@@ -1121,8 +1132,10 @@ function Row({
           <span className="w-[110px] shrink-0 text-xs whitespace-nowrap text-(--text-02)">
             {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
+          {/* White container pops the menu trigger off the grey hover row
+              (mock's Button/Icon Button, tint-00 on radius-08). */}
           <span
-            className={`flex transition-opacity duration-100 ${hover || menuOpen ? "opacity-100" : "opacity-0"}`}
+            className={`flex rounded-(--radius-08) bg-(--background-tint-00) transition-opacity duration-100 ${hover || menuOpen ? "opacity-100" : "opacity-0"}`}
             onClick={(e) => e.stopPropagation()}
           >
             <WikiItemMenu
@@ -1135,8 +1148,7 @@ function Row({
             >
               <Button
                 prominence="tertiary"
-                size="sm"
-                icon={SvgMoreHorizontal}
+                icon={MoreVertical}
                 disabled={busy}
                 aria-label={`More actions for ${label}`}
               />
