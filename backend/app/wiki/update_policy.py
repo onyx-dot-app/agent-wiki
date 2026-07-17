@@ -374,6 +374,11 @@ def _disabled_true_scopes() -> list[str]:
 
     Small — only managed scopes, not pages. Drives the auto-update-enabled
     metric without enumerating every wiki page.
+
+    Trashed scopes are excluded: a deleted page keeps its policy row (restore
+    brings the policy back), but a ``.trash/`` path can't affect any live page
+    — and ``kind_for_path`` rejects trash paths, which would abort the whole
+    count and make the metric silently fall back to "all enabled".
     """
     with session() as s:
         rows = s.execute(
@@ -381,7 +386,7 @@ def _disabled_true_scopes() -> list[str]:
                 UpdatePolicy.ingestion_auto_update_disabled.is_(True)
             )
         ).scalars().all()
-    return list(rows)
+    return [p for p in rows if not filesystem.is_trash_path(p)]
 
 
 def count_ingest_enabled_pages(
