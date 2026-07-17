@@ -57,12 +57,17 @@
 }
 
 /* Inline host (folder page side column): the card is the whole surface
-   (mock 1673:32813, white on border-01 at radius-12), so the drawer's tint
-   wrapper chrome drops away. */
+   (mock 1673:32813, border-01 at radius-12), so the drawer's tint wrapper
+   chrome drops away and the card fill stays the page background itself
+   rather than painting its own. */
 .inline {
   background: transparent;
   padding: 0;
   max-width: none;
+}
+.inline .card {
+  background: transparent;
+  box-shadow: none;
 }
 
 .row {
