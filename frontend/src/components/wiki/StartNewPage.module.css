@@ -21,8 +21,16 @@
   gap: 8px;
   padding: 8px;
 }
+/* SelectCard strips className and style, so the mock's chip shadow and a
+   radius matching the card's corners live on the grid cell instead. */
 .templateCell {
   display: flex;
+  min-width: 0;
+  border-radius: var(--radius-12);
+  box-shadow: var(--shadow-chip);
+}
+.templateCell > * {
+  flex: 1;
   min-width: 0;
 }
 
@@ -36,14 +44,15 @@
   flex: 0 0 auto;
 }
 
-/* Blank-page glyph: the mock's square-plus, layered from the square and plus
-   icons. Not an interactive Button. */
-.blankGlyph {
+/* Blank-page glyph layers: the plus centers over the square inside
+   IconContainer's glyph slot. */
+.glyphStack {
   position: relative;
   display: inline-flex;
-  color: var(--text-03);
+  align-items: center;
+  justify-content: center;
 }
-.blankGlyphPlus {
+.glyphPlus {
   position: absolute;
   inset: 0;
   display: flex;

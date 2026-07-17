@@ -3,9 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import useSWR from "swr";
-import { LineItemButton, SelectCard, Text } from "@onyx-ai/opal/components";
+import {
+  IconContainer,
+  LineItemButton,
+  SelectCard,
+  Text,
+} from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 import { SvgChevronRight, SvgPlus, SvgSquare } from "@onyx-ai/opal/icons";
+import { cn } from "@onyx-ai/opal/utils";
+import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { listTemplateSummaries } from "@/lib/templates";
 import type { DocumentTemplateSummary } from "@/lib/templates";
 import styles from "@/components/wiki/StartNewPage.module.css";
@@ -48,16 +55,7 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
         <div className={styles.templateCell}>
           <TemplateCard
             title="Blank page"
-            glyph={
-              // The mock's square-plus glyph, composed from published icons
-              // until @onyx-ai/opal ships an SvgSquarePlus.
-              <span className={styles.blankGlyph}>
-                <SvgSquare size={20} />
-                <span className={styles.blankGlyphPlus}>
-                  <SvgPlus size={12} />
-                </span>
-              </span>
-            }
+            glyph={<IconContainer size="main-ui" icon={SquarePlusGlyph} />}
             onClick={() => startNewPage(blankTemplate?.id)}
           />
         </div>
@@ -92,6 +90,17 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
   );
 }
 
+// Square-plus layered from published icons, sized by IconContainer's glyph
+// class. Swap to Opal's SvgSquarePlus when it ships (onyx #13153).
+const SquarePlusGlyph: IconFunctionComponent = ({ className }) => (
+  <span className={cn(styles.glyphStack, className)}>
+    <SvgSquare size={16} />
+    <span className={styles.glyphPlus}>
+      <SvgPlus size={8} />
+    </span>
+  </span>
+);
+
 function TemplateCard({
   title,
   description,
@@ -106,22 +115,18 @@ function TemplateCard({
   onClick: () => void;
 }) {
   return (
-    <SelectCard
-      state="empty"
-      onClick={onClick}
-      padding="sm"
-      rounding="lg"
-      border="solid"
-    >
+    // Mock card chrome (709:259996): tint fill, radius 12 (default rounding),
+    // no border. Filled is the select-card variant's visible-background rest.
+    <SelectCard state="filled" onClick={onClick} padding="sm" border="none">
       <Section
         flexDirection="column"
         alignItems="start"
         justifyContent="start"
-        gap={0.25}
+        gap={glyph ? 0.75 : 0.25}
         width="full"
         height="full"
       >
-        <Text font="main-ui-action" color="text-05" nowrap>
+        <Text font="main-ui-action" color="text-03" nowrap>
           {title}
         </Text>
         {glyph ? (
