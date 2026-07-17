@@ -83,7 +83,7 @@ export function WikiHeader() {
       {/* Page-level actions portal here from the active wiki route (see
           WikiHeaderActionsProvider). Pushed right by the flex spacer. */}
       <div className="flex-1" />
-      <div ref={host?.setEl} className="flex items-center gap-1" />
+      <div ref={host?.setEl} className="flex items-center gap-2" />
       <NotificationBell />
       <CraftNotifier />
     </div>

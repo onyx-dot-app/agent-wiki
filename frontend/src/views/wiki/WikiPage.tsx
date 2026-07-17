@@ -32,6 +32,7 @@ import {
   SvgShield,
   SvgTrash,
   SvgWorkflow,
+  SvgZap,
 } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
@@ -41,6 +42,7 @@ import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { StartNewPage } from "@/components/wiki/StartNewPage";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";
+import { useRowActions } from "@/providers/WikiItemActionsProvider";
 import { apiFetch, ApiError } from "@/lib/api";
 import { isDocId, wikiHref, wikiPath, revalidateWiki } from "@/lib/wikiHref";
 import { formatRelative } from "@/lib/format";
@@ -173,6 +175,7 @@ function Explorer({ dir }: { dir: string }) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const rowActions = useRowActions();
   const { entries, error: listError, mutate: mutatePaths } = useWikiTree();
   const [mutationError, setMutationError] = useState<string | null>(null);
   const confirmDialog = useConfirm();
@@ -374,7 +377,7 @@ function Explorer({ dir }: { dir: string }) {
           setCreating((v) => (v === "folder" ? null : "folder"));
         }}
       />
-      <span aria-hidden className="mx-1 h-5 w-px bg-(--border-01)" />
+      <span aria-hidden className="mx-2 h-5 w-px bg-(--border-01)" />
       <Button
         prominence="tertiary"
         rightIcon={SvgLock}
@@ -387,6 +390,12 @@ function Explorer({ dir }: { dir: string }) {
         prominence="tertiary"
         tooltip="Trigger"
         onClick={() => setTriggerModalOpen(true)}
+      />
+      <Button
+        icon={SvgZap}
+        prominence="tertiary"
+        tooltip="Launch Agent"
+        onClick={() => rowActions.launchAgent(dir)}
       />
       {isMobile && (
         <Button
