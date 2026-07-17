@@ -56,8 +56,8 @@ export function WikiHeader() {
           onClick={toggleTree}
         />
       )}
-      {/* min-w-0 + nowrap: on tight widths long paths truncate at the tail
-          segment instead of wrapping over the panels beside the header. */}
+      {/* min-w-0 + nowrap: the header row has a fixed height, so long paths
+          truncate at the tail segment instead of wrapping past it. */}
       <nav className="flex min-w-0 items-center gap-1.5 text-sm whitespace-nowrap">
         {crumbs.map((c, i) => {
           const last = i === crumbs.length - 1;

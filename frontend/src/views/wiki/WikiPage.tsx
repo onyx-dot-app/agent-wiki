@@ -613,10 +613,10 @@ function Explorer({ dir }: { dir: string }) {
         )}
       </div>
 
-      {/* Folder policy applies to every page under this folder. Wide views
-          show it inline in the side column (mock 1673:32813). Compact views
-          (mobile, or squeezed by the tree/chat panels) keep the header
-          button + drawer. */}
+      {/* Folder policy applies to pages under this folder (most-granular
+          scope wins). Wide views show it inline in the side column (mock
+          1673:32813). Compact views (mobile, or squeezed by the tree/chat
+          panels) keep the header button + drawer. */}
       {!compact && (
         <aside className="w-[360px] shrink-0 overflow-y-auto p-2">
           <UpdatePolicyPanel path={dir} />
