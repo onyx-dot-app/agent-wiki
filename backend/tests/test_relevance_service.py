@@ -131,3 +131,34 @@ def test_scoreless_filter_keeps_input_order_and_empty_scores() -> None:
     result = RelevanceService(_DropByPath(set())).evaluate(_doc(), _pages("a.md", "b.md"))
     assert [p.path for p in result.kept] == ["a.md", "b.md"]
     assert result.scores == {}
+
+
+def test_relevant_pages_sources_the_embedding_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dataclasses
+
+    from app.db.page_embeddings import PageVector
+    from app.llm import embeddings as llm_embeddings
+
+    vec = [0.1, 0.2]
+    monkeypatch.setattr(
+        "app.db.page_embeddings.load_all",
+        lambda model: [PageVector("a.md", llm_embeddings.pack(vec)),
+                       PageVector("b.md", llm_embeddings.pack(vec))],
+    )
+    monkeypatch.setattr(
+        enrich, "with_document_embedding", lambda d: dataclasses.replace(d, embedding=vec)
+    )
+    result = RelevanceService(_DropByPath({"b.md"})).relevant_pages(_doc())
+    assert result is not None
+    assert [p.path for p in result.kept] == ["a.md"]
+    assert [p.path for p in result.dropped] == ["b.md"]
+
+
+def test_relevant_pages_none_when_doc_cannot_embed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import MagicMock
+
+    load_all = MagicMock()
+    monkeypatch.setattr("app.db.page_embeddings.load_all", load_all)
+    # autouse fixture leaves the doc unembedded (pass-through, embedding=None)
+    assert RelevanceService(_DropByPath(set())).relevant_pages(_doc()) is None
+    load_all.assert_not_called()  # the doc gate comes before the bulk load

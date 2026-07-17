@@ -17,10 +17,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from app.db import page_embeddings
 from app.ingest import enrich
 from app.ingest.relevance.factory import build_relevance_filter
 from app.ingest.relevance.filter import RelevanceFilter
 from app.ingest.types import CandidatePage, IngestionDocument
+from app.llm import embeddings
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +90,47 @@ class RelevanceService:
         kept.sort(key=lambda p: scores.get(p.path, float("-inf")), reverse=True)
         dropped = [p for p in pages if p.path not in kept_paths]
         return RelevanceResult(kept=kept, dropped=dropped, scores=scores)
+
+    def relevant_pages(self, doc: IngestionDocument) -> RelevanceResult | None:
+        """Which wiki pages is ``doc`` relevant to, over the whole embedding
+        store: embed the document, score every stored page vector (one bulk
+        load), and return the partition.
+
+        Returns ``None`` when the document can't be embedded — there is nothing
+        to score against, and treating that as keep-all would flood the caller
+        with every page. Callers should skip the document (a transient embed
+        error self-corrects on its next push).
+
+        Pages carry no body (``body=""``) — relevance needs only vectors;
+        callers read bodies for the pages they act on.
+        """
+        enriched_doc = enrich.with_document_embedding(doc)
+        if enriched_doc.embedding is None:
+            log.warning(
+                "relevance service: document embedding unavailable, doc_id=%s", doc.id
+            )
+            return None
+        vectors = page_embeddings.load_all(embeddings.model_name())
+        pages = [
+            CandidatePage(path=pv.path, body="", embedding=embeddings.unpack(pv.vector))
+            for pv in vectors
+        ]
+        result = self.evaluate(enriched_doc, pages)
+        # Kept scores + the highest dropped scores (the near-misses) are the
+        # signal for calibrating the filter threshold against real traffic.
+        near_misses = sorted(
+            (round(result.scores[p.path], 4) for p in result.dropped if p.path in result.scores),
+            reverse=True,
+        )[:5]
+        log.info(
+            "relevance service: kept %d/%d pages, doc_id=%s kept=%s dropped_near_misses=%s",
+            len(result.kept),
+            len(pages),
+            doc.id,
+            [(p.path, round(result.scores[p.path], 4)) for p in result.kept if p.path in result.scores],
+            near_misses,
+        )
+        return result
 
 
 _service: RelevanceService | None = None

@@ -145,10 +145,10 @@ def _stub_candidates(
     filter keeps ``keep`` (all when None). Order is preserved end to end."""
     vectors = [PageVector(p, llm_embeddings.pack(_VEC)) for p in paths]
     monkeypatch.setattr(
-        "app.tasks.wiki_update.page_embeddings.load_all", lambda model: vectors
+        "app.db.page_embeddings.load_all", lambda model: vectors
     )
     monkeypatch.setattr(
-        "app.tasks.wiki_update.ingest_enrich.with_document_embedding",
+        "app.ingest.enrich.with_document_embedding",
         lambda d: dataclasses.replace(d, embedding=_VEC),
     )
     monkeypatch.setattr(
@@ -194,7 +194,7 @@ def _run(push: dict[str, Any]) -> None:
 def test_filtered_source_drops_silently(monkeypatch):
     monkeypatch.setattr("app.ingest.source_tiers.FILTERED_SOURCES", frozenset({"git_commit"}))
     load_all = MagicMock()
-    monkeypatch.setattr("app.tasks.wiki_update.page_embeddings.load_all", load_all)
+    monkeypatch.setattr("app.db.page_embeddings.load_all", load_all)
     _run(_make_push(source="git_commit"))
     load_all.assert_not_called()
 
@@ -203,10 +203,10 @@ def test_doc_embedding_unavailable_drops_doc(monkeypatch):
     # No document vector -> nothing to score against. The doc is dropped (with a
     # terminal result) rather than fail-opening into reconciling every page.
     monkeypatch.setattr(
-        "app.tasks.wiki_update.ingest_enrich.with_document_embedding", lambda d: d
+        "app.ingest.enrich.with_document_embedding", lambda d: d
     )
     load_all = MagicMock()
-    monkeypatch.setattr("app.tasks.wiki_update.page_embeddings.load_all", load_all)
+    monkeypatch.setattr("app.db.page_embeddings.load_all", load_all)
     before = _doc_result_count("no_candidates")
     _run(_make_push())
     load_all.assert_not_called()

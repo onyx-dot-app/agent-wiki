@@ -25,16 +25,13 @@ import time
 from typing import Any
 
 from app.config import CONFIG
-from app.db import page_embeddings
 from app.db.fts import SearchHit
-from app.ingest import enrich as ingest_enrich
 from app.ingest import eval_sample as ingest_eval_sample
 from app.ingest import settings as ingest_settings
 from app.ingest.relevance.service import get_relevance_service
 from app.ingest.source_tiers import is_filtered
 from app.ingest.models import WikiUpdateCandidate
-from app.ingest.types import CandidatePage, IngestionDocument
-from app.llm import embeddings
+from app.ingest.types import IngestionDocument
 from app.llm.agents import ingest_batch_reconciler, ingest_selector, nl_updater
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.wiki import utils as wiki_utils
@@ -315,12 +312,13 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
 
     t_start = time.monotonic()
 
-    # Candidates: every auto-update-enabled page with a stored embedding — the
-    # relevance filter, not keyword retrieval, decides which pages the document
-    # plausibly updates. No top-N ceiling, and no "no keyword hit" path that
-    # silently drops a document. One bulk vector load; page bodies are read
-    # only for pages the filter keeps.
-    doc_carrier = ingest_enrich.with_document_embedding(
+    # Candidates: every page with a stored embedding, scored by the relevance
+    # filter (RelevanceService) — no keyword retrieval, so no top-N ceiling and
+    # no "no keyword hit" path that silently drops a document. None => the
+    # document couldn't be embedded: skip it rather than fail-open into
+    # reconciling every page (a transient embed error self-corrects on the
+    # next push).
+    relevance_result = get_relevance_service().relevant_pages(
         IngestionDocument(
             content=content,
             id=push.get("source_document_id"),
@@ -330,57 +328,28 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             metadata=metadata or None,
         )
     )
-    if doc_carrier.embedding is None:
-        # Nothing to score against. Skip the document rather than fail-open
-        # into reconciling every page; a transient embed error self-corrects
-        # on the next push.
-        log.warning(
-            "process_pushed_document: document embedding unavailable, dropping doc_id=%s",
-            doc_id,
-        )
+    if relevance_result is None:
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
         ingest_document_results_total.labels(result="no_candidates").inc()
         return
-
-    vectors = page_embeddings.load_all(embeddings.model_name())
-    # Resolve every page's update policy in one query. Policy-disabled pages
-    # are excluded *after* the filter (with the cap check below): recording the
-    # ingestion_auto_update_disabled outcome only for pages the filter judged
-    # relevant keeps that metric meaning "policy blocked a would-be candidate",
-    # not "a disabled page exists" (which would fire per page per document).
-    policies = update_policy.resolve_for_paths([pv.path for pv in vectors])
-    pages = [
-        CandidatePage(path=pv.path, body="", embedding=embeddings.unpack(pv.vector))
-        for pv in vectors
-    ]
-
-    relevance_result = get_relevance_service().evaluate(doc_carrier, pages)
     for page in relevance_result.dropped:
         ingest_outcomes_total.labels(
             outcome="filtered_by_relevance", wiki_path=page.path
         ).inc()
-    # Kept scores + the highest dropped scores (the near-misses) are the signal
-    # for calibrating the filter threshold against production traffic.
-    scores = relevance_result.scores
-    near_misses = sorted(
-        (round(scores[p.path], 4) for p in relevance_result.dropped if p.path in scores),
-        reverse=True,
-    )[:5]
-    log.info(
-        "process_pushed_document: relevance filter kept %d/%d pages, doc_id=%s "
-        "kept=%s dropped_near_misses=%s",
-        len(relevance_result.kept),
-        len(pages),
-        doc_id,
-        [(p.path, round(scores[p.path], 4)) for p in relevance_result.kept if p.path in scores],
-        near_misses,
-    )
     if not relevance_result.kept:
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
         ingest_document_results_total.labels(result="no_candidates").inc()
         return
 
     source_label = source_type or "external"
+
+    # Resolve the kept pages' update policies in one query. Policy-disabled
+    # pages are excluded below (with the cap check) rather than before the
+    # filter: recording the ingestion_auto_update_disabled outcome only for
+    # pages the filter judged relevant keeps that metric meaning "policy
+    # blocked a would-be candidate", not "a disabled page exists" (which would
+    # fire per page per document).
+    policies = update_policy.resolve_for_paths([p.path for p in relevance_result.kept])
 
     # Read bodies only for pages the filter kept — needed by both the selector
     # and the main reconciler loop. Skip unreadable files early so the selector
