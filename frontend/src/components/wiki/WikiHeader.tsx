@@ -1,9 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import useSWR from "swr";
-import { Button } from "@onyx-ai/opal/components";
-import { SvgChevronRight, SvgListTree } from "@onyx-ai/opal/icons";
+import { Button, LineItemButton, Popover } from "@onyx-ai/opal/components";
+import {
+  SvgChevronRight,
+  SvgFolder,
+  SvgListTree,
+  SvgMoreHorizontal,
+} from "@onyx-ai/opal/icons";
 import { NotificationBell } from "@/components/common/NotificationBell";
 import { CraftNotifier } from "@/components/wiki/CraftNotifier";
 import { useAppFocus } from "@/hooks/useAppFocus";
@@ -15,11 +22,17 @@ function segmentLabel(segment: string): string {
   return segment.replace(/\.md$/, "").replace(/_/g, " ");
 }
 
+// Trailing crumbs kept visible when the path folds (the current page plus
+// its nearest ancestors). Home always renders separately.
+const FOLD_TRAIL = 4;
+
 export function WikiHeader() {
+  const router = useRouter();
   const { view, toggleTree } = useLeftPanel();
   const treeVisible = view === "wiki-tree";
   const { wikiPath } = useAppFocus();
   const host = useHeaderActionsHost();
+  const [foldOpen, setFoldOpen] = useState(false);
 
   const segments = wikiPath ? wikiPath.split("/") : [];
   // Ancestor + self segment paths, resolved to ids so each crumb links to the
@@ -44,6 +57,13 @@ export function WikiHeader() {
     });
   });
 
+  // Deep paths fold their middle ancestors into a "…" popover (root→leaf
+  // order). The folder tree is the tool for deep hierarchies, crumbs only
+  // hop nearby levels.
+  const isFolded = crumbs.length > FOLD_TRAIL + 1;
+  const folded = isFolded ? crumbs.slice(1, -FOLD_TRAIL) : [];
+  const trail = isFolded ? crumbs.slice(-FOLD_TRAIL) : crumbs.slice(1);
+
   return (
     <div className="flex h-14 items-center gap-3 px-4">
       {/* The expand control lives here only while the tree is closed. When
@@ -56,19 +76,57 @@ export function WikiHeader() {
           onClick={toggleTree}
         />
       )}
-      {/* min-w-0 + nowrap: the header row has a fixed height, so long paths
-          truncate at the tail segment instead of wrapping past it. */}
-      <nav className="flex min-w-0 items-center gap-1.5 text-sm whitespace-nowrap">
-        {crumbs.map((c, i) => {
-          const last = i === crumbs.length - 1;
+      {/* min-w-0 + nowrap + overflow-hidden: one line, always. The container
+          only clips, the per-crumb truncate classes render the ellipsis. */}
+      <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-sm whitespace-nowrap">
+        <Link
+          href={crumbs[0].href}
+          className="shrink-0 text-(--text-03) hover:text-(--text-05)"
+        >
+          {crumbs[0].label}
+        </Link>
+        {folded.length > 0 && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            <SvgChevronRight size={12} className="text-(--text-02)" />
+            <Popover open={foldOpen} onOpenChange={setFoldOpen}>
+              <Popover.Trigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    icon={SvgMoreHorizontal}
+                    prominence="tertiary"
+                    size="sm"
+                    tooltip="Show full path"
+                  />
+                </span>
+              </Popover.Trigger>
+              <Popover.Content width="fit" align="start">
+                <Popover.Menu>
+                  {folded.map((c) => (
+                    <LineItemButton
+                      key={c.href}
+                      title={c.label}
+                      icon={SvgFolder}
+                      sizePreset="main-ui"
+                      variant="section"
+                      onClick={() => {
+                        setFoldOpen(false);
+                        router.push(c.href);
+                      }}
+                    />
+                  ))}
+                </Popover.Menu>
+              </Popover.Content>
+            </Popover>
+          </span>
+        )}
+        {trail.map((c, i) => {
+          const last = i === trail.length - 1;
           return (
             <span
               key={c.href}
               className={`flex items-center gap-1.5 ${last ? "min-w-0" : "shrink-0"}`}
             >
-              {i > 0 && (
-                <SvgChevronRight size={12} className="text-(--text-02)" />
-              )}
+              <SvgChevronRight size={12} className="text-(--text-02)" />
               {last ? (
                 <span className="overflow-hidden font-semibold text-ellipsis text-(--text-05)">
                   {c.label}
@@ -76,7 +134,7 @@ export function WikiHeader() {
               ) : (
                 <Link
                   href={c.href}
-                  className="text-(--text-03) hover:text-(--text-05)"
+                  className="max-w-44 truncate text-(--text-03) hover:text-(--text-05)"
                 >
                   {c.label}
                 </Link>
