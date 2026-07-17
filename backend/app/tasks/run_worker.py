@@ -33,6 +33,7 @@ _TASK_MODULES = (
     "app.tasks.coedit_checkpoint",
     "app.tasks.coedit_rebase",
     "app.tasks.craft",
+    "app.tasks.detection",
     "app.tasks.wiki_update",
     "app.tasks.expire_launch_artifacts",
     "app.tasks.ingest_eval_retention",
@@ -90,6 +91,12 @@ _CONCURRENCY = {
     "documents": 1,
     "triggers": 4,
     "coedit": 4,
+    # Detection: only the admin whole-space sweep runs here today, and two
+    # concurrent sweeps would just duplicate work — so serialize at 1. Bump
+    # when a second task type lands (single-page checks / proposal executes)
+    # that should slip past a running sweep; git safety then comes from the
+    # commit lock, not single-threading.
+    "detection": 1,
     "lightweight_maintenance": 4,
 }
 
@@ -102,6 +109,7 @@ _METRICS_PORT = {
     "triggers": 9092,
     "lightweight_maintenance": 9093,
     "coedit": 9094,
+    "detection": 9095,
 }
 
 

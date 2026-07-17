@@ -59,7 +59,7 @@ export default function AdminHealthPage() {
           description={`Backend liveness and queue depth. Polls every ${POLL_MS / 1000}s.`}
         />
 
-        <section className="mb-5 flex items-center gap-3 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+        <section className="mb-5 flex items-center gap-3 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
           <span
             aria-hidden
             style={{ background: statusColor }}
@@ -108,7 +108,7 @@ export default function AdminHealthPage() {
               return (
                 <li
                   key={q.name}
-                  className="mb-[10px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-[14px]"
+                  className="mb-[10px] rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-[14px]"
                 >
                   <div className="mb-2 flex items-baseline justify-between">
                     <div className="text-sm">
@@ -129,7 +129,7 @@ export default function AdminHealthPage() {
                   </div>
                   <div
                     style={{ marginBottom: haveCounts ? 8 : 0 }}
-                    className="h-[6px] overflow-hidden rounded-(--border-radius-04) bg-(--background-tint-02)"
+                    className="h-[6px] overflow-hidden rounded-(--radius-04) bg-(--background-tint-02)"
                   >
                     <div
                       style={{

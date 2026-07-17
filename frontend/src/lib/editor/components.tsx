@@ -165,7 +165,7 @@ const baseTheme = EditorView.theme({
     fontFamily:
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     backgroundColor: "var(--background-tint-01)",
-    borderRadius: "var(--border-radius-04, 4px)",
+    borderRadius: "var(--radius-04, 4px)",
     padding: "0.1em 0.3em",
   },
   ".cm-md-code-block": {
@@ -173,7 +173,7 @@ const baseTheme = EditorView.theme({
       "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
     display: "block",
     backgroundColor: "var(--background-tint-01)",
-    borderRadius: "var(--border-radius-08)",
+    borderRadius: "var(--radius-08)",
   },
   ".cm-md-blockquote": {
     display: "inline-block",

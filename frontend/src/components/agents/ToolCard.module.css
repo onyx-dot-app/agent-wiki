@@ -7,7 +7,7 @@
   padding: 12px;
   background: var(--background-tint-00);
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-08);
+  border-radius: var(--radius-08);
   gap: 8px;
 }
 

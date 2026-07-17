@@ -30,7 +30,7 @@
   gap: 10px;
   padding: 10px;
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
   cursor: pointer;
 }
 
@@ -64,7 +64,7 @@
 .checklistCard {
   padding: 12px;
   border: 1px solid var(--border-01);
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
 }
 
 .checklistHeader {

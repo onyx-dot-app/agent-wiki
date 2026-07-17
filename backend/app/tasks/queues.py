@@ -1,11 +1,12 @@
-"""Four task queues backed by Redis Streams.
+"""Five task queues backed by Redis Streams.
 
-We deliberately split background work into **four independent queues**, each
+We deliberately split background work into **five independent queues**, each
 with its own ``TaskQueue`` instance and its own consumer process. Each queue
 is a Redis Stream (``queue:{name}``) so each queue's backlog is isolated from
 the others. A slow LLM doc-rewrite can't delay a reindex; a flood of
 trigger evaluations can't backpressure connector ingest; a co-edit checkpoint
-can't sit behind an hour of connector ingest.
+can't sit behind an hour of connector ingest; a whole-space detection sweep
+can't starve any of them.
 
 Each constant below is the canonical entry point for tasks that belong on
 that queue. Keep this a small, fixed set — the value of the split comes from
@@ -45,6 +46,18 @@ Queues:
   a Postgres advisory lock (``coedit.checkpoint_lock_key``), not single-threading
   — different sessions checkpoint in parallel; the same session is serialized.
 
+* ``detection_queue`` — **Wiki Auto Management detection + execution.** A
+  whole-space sweep walks the wiki, runs the detectors, and emits
+  ``change_proposals`` (mechanical today; fuzzy-dup/misplacement will add LLM
+  calls), and on approval the executor commits structural changes to git. That
+  profile — long, bursty, eventually LLM-bound, and committing — conflicts with
+  every other queue's contract: it would starve connector ingest on
+  ``documents`` (concurrency 1), delay latency-sensitive fan-out on
+  ``triggers``, sit in front of user-visible checkpoints on ``coedit``, and
+  break ``lightweight_maintenance``'s no-LLM/no-commit rule. So it gets its own
+  queue. Safety on concurrent executes comes from the git commit lock, like
+  ``coedit`` — not single-threading.
+
 * ``lightweight_maintenance_queue`` — **fast upkeep tasks.** Sub-second,
   no LLM, no external HTTP, no wiki commits. Anything that fits that
   profile and isn't worth its own queue lives here. The placement rule
@@ -75,6 +88,7 @@ __all__ = [
     "QueueFullError",
     "QUEUES",
     "coedit_queue",
+    "detection_queue",
     "documents_queue",
     "lightweight_maintenance_queue",
     "triggers_queue",
@@ -88,6 +102,7 @@ def _make(name: str) -> TaskQueue:
 documents_queue = _make("documents")
 triggers_queue = _make("triggers")
 coedit_queue = _make("coedit")
+detection_queue = _make("detection")
 lightweight_maintenance_queue = _make("lightweight_maintenance")
 
 # Map queue-name → instance, used by run_worker.py to launch the right
@@ -96,5 +111,6 @@ QUEUES = {
     "documents": documents_queue,
     "triggers": triggers_queue,
     "coedit": coedit_queue,
+    "detection": detection_queue,
     "lightweight_maintenance": lightweight_maintenance_queue,
 }

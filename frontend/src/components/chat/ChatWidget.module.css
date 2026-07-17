@@ -33,13 +33,13 @@
 .markdownCode {
   background: var(--background-tint-03);
   padding: 0 4px;
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
 }
 
 .markdownPre {
   background: var(--background-tint-03);
   padding: 8px;
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
   white-space: pre-wrap;
 }
 

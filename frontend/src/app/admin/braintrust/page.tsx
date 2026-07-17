@@ -165,7 +165,7 @@ function BraintrustForm() {
         clearDisabled={saving || !settings.api_key_set}
       />
 
-      <div className="flex items-center justify-between rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-02) px-[14px] py-3">
+      <div className="flex items-center justify-between rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-02) px-[14px] py-3">
         <div>
           <div className="text-[13px] font-medium">
             Tracing is currently{" "}
@@ -252,5 +252,5 @@ function KeyField({
 }
 
 const inputClass =
-  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--radius-04) text-sm";
 const lblClass = "mb-1 text-[13px] font-medium";

@@ -785,13 +785,13 @@ export function FileView({ path }: FileViewProps) {
       />
 
       {error && (
-        <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+        <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {error}
         </div>
       )}
 
       {viewingOld && !loading && !error && (
-        <div className="mb-3 flex items-center gap-3 rounded-(--border-radius-08) border border-(--status-warning-02) bg-(--status-warning-01) px-3 py-2 text-[13px] text-(--status-text-warning-05)">
+        <div className="mb-3 flex items-center gap-3 rounded-(--radius-08) border border-(--status-warning-02) bg-(--status-warning-01) px-3 py-2 text-[13px] text-(--status-text-warning-05)">
           <span>
             Viewing an older version
             {viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
@@ -1058,7 +1058,7 @@ export function FileView({ path }: FileViewProps) {
       {selTool && (
         <div
           onMouseDown={(e) => e.preventDefault()}
-          className="fixed z-[80] -translate-x-1/2 -translate-y-full rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-popover)"
+          className="fixed z-[80] -translate-x-1/2 -translate-y-full rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-popover)"
           style={{
             left: selTool.x,
             top: selTool.y - 8,
@@ -1102,7 +1102,7 @@ function ActiveAgentsBar({
   const count = agents.length + sessions.length;
   const expandable = count > 0;
   return (
-    <div className="mb-3 overflow-hidden rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01)">
+    <div className="mb-3 overflow-hidden rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01)">
       <button
         onClick={expandable ? onToggle : undefined}
         aria-expanded={expandable ? open : undefined}
@@ -1176,7 +1176,7 @@ function ActiveAgentRow({ a, isLast }: ActiveAgentRowProps) {
         !isLast && "border-b border-(--border-01)",
       )}
     >
-      <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
+      <span className="shrink-0 rounded-(--radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
         {a.activity}
       </span>
 
@@ -1229,7 +1229,7 @@ function ActiveSessionRow({ s, isLast, onClose }: ActiveSessionRowProps) {
         !isLast && "border-b border-(--border-01)",
       )}
     >
-      <span className="shrink-0 rounded-(--border-radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
+      <span className="shrink-0 rounded-(--radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
         {s.status}
       </span>
 
@@ -1300,7 +1300,7 @@ export function TemplateGallery({
   // line. On wide screens the user scrolls / clicks chevrons through
   // the row; on narrow screens the same layout becomes a swipe strip.
   return (
-    <div className="flex flex-col gap-[10px] rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
+    <div className="flex flex-col gap-[10px] rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) p-[14px]">
       <div className="flex items-baseline gap-2">
         <span className="text-[13px] font-semibold text-(--text-05)">
           Start from a template
@@ -1474,7 +1474,7 @@ function TemplateCard({
       onClick={onClick}
       disabled={busy}
       className={cn(
-        "box-border flex h-full min-h-[64px] w-full flex-col gap-1 rounded-(--border-radius-04) border px-3 py-[10px] text-left text-(--text-05) transition-[background,border-color] duration-[80ms] ease-in-out",
+        "box-border flex h-full min-h-[64px] w-full flex-col gap-1 rounded-(--radius-04) border px-3 py-[10px] text-left text-(--text-05) transition-[background,border-color] duration-[80ms] ease-in-out",
         busy ? "cursor-wait opacity-[0.7]" : "cursor-pointer",
         "border-(--border-01)",
         active ? "bg-(--background-tint-03)" : "bg-(--background-tint-00)",
@@ -1589,7 +1589,7 @@ export function FilenameRow({
   placeholder = "filename",
 }: FilenameRowProps) {
   return (
-    <div className="flex shrink-0 items-stretch overflow-hidden rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00)">
+    <div className="flex shrink-0 items-stretch overflow-hidden rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00)">
       {parent && (
         <span className="flex items-center border-r border-(--border-01) bg-(--background-tint-02) px-[10px] font-mono text-[13px] text-(--text-04)">
           {parent}/

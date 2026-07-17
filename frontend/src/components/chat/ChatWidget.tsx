@@ -545,7 +545,7 @@ export function ChatWidget() {
 
   if (mode === "closed") {
     return (
-      <div className="fixed right-5 bottom-5 z-[1000] rounded-(--border-radius-12) shadow-(--shadow-fab)">
+      <div className="fixed right-5 bottom-5 z-[1000] rounded-(--radius-12) shadow-(--shadow-fab)">
         <Button
           icon={SvgBubbleText}
           variant="action"
@@ -568,7 +568,7 @@ export function ChatWidget() {
       className={
         isExpanded
           ? "fixed top-0 right-0 z-[1000] h-screen border-l border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-panel)"
-          : "fixed right-5 bottom-5 z-[1000] rounded-(--border-radius-12) border border-(--border-01) bg-(--background-tint-00) shadow-(--shadow-modal)"
+          : "fixed right-5 bottom-5 z-[1000] rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00) shadow-(--shadow-modal)"
       }
       style={
         isExpanded
@@ -583,7 +583,7 @@ export function ChatWidget() {
           contained and lets it cover the chat header. The resize handle in
           expanded mode lives outside this so it can extend past the left edge. */}
       <div
-        className={`relative flex h-full w-full flex-col overflow-hidden ${isExpanded ? "" : "rounded-(--border-radius-12)"}`}
+        className={`relative flex h-full w-full flex-col overflow-hidden ${isExpanded ? "" : "rounded-(--radius-12)"}`}
       >
         <header className="flex shrink-0 items-center gap-2 border-b border-(--border-01) bg-(--background-tint-01) px-3 py-[10px]">
           <div className="text-sm font-semibold">Chat</div>
@@ -647,7 +647,7 @@ export function ChatWidget() {
         {error && (
           <div
             role="alert"
-            className="mx-3 mb-2 flex items-start gap-2 rounded-(--border-radius-04) border border-(--status-error-02) bg-(--status-error-01) px-[10px] py-2 text-xs text-(--status-text-error-05)"
+            className="mx-3 mb-2 flex items-start gap-2 rounded-(--radius-04) border border-(--status-error-02) bg-(--status-error-01) px-[10px] py-2 text-xs text-(--status-text-error-05)"
           >
             <div className="flex-1 whitespace-pre-wrap">{error}</div>
             {items.length > 0 && items[items.length - 1].kind === "user" && (
@@ -683,7 +683,7 @@ export function ChatWidget() {
             placeholder="Send a message…"
             rows={2}
             disabled={sending}
-            className="box-border min-w-0 flex-1 resize-none rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) p-2 font-[inherit] text-[13px] text-(--text-05) outline-none focus:border-(--border-05)"
+            className="box-border min-w-0 flex-1 resize-none rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) p-2 font-[inherit] text-[13px] text-(--text-05) outline-none focus:border-(--border-05)"
           />
           <Button
             type="submit"
@@ -888,7 +888,7 @@ function Bubble({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} min-w-0`}>
       <div
-        className={`max-w-[85%] min-w-0 rounded-(--border-radius-08) px-3 py-2 text-[13px] leading-[1.5] ${
+        className={`max-w-[85%] min-w-0 rounded-(--radius-08) px-3 py-2 text-[13px] leading-[1.5] ${
           isUser
             ? "bg-(--background-tint-inverted-00) text-(--text-inverted-05)"
             : "bg-(--background-tint-02) text-(--text-05)"

@@ -266,7 +266,7 @@ function AgentModelSection({
     <section>
       <div className={sectionHeaderClass}>Default model</div>
       {!editing ? (
-        <div className="flex items-center justify-between rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) px-4 py-3">
+        <div className="flex items-center justify-between rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) px-4 py-3">
           <div>
             {settings.provider &&
             PROVIDER_META[settings.provider as Provider] ? (
@@ -294,7 +294,7 @@ function AgentModelSection({
           </Button>
         </div>
       ) : (
-        <div className="flex flex-col rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01)">
+        <div className="flex flex-col rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01)">
           <div className="flex flex-col gap-1 p-3">
             {options.map(({ provider: p, model: m }) => {
               const isSelected = selProvider === p && selModel === m;
@@ -306,7 +306,7 @@ function AgentModelSection({
                     setSelProvider(p);
                     setSelModel(m);
                   }}
-                  className={`flex cursor-pointer items-center gap-3 rounded-(--border-radius-04) border px-3 py-[10px] text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+                  className={`flex cursor-pointer items-center gap-3 rounded-(--radius-04) border px-3 py-[10px] text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
                 >
                   <div
                     className={`flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded-full ${isSelected ? "border-none bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}
@@ -382,11 +382,11 @@ function ProviderCard({
   const hint = keyHint(provider, settings);
 
   return (
-    <div className="overflow-hidden rounded-(--border-radius-08) border border-(--border-01)">
+    <div className="overflow-hidden rounded-(--radius-08) border border-(--border-01)">
       {/* Card header row */}
       <div className="flex items-center gap-3 bg-(--background-tint-01) px-4 py-3">
         {/* Provider initial icon */}
-        <div className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-(--border-radius-04) bg-(--background-tint-02) text-[13px] font-bold text-(--text-04)">
+        <div className="flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-(--radius-04) bg-(--background-tint-02) text-[13px] font-bold text-(--text-04)">
           {meta.initial}
         </div>
 
@@ -583,10 +583,10 @@ function ProviderForm({
                 key={id}
                 type="button"
                 onClick={() => toggleModel(id)}
-                className={`flex cursor-pointer items-center gap-[10px] rounded-(--border-radius-08) border px-3 py-[10px] text-left ${checked ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+                className={`flex cursor-pointer items-center gap-[10px] rounded-(--radius-08) border px-3 py-[10px] text-left ${checked ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
               >
                 <div
-                  className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-(--border-radius-04) ${checked ? "border-none bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}
+                  className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-(--radius-04) ${checked ? "border-none bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}
                 >
                   {checked && (
                     <span className="flex text-(--text-inverted-05)">
@@ -738,7 +738,7 @@ function ModelListEditor({
         {models.map((id) => (
           <div
             key={id}
-            className="flex items-center justify-between rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) py-[6px] pr-2 pl-3"
+            className="flex items-center justify-between rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) py-[6px] pr-2 pl-3"
           >
             <span className="font-mono text-[13px] text-(--text-05)">{id}</span>
             <Button
@@ -1143,7 +1143,7 @@ function FormActions({
 }
 
 const inputClass =
-  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--border-radius-04) text-sm";
+  "w-full py-2 px-[10px] box-border border border-(--border-01) rounded-(--radius-04) text-sm";
 const lblClass = "mb-1 text-[13px] font-medium";
 const sectionHeaderClass =
   "text-[13px] font-semibold text-(--text-04) uppercase tracking-[0.05em] mb-3";

@@ -12,28 +12,38 @@ import {
 import { createPortal } from "react-dom";
 import {
   Button,
+  Divider,
   EmptyMessageCard,
+  InputTypeIn,
   MessageCard,
+  Text,
 } from "@onyx-ai/opal/components";
 import { cn } from "@onyx-ai/opal/utils";
 import {
   SvgAlertTriangle,
+  SvgArrowUpDown,
+  SvgCheck,
+  SvgChevronLeft,
   SvgDocFile,
-  SvgEdit,
   SvgFolder,
   SvgFolderPlus,
+  SvgLock,
+  SvgMoreHorizontal,
   SvgPlus,
-  SvgShare,
   SvgShield,
   SvgTrash,
   SvgWorkflow,
+  SvgZap,
 } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
 import { WikiHome } from "@/components/wiki/WikiHome";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
+import { StartNewPage } from "@/components/wiki/StartNewPage";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
+import WikiItemMenu from "@/components/wiki/WikiItemActions";
+import { useRowActions } from "@/providers/WikiItemActionsProvider";
 import { apiFetch, ApiError } from "@/lib/api";
 import { isDocId, wikiHref, wikiPath, revalidateWiki } from "@/lib/wikiHref";
 import { formatRelative } from "@/lib/format";
@@ -178,6 +188,7 @@ function Explorer({ dir }: ExplorerProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const rowActions = useRowActions();
   const { entries, error: listError, mutate: mutatePaths } = useWikiTree();
   const [mutationError, setMutationError] = useState<string | null>(null);
   const confirmDialog = useConfirm();
@@ -200,9 +211,7 @@ function Explorer({ dir }: ExplorerProps) {
   const [createBusy, setCreateBusy] = useState(false);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
-  const [sort, setSort] = useState<"name-asc" | "name-desc" | "recent">(
-    "name-asc",
-  );
+  const [sort, setSort] = useState<SortMode>("name-asc");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -357,23 +366,19 @@ function Explorer({ dir }: ExplorerProps) {
     }
   }
 
-  // Folder-level actions portal into the single pinned header as icon buttons;
-  // the breadcrumb there is the shared one (WikiHeader), so this view renders
-  // no header of its own.
+  // Folder-level actions portal into the single pinned header (mock
+  // 705:142993): New Page + new-folder, then share / trigger / launch-agent
+  // past a divider. The update policy lives inline in the side column. Mobile
+  // keeps it behind a header button + drawer instead.
   const headerActions = (
     <>
       <Button
-        icon={SvgWorkflow}
         prominence="tertiary"
-        tooltip="Trigger"
-        onClick={() => setTriggerModalOpen(true)}
-      />
-      <Button
-        icon={SvgShield}
-        prominence="tertiary"
-        tooltip="Update Policy"
-        onClick={() => setPolicyOpen(true)}
-      />
+        rightIcon={SvgPlus}
+        onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
+      >
+        New Page
+      </Button>
       <Button
         icon={SvgFolderPlus}
         prominence="tertiary"
@@ -383,158 +388,234 @@ function Explorer({ dir }: ExplorerProps) {
           setCreating((v) => (v === "folder" ? null : "folder"));
         }}
       />
+      <span aria-hidden className="mx-2 h-5 w-px bg-(--border-01)" />
       <Button
-        icon={SvgPlus}
-        variant="action"
-        tooltip="New document"
-        onClick={() => router.push(`/app/wiki/${dir}?new=1`)}
+        prominence="tertiary"
+        rightIcon={SvgLock}
+        onClick={() => setSharePath(dir)}
+      >
+        Share
+      </Button>
+      <Button
+        icon={SvgWorkflow}
+        prominence="tertiary"
+        tooltip="Trigger"
+        onClick={() => setTriggerModalOpen(true)}
       />
+      <Button
+        icon={SvgZap}
+        prominence="tertiary"
+        tooltip="Launch Agent"
+        onClick={() => rowActions.launchAgent(dir)}
+      />
+      {isMobile && (
+        <Button
+          icon={SvgShield}
+          prominence="tertiary"
+          tooltip="Update Policy"
+          onClick={() => setPolicyOpen(true)}
+        />
+      )}
     </>
   );
 
+  const parentDir = dir.split("/").slice(0, -1).join("/");
+  const cycleSort = () =>
+    setSort((s) => SORT_ORDER[(SORT_ORDER.indexOf(s) + 1) % SORT_ORDER.length]);
+  const sortLabel = SORT_LABEL[sort];
+
   return (
-    <main
-      className={cn(
-        "h-full overflow-y-auto",
-        isMobile ? "px-3 py-4" : "px-8 py-6",
-      )}
-    >
+    <main className="flex h-full min-h-0">
       {host?.el && createPortal(headerActions, host.el)}
 
-      <TriggerPanel
-        open={triggerModalOpen}
-        initial={{ scope_path: dir || "/" }}
-        lockScope
-        onClose={() => setTriggerModalOpen(false)}
-        onSaved={(t) => setTriggerStatus(`Created trigger for ${t.scope_path}`)}
-      />
+      <div
+        className={`min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      >
+        <TriggerPanel
+          open={triggerModalOpen}
+          initial={{ scope_path: dir || "/" }}
+          lockScope
+          onClose={() => setTriggerModalOpen(false)}
+          onSaved={(t) =>
+            setTriggerStatus(`Created trigger for ${t.scope_path}`)
+          }
+        />
 
-      {triggerStatus && (
-        <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
-      )}
+        {triggerStatus && (
+          <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
+        )}
 
-      {creating && (
-        <form
-          onSubmit={onCreate}
-          className="mb-4 flex gap-2 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) p-3"
-        >
-          <input
-            autoFocus
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="folder-name (or subdir/folder-name)"
-            disabled={createBusy}
-            className="flex-1 rounded-(--border-radius-04) border border-(--border-01) p-2 text-sm"
-          />
-          <Button
-            type="submit"
-            variant="action"
-            disabled={createBusy || !newName.trim()}
+        {creating && (
+          <form
+            onSubmit={onCreate}
+            className="mb-4 flex gap-2 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) p-3"
           >
-            Create folder
-          </Button>
-          <Button
-            type="button"
-            onClick={() => {
-              setCreating(null);
-              setNewName("");
-            }}
-          >
-            Cancel
-          </Button>
-        </form>
-      )}
+            <span className="min-w-0 flex-1">
+              <InputTypeIn
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="folder-name (or subdir/folder-name)"
+                aria-label="New folder name"
+              />
+            </span>
+            <Button
+              type="submit"
+              variant="action"
+              disabled={createBusy || !newName.trim()}
+            >
+              Create folder
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                setCreating(null);
+                setNewName("");
+              }}
+            >
+              Cancel
+            </Button>
+          </form>
+        )}
 
-      {error && (
-        <div className="mb-3 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+            {error}
+          </div>
+        )}
 
-      {subdirs.length === 0 && files.length === 0 && !error && (
-        <p className="text-sm text-(--text-03)">
-          This folder is empty. Create a document to get started.
-        </p>
-      )}
+        {subdirs.length === 0 && files.length === 0 && !error && (
+          <p className="text-sm text-(--text-03)">
+            This folder is empty. Create a document to get started.
+          </p>
+        )}
 
-      {(subdirs.length > 0 || files.length > 0) && (
-        <SortBar value={sort} onChange={setSort} />
-      )}
+        {/* Table surface: header line + white rows on a tint container
+            (mock's Table, tint-01 on radius-08, rows tint-00 on radius-12). */}
+        <div className="rounded-(--radius-08) bg-(--background-tint-01) p-1">
+          {(subdirs.length > 0 || files.length > 0) && (
+            // Column header line (mock 709:144294): Name spans, Last Updated
+            // carries the sort control cycling name ascending, descending, recent.
+            <div className="flex items-center px-3 pt-1 pb-2">
+              <span className="min-w-0 flex-1">
+                <Text font="main-ui-action" color="text-04">
+                  Name
+                </Text>
+              </span>
+              <Text font="main-ui-action" color="text-04" nowrap>
+                Last Updated
+              </Text>
+              <Button
+                icon={SvgArrowUpDown}
+                prominence="tertiary"
+                size="sm"
+                tooltip={`Sort: ${sortLabel}`}
+                onClick={cycleSort}
+              />
+            </div>
+          )}
 
-      <ul className="m-0 list-none p-0">
-        {(() => {
-          const dirEntries = subdirs.map((d) => ({ ...d, isFile: false }));
-          const fileEntries = files.map((f) => ({ ...f, isFile: true }));
-          // Folders always above docs; ordering within each group is set by `sort`.
-          const ordered = [...dirEntries, ...fileEntries];
-          return ordered.map(({ name, updated_at, isFile }) => {
-            const childPath = (dir ? dir + "/" : "") + name;
-            return (
-              <Row
-                key={(isFile ? "f:" : "d:") + name}
-                icon={
-                  isFile ? (
-                    <SvgDocFile size={20} aria-hidden />
-                  ) : (
-                    <SvgFolder size={20} aria-hidden />
+          <ul className="m-0 list-none p-0">
+            {dir && (
+              <BackRow
+                onClick={() =>
+                  router.push(
+                    parentDir ? `/app/wiki/${parentDir}` : "/app/wiki",
                   )
                 }
-                label={name}
-                updatedAt={updated_at}
-                href={`/app/wiki/${childPath}`}
-                path={childPath}
-                isFile={isFile}
-                busy={busyPath === childPath}
-                onDelete={() => onDelete(childPath)}
-                onShare={() => setSharePath(childPath)}
-                renaming={renaming === childPath}
-                onStartRename={() => setRenaming(childPath)}
-                onCancelRename={() => setRenaming(null)}
-                onSubmitRename={(v) => onRenameSubmit(childPath, v)}
-                onDragStart={() => setDragSource(childPath)}
-                onDragEnd={() => {
-                  setDragSource(null);
-                  setDropTarget(null);
-                }}
-                dropActive={!isFile && dropTarget === childPath}
-                onFolderDragOver={
-                  isFile
-                    ? undefined
-                    : () => {
-                        if (dragSource && dragSource !== childPath) {
-                          setDropTarget(childPath);
-                        }
-                      }
-                }
-                onFolderDragLeave={
-                  isFile
-                    ? undefined
-                    : () =>
-                        setDropTarget((cur) => (cur === childPath ? null : cur))
-                }
-                onFolderDrop={
-                  isFile
-                    ? undefined
-                    : () => {
-                        if (dragSource && dragSource !== childPath) {
-                          onMove(dragSource, childPath);
-                        }
-                        setDragSource(null);
-                        setDropTarget(null);
-                      }
-                }
               />
-            );
-          });
-        })()}
-      </ul>
-      {sharePath && (
-        <ShareDialog path={sharePath} open onClose={() => setSharePath(null)} />
+            )}
+            {(() => {
+              const dirEntries = subdirs.map((d) => ({ ...d, isFile: false }));
+              const fileEntries = files.map((f) => ({ ...f, isFile: true }));
+              // Folders always above docs. Ordering within each group is set by `sort`.
+              const ordered = [...dirEntries, ...fileEntries];
+              return ordered.map(({ name, updated_at, isFile }) => {
+                const childPath = (dir ? dir + "/" : "") + name;
+                return (
+                  <Row
+                    key={(isFile ? "f:" : "d:") + name}
+                    icon={
+                      isFile ? (
+                        <SvgDocFile size={18} aria-hidden />
+                      ) : (
+                        <SvgFolder size={18} aria-hidden />
+                      )
+                    }
+                    label={name}
+                    updatedAt={updated_at}
+                    href={`/app/wiki/${childPath}`}
+                    path={childPath}
+                    isFile={isFile}
+                    busy={busyPath === childPath}
+                    onDelete={() => onDelete(childPath)}
+                    renaming={renaming === childPath}
+                    onStartRename={() => setRenaming(childPath)}
+                    onCancelRename={() => setRenaming(null)}
+                    onSubmitRename={(v) => onRenameSubmit(childPath, v)}
+                    onDragStart={() => setDragSource(childPath)}
+                    onDragEnd={() => {
+                      setDragSource(null);
+                      setDropTarget(null);
+                    }}
+                    dropActive={!isFile && dropTarget === childPath}
+                    onFolderDragOver={
+                      isFile
+                        ? undefined
+                        : () => {
+                            if (dragSource && dragSource !== childPath) {
+                              setDropTarget(childPath);
+                            }
+                          }
+                    }
+                    onFolderDragLeave={
+                      isFile
+                        ? undefined
+                        : () =>
+                            setDropTarget((cur) =>
+                              cur === childPath ? null : cur,
+                            )
+                    }
+                    onFolderDrop={
+                      isFile
+                        ? undefined
+                        : () => {
+                            if (dragSource && dragSource !== childPath) {
+                              onMove(dragSource, childPath);
+                            }
+                            setDragSource(null);
+                            setDropTarget(null);
+                          }
+                    }
+                  />
+                );
+              });
+            })()}
+          </ul>
+        </div>
+        <div className="my-2">
+          <Divider />
+        </div>
+        <StartNewPage dir={dir} />
+
+        {sharePath && (
+          <ShareDialog
+            path={sharePath}
+            open
+            onClose={() => setSharePath(null)}
+          />
+        )}
+      </div>
+
+      {/* Folder policy applies to every page under this folder. Desktop shows
+          it inline in the side column (mock 1673:32813). Mobile keeps the
+          header button + drawer. */}
+      {!isMobile && (
+        <aside className="w-[360px] shrink-0 overflow-y-auto p-2">
+          <UpdatePolicyPanel path={dir} />
+        </aside>
       )}
-      {policyOpen && (
-        // Folder policy applies to every page under this folder. Shown as a
-        // right-side drawer (the folder listing isn't a flex row like the page
-        // view), reusing the same panel — ``dir`` is the folder path ("" = root).
+      {policyOpen && isMobile && (
         <>
           <div
             onClick={() => setPolicyOpen(false)}
@@ -827,7 +908,7 @@ function NewDocView({ dir }: NewDocViewProps) {
       />
 
       {error && (
-        <div className="rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+        <div className="rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {error}
         </div>
       )}
@@ -852,34 +933,68 @@ function NewDocView({ dir }: NewDocViewProps) {
             ? "Start typing, or pick a template above…"
             : "Start typing your new document…"
         }
-        className="box-border min-h-0 w-full flex-1 resize-none rounded-(--border-radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
+        className="box-border min-h-0 w-full flex-1 resize-none rounded-(--radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
       />
     </main>
   );
 }
 
 type SortMode = "name-asc" | "name-desc" | "recent";
+const SORT_ORDER: SortMode[] = ["name-asc", "name-desc", "recent"];
+const SORT_LABEL: Record<SortMode, string> = {
+  "name-asc": "Name (A → Z)",
+  "name-desc": "Name (Z → A)",
+  recent: "Recently updated",
+};
 
-interface SortBarProps {
-  value: SortMode;
-  onChange: (v: SortMode) => void;
+/* Shared card-row chrome for the folder listing: borderless white cards on
+   the table's tint background (mock rows 4857:368063). */
+const ROW_CLASS =
+  "mb-1 flex h-11 items-center rounded-(--radius-12) py-1 pr-2 pl-1";
+
+/* The mock's row menu glyph is vertical dots. The published icon set has only
+ * the horizontal variant, whose 90° rotation is identical geometry. Swap for
+ * an SvgMoreVertical once @onyx-ai/opal ships one. Button sizes icons via the
+ * style prop, so the transform must merge with it, never replace it. */
+const MoreVertical: NonNullable<
+  React.ComponentProps<typeof Button>["icon"]
+> = ({ style, ...props }) => (
+  <SvgMoreHorizontal
+    {...props}
+    style={{ ...style, transform: "rotate(90deg)" }}
+  />
+);
+
+/* The mock's shaded leading box: a 36px tint square holding the row's
+   file/folder glyph (Qualifier Container, tint-01 on radius-08). */
+function RowQualifier({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="mr-2 flex size-9 shrink-0 items-center justify-center rounded-(--radius-08) bg-(--background-tint-01) text-(--text-03)">
+      {children}
+    </span>
+  );
 }
 
-function SortBar({ value, onChange }: SortBarProps) {
+function BackRow({ onClick }: { onClick: () => void }) {
   return (
-    <div className="mb-2 flex items-center gap-2 text-xs text-(--text-03)">
-      <label htmlFor="wiki-sort">Sort:</label>
-      <select
-        id="wiki-sort"
-        value={value}
-        onChange={(e) => onChange(e.target.value as SortMode)}
-        className="rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-2 py-1 text-xs text-(--text-05)"
-      >
-        <option value="name-asc">Name (A → Z)</option>
-        <option value="name-desc">Name (Z → A)</option>
-        <option value="recent">Recently updated</option>
-      </select>
-    </div>
+    // raw-ok: the whole 44px table row is the click target. OPAL has no
+    // full-width table-row button primitive (LineItemButton is menu-scale).
+    <li
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") onClick();
+      }}
+      className={`${ROW_CLASS} cursor-pointer bg-(--background-tint-00) hover:bg-(--background-tint-02)`}
+    >
+      <RowQualifier>
+        <SvgChevronLeft size={18} aria-hidden />
+      </RowQualifier>
+      <span className="flex flex-1 items-center text-sm text-(--text-05)">
+        Back
+      </span>
+    </li>
   );
 }
 
@@ -892,7 +1007,6 @@ interface RowProps {
   isFile: boolean;
   busy: boolean;
   onDelete: () => void;
-  onShare?: () => void;
   renaming: boolean;
   onStartRename: () => void;
   onCancelRename: () => void;
@@ -914,7 +1028,6 @@ function Row({
   isFile,
   busy,
   onDelete,
-  onShare,
   renaming,
   onStartRename,
   onCancelRename,
@@ -928,6 +1041,7 @@ function Row({
 }: RowProps) {
   const router = useRouter();
   const [hover, setHover] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [draft, setDraft] = useState(label);
 
   useEffect(() => {
@@ -989,26 +1103,29 @@ function Row({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       className={cn(
-        "flex items-center border-b border-(--border-01) px-3 py-[10px]",
+        ROW_CLASS,
         dropActive
           ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)"
-          : hover
+          : hover || menuOpen
             ? "bg-(--background-tint-02)"
-            : "bg-transparent",
+            : "bg-(--background-tint-00)",
         busy ? "opacity-50" : "opacity-100",
         renaming ? "cursor-default" : "cursor-pointer",
       )}
     >
-      <span className="mr-[10px] flex text-(--text-03)">{icon}</span>
+      <RowQualifier>{icon}</RowQualifier>
       {renaming ? (
+        // Mock rename state (890:418642): the name cell becomes an input with
+        // its text preselected, confirmed by the check button or Enter.
         <form
           onSubmit={(e) => {
             e.preventDefault();
             onSubmitRename(draft);
           }}
-          className="flex flex-1 gap-1.5"
+          className="flex min-w-0 flex-1 items-center"
         >
-          <input
+          <InputTypeIn
+            onFocus={(e) => e.currentTarget.select()}
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -1018,81 +1135,62 @@ function Row({
                 onCancelRename();
               }
             }}
-            disabled={busy}
-            className="flex-1 rounded-(--border-radius-04) border border-(--border-01) px-2 py-1 text-sm"
+            aria-label={`Rename ${label}`}
+            rightChildren={
+              // Keep focus in the input across the click so Escape still
+              // works if the request errors.
+              <span onMouseDown={(e) => e.preventDefault()}>
+                <Button
+                  prominence="tertiary"
+                  size="sm"
+                  icon={SvgCheck}
+                  aria-label="Save name"
+                  disabled={busy || !draft.trim()}
+                  onClick={() => onSubmitRename(draft)}
+                />
+              </span>
+            }
           />
-          <Button
-            type="submit"
-            size="sm"
-            variant="action"
-            disabled={busy || !draft.trim()}
-          >
-            Save
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={onCancelRename}
-            disabled={busy}
-          >
-            Cancel
-          </Button>
         </form>
       ) : (
         // The label is a plain span — the click target is the parent
         // <li>. flex: 1 keeps it stretching to fill the space between
         // icon and action buttons, so any click on the label area
         // still hits the row's onClick.
-        <span className="flex flex-1 items-center gap-[10px] text-sm text-(--text-05)">
+        <span className="flex min-w-0 flex-1 items-center gap-[10px] overflow-hidden text-sm text-ellipsis whitespace-nowrap text-(--text-05)">
           {label}
         </span>
       )}
       {!renaming && (
         <>
-          <span className="mr-2 text-xs whitespace-nowrap text-(--text-02)">
+          <span className="w-[110px] shrink-0 text-xs whitespace-nowrap text-(--text-02)">
             {updatedAt ? relativeTime(updatedAt, "short") : "—"}
           </span>
-          {onShare && (
-            <button
-              onClick={onShare}
-              disabled={busy}
-              title="Share"
-              aria-label={`Share ${label}`}
-              className={cn(
-                "flex items-center border-none bg-transparent p-[6px]",
-                busy ? "cursor-not-allowed" : "cursor-pointer",
-                hover ? "text-(--text-04)" : "text-transparent",
-              )}
+          {/* White container pops the menu trigger off the grey hover row
+              (mock's Button/Icon Button, tint-00 on radius-08). */}
+          <span
+            className={cn(
+              "flex rounded-(--radius-08) bg-(--background-tint-00) transition-opacity duration-100",
+              hover || menuOpen ? "opacity-100" : "opacity-0",
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <WikiItemMenu
+              path={path}
+              isFolder={!isFile}
+              open={menuOpen}
+              onOpenChange={setMenuOpen}
+              align="end"
+              overrides={{ rename: onStartRename, remove: onDelete }}
             >
-              <SvgShare size={16} />
-            </button>
-          )}
-          <button
-            onClick={onStartRename}
-            disabled={busy}
-            title="Rename"
-            aria-label={`Rename ${label}`}
-            className={cn(
-              "flex items-center border-none bg-transparent p-[6px]",
-              busy ? "cursor-not-allowed" : "cursor-pointer",
-              hover ? "text-(--text-04)" : "text-transparent",
-            )}
-          >
-            <SvgEdit size={16} />
-          </button>
-          <button
-            onClick={onDelete}
-            disabled={busy}
-            title="Delete"
-            aria-label={`Delete ${label}`}
-            className={cn(
-              "flex items-center border-none bg-transparent p-[6px]",
-              busy ? "cursor-not-allowed" : "cursor-pointer",
-              hover ? "text-(--status-text-error-05)" : "text-transparent",
-            )}
-          >
-            <SvgTrash size={16} />
-          </button>
+              <Button
+                prominence="tertiary"
+                icon={MoreVertical}
+                disabled={busy}
+                aria-label={`More actions for ${label}`}
+              />
+            </WikiItemMenu>
+          </span>
         </>
       )}
     </li>

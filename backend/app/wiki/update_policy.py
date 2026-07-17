@@ -278,6 +278,46 @@ def _resolve_chain(chain: list[str], by_path: dict[str, UpdatePolicy]) -> Resolv
     )
 
 
+def resolve_ai_management_for_paths(paths: Iterable[str]) -> dict[str, bool | None]:
+    """Effective ``ai_management_allowed`` **tri-state** for many paths in a
+    single query (see ``resolve_ai_management`` for the tri-state meaning).
+
+    Fetches the union of every path's scope chain once, then resolves each path
+    most-granular-wins. Keyed by the *input* path strings. Use this instead of
+    per-path calls when checking a batch of proposal paths."""
+    chains = {p: _scope_chain(normalize_path(p)) for p in paths}
+    if not chains:
+        return {}
+    scopes = {scope for chain in chains.values() for scope in chain}
+    with session() as s:
+        rows = s.scalars(
+            select(UpdatePolicy).where(UpdatePolicy.path.in_(scopes))
+        ).all()
+    by_path = {r.path: r for r in rows}
+    result: dict[str, bool | None] = {}
+    for p, chain in chains.items():
+        value: bool | None = None
+        for scope in chain:
+            row = by_path.get(scope)
+            if row is not None and row.ai_management_allowed is not None:
+                value = row.ai_management_allowed
+                break
+        result[p] = value
+    return result
+
+
+def resolve_ai_management(path: str) -> bool | None:
+    """Effective ``ai_management_allowed`` **tri-state** for ``path``.
+
+    ``None`` = unset everywhere in the scope chain (so AI management stays
+    propose→approve); ``True`` = opted in (may auto-apply); ``False`` =
+    explicitly forbidden (also the do-not-consolidate marker). Distinct from
+    ``ResolvedPolicy.ai_management_allowed``, which collapses to a bool and so
+    can't tell "forbidden" from "unset" — detection needs that difference to
+    skip forbidden scopes while still proposing on unset ones."""
+    return resolve_ai_management_for_paths([path]).get(path)
+
+
 def resolve_for_paths(paths: Iterable[str]) -> dict[str, ResolvedPolicy]:
     """Effective policy for many paths in a single query.
 

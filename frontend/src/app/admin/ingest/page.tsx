@@ -235,7 +235,7 @@ function IngestForm() {
                       ? settings.api_key_hint
                       : "No key yet — click Regenerate"
                 }
-                className={`box-border w-full flex-1 rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm ${freshKey ? "font-mono" : ""}`}
+                className={`box-border w-full flex-1 rounded-(--radius-04) border border-(--border-01) px-[10px] py-2 text-sm ${freshKey ? "font-mono" : ""}`}
               />
               {freshKey && keyVisible && (
                 <Button
@@ -287,7 +287,7 @@ function IngestForm() {
             value={onyxBaseUrl}
             onChange={(e) => setOnyxBaseUrl(e.target.value)}
             placeholder="https://your-onyx.example.com"
-            className="box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 font-mono text-sm"
+            className="box-border w-full rounded-(--radius-04) border border-(--border-01) px-[10px] py-2 font-mono text-sm"
           />
           <div className="mt-1.5 text-xs text-(--text-03)">
             The public origin of your Onyx deployment (no trailing slash). Users
@@ -306,7 +306,7 @@ function IngestForm() {
             max={5000000}
             value={maxDocChars}
             onChange={(e) => setMaxDocChars(e.target.value)}
-            className="box-border w-[160px] rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
+            className="box-border w-[160px] rounded-(--radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           />
         </label>
 
@@ -326,7 +326,7 @@ function IngestForm() {
             min={0}
             value={warnDefault}
             onChange={(e) => setWarnDefault(e.target.value)}
-            className="box-border w-[160px] rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
+            className="box-border w-[160px] rounded-(--radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           />
         </label>
         <label>
@@ -338,7 +338,7 @@ function IngestForm() {
             min={0}
             value={autoCap}
             onChange={(e) => setAutoCap(e.target.value)}
-            className="box-border w-[160px] rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
+            className="box-border w-[160px] rounded-(--radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           />
         </label>
         <div className="flex items-center gap-3">
@@ -425,7 +425,7 @@ function SelectorModelSection({
         model.
       </div>
       {!editing ? (
-        <div className="flex items-center justify-between rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01) px-4 py-3">
+        <div className="flex items-center justify-between rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) px-4 py-3">
           <span
             className={`text-sm ${selModel && selModel !== settings.model ? "text-(--text-05)" : "text-(--text-03)"}`}
           >
@@ -441,7 +441,7 @@ function SelectorModelSection({
           </Button>
         </div>
       ) : (
-        <div className="flex flex-col rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-01)">
+        <div className="flex flex-col rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01)">
           <div className="flex flex-col gap-1 p-3">
             {hasNoModels && (
               <div className="py-1 pb-2 text-[13px] text-(--text-03)">
@@ -458,7 +458,7 @@ function SelectorModelSection({
             <button
               type="button"
               onClick={() => setSelModel("")}
-              className={`flex cursor-pointer items-center gap-3 rounded-(--border-radius-04) border px-3 py-[10px] text-left ${selModel === "" ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+              className={`flex cursor-pointer items-center gap-3 rounded-(--radius-04) border px-3 py-[10px] text-left ${selModel === "" ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
             >
               <div
                 className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${selModel === "" ? "bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}
@@ -480,7 +480,7 @@ function SelectorModelSection({
                   key={`${p}:${m}`}
                   type="button"
                   onClick={() => setSelModel(m)}
-                  className={`flex cursor-pointer items-center gap-3 rounded-(--border-radius-04) border px-3 py-[10px] text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+                  className={`flex cursor-pointer items-center gap-3 rounded-(--radius-04) border px-3 py-[10px] text-left ${isSelected ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
                 >
                   <div
                     className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${isSelected ? "bg-(--background-tint-inverted-00)" : "border-[1.5px] border-(--border-02) bg-transparent"}`}

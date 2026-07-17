@@ -88,7 +88,7 @@ export default function AppSidebar() {
 
   return (
     <SidebarLayouts.Root foldable>
-      <SidebarLayouts.Header logo={sidebarLogo}>
+      <SidebarLayouts.Header renderAppLogo={sidebarLogo}>
         {folded ? (
           <Button
             icon={SvgSearch}

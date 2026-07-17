@@ -5,10 +5,12 @@ import { Divider, LineItemButton, Popover } from "@onyx-ai/opal/components";
 import {
   SvgEdit,
   SvgFolderIn,
+  SvgFolderPlus,
   SvgLink,
+  SvgPlus,
   SvgShare,
-  SvgSparkle,
   SvgTrash,
+  SvgZap,
 } from "@onyx-ai/opal/icons";
 import { useRowActions } from "@/providers/WikiItemActionsProvider";
 
@@ -18,13 +20,16 @@ export interface WikiItemMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   align?: "start" | "center" | "end";
+  /** Replace the provider's rename/delete with surface-local flows (e.g. the
+   * folder explorer's inline rename and styled confirm). */
+  overrides?: { rename?: () => void; remove?: () => void };
   children: ReactNode;
 }
 
 /**
  * Per-item "⋯" actions menu. Spec: 160px wide, compact line items, dividers,
- * Delete in danger red. Folders omit "Launch Agent". The caller supplies the
- * trigger as `children`.
+ * Delete in danger red. Folders lead with New Page / New Folder and omit
+ * "Launch Agent". The caller supplies the trigger as `children`.
  */
 export default function WikiItemMenu({
   path,
@@ -32,6 +37,7 @@ export default function WikiItemMenu({
   open,
   onOpenChange,
   align = "start",
+  overrides,
   children,
 }: WikiItemMenuProps) {
   const actions = useRowActions();
@@ -44,6 +50,25 @@ export default function WikiItemMenu({
       <Popover.Trigger asChild>{children}</Popover.Trigger>
       <Popover.Content align={align} sideOffset={4} width="fit">
         <div className="box-border flex w-[160px] flex-col gap-[2px]">
+          {isFolder && (
+            <>
+              <LineItemButton
+                variant="body"
+                sizePreset="main-ui"
+                icon={SvgPlus}
+                title="New Page"
+                onClick={run(actions.newPage)}
+              />
+              <LineItemButton
+                variant="body"
+                sizePreset="main-ui"
+                icon={SvgFolderPlus}
+                title="New Folder"
+                onClick={run(actions.newFolder)}
+              />
+              <Divider />
+            </>
+          )}
           <LineItemButton
             variant="body"
             sizePreset="main-ui"
@@ -56,7 +81,7 @@ export default function WikiItemMenu({
             sizePreset="main-ui"
             icon={SvgEdit}
             title="Rename"
-            onClick={run(actions.rename)}
+            onClick={run(overrides?.rename ?? actions.rename)}
           />
           <LineItemButton
             variant="body"
@@ -77,7 +102,7 @@ export default function WikiItemMenu({
             <LineItemButton
               variant="body"
               sizePreset="main-ui"
-              icon={SvgSparkle}
+              icon={SvgZap}
               title="Launch Agent"
               onClick={run(actions.launchAgent)}
             />
@@ -91,7 +116,8 @@ export default function WikiItemMenu({
               title="Delete"
               onClick={() => {
                 onOpenChange(false);
-                actions.remove(path, isFolder);
+                if (overrides?.remove) overrides.remove();
+                else actions.remove(path, isFolder);
               }}
             />
           </span>

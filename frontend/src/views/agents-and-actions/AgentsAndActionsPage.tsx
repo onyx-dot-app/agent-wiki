@@ -61,7 +61,7 @@ function OnyxCraftSection() {
   if (isLoading || isUnavailable) return null;
 
   return (
-    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+    <section className="mb-4 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
       <h2 className="m-0 mb-1 text-base">Onyx Craft</h2>
       <p className="m-0 mb-3 text-[13px] text-(--text-03)">
         Connect your Onyx account to launch Craft builds from any wiki page with
@@ -84,21 +84,21 @@ function EndpointBlock() {
   }, []);
 
   return (
-    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+    <section className="mb-4 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
       <div className="mb-1.5 text-[13px] text-(--text-03)">MCP server URL</div>
       <div className="flex items-center gap-2">
-        <code className="flex-1 overflow-x-auto rounded-(--border-radius-04) bg-(--background-tint-02) px-[10px] py-2 font-mono text-xs text-(--text-05)">
+        <code className="flex-1 overflow-x-auto rounded-(--radius-04) bg-(--background-tint-02) px-[10px] py-2 font-mono text-xs text-(--text-05)">
           {endpoint || "—"}
         </code>
         <CopyButton text={endpoint} />
       </div>
       <div className="mt-2 text-xs text-(--text-03)">
         Send the API key in the{" "}
-        <code className="rounded-(--border-radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
+        <code className="rounded-(--radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
           Authorization
         </code>{" "}
         header as{" "}
-        <code className="rounded-(--border-radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
+        <code className="rounded-(--radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
           Bearer mcp_…
         </code>
         .
@@ -113,7 +113,7 @@ function TokenManager() {
   const [reveal, setReveal] = useState<CreatedToken | null>(null);
 
   return (
-    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+    <section className="mb-4 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="m-0 text-base">API keys</h2>
         <Button
@@ -125,7 +125,7 @@ function TokenManager() {
       </div>
 
       {error && (
-        <div className="mb-2 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+        <div className="mb-2 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {error.message || "Failed to load keys."}
         </div>
       )}
@@ -192,7 +192,7 @@ function TokenRow({ token, onRevoked }: TokenRowProps) {
   }
 
   return (
-    <li className="mt-2 flex items-center gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-3 py-[10px]">
+    <li className="mt-2 flex items-center gap-3 rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-3 py-[10px]">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-(--text-05)">{token.name}</div>
         <div className="mt-0.5 text-xs text-(--text-03)">
@@ -236,7 +236,7 @@ function CreateForm({ onCancel, onCreated }: CreateFormProps) {
   return (
     <form
       onSubmit={onSubmit}
-      className="mb-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-3"
+      className="mb-3 rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-01) p-3"
     >
       <label className="text-[13px] text-(--text-04)">
         Agent name
@@ -245,7 +245,7 @@ function CreateForm({ onCancel, onCreated }: CreateFormProps) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. Claude Code, Cursor, Codex"
-          className="mt-1 box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
+          className="mt-1 box-border w-full rounded-(--radius-04) border border-(--border-01) px-[10px] py-2 text-sm"
           maxLength={80}
         />
         <div className="mt-1.5 text-xs text-(--text-03)">
@@ -255,7 +255,7 @@ function CreateForm({ onCancel, onCreated }: CreateFormProps) {
         </div>
       </label>
       {err && (
-        <div className="mt-[10px] mb-2 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+        <div className="mt-[10px] mb-2 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {err}
         </div>
       )}
@@ -278,12 +278,12 @@ interface RevealOnceProps {
 
 function RevealOnce({ token, onClose }: RevealOnceProps) {
   return (
-    <div className="mb-3 rounded-(--border-radius-04) border border-(--status-warning-02) bg-(--status-warning-01) p-[14px]">
+    <div className="mb-3 rounded-(--radius-04) border border-(--status-warning-02) bg-(--status-warning-01) p-[14px]">
       <div className="text-sm font-semibold text-(--status-text-warning-05)">
         Copy your key now — this is the only time it&apos;ll be shown.
       </div>
       <div className="mt-[10px] flex items-center gap-2">
-        <code className="flex-1 overflow-x-auto rounded-(--border-radius-04) bg-(--background-tint-02) px-[10px] py-2 font-mono text-xs text-(--text-05)">
+        <code className="flex-1 overflow-x-auto rounded-(--radius-04) bg-(--background-tint-02) px-[10px] py-2 font-mono text-xs text-(--text-05)">
           {token.token}
         </code>
         <CopyButton text={token.token} />
@@ -320,7 +320,7 @@ function ClientConfigHelp() {
   );
 
   return (
-    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+    <section className="mb-4 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex cursor-pointer items-center gap-1.5 border-none bg-transparent p-0 text-sm font-medium text-(--text-05)"
@@ -332,12 +332,12 @@ function ClientConfigHelp() {
         <div className="mt-3">
           <div className="mb-1.5 text-[13px] text-(--text-04)">
             Sample{" "}
-            <code className="rounded-(--border-radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
+            <code className="rounded-(--radius-04) bg-(--background-tint-02) px-1 py-px font-mono text-xs">
               mcp_servers.json
             </code>{" "}
             entry — replace the placeholder with your generated key:
           </div>
-          <pre className="max-w-full flex-1 overflow-x-auto rounded-(--border-radius-04) bg-(--background-tint-02) p-3 px-[10px] py-2 font-mono text-xs whitespace-pre text-(--text-05)">
+          <pre className="max-w-full flex-1 overflow-x-auto rounded-(--radius-04) bg-(--background-tint-02) p-3 px-[10px] py-2 font-mono text-xs whitespace-pre text-(--text-05)">
             {claudeCodeSnippet}
           </pre>
         </div>
@@ -400,7 +400,7 @@ function CodingToolsSection() {
   }, [wizardOpen]);
 
   return (
-    <section className="mb-4 rounded-(--border-radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
+    <section className="mb-4 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-4">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="m-0 text-base">Coding tools</h2>
         <Button onClick={() => setWizardOpen(true)}>Set up tools</Button>
@@ -445,7 +445,7 @@ function CodingToolsSection() {
             aria-modal="true"
             aria-label="Set up launcher"
             tabIndex={-1}
-            className="max-h-[90vh] w-[min(560px,92vw)] overflow-y-auto rounded-(--border-radius-12) bg-(--background-tint-00) p-[22px] shadow-(--shadow-modal)"
+            className="max-h-[90vh] w-[min(560px,92vw)] overflow-y-auto rounded-(--radius-12) bg-(--background-tint-00) p-[22px] shadow-(--shadow-modal)"
           >
             <SetupWizard
               onDone={() => setWizardOpen(false)}

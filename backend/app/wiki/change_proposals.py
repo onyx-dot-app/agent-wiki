@@ -175,6 +175,31 @@ def list_for_run(run_id: str) -> list[dict[str, Any]]:
         return [_to_dict(r) for r in rows]
 
 
+def taken_dedupe_keys(statuses: tuple[ProposalStatus, ...]) -> set[str]:
+    """Dedupe keys (``op`` + sorted source+target path-set) of every proposal
+    currently in one of ``statuses`` — the detection runner's do-not-re-propose
+    set. Pass ``(pending, approved, applied, rejected)`` to avoid re-emitting an
+    in-flight, already-applied, or human-rejected change; ``expired``/``stale``
+    are intentionally omitted so a timed-out or drifted proposal can recur.
+
+    Key format matches ``ProposalDraft.dedupe_key`` in the detector seam."""
+    with session() as s:
+        # Project only the three columns the key needs — full rows would
+        # deserialize proposed_bodies / base_shas we immediately discard.
+        rows = s.execute(
+            select(
+                ChangeProposal.op,
+                ChangeProposal.source_paths,
+                ChangeProposal.target_paths,
+            ).where(ChangeProposal.status.in_([st.value for st in statuses]))
+        ).all()
+        keys: set[str] = set()
+        for op, source_paths, target_paths in rows:
+            paths = ",".join(sorted(list(source_paths) + list(target_paths)))
+            keys.add(f"{op}:{paths}")
+        return keys
+
+
 def _transition(
     proposal_id: int,
     *,

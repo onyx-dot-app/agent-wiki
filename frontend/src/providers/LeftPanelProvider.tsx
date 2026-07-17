@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -46,10 +47,12 @@ interface LeftPanelProviderProps {
 export function LeftPanelProvider({ children }: LeftPanelProviderProps) {
   const focus = useAppFocus();
   const [activitiesOpen, setActivitiesOpen] = useState(false);
-  const [treeOpen, setTreeOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined") return true;
-    return window.localStorage.getItem(TREE_OPEN_KEY) !== "0";
-  });
+  // Starts open on server and client alike so hydration matches. The stored
+  // preference applies after mount.
+  const [treeOpen, setTreeOpen] = useState(true);
+  useEffect(() => {
+    if (window.localStorage.getItem(TREE_OPEN_KEY) === "0") setTreeOpen(false);
+  }, []);
 
   const isOnWikiRoute = focus.isWiki();
 

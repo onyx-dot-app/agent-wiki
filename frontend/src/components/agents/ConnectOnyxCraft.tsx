@@ -42,7 +42,7 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
   // A non-dark error (500/timeout) surfaces rather than silently hiding.
   if (error || !status) {
     return (
-      <div className="rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+      <div className="rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
         Couldn&apos;t load your Onyx connection. Try again in a moment.
       </div>
     );
@@ -82,7 +82,7 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
 
   if (status.connected) {
     return (
-      <div className="flex items-center gap-3 rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-00) px-3 py-[10px]">
+      <div className="flex items-center gap-3 rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) px-3 py-[10px]">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-(--status-text-success-05)">
             ✓ Connected to Onyx
@@ -116,7 +116,7 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
     // Not a <form>: this drops into surfaces that are already inside a form
     // (the Run Agent panel), and a nested form submits the outer one — which
     // reloads the page and drops the connect. Submit via button + Enter key.
-    <div className="rounded-(--border-radius-04) border border-(--border-01) bg-(--background-tint-01) p-3">
+    <div className="rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-01) p-3">
       <label className="text-[13px] text-(--text-04)">
         Onyx Personal Access Token
         <input
@@ -131,7 +131,7 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
             }
           }}
           placeholder="onyx_pat_…"
-          className="mt-1 box-border w-full rounded-(--border-radius-04) border border-(--border-01) px-[10px] py-2 font-mono text-sm"
+          className="mt-1 box-border w-full rounded-(--radius-04) border border-(--border-01) px-[10px] py-2 font-mono text-sm"
           maxLength={1024}
         />
       </label>
@@ -153,7 +153,7 @@ export function ConnectOnyxCraft({ onConnected }: Props) {
         , then paste it here.
       </div>
       {err && (
-        <div className="mt-[10px] mb-1 rounded-(--border-radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+        <div className="mt-[10px] mb-1 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
           {err}
         </div>
       )}
