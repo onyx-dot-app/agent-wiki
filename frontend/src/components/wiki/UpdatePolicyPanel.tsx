@@ -1,12 +1,21 @@
 "use client";
 
-import { Button, Divider, Switch, Text } from "@onyx-ai/opal/components";
 import {
-  SvgAddLines,
+  Button,
+  Divider,
+  InputTextArea,
+  SelectButton,
+  Switch,
+  Text,
+  Tooltip,
+} from "@onyx-ai/opal/components";
+import { InputHorizontal } from "@onyx-ai/opal/layouts";
+import {
   SvgBell,
   SvgExpand,
   SvgHistory,
   SvgPauseCircle,
+  SvgSliders,
   SvgSparkle,
   SvgX,
 } from "@onyx-ai/opal/icons";
@@ -30,9 +39,11 @@ interface Props {
   // (folder page column, side-panel tab) rather than as a dismissable drawer.
   onClose?: () => void;
   fullHeight?: boolean;
-  // When set, the history card shows an "Update History" link that calls
-  // this. Omit on surfaces with no history view (e.g. the folder drawer).
+  // When set, the history card's expander toggles the host's version list.
+  // Omit on surfaces with no history view (e.g. the folder drawer).
   onShowHistory?: () => void;
+  /** Whether the host's version list is showing (tints the expander). */
+  historyOpen?: boolean;
 }
 
 function errorMessage(e: unknown): string {
@@ -42,49 +53,12 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong.";
 }
 
-interface PolicyRowProps {
-  title: string;
-  description: string;
-  /** Leads the row with the AI sparkle glyph (the mock marks only AI rows). */
-  sparkle?: boolean;
-  origin?: React.ReactNode;
-  control: React.ReactNode;
-}
-
-/** One labelled control row of the policy card (mock 1807:54673). */
-function PolicyRow({
-  title,
-  description,
-  sparkle,
-  origin,
-  control,
-}: PolicyRowProps) {
-  return (
-    <div className="flex items-start justify-between gap-2">
-      <div className="flex min-w-0 flex-1 gap-1">
-        {sparkle && (
-          <SvgSparkle size={16} className="mt-0.5 shrink-0 text-(--text-04)" />
-        )}
-        <div className="flex min-w-0 flex-col">
-          <Text font="main-ui-action" color="text-04">
-            {title}
-          </Text>
-          <Text font="secondary-body" color="text-03">
-            {description}
-          </Text>
-          {origin}
-        </div>
-      </div>
-      <div className="shrink-0 pt-0.5">{control}</div>
-    </div>
-  );
-}
-
 export function UpdatePolicyPanel({
   path,
   onClose,
   fullHeight,
   onShowHistory,
+  historyOpen,
 }: Props) {
   const kind = path.endsWith(".md") ? "page" : "folder";
 
@@ -183,29 +157,42 @@ export function UpdatePolicyPanel({
 
   const aiSwitchOn = pendingAiOn ?? effAiManaged;
 
-  function originLine(
+  // The switch carries the inheritance story out of the card body: origin
+  // in its tooltip, and a reset affordance that appears only while the card
+  // is hovered (the mock shows bare toggle rows).
+  function policySwitch(
+    checked: boolean,
+    onChange: (on: boolean) => void,
     setHere: boolean,
-    effOn: boolean,
     reset: () => void,
   ): React.ReactNode {
-    return setHere ? (
-      <div className="mt-1 flex items-center gap-2">
-        <span className="text-xs text-(--text-03)">Set on this {kind}</span>
-        <Button
-          prominence="tertiary"
-          size="sm"
-          disabled={saving}
-          onClick={reset}
-        >
-          Reset to inherited
-        </Button>
+    const origin = setHere
+      ? `Set on this ${kind}`
+      : checked
+        ? "Inherited from a parent folder"
+        : "Inherited (default)";
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <Tooltip tooltip={origin} side="left">
+          <Switch
+            checked={checked}
+            disabled={saving}
+            onCheckedChange={onChange}
+          />
+        </Tooltip>
+        {setHere && (
+          <span className="opacity-0 transition-opacity group-hover/policy:opacity-100">
+            <Button
+              prominence="tertiary"
+              size="sm"
+              disabled={saving}
+              onClick={reset}
+            >
+              Reset
+            </Button>
+          </span>
+        )}
       </div>
-    ) : (
-      <span className="mt-0.5 text-xs text-(--text-03)">
-        {effOn
-          ? "Inherited — on (from a parent folder)"
-          : "Inherited — off (default)"}
-      </span>
     );
   }
 
@@ -259,91 +246,81 @@ export function UpdatePolicyPanel({
           </div>
         ) : (
           <>
-            <div className="flex flex-col gap-2 rounded-(--radius-12) border border-(--border-01) p-3">
-              <PolicyRow
+            <div className="group/policy flex flex-col gap-2 rounded-(--radius-12) border border-(--border-01) p-3">
+              <InputHorizontal
+                icon={SvgSparkle}
                 title="AI Auto-Edits"
                 description={`Let AI update/organize this ${kind} on its own.`}
-                sparkle
-                origin={originLine(
+              >
+                {policySwitch(
+                  aiSwitchOn,
+                  onToggleAiManaged,
                   aiManagedSetHere,
-                  effAiManaged,
                   () => void save({ ai_management_allowed: null }),
                 )}
-                control={
-                  <Switch
-                    checked={aiSwitchOn}
-                    disabled={saving}
-                    onCheckedChange={onToggleAiManaged}
-                  />
-                }
-              />
-              <PolicyRow
+              </InputHorizontal>
+              <InputHorizontal
                 title="Update"
                 description="Periodically scan ingested data sources to add relevant new information."
-                origin={originLine(
+              >
+                {policySwitch(
+                  switchOn,
+                  onToggle,
                   disableSetHere,
-                  !effDisabled,
                   () => void save({ ingestion_auto_update_disabled: null }),
                 )}
-                control={
-                  <Switch
-                    checked={switchOn}
-                    disabled={saving}
-                    onCheckedChange={onToggle}
-                  />
-                }
-              />
-              <PolicyRow
+              </InputHorizontal>
+              <InputHorizontal
                 title="Organize"
                 description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
-                origin={
-                  <span className="mt-0.5 text-xs text-(--text-03)">
-                    Coming soon
+              >
+                <Tooltip tooltip="Coming soon" side="left">
+                  {/* The span keeps hover alive: a disabled control swallows
+                      pointer events, so the tooltip would never fire on it. */}
+                  <span className="inline-flex">
+                    <Switch checked={false} disabled />
                   </span>
-                }
-                control={<Switch checked={false} disabled />}
-              />
+                </Tooltip>
+              </InputHorizontal>
 
               <Divider paddingParallel="fit" paddingPerpendicular="fit" />
 
-              <PolicyRow
+              {/* Collapsed, the row's description is the instruction itself
+                  (mock 1855:273683). The expander opens the inline editor. */}
+              <InputHorizontal
                 title="Page Instructions"
-                description={`Add instructions on how this ${kind} should be updated.`}
-                control={
-                  !editing ? (
-                    <Button
-                      icon={SvgAddLines}
-                      prominence="secondary"
-                      tooltip="Edit instructions"
-                      onClick={() => {
-                        setDraft(ownInstruction);
-                        setEditing(true);
-                      }}
-                    />
-                  ) : null
+                description={
+                  ownInstruction ||
+                  effInstruction ||
+                  `Instruct the wiki on how to update this ${kind}.`
                 }
-              />
+              >
+                <SelectButton
+                  icon={SvgExpand}
+                  state={editing ? "selected" : "empty"}
+                  tooltip={editing ? "Collapse" : "Edit instructions"}
+                  onClick={() => {
+                    if (editing) {
+                      setEditing(false);
+                      return;
+                    }
+                    setDraft(ownInstruction);
+                    setEditing(true);
+                  }}
+                />
+              </InputHorizontal>
 
-              {!editing && ownInstruction && (
-                <div className="text-[13px] whitespace-pre-wrap text-(--text-05)">
-                  {ownInstruction}
-                </div>
-              )}
               {!editing && !ownInstruction && effInstruction && (
-                // No instruction of its own, so show the inherited one.
-                <div className="text-[13px] whitespace-pre-wrap text-(--text-05)">
-                  <span className="block text-xs text-(--text-03)">
-                    Inherited from a parent folder
-                  </span>
-                  {effInstruction}
-                </div>
+                <Text font="secondary-body" color="text-03">
+                  Inherited from a parent folder
+                </Text>
               )}
 
               {editing && (
                 <div>
-                  {/* raw-ok: InputTextArea's opal-input chrome duplicates the card border. */}
-                  <textarea
-                    className="box-border min-h-24 w-full resize-y rounded-(--radius-04) border border-(--border-01) bg-(--background-tint-00) p-2 font-[inherit] text-[13px] text-(--text-05) outline-none focus:border-(--border-05)"
+                  <InputTextArea
+                    rows={4}
+                    resizable
                     value={draft}
                     autoFocus
                     placeholder={`How should this ${kind} be updated?`}
@@ -405,11 +382,19 @@ export function UpdatePolicyPanel({
                   </div>
                   {kind === "page" && (
                     <Button
-                      icon={SvgExpand}
+                      icon={SvgSliders}
                       prominence="tertiary"
                       size="sm"
                       tooltip="Auto-edit limits"
                       onClick={() => setLimitOpen(true)}
+                    />
+                  )}
+                  {onShowHistory && (
+                    <SelectButton
+                      icon={SvgExpand}
+                      state={historyOpen ? "selected" : "empty"}
+                      tooltip="Version history"
+                      onClick={onShowHistory}
                     />
                   )}
                 </div>
@@ -440,18 +425,6 @@ export function UpdatePolicyPanel({
                           ? "Approaching daily auto-edit limit. Updates will pause when the limit is reached."
                           : "Auto-updating frequently."}
                     </Text>
-                  </div>
-                )}
-                {onShowHistory && (
-                  <div className="flex justify-end px-1 pb-1">
-                    <Button
-                      rightIcon={SvgHistory}
-                      prominence="tertiary"
-                      size="sm"
-                      onClick={onShowHistory}
-                    >
-                      Update History
-                    </Button>
                   </div>
                 )}
               </div>

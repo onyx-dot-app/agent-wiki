@@ -9,6 +9,7 @@ import {
 import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
 import AppSidebar from "@/sections/sidebar/AppSidebar";
+import { ChatWidget } from "@/components/chat/ChatWidget";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
 import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import {
@@ -179,6 +180,9 @@ function AppContent({ children }: AppContentProps) {
           <RootLayout.MainContent>{children}</RootLayout.MainContent>
         </RootLayout.App>
         <RightPanelHost />
+        {/* Inside the providers so the docked chat can portal into the right
+            rail beside the app column. */}
+        <ChatWidget />
       </WikiItemActionsProvider>
     </WikiHeaderActionsProvider>
   );

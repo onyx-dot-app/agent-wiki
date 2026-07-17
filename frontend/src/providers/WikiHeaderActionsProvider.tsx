@@ -1,6 +1,12 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 // Lets a wiki route render page-level chrome into the shared app shell instead
 // of duplicating it inside the scrollable content:
@@ -25,6 +31,18 @@ const HeaderActionsContext = createContext<ChromeHost | null>(null);
 const AgentsBarContext = createContext<ChromeHost | null>(null);
 const RightPanelContext = createContext<ChromeHost | null>(null);
 
+/** Who currently owns the right rail. The rail fits one occupant (a
+ *  doc-owned panel or the docked chat), so claiming it tells the other to
+ *  yield. */
+export type RailOwner = "panel" | "chat" | null;
+
+interface RailOwnerState {
+  owner: RailOwner;
+  claim: (owner: RailOwner) => void;
+}
+
+const RailOwnerContext = createContext<RailOwnerState | null>(null);
+
 export function WikiHeaderActionsProvider({
   children,
 }: {
@@ -33,15 +51,28 @@ export function WikiHeaderActionsProvider({
   const [headerEl, setHeaderEl] = useState<HTMLElement | null>(null);
   const [agentsEl, setAgentsEl] = useState<HTMLElement | null>(null);
   const [rightEl, setRightEl] = useState<HTMLElement | null>(null);
+  const [railOwner, setRailOwner] = useState<RailOwner>(null);
+  // Memoized so owner consumers don't re-render when a host element mounts.
+  const railValue = useMemo<RailOwnerState>(
+    () => ({ owner: railOwner, claim: setRailOwner }),
+    [railOwner],
+  );
   return (
     <HeaderActionsContext.Provider value={{ el: headerEl, setEl: setHeaderEl }}>
       <AgentsBarContext.Provider value={{ el: agentsEl, setEl: setAgentsEl }}>
         <RightPanelContext.Provider value={{ el: rightEl, setEl: setRightEl }}>
-          {children}
+          <RailOwnerContext.Provider value={railValue}>
+            {children}
+          </RailOwnerContext.Provider>
         </RightPanelContext.Provider>
       </AgentsBarContext.Provider>
     </HeaderActionsContext.Provider>
   );
+}
+
+/** Read/claim the right rail. Null outside the provider. */
+export function useRailOwner(): RailOwnerState | null {
+  return useContext(RailOwnerContext);
 }
 
 /** Read the pinned-header actions host. Null outside the provider. */

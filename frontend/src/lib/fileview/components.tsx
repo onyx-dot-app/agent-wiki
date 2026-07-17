@@ -24,6 +24,7 @@ import {
   SvgDocFile,
   SvgFolder,
   SvgHistory,
+  SvgMoreHorizontal,
   SvgShare,
   SvgSidebar,
   SvgSparkle,
@@ -69,6 +70,7 @@ import { useCoeditSession } from "@/lib/coeditor/hooks";
 import {
   useAgentsBarHost,
   useHeaderActionsHost,
+  useRailOwner,
   useRightPanelHost,
 } from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
@@ -161,6 +163,7 @@ export function FileView({ path }: FileViewProps) {
   const host = useHeaderActionsHost();
   const agentsBarHost = useAgentsBarHost();
   const rightHost = useRightPanelHost();
+  const rail = useRailOwner();
   const { isActivitiesOpen, toggleActivities } = useLeftPanel();
   const { refresh: refreshTriggers } = useTriggers();
   const { setDrafting, requestExpand } = useDrafting();
@@ -177,6 +180,7 @@ export function FileView({ path }: FileViewProps) {
   const [editingTrigger, setEditingTrigger] = useState<Trigger | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const confirmDialog = useConfirm();
   // History state. `viewingSha` is null when looking at the working-tree
   // (latest) version; otherwise it's the sha being viewed and is what we
@@ -208,25 +212,44 @@ export function FileView({ path }: FileViewProps) {
   const focusedCommentRef = useRef<string | null>(null);
 
   // The side panel is mutually exclusive with the triggers surfaces. Every
-  // path that opens one closes the other (every opener routes through
-  // here). The version-history list lives inside the Updates tab and
+  // path that opens one closes the other (the panel openers all route
+  // through here). The version-history list lives inside the Updates tab and
   // collapses with the panel, so opening the panel leaves `historyOpen`
   // alone.
-  const openPanel = useCallback((tab: DocPanelTab) => {
-    setAutomationsOpen(false);
-    setTriggerModalOpen(false);
-    setEditingTrigger(null);
-    setPanelTab(tab);
-    // A pending selection draft only makes sense on the Comments tab.
-    if (tab !== "comments") setCommentDraft(null);
-  }, []);
+  const claimRail = rail?.claim;
+  const openPanel = useCallback(
+    (tab: DocPanelTab) => {
+      setAutomationsOpen(false);
+      setTriggerModalOpen(false);
+      setEditingTrigger(null);
+      setPanelTab(tab);
+      claimRail?.("panel");
+      // A pending selection draft only makes sense on the Comments tab.
+      if (tab !== "comments") setCommentDraft(null);
+    },
+    [claimRail],
+  );
   // Closing the panel also collapses the history list. An active diff
   // stays in the doc area (closing chrome never switches the document).
   const closePanel = useCallback(() => {
     setPanelTab(null);
     setCommentDraft(null);
     setHistoryOpen(false);
-  }, []);
+    claimRail?.(null);
+  }, [claimRail]);
+
+  // The rail fits one occupant. When the docked chat claims it, every doc
+  // surface that renders there yields.
+  const railOwner = rail?.owner;
+  useEffect(() => {
+    if (railOwner !== "chat") return;
+    setPanelTab(null);
+    setCommentDraft(null);
+    setHistoryOpen(false);
+    setAutomationsOpen(false);
+    setTriggerModalOpen(false);
+    setEditingTrigger(null);
+  }, [railOwner]);
   const openComments = useCallback(() => openPanel("comments"), [openPanel]);
 
   const refreshComments = useCallback(async () => {
@@ -822,10 +845,9 @@ export function FileView({ path }: FileViewProps) {
 
   // Page actions live in the single pinned header (WikiHeader), not a second
   // header inside the scroll area — they portal into its right-aligned slot.
-  // The panel toggles are icon SelectButtons so the open panel shows the
-  // selected tint. The presence cluster leads, the rest are tertiary icon
-  // Buttons with the lone solid CTA (Edit). Editing swaps in the single
-  // labelled Done CTA.
+  // The presence cluster leads, then tertiary icon Buttons, with the
+  // side-panel SelectButton tinted while the panel is open. Editing swaps
+  // in the single labelled Done CTA.
   const headerActions = editing ? (
     // One exit: "Done" leaves the session (committing the shared buffer). There
     // is no Cancel — the buffer is the live shared document, so a single
@@ -841,40 +863,84 @@ export function FileView({ path }: FileViewProps) {
         onOpenUpdates={() => openPanel("updates")}
       />
       <Button
-        icon={SvgSparkle}
-        prominence="tertiary"
-        tooltip="Run Agent"
-        onClick={() => setRunAgentOpen(true)}
-      />
-      <SelectButton
-        icon={SvgWorkflow}
-        state={automationsOpen ? "selected" : "empty"}
-        tooltip="Triggers"
-        onClick={() => {
-          if (automationsOpen || triggerModalOpen) {
-            setAutomationsOpen(false);
-            setTriggerModalOpen(false);
-            setEditingTrigger(null);
-            return;
-          }
-          setHistoryOpen(false);
-          setPanelTab(null);
-          setCommentDraft(null);
-          setAutomationsOpen(true);
-        }}
-      />
-      <Button
         icon={SvgShare}
         prominence="tertiary"
         tooltip="Share"
         onClick={() => setShareOpen(true)}
       />
-      <SelectButton
-        icon={SvgHistory}
-        state={historyOpen ? "selected" : "empty"}
-        tooltip="History"
-        onClick={toggleHistory}
-      />
+      {/* Everything beyond the mock's header row (1790:52304) lives in the
+          More menu: edit, agents, triggers, version history. */}
+      <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+        <Popover.Trigger asChild>
+          <span className="inline-flex">
+            <Button
+              icon={SvgMoreHorizontal}
+              prominence="tertiary"
+              tooltip="More"
+            />
+          </span>
+        </Popover.Trigger>
+        <Popover.Content width="fit" align="end">
+          <Popover.Menu>
+            {/* Editing always targets current HEAD via a co-edit session, so
+                hide Edit while viewing an older commit ("Back to latest"
+                first). */}
+            {!viewingOld && (
+              <LineItemButton
+                title="Edit page"
+                icon={SvgEdit}
+                sizePreset="main-ui"
+                variant="section"
+                onClick={() => {
+                  setMoreOpen(false);
+                  startEdit();
+                }}
+              />
+            )}
+            <LineItemButton
+              title="Run Agent"
+              icon={SvgSparkle}
+              sizePreset="main-ui"
+              variant="section"
+              onClick={() => {
+                setMoreOpen(false);
+                setRunAgentOpen(true);
+              }}
+            />
+            <LineItemButton
+              title="Triggers"
+              icon={SvgWorkflow}
+              sizePreset="main-ui"
+              variant="section"
+              onClick={() => {
+                setMoreOpen(false);
+                if (automationsOpen || triggerModalOpen) {
+                  setAutomationsOpen(false);
+                  setTriggerModalOpen(false);
+                  setEditingTrigger(null);
+                  claimRail?.(null);
+                  return;
+                }
+                setHistoryOpen(false);
+                setPanelTab(null);
+                setCommentDraft(null);
+                setAutomationsOpen(true);
+                claimRail?.("panel");
+              }}
+            />
+            <LineItemButton
+              title="Version history"
+              icon={SvgHistory}
+              sizePreset="main-ui"
+              variant="section"
+              onClick={() => {
+                setMoreOpen(false);
+                void toggleHistory();
+              }}
+            />
+          </Popover.Menu>
+        </Popover.Content>
+      </Popover>
       {/* Comments and update policy live in the side panel's tabs. The
           toggle opens the panel on Updates and closes it wholesale. */}
       <SelectButton
@@ -883,16 +949,6 @@ export function FileView({ path }: FileViewProps) {
         tooltip="Side panel"
         onClick={() => (panelTab ? closePanel() : openPanel("updates"))}
       />
-      {/* Editing always targets current HEAD via a co-edit session, so hide
-          Edit while viewing an older commit — "Back to latest" first. */}
-      {!viewingOld && (
-        <Button
-          icon={SvgEdit}
-          variant="action"
-          tooltip="Edit"
-          onClick={startEdit}
-        />
-      )}
     </>
   ) : null;
 
@@ -903,7 +959,11 @@ export function FileView({ path }: FileViewProps) {
       onTabChange={openPanel}
       updates={
         <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <UpdatePolicyPanel path={path} onShowHistory={toggleHistory} />
+          <UpdatePolicyPanel
+            path={path}
+            onShowHistory={toggleHistory}
+            historyOpen={historyOpen}
+          />
           {historyOpen && (
             // Version list expands under the policy cards (mock 1855:273363).
             // The fixed-height clipped wrapper hosts HistoryPanel's

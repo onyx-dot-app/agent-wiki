@@ -1,7 +1,7 @@
 "use client";
 
-import { type FormEvent, type KeyboardEvent, type Ref } from "react";
-import { Button, Text } from "@onyx-ai/opal/components";
+import { useEffect, useState, type KeyboardEvent, type Ref } from "react";
+import { Button, InputTextArea, Text, Tooltip } from "@onyx-ai/opal/components";
 import {
   SvgArrowUp,
   SvgBubbleText,
@@ -18,8 +18,37 @@ import {
   SvgOllama,
   SvgOpenai,
 } from "@onyx-ai/opal/logos";
+import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLLMStatus } from "@/lib/llm";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
+
+/** Horizontal center of the doc column, so the bar floats over the content
+ *  area rather than the viewport (side panels and the tree shift it). Null
+ *  until measured, or when no content column exists. */
+function useContentCenterX(pathKey: string | null): number | null {
+  const [x, setX] = useState<number | null>(null);
+  useEffect(() => {
+    const el = document.querySelector("main");
+    const measure = () => {
+      if (!el) {
+        setX(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      setX(r.left + r.width / 2);
+    };
+    measure();
+    const ro = el ? new ResizeObserver(measure) : null;
+    if (el && ro) ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+    // pathKey re-attaches the observer when navigation swaps the main element.
+  }, [pathKey]);
+  return x;
+}
 
 const PROVIDER_LOGOS: Record<string, IconFunctionComponent> = {
   anthropic: SvgAnthropic,
@@ -29,39 +58,27 @@ const PROVIDER_LOGOS: Record<string, IconFunctionComponent> = {
   bedrock: SvgAws,
 };
 
-/** Segmented Chat | Edit | Automations selector (mock 1829:64849). Chat is
+/** Segmented Chat | Edit | Automations selector (mock 1829:64849): the
+ *  active segment reads as a white card, the rest are icon-only. Chat is
  *  the only live mode today, so the other segments render disabled. */
 export function ModeSelector() {
   return (
     <div className="flex items-center rounded-(--radius-12) bg-(--background-tint-03)">
-      {/* raw-ok: no Opal Tabs variant fits. Contained is an equal-width grid, pill/underline are underline-indicator styles. The mock needs chip-style content-width segments (icon+label active, icon-only inactive). */}
-      <button
-        type="button"
-        className="flex items-center gap-1 rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00) p-2 shadow-(--shadow-chip)"
-      >
-        <SvgBubbleText size={20} className="text-(--text-04)" />
-        <Text font="main-ui-action" color="text-04">
-          Chat
-        </Text>
-      </button>
-      {/* raw-ok: same segmented-control gap as above. */}
-      <button
-        type="button"
+      <Button icon={SvgBubbleText} prominence="secondary">
+        Chat
+      </Button>
+      <Button
+        icon={SvgEditBig}
+        prominence="internal"
+        tooltip="Edit mode coming soon"
         disabled
-        title="Edit mode coming soon"
-        className="flex items-center rounded-(--radius-12) p-2 text-(--text-03)"
-      >
-        <SvgEditBig size={20} />
-      </button>
-      {/* raw-ok: same segmented-control gap as above. */}
-      <button
-        type="button"
+      />
+      <Button
+        icon={SvgZap}
+        prominence="internal"
+        tooltip="Automations coming soon"
         disabled
-        title="Automations coming soon"
-        className="flex items-center rounded-(--radius-12) p-2 text-(--text-03)"
-      >
-        <SvgZap size={20} />
-      </button>
+      />
     </div>
   );
 }
@@ -72,15 +89,14 @@ export function ModelChip() {
   if (!status?.model) return null;
   const Logo = PROVIDER_LOGOS[status.provider];
   return (
-    <div
-      title="Model is set in Admin, Language Models"
-      className="flex items-center gap-1 rounded-(--radius-12) bg-(--background-tint-00) p-2 shadow-(--shadow-chip)"
-    >
-      {Logo && <Logo size={20} />}
-      <Text font="main-ui-action" color="text-04">
-        {status.model}
-      </Text>
-    </div>
+    <Tooltip tooltip="Model is set in Admin, Language Models" side="top">
+      <div className="flex items-center gap-1 rounded-(--radius-12) bg-(--background-tint-00) p-2 shadow-(--shadow-chip)">
+        {Logo && <Logo size={20} />}
+        <Text font="main-ui-action" color="text-04">
+          {status.model}
+        </Text>
+      </div>
+    </Tooltip>
   );
 }
 
@@ -103,31 +119,26 @@ export function Composer({
   inputRef,
 }: ComposerProps) {
   const canSend = input.trim() !== "" && !sending;
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (canSend) onSubmit();
-  };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (canSend) onSubmit();
     }
   };
-  // raw-ok: plain form element wiring Enter/submit. No Opal form wrapper exists.
   return (
-    <form
-      onSubmit={submit}
-      className="flex w-full flex-col rounded-(--radius-16) bg-(--background-tint-00) shadow-(--shadow-chip)"
-    >
-      {/* raw-ok: composer needs a toolbar row below the text inside one surface. InputTextArea offers only a top-right rightSection and paints .opal-input chrome that fights the mock's radius-16 chip. */}
-      <textarea
+    <div className="flex w-full flex-col rounded-(--radius-16) bg-(--background-tint-00) shadow-(--shadow-chip)">
+      {/* The internal variant is the borderless field, so the radius-16
+          surface above stays the only chrome. */}
+      <InputTextArea
         ref={inputRef}
+        variant="internal"
         rows={1}
+        autoResize
+        maxRows={6}
         value={input}
         onChange={(e) => onInputChange(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder="Ask wiki or write with AI…"
-        className="w-full resize-none border-none bg-transparent px-3.5 pt-3 pb-2 text-base leading-6 text-(--text-05) outline-none placeholder:text-(--text-02)"
       />
       <div className="flex items-center justify-between p-1">
         <Button
@@ -142,11 +153,11 @@ export function Composer({
           variant="action"
           size="sm"
           tooltip="Send"
-          type="submit"
+          onClick={onSubmit}
           disabled={!canSend}
         />
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -175,9 +186,15 @@ export function ChatBar({
   onSubmit,
   sending,
 }: ChatBarProps) {
+  const { wikiPath } = useAppFocus();
+  const centerX = useContentCenterX(wikiPath);
+  const centerStyle = centerX !== null ? { left: centerX } : undefined;
   if (collapsed) {
     return (
-      <div className="fixed bottom-6 left-1/2 z-[1000] -translate-x-1/2 rounded-(--radius-round) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-bar)">
+      <div
+        className="fixed bottom-6 left-1/2 z-[1000] -translate-x-1/2 rounded-(--radius-round) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-bar)"
+        style={centerStyle}
+      >
         <div className="flex items-center gap-1">
           <Button
             icon={SvgBubbleText}
@@ -206,7 +223,10 @@ export function ChatBar({
   }
 
   return (
-    <div className="fixed bottom-6 left-1/2 z-[1000] w-[min(752px,calc(100vw-48px))] -translate-x-1/2">
+    <div
+      className="fixed bottom-6 left-1/2 z-[1000] w-[min(752px,calc(100vw-48px))] -translate-x-1/2"
+      style={centerStyle}
+    >
       <div className="flex flex-col gap-1 rounded-(--radius-20) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-bar)">
         <div className="flex items-center">
           <div className="p-1">

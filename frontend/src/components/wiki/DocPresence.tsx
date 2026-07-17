@@ -1,6 +1,6 @@
 "use client";
 
-import { IconContainer } from "@onyx-ai/opal/components";
+import { Button, IconContainer } from "@onyx-ai/opal/components";
 import { SvgSparkle } from "@onyx-ai/opal/icons";
 import type { CoeditParticipant } from "@/lib/coeditor/types";
 import { useUpdateHealth, type UpdateHealth } from "@/lib/wiki";
@@ -88,19 +88,22 @@ export function DocPresence({
         </div>
       )}
       {visible.length > 0 && <div className="mx-1 h-4 w-px bg-(--border-01)" />}
-      {/* raw-ok: the status control is a 20px avatar circle with a state ring, no Opal button variant renders avatar chrome. */}
-      <button
-        type="button"
-        title={STATE_TOOLTIP[state]}
+      <Button
+        prominence="internal"
+        size="sm"
+        tooltip={STATE_TOOLTIP[state]}
         onClick={onOpenUpdates}
-        className="flex size-5 items-center justify-center rounded-(--radius-round) border bg-(--background-tint-00)"
-        style={{ borderColor: `var(${STATE_RING[state]})` }}
-      >
-        <SvgSparkle
-          size={14}
-          className={state === "off" ? "text-(--text-02)" : "text-(--text-04)"}
-        />
-      </button>
+        icon={({ style }) => (
+          <span
+            style={{ ...style, borderColor: `var(${STATE_RING[state]})` }}
+            className={`flex items-center justify-center rounded-(--radius-round) border bg-(--background-tint-00) ${
+              state === "off" ? "text-(--text-02)" : "text-(--text-04)"
+            }`}
+          >
+            <IconContainer icon={SvgSparkle} size="secondary" />
+          </span>
+        )}
+      />
     </div>
   );
 }

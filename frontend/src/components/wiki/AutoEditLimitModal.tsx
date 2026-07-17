@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, InputTypeIn, Text } from "@onyx-ai/opal/components";
-import { SvgBell, SvgSliders, SvgX } from "@onyx-ai/opal/icons";
+import { Button, InputTypeIn, Tag, Text } from "@onyx-ai/opal/components";
+import { InputHorizontal } from "@onyx-ai/opal/layouts";
+import { SvgBell, SvgPauseCircle, SvgSliders, SvgX } from "@onyx-ai/opal/icons";
 
 interface UsageBarProps {
   count: number;
@@ -36,31 +37,21 @@ export function UsageBar({ count, threshold, cap }: UsageBarProps) {
         )}
         <div className="absolute inset-y-0 right-0 w-0.5 bg-(--theme-orange-05)" />
       </div>
-      {/* Chips use the mock's 10px figure type, which has no Text token. */}
       <div className="flex items-center justify-end gap-1">
         {threshold > 0 && (
-          <span
-            className={`flex items-center gap-0.5 rounded-(--radius-04) p-0.5 text-[10px] leading-3 ${
-              warning
-                ? "border border-(--theme-amber-02) bg-(--theme-amber-01)"
-                : "bg-(--background-tint-02)"
-            }`}
-          >
-            {warning && <SvgBell size={12} className="text-(--text-04)" />}
-            <span className="px-0.5 text-(--text-04)">Alert:</span>
-            <span className="text-(--text-03)">{threshold}</span>
-          </span>
+          <Tag
+            title="Alert:"
+            value={String(threshold)}
+            color={warning ? "amber" : "gray"}
+            icon={warning ? SvgBell : undefined}
+          />
         )}
-        <span
-          className={`flex items-center gap-0.5 rounded-(--radius-04) p-0.5 text-[10px] leading-3 ${
-            limit
-              ? "border border-(--status-warning-02) bg-(--status-warning-01)"
-              : "bg-(--background-tint-02)"
-          }`}
-        >
-          <span className="px-0.5 text-(--text-04)">Auto-Edit Limit:</span>
-          <span className="text-(--text-03)">{cap}</span>
-        </span>
+        <Tag
+          title="Auto-Edit Limit:"
+          value={String(cap)}
+          color={limit ? "red" : "gray"}
+          icon={limit ? SvgPauseCircle : undefined}
+        />
       </div>
     </div>
   );
@@ -168,16 +159,11 @@ export function AutoEditLimitModal({
           <UsageBar count={count} threshold={threshold} cap={cap} />
         </div>
 
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Text font="main-ui-action" color="text-04">
-              Alert Threshold
-            </Text>
-            <Text font="secondary-body" color="text-03">
-              Notify the page owner when daily auto-edits reach this threshold.
-            </Text>
-          </div>
-          <div className="w-40 shrink-0">
+        <InputHorizontal
+          title="Alert Threshold"
+          description="Notify the page owner when daily auto-edits reach this threshold."
+        >
+          <div className="w-40">
             <InputTypeIn
               type="number"
               min={0}
@@ -188,18 +174,13 @@ export function AutoEditLimitModal({
               onChange={(e) => setDraft(e.target.value)}
             />
           </div>
-        </div>
+        </InputHorizontal>
 
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Text font="main-ui-action" color="text-04">
-              Daily Auto-Edit Limit
-            </Text>
-            <Text font="secondary-body" color="text-03">
-              Pause auto-edits when daily auto-edits reach this limit.
-            </Text>
-          </div>
-          <div className="flex w-40 shrink-0 flex-col gap-1">
+        <InputHorizontal
+          title="Daily Auto-Edit Limit"
+          description="Pause auto-edits when daily auto-edits reach this limit."
+        >
+          <div className="flex w-40 flex-col gap-1">
             <InputTypeIn
               variant="disabled"
               value={cap > 0 ? String(cap) : "No limit"}
@@ -209,7 +190,7 @@ export function AutoEditLimitModal({
               Daily limit is set and locked by admins.
             </Text>
           </div>
-        </div>
+        </InputHorizontal>
 
         <div className="flex justify-end gap-2">
           <Button prominence="secondary" onClick={onClose} disabled={saving}>

@@ -15,21 +15,24 @@ import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import styles from "./ChatWidget.module.css";
 
 import { Button } from "@onyx-ai/opal/components";
+import { createPortal } from "react-dom";
 import {
   SvgCheck,
   SvgChevronDown,
   SvgChevronRight,
+  SvgChevronUp,
   SvgCopy,
   SvgDocFile,
   SvgEdit,
-  SvgFold,
   SvgHistory,
   SvgRefreshCw,
+  SvgSidebar,
   SvgThumbsDown,
   SvgThumbsUp,
   SvgX,
   SvgXCircle,
 } from "@onyx-ai/opal/icons";
+import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 import {
   ChatBar,
   Composer,
@@ -49,6 +52,11 @@ import {
 } from "@/lib/chat";
 import { useDrafting, type DraftingState } from "@/lib/drafting";
 import { useAppFocus } from "@/hooks/useAppFocus";
+import { useIsMobile } from "@/lib/viewport";
+import {
+  useRailOwner,
+  useRightPanelHost,
+} from "@/providers/WikiHeaderActionsProvider";
 import { ChatHistoryPanel } from "@/components/chat/ChatHistoryPanel";
 import { presentTool } from "@/lib/tools";
 import { reviseDraft } from "@/lib/wiki";
@@ -88,6 +96,8 @@ const MIN_EXPANDED_WIDTH = 280;
 
 export function ChatWidget() {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
+  const rightHost = useRightPanelHost();
   const { drafting, expandTick, getDraftBody, applyDraftBody } = useDrafting();
   // The wiki page the user currently has open (null off the wiki), sent with
   // each message so the chat agent knows what they're looking at.
@@ -131,7 +141,8 @@ export function ChatWidget() {
   // "widget"). Restored when drafting ends so the doc-creation flow doesn't
   // permanently commandeer the chat. Any manual mode change (bar
   // expand/collapse/dock, panel collapse/close) clears it: the user's
-  // explicit choice wins over the automatic restore.
+  // explicit choice wins over the automatic restore. The rail eviction
+  // doesn't clear it: being evicted isn't the user's choice.
   const preDraftingModeRef = useRef<Mode | null>(null);
 
   const setModeManually = useCallback((m: Mode) => {
@@ -381,13 +392,41 @@ export function ChatWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desiredKey]);
 
-  // When expanded, reserve real layout space on the right so the page is
-  // pushed left rather than being overlaid by the panel. Layout effect so
-  // the padding lands in the same paint as the panel itself — with a plain
-  // effect the collapse painted first and the page reflowed a frame later
-  // (panel gone, gap still there → visible two-step).
+  const railHosted = !isMobile && !!rightHost?.el;
+
+  // The rail fits one occupant. Docking claims it (the doc side panel
+  // yields), and a panel claim while expanded drops the chat back to the
+  // bar.
+  const rail = useRailOwner();
+  const claimRail = rail?.claim;
+  const railOwner = rail?.owner;
+  useEffect(() => {
+    if (mode === "expanded" && railHosted) claimRail?.("chat");
+  }, [mode, railHosted, claimRail]);
+  // Release our own claim when leaving expanded, read through a ref so this
+  // never re-fires on owner changes (re-claiming there would fight the
+  // panel's eviction).
+  const ownerRef = useRef(railOwner);
+  ownerRef.current = railOwner;
+  useEffect(() => {
+    if (mode !== "expanded" && ownerRef.current === "chat") claimRail?.(null);
+  }, [mode, claimRail]);
+  // Yield only when ownership actually changes hands. Keying on mode too
+  // would fire against the stale owner in the same commit as our own claim
+  // and bounce the dock straight back to the bar.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  useEffect(() => {
+    if (railOwner === "panel" && modeRef.current === "expanded")
+      setMode("widget");
+  }, [railOwner]);
+
+  // The docked panel normally lives in the right rail (a flex sibling), so
+  // layout shifts on its own. The fixed overlay fallback (no rail host, or
+  // mobile) reserves real layout space instead of covering the page, via a
+  // layout effect so the padding lands in the same paint as the panel.
   useLayoutEffect(() => {
-    if (mode !== "expanded") {
+    if (mode !== "expanded" || railHosted) {
       document.body.style.paddingRight = "";
       return;
     }
@@ -395,7 +434,7 @@ export function ChatWidget() {
     return () => {
       document.body.style.paddingRight = "";
     };
-  }, [mode, expandedWidth]);
+  }, [mode, expandedWidth, railHosted]);
 
   const sendUserMessage = useCallback(
     async (text: string) => {
@@ -575,13 +614,11 @@ export function ChatWidget() {
 
   const groups = groupChatItems(items);
 
-  return (
-    <div
-      role="dialog"
-      aria-label="Chat"
-      className="fixed top-0 right-0 z-[1000] h-screen border-l border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-panel)"
-      style={{ width: expandedWidth }}
-    >
+  // The docked panel body. Rail mode mounts it into the app's right rail
+  // beside the header (mock 1828:60338). The overlay fallback keeps it as a
+  // fixed right-edge drawer when no rail exists (mobile, loading).
+  const panel = (
+    <>
       {/* Inner clipped surface. Keeps the history panel's slide animation
           contained and lets it cover the chat header. The resize handle
           lives outside this so it can extend past the left edge. */}
@@ -606,10 +643,10 @@ export function ChatWidget() {
           />
           <div className="mx-1 h-4 w-px bg-(--border-01)" />
           <Button
-            icon={SvgFold}
+            icon={SvgSidebar}
             prominence="tertiary"
             size="sm"
-            tooltip="Collapse to bar"
+            tooltip="Undock to bar"
             onClick={() => setModeManually("widget")}
           />
           <Button
@@ -701,13 +738,39 @@ export function ChatWidget() {
         />
       </div>
 
+      {!railHosted && (
+        <div
+          onMouseDown={startResize}
+          title="Drag to resize"
+          aria-label="Resize chat panel"
+          role="separator"
+          className="absolute top-0 left-[-3px] z-[1001] h-full w-[6px] cursor-col-resize"
+        />
+      )}
+    </>
+  );
+
+  if (railHosted && rightHost?.el) {
+    return createPortal(
       <div
-        onMouseDown={startResize}
-        title="Drag to resize"
-        aria-label="Resize chat panel"
-        role="separator"
-        className="absolute top-0 left-[-3px] z-[1001] h-full w-[6px] cursor-col-resize"
-      />
+        role="dialog"
+        aria-label="Chat"
+        className="flex h-full w-[400px] flex-col bg-(--background-tint-00)"
+      >
+        {panel}
+      </div>,
+      rightHost.el,
+    );
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-label="Chat"
+      className="fixed top-0 right-0 z-[1000] h-screen border-l border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-panel)"
+      style={{ width: expandedWidth }}
+    >
+      {panel}
     </div>
   );
 }
@@ -980,8 +1043,9 @@ function groupChatItems(items: ChatItem[]): RenderGroup[] {
   return groups;
 }
 
-/** Expandable tool-activity block (mock 1829:74012's steps affordance).
- *  Stays open while any step runs so live activity is never hidden. */
+/** Response activity row (mock 1829:74012): the assistant mark leads and
+ *  the step-count toggle sits right. Stays open while any step runs so
+ *  live activity is never hidden. */
 function ToolSteps({ items }: { items: ToolItem[] }) {
   const [open, setOpen] = useState(false);
   const anyRunning = items.some((t) => t.state === "running");
@@ -989,9 +1053,11 @@ function ToolSteps({ items }: { items: ToolItem[] }) {
   const label = `${items.length} ${items.length === 1 ? "step" : "steps"}`;
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex">
+      <div className="flex items-center gap-2">
+        <SvgOnyxLogo size={20} />
+        <div className="flex-1" />
         <Button
-          icon={expanded ? SvgChevronDown : SvgChevronRight}
+          rightIcon={expanded ? SvgChevronUp : SvgChevronDown}
           prominence="tertiary"
           size="sm"
           onClick={() => setOpen((v) => !v)}
@@ -1000,7 +1066,7 @@ function ToolSteps({ items }: { items: ToolItem[] }) {
         </Button>
       </div>
       {expanded && (
-        <div className="flex flex-col gap-1 pl-2">
+        <div className="flex flex-col gap-1 pl-7">
           {items.map((t, i) => (
             <ToolStatus key={i} item={t} />
           ))}
