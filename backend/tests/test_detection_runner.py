@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import pytest
 
+from app.auth.users import AI_USER_ID
+from app.tasks.queues import detection_queue
+from app.wiki import git as wiki_git
+from app.wiki import update_policy
 from app.wiki.automanage import runner, runs
 from app.wiki.automanage.detectors.empty_folder import _EmptyFolderDetector
 from app.wiki.change_proposals import ProposalStatus, list_by_status, reject
@@ -77,11 +81,36 @@ def test_rejected_is_not_reproposed(repo):
 
 
 def test_forbidden_scope_is_skipped(repo):
-    from app.wiki import update_policy
-
     update_policy.set_policy("archive", ai_management_allowed=False)
     result = runner.run_sweep(triggered_by_user_id=None)
     folders = {p["source_paths"][0] for p in list_by_status(ProposalStatus.PENDING)}
     assert "archive" not in folders  # explicitly do-not-manage
     assert "old" in folders
     assert result["proposals_emitted"] == 1
+
+
+def test_ai_managed_scope_auto_applies(repo):
+    # archive opts into AI management → auto-approved + executed as the AI user,
+    # no human queue. old is unset → stays pending.
+    update_policy.set_policy("archive", ai_management_allowed=True)
+    with detection_queue.immediate_mode():
+        runner.run_sweep(triggered_by_user_id=None)
+
+    applied = {p["source_paths"][0]: p for p in list_by_status(ProposalStatus.APPLIED)}
+    assert "archive" in applied
+    assert applied["archive"]["reviewed_by_user_id"] is None  # no human reviewer
+    assert applied["archive"]["acting_user_id"] == AI_USER_ID
+    assert "archive/.gitkeep" not in wiki_git.list_paths()  # trashed
+
+    pending = {p["source_paths"][0] for p in list_by_status(ProposalStatus.PENDING)}
+    assert pending == {"old"}  # unset scope waits for a human
+    assert "old/.gitkeep" in wiki_git.list_paths()  # untouched
+
+
+def test_unset_scope_stays_pending(repo):
+    # No policy anywhere → both empties wait for human review, nothing executes.
+    with detection_queue.immediate_mode():
+        runner.run_sweep(triggered_by_user_id=None)
+    assert list_by_status(ProposalStatus.APPLIED) == []
+    pending = {p["source_paths"][0] for p in list_by_status(ProposalStatus.PENDING)}
+    assert pending == {"archive", "old"}
