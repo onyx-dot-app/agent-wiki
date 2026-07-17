@@ -112,10 +112,21 @@ function AgentsBarHost() {
   return <div ref={host?.setEl} className="shrink-0" />;
 }
 
+// The user's persisted fold preference. Read only after mount: the server
+// renders unfolded, and folding post-hydration keeps server and client HTML
+// identical (reading localStorage during render caused hydration mismatches).
+function storedFoldPreference(): boolean {
+  const stored = window.localStorage.getItem(COLLAPSED_KEY);
+  if (stored === "1") return true;
+  if (stored === "0") return false;
+  return window.innerWidth < 724;
+}
+
 // Folds the app sidebar to its icon rail while the folder tree is open (the
 // mock pairs the tree panel with a folded sidebar), and restores the user's
 // pre-tree fold state when the tree closes. Manual unfolding while the tree
-// is open is respected until the tree closes.
+// is open is respected until the tree closes. Also applies the stored fold
+// preference on mount, since the first render is always unfolded (SSR).
 function SidebarAutoFold() {
   const { view } = useLeftPanel();
   const { folded, setFolded } = useSidebarState();
@@ -127,10 +138,13 @@ function SidebarAutoFold() {
     const was = prevView.current;
     prevView.current = view ?? "closed";
     if (view === "wiki-tree" && was !== "wiki-tree") {
-      foldedBeforeTree.current = was === "init" ? false : folded;
+      foldedBeforeTree.current =
+        was === "init" ? storedFoldPreference() : folded;
       setFolded(true);
     } else if (view !== "wiki-tree" && was === "wiki-tree") {
       setFolded(foldedBeforeTree.current);
+    } else if (was === "init" && storedFoldPreference()) {
+      setFolded(true);
     }
     // `folded` is read only at the open transition, not a reactive input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -175,18 +189,12 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
-  const [defaultFolded] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    const stored = window.localStorage.getItem(COLLAPSED_KEY);
-    if (stored === "1") return true;
-    if (stored === "0") return false;
-    return window.innerWidth < 724;
-  });
-
   return (
     <LeftPanelProvider>
+      {/* defaultFolded stays false so server and client render the same HTML.
+          SidebarAutoFold applies the stored preference after hydration. */}
       <SidebarStateProvider
-        defaultFolded={defaultFolded}
+        defaultFolded={false}
         onFoldedChange={(folded) => {
           window.localStorage.setItem(COLLAPSED_KEY, folded ? "1" : "0");
         }}

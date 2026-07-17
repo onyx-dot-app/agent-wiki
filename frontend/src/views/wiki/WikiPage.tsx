@@ -437,14 +437,15 @@ function Explorer({ dir }: { dir: string }) {
             onSubmit={onCreate}
             className="mb-4 flex gap-2 rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) p-3"
           >
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="folder-name (or subdir/folder-name)"
-              disabled={createBusy}
-              className="flex-1 rounded-(--radius-04) border border-(--border-01) p-2 text-sm"
-            />
+            <span className="min-w-0 flex-1">
+              <InputTypeIn
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="folder-name (or subdir/folder-name)"
+                aria-label="New folder name"
+              />
+            </span>
             <Button
               type="submit"
               variant="action"
@@ -1093,7 +1094,7 @@ function Row({
           className="flex min-w-0 flex-1 items-center"
         >
           <InputTypeIn
-            ref={(el) => el?.select()}
+            onFocus={(e) => e.currentTarget.select()}
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

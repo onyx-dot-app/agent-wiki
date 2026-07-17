@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import useSWR from "swr";
 
 import {
@@ -164,8 +164,6 @@ function NewFolderRow({
   const [name, setName] = useState("New Folder");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => inputRef.current?.select(), []);
 
   async function submit() {
     const clean = name.trim().replace(/^\/+|\/+$/g, "");
@@ -188,7 +186,7 @@ function NewFolderRow({
   return (
     <div className={styles.newFolderRow}>
       <InputTypeIn
-        ref={inputRef}
+        onFocus={(e) => e.currentTarget.select()}
         value={name}
         onChange={(e) => setName(e.target.value)}
         aria-label="New folder name"
