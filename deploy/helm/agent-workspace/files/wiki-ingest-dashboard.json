@@ -3020,8 +3020,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "wiki_pages_embedded_total",
-          "legendFormat": "Wiki Pages",
+          "expr": "max(wiki_pages_embedded_total)",
+          "legendFormat": "Pages Embedded",
           "refId": "A"
         }
       ],
@@ -3079,8 +3079,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "wiki_pages_embedded_total / wiki_pages_total",
-          "legendFormat": "Wiki Pages",
+          "expr": "max(wiki_pages_embedded_total) / max(wiki_pages_total)",
+          "legendFormat": "Embedding Coverage",
           "refId": "A"
         }
       ],
