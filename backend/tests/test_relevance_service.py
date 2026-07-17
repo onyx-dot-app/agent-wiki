@@ -162,3 +162,37 @@ def test_relevant_pages_none_when_doc_cannot_embed(monkeypatch: pytest.MonkeyPat
     # autouse fixture leaves the doc unembedded (pass-through, embedding=None)
     assert RelevanceService(_DropByPath(set())).relevant_pages(_doc()) is None
     load_all.assert_not_called()  # the doc gate comes before the bulk load
+
+
+def test_relevant_pages_emits_score_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dataclasses
+
+    from prometheus_client import REGISTRY
+
+    from app.db.page_embeddings import PageVector
+    from app.llm import embeddings as llm_embeddings
+
+    vec = [0.1, 0.2]
+    monkeypatch.setattr(
+        "app.db.page_embeddings.load_all",
+        lambda model: [PageVector("hi.md", llm_embeddings.pack(vec)),
+                       PageVector("lo.md", llm_embeddings.pack(vec))],
+    )
+    monkeypatch.setattr(
+        enrich, "with_document_embedding", lambda d: dataclasses.replace(d, embedding=vec)
+    )
+
+    def _count(name: str, labels: dict[str, str]) -> float:
+        return REGISTRY.get_sample_value(name, labels) or 0.0
+
+    kept_before = _count("ingest_relevance_scores_count", {"decision": "kept"})
+    dropped_before = _count("ingest_relevance_scores_count", {"decision": "dropped"})
+    docs_before = REGISTRY.get_sample_value("ingest_relevance_kept_pages_count") or 0.0
+
+    svc = RelevanceService(_ScoredFilter({"hi.md": 0.9, "lo.md": 0.01}, cutoff=0.1))
+    result = svc.relevant_pages(_doc())
+
+    assert result is not None and [p.path for p in result.kept] == ["hi.md"]
+    assert _count("ingest_relevance_scores_count", {"decision": "kept"}) - kept_before == 1.0
+    assert _count("ingest_relevance_scores_count", {"decision": "dropped"}) - dropped_before == 1.0
+    assert (REGISTRY.get_sample_value("ingest_relevance_kept_pages_count") or 0.0) - docs_before == 1.0
