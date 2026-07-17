@@ -194,6 +194,7 @@ export function useCoeditSession(opts: {
     pendingCursor.current = null;
     setTyping([]);
     setPeers([]);
+    setParticipants([]);
     abort.current?.abort();
     abort.current = null;
     const sid = sessionId.current;

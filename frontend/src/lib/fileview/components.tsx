@@ -17,7 +17,6 @@ import {
 } from "@onyx-ai/opal/components";
 import { Content } from "@onyx-ai/opal/layouts";
 import {
-  SvgBubbleText,
   SvgChevronLeft,
   SvgChevronRight,
   SvgEdit,
@@ -26,7 +25,7 @@ import {
   SvgFolder,
   SvgHistory,
   SvgShare,
-  SvgShield,
+  SvgSidebar,
   SvgSparkle,
   SvgWorkflow,
 } from "@onyx-ai/opal/icons";
@@ -35,6 +34,7 @@ import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
 import { TriggersSidePanel } from "@/components/wiki/TriggersSidePanel";
 import { DiffView } from "@/components/wiki/DiffView";
+import { DocPresence } from "@/components/wiki/DocPresence";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
@@ -189,7 +189,6 @@ export function FileView({ path }: FileViewProps) {
   const [historyError, setHistoryError] = useState<string | null>(null);
   // One tabbed side panel hosts the per-doc surfaces (null = closed).
   const [panelTab, setPanelTab] = useState<DocPanelTab | null>(null);
-  const commentsOpen = panelTab === "comments";
   // Comments (render-mode). `commentDraft` is a pending text selection being
   // composed; `selTool` is the floating "Comment" affordance shown on select.
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
@@ -225,10 +224,6 @@ export function FileView({ path }: FileViewProps) {
     setPanelTab(null);
     setCommentDraft(null);
   }, []);
-  const togglePanel = useCallback(
-    (tab: DocPanelTab) => (panelTab === tab ? closePanel() : openPanel(tab)),
-    [panelTab, closePanel, openPanel],
-  );
   const openComments = useCallback(() => openPanel("comments"), [openPanel]);
 
   const refreshComments = useCallback(async () => {
@@ -826,8 +821,9 @@ export function FileView({ path }: FileViewProps) {
   // Page actions live in the single pinned header (WikiHeader), not a second
   // header inside the scroll area — they portal into its right-aligned slot.
   // The panel toggles are icon SelectButtons so the open panel shows the
-  // selected tint; the others are tertiary icon Buttons with the lone solid
-  // CTA (Edit). Editing swaps in labelled Cancel / Save for clarity.
+  // selected tint. The presence cluster leads, the rest are tertiary icon
+  // Buttons with the lone solid CTA (Edit). Editing swaps in the single
+  // labelled Done CTA.
   const headerActions = editing ? (
     // One exit: "Done" leaves the session (committing the shared buffer). There
     // is no Cancel — the buffer is the live shared document, so a single
@@ -837,6 +833,11 @@ export function FileView({ path }: FileViewProps) {
     </Button>
   ) : !loading && !error ? (
     <>
+      <DocPresence
+        path={path}
+        participants={coedit.participants}
+        onOpenUpdates={() => openPanel("updates")}
+      />
       <Button
         icon={SvgSparkle}
         prominence="tertiary"
@@ -872,17 +873,13 @@ export function FileView({ path }: FileViewProps) {
         tooltip="History"
         onClick={toggleHistory}
       />
+      {/* Comments and update policy live in the side panel's tabs. The
+          toggle opens the panel on Updates and closes it wholesale. */}
       <SelectButton
-        icon={SvgBubbleText}
-        state={commentsOpen ? "selected" : "empty"}
-        tooltip="Comments"
-        onClick={() => togglePanel("comments")}
-      />
-      <SelectButton
-        icon={SvgShield}
-        state={panelTab === "updates" ? "selected" : "empty"}
-        tooltip="Update Policy"
-        onClick={() => togglePanel("updates")}
+        icon={SvgSidebar}
+        state={panelTab ? "selected" : "empty"}
+        tooltip="Side panel"
+        onClick={() => (panelTab ? closePanel() : openPanel("updates"))}
       />
       {/* Editing always targets current HEAD via a co-edit session, so hide
           Edit while viewing an older commit — "Back to latest" first. */}
