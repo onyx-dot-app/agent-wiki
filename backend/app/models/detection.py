@@ -1,6 +1,8 @@
 """HTTP shapes for the Wiki Auto Management detection admin API."""
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -45,3 +47,11 @@ class ProposalView(BaseModel):
 
 class ProposalsResponse(BaseModel):
     proposals: list[ProposalView]
+
+
+class ProposalActionResponse(BaseModel):
+    """Result of approving/rejecting a proposal. On approve, execution is
+    enqueued on the detection queue, so ``status`` reflects the decision, not
+    the applied state."""
+
+    status: Literal["approved", "rejected"]
