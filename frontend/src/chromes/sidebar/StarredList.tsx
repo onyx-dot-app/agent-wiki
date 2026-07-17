@@ -23,7 +23,7 @@ import { Button, SidebarTab } from "@onyx-ai/opal/components";
 import { SvgDocFile, SvgStarOff } from "@onyx-ai/opal/icons";
 import { reorderStarred, unstarDoc } from "@/lib/starred";
 import { wikiHref } from "@/lib/wikiHref";
-import { docLabel } from "@/sections/sidebar/docLabel";
+import { docLabel } from "@/chromes/sidebar/docLabel";
 import { useAppFocus } from "@/hooks/useAppFocus";
 
 interface StarredRowProps {
