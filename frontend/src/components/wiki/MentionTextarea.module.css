@@ -1,5 +1,5 @@
-/* Comment textarea + @-mention typeahead. The textarea mirrors the shared
-   .textarea styling in CommentsPanel.module.css so the two read identically. */
+/* Comment textarea + @-mention typeahead. Standalone themed textarea
+   (border, radius, and focus states from Opal tokens). */
 .wrap {
   position: relative;
 }

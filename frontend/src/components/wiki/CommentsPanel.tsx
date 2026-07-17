@@ -2,6 +2,10 @@
 
 import {
   Button,
+  Divider,
+  EndOfList,
+  IconContainer,
+  InputTypeIn,
   LineItemButton,
   Popover,
   Text,
@@ -36,7 +40,6 @@ import { absoluteTime, relativeTime } from "@/lib/time";
 import type { CommentThreadView, CommentView } from "@/types";
 
 import { MentionTextarea } from "./MentionTextarea";
-import styles from "./CommentsPanel.module.css";
 
 export type { CommentDraft };
 
@@ -44,7 +47,7 @@ interface Props {
   path: string;
   headSha: string | null;
   draft: CommentDraft | null;
-  /** Threads are owned by the page (so highlights stay in sync); the panel
+  /** Threads are owned by the page (so highlights stay in sync). The panel
    * renders them and calls `onChanged` after a mutation to trigger a refetch. */
   threads: CommentThreadView[];
   onChanged: () => void | Promise<void>;
@@ -52,8 +55,9 @@ interface Props {
   activeId: string | null;
   onActivate: (id: string | null) => void;
   onDraftConsumed: () => void;
-  /** Renders the title + close header when set. Omit when a host surface
-   * (e.g. the tabbed doc side panel) already names and dismisses the panel. */
+  /** Renders the title + close header and the standalone card chrome when
+   * set. Omit when a host surface (e.g. the tabbed doc side panel) already
+   * frames, names, and dismisses the panel. */
   onClose?: () => void;
   fullHeight?: boolean;
 }
@@ -116,6 +120,7 @@ export function CommentsPanel({
   );
 
   const [showResolved, setShowResolved] = useState(false);
+  const [search, setSearch] = useState("");
 
   // Order threads to match the doc: by their referenced position (start_offset)
   // top-to-bottom. Orphaned threads ("Original content deleted") have no live
@@ -130,18 +135,29 @@ export function CommentsPanel({
     return ao - bo;
   });
 
-  // Resolved threads drop out of the main list (Google-Docs style) — they're
-  // "done", so they shouldn't clutter the doc. They stay reachable (to reopen)
-  // behind a toggle.
+  // Resolved threads drop out of the main list (Google-Docs style): they're
+  // "done", so they shouldn't clutter the list. They stay reachable (to
+  // reopen) behind the foldable Resolved divider.
+  // Search filters whole threads: a hit anywhere (any body or author) keeps
+  // the full conversation visible for context.
+  const q = search.trim().toLowerCase();
+  const matchesSearch = (t: CommentThreadView) =>
+    q === "" ||
+    [t.root, ...t.replies].some(
+      (c) =>
+        c.body.toLowerCase().includes(q) ||
+        (c.author_display ?? "").toLowerCase().includes(q),
+    );
   const openThreads = orderedThreads.filter(
-    (t) => t.root.status !== "resolved",
+    (t) => t.root.status !== "resolved" && matchesSearch(t),
   );
   const resolvedThreads = orderedThreads.filter(
-    (t) => t.root.status === "resolved",
+    (t) => t.root.status === "resolved" && matchesSearch(t),
   );
+  const totalComments = threads.reduce((n, t) => n + 1 + t.replies.length, 0);
 
   // If the active thread (clicked, or arrived via a `?comment=` deep-link) is
-  // resolved, expand the resolved section so it's actually visible — otherwise
+  // resolved, expand the resolved section so it's actually visible. Otherwise
   // activating it would silently do nothing.
   const activeIsResolved = resolvedThreads.some((t) => t.root.id === activeId);
   useEffect(() => {
@@ -168,11 +184,13 @@ export function CommentsPanel({
 
   return (
     <div
-      className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""} ${onClose ? "" : styles.inline}`}
+      className={`flex min-h-0 flex-col gap-2 ${
+        fullHeight ? "h-full w-full" : ""
+      } ${onClose ? "w-full max-w-[400px] rounded-(--radius-12) bg-(--background-tint-01) p-2" : ""}`}
     >
       {onClose && (
-        <div className={styles.headerRow}>
-          <div className={styles.headerTitle}>
+        <div className="flex shrink-0 items-center gap-1 p-1">
+          <div className="min-w-0 flex-1">
             <Text font="main-ui-action" color="text-04">
               Comments
             </Text>
@@ -187,8 +205,24 @@ export function CommentsPanel({
         </div>
       )}
 
-      <div className={styles.scroll}>
-        {error && <div className={styles.error}>{error}</div>}
+      {threads.length > 0 && (
+        <div className="shrink-0">
+          <InputTypeIn
+            searchIcon
+            clearButton
+            placeholder="Search comments…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1 pb-2">
+        {error && (
+          <div className="py-1 text-xs text-(--status-text-error-05)">
+            {error}
+          </div>
+        )}
 
         {draft && (
           <DraftComposer
@@ -217,27 +251,31 @@ export function CommentsPanel({
 
         {openThreads.length === 0 && resolvedThreads.length === 0 && !draft ? (
           <Text font="secondary-body" color="text-03">
-            No comments yet. Select text in the page to add one.
+            {q !== ""
+              ? "No comments match your search."
+              : "No comments yet. Select text in the page to add one."}
           </Text>
         ) : (
           <>
             {openThreads.map(renderThread)}
 
             {resolvedThreads.length > 0 && (
-              <>
-                <div className={styles.resolvedToggle}>
-                  <Button
-                    prominence="tertiary"
-                    size="sm"
-                    onClick={() => setShowResolved((v) => !v)}
-                  >
-                    {showResolved
-                      ? `Hide resolved (${resolvedThreads.length})`
-                      : `Show resolved (${resolvedThreads.length})`}
-                  </Button>
+              <Divider
+                title={`Resolved (${resolvedThreads.length})`}
+                foldable
+                open={showResolved}
+                onOpenChange={setShowResolved}
+              >
+                <div className="flex flex-col gap-4 pt-2">
+                  {resolvedThreads.map(renderThread)}
                 </div>
-                {showResolved && resolvedThreads.map(renderThread)}
-              </>
+              </Divider>
+            )}
+
+            {totalComments > 0 && (
+              <EndOfList
+                title={`${totalComments} Comment${totalComments === 1 ? "" : "s"}`}
+              />
             )}
           </>
         )}
@@ -262,8 +300,10 @@ function DraftComposer({
   // the body on submit.
   const mentions = useRef<Record<string, string>>({});
   return (
-    <div className={styles.draft}>
-      <div className={styles.quote}>{draft.quotedText}</div>
+    <div className="rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-02) p-2.5">
+      <div className="mb-1.5 rounded-(--radius-04) border-l-[3px] border-(--border-01) bg-(--background-tint-03) px-2 py-1 text-xs [word-break:break-word] whitespace-pre-wrap text-(--text-04)">
+        {draft.quotedText}
+      </div>
       <MentionTextarea
         placeholder="Add a comment…"
         value={body}
@@ -273,7 +313,7 @@ function DraftComposer({
           mentions.current[d] = id;
         }}
       />
-      <div className={styles.composeRow}>
+      <div className="mt-1.5 flex justify-end gap-2">
         <Button prominence="tertiary" size="sm" onClick={onCancel}>
           Cancel
         </Button>
@@ -333,14 +373,22 @@ function Thread({
     // Clicking the thread selects it (its span gets the orange highlight). The
     // commented text itself lives as a highlight in the doc, so no quote box.
     <div
-      className={`${styles.thread} ${resolved ? styles.threadResolved : ""} ${active ? styles.threadActive : ""}`}
+      className={`cursor-pointer rounded-(--radius-12) border bg-(--background-tint-00) p-3.5 shadow-(--shadow-sm) ${
+        resolved ? "opacity-65" : ""
+      } ${
+        active
+          ? "border-(--background-tint-inverted-00) ring-1 ring-(--background-tint-inverted-00)"
+          : "border-(--border-01)"
+      }`}
       onClick={onActivate}
     >
       {root.status === "orphaned" && (
-        <div className={styles.orphanedNote}>Original content deleted</div>
+        <div className="mb-2 text-xs text-(--text-03) italic">
+          Original content deleted
+        </div>
       )}
 
-      <div className={styles.threadBody}>
+      <div className="flex flex-col gap-3">
         {conversation.map((c) => (
           <Comment
             key={c.id}
@@ -356,7 +404,7 @@ function Thread({
       </div>
 
       {replyOpen ? (
-        <div className={styles.replyBox}>
+        <div className="mt-2.5">
           <MentionTextarea
             placeholder="Reply…"
             value={replyBody}
@@ -366,7 +414,7 @@ function Thread({
               replyMentions.current[d] = id;
             }}
           />
-          <div className={styles.composeRow}>
+          <div className="mt-1.5 flex justify-end gap-2">
             <Button
               prominence="tertiary"
               size="sm"
@@ -395,7 +443,7 @@ function Thread({
           </div>
         </div>
       ) : (
-        <div className={styles.actions}>
+        <div className="mt-2 flex flex-wrap gap-1.5">
           <Button
             prominence="tertiary"
             size="sm"
@@ -488,34 +536,35 @@ function Comment({
   };
 
   return (
-    <div className={styles.comment}>
-      <div className={styles.metaRow}>
+    <div className="group/comment">
+      <div className="mb-1 flex min-h-6 items-center gap-2">
+        <IconContainer avatar="user" name={comment.author_display ?? "User"} />
         <Text font="main-ui-action" color="text-04">
           {authorLabel(comment.author_user_id, comment.author_display, selfId)}
         </Text>
-        <span
-          className={styles.time}
-          title={absoluteTime(toIso(comment.created_at))}
-        >
+        <span title={absoluteTime(toIso(comment.created_at))}>
           <Text font="secondary-body" color="text-03">
             {relativeTime(toIso(comment.created_at), "short")}
           </Text>
         </span>
-        <span className={styles.metaRight}>
+        <span className="ml-auto flex items-center gap-1.5">
           {!editing && (
-            // Overflow menu (Google-Docs style) keeps actions off the card until
-            // hovered, so comments stay compact. Forced visible while open.
-            // "Copy link" is available to everyone (read access); Edit/Delete
-            // only to the author/admin.
+            // Overflow menu (Google-Docs style): actions stay off the card
+            // until hover/focus (touch devices always show them), forced
+            // visible while open. "Copy link" is for everyone (read access).
+            // Edit/Delete only for the author/admin.
             <span
-              className={`${styles.kebab} ${menuOpen ? styles.kebabOpen : ""}`}
+              className={`transition-opacity group-focus-within/comment:opacity-100 group-hover/comment:opacity-100 [@media(hover:none)]:opacity-100 ${
+                menuOpen ? "opacity-100" : "opacity-0"
+              }`}
             >
               <Popover open={menuOpen} onOpenChange={setMenuOpen}>
                 {/* Radix renders its own <button> here (no asChild) so the
-                    trigger's onClick/ref/data-state are guaranteed to wire up —
-                    OPAL's Button isn't a Radix Slot and drops them. */}
+                    trigger's onClick/ref/data-state wire up directly. OPAL's
+                    Button isn't a Radix Slot, so forwarding through it isn't
+                    guaranteed. */}
                 <Popover.Trigger
-                  className={styles.kebabBtn}
+                  className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-(--radius-04) text-(--text-03) hover:bg-(--background-tint-03) hover:text-(--text-05) [&>svg]:h-4 [&>svg]:w-4"
                   aria-label="Comment actions"
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -573,7 +622,7 @@ function Comment({
               editMentions.current[d] = id;
             }}
           />
-          <div className={styles.composeRow}>
+          <div className="mt-1.5 flex justify-end gap-2">
             <Button
               prominence="tertiary"
               size="sm"
@@ -598,10 +647,13 @@ function Comment({
           </div>
         </div>
       ) : (
-        <div className={styles.body}>
+        <div className="text-[13px] [word-break:break-word] whitespace-pre-wrap text-(--text-05)">
           {parseBody(comment.body).map((seg, i) =>
             seg.kind === "mention" ? (
-              <span key={i} className={styles.mention}>
+              <span
+                key={i}
+                className="rounded-(--radius-04) bg-(--background-tint-03) px-[3px] font-medium text-(--text-05)"
+              >
                 @{seg.name}
               </span>
             ) : (
