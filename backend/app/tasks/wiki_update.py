@@ -359,11 +359,21 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         ingest_outcomes_total.labels(
             outcome="filtered_by_relevance", wiki_path=page.path
         ).inc()
+    # Kept scores + the highest dropped scores (the near-misses) are the signal
+    # for calibrating the filter threshold against production traffic.
+    scores = relevance_result.scores
+    near_misses = sorted(
+        (round(scores[p.path], 4) for p in relevance_result.dropped if p.path in scores),
+        reverse=True,
+    )[:5]
     log.info(
-        "process_pushed_document: relevance filter kept %d/%d pages, doc_id=%s",
+        "process_pushed_document: relevance filter kept %d/%d pages, doc_id=%s "
+        "kept=%s dropped_near_misses=%s",
         len(relevance_result.kept),
         len(pages),
         doc_id,
+        [(p.path, round(scores[p.path], 4)) for p in relevance_result.kept if p.path in scores],
+        near_misses,
     )
     if not relevance_result.kept:
         ingest_outcomes_total.labels(outcome="no_candidates", wiki_path="").inc()
@@ -420,9 +430,16 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             continue
         readable.append(
             WikiUpdateCandidate(
-                # Synthesized hit — the relevance filter provides no BM25 rank
-                # or score; downstream reads only .path.
-                hit=SearchHit(doc_id=page.path, path=page.path, title=None, snippet="", score=0.0),
+                # Synthesized hit carrying the filter's relevance score (0.0
+                # when the pair was kept fail-open, unscored); downstream reads
+                # .path and records .score on eval rows.
+                hit=SearchHit(
+                    doc_id=page.path,
+                    path=page.path,
+                    title=None,
+                    snippet="",
+                    score=relevance_result.scores.get(page.path, 0.0),
+                ),
                 body=body,
                 update_instruction=policy.update_instruction if policy else None,
             )

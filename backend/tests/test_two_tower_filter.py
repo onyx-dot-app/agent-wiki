@@ -94,3 +94,20 @@ def test_is_relevant_single_pair():
     assert TwoTowerFilter(_StubScorer([0.3]), threshold=0.5).is_relevant(
         _DOC, _page("a.md", [0.1])
     ) is False
+
+
+def test_score_pages_probs_with_none_for_unembedded():
+    f = TwoTowerFilter(_StubScorer([0.9, 0.2]), threshold=0.5)
+    pages = [_page("a.md", [0.1, 0.2]), _page("none.md", None), _page("b.md", [0.3, 0.4])]
+    assert f.score_pages(_DOC, pages) == [0.9, None, 0.2]
+
+
+def test_score_pages_none_when_doc_embedding_missing():
+    f = TwoTowerFilter(_StubScorer([0.9]), threshold=0.5)
+    doc = IngestionDocument(content="doc", embedding=None)
+    assert f.score_pages(doc, [_page("a.md", [0.1])]) is None
+
+
+def test_score_pages_none_on_scorer_error():
+    f = TwoTowerFilter(_RaisingScorer(), threshold=0.5)
+    assert f.score_pages(_DOC, [_page("a.md", [0.1])]) is None

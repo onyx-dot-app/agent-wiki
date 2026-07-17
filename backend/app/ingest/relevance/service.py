@@ -15,7 +15,7 @@ have considered.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.ingest import enrich
 from app.ingest.relevance.factory import build_relevance_filter
@@ -29,13 +29,17 @@ log = logging.getLogger(__name__)
 class RelevanceResult:
     """The input pages partitioned by the filter's verdict.
 
-    ``kept`` + ``dropped`` together are exactly the input pages (the caller's own
-    objects, each in input order). ``dropped`` is what enforce mode would remove
-    and what shadow mode records.
+    ``kept`` + ``dropped`` together are exactly the input pages (the caller's
+    own objects). ``kept`` is ordered most-relevant-first when the filter
+    exposes scores (unscored pages last, in input order); ``dropped`` keeps
+    input order. ``scores`` maps page path -> the filter's numeric relevance
+    for every pair it scored — for candidate ordering, telemetry, and
+    threshold calibration. Empty when the filter has no numeric score.
     """
 
     kept: list[CandidatePage]
     dropped: list[CandidatePage]
+    scores: dict[str, float] = field(default_factory=dict)
 
 
 class RelevanceService:
@@ -51,16 +55,18 @@ class RelevanceService:
     def evaluate(
         self, doc: IngestionDocument, pages: list[CandidatePage]
     ) -> RelevanceResult:
-        """Enrich embeddings, filter, and partition ``pages`` into kept/dropped.
+        """Enrich embeddings, score, filter, and partition ``pages``.
 
-        Fail-open: on any error every page is kept, so a filter hiccup never
-        drops a candidate. Returns the caller's own page objects, in input order.
+        Fail-open: on any error every page is kept (unordered, no scores), so a
+        filter hiccup never drops a candidate. Returns the caller's own page
+        objects; kept most-relevant-first when scores exist.
         """
         if not pages:
             return RelevanceResult(kept=[], dropped=[])
         try:
             enriched_doc = enrich.with_document_embedding(doc)
             enriched_pages = enrich.with_page_embeddings(list(pages))
+            raw_scores = self._filter.score_pages(enriched_doc, enriched_pages)
             kept_paths = {
                 p.path for p in self._filter.keep_relevant(enriched_doc, enriched_pages)
             }
@@ -69,9 +75,19 @@ class RelevanceService:
                 "relevance service: evaluate failed; keeping all candidates", exc_info=True
             )
             return RelevanceResult(kept=list(pages), dropped=[])
+        scores = (
+            {}
+            if raw_scores is None
+            else {
+                p.path: s for p, s in zip(pages, raw_scores, strict=True) if s is not None
+            }
+        )
         kept = [p for p in pages if p.path in kept_paths]
+        # Most-relevant-first; stable sort keeps unscored (fail-open) pages in
+        # input order after every scored page.
+        kept.sort(key=lambda p: scores.get(p.path, float("-inf")), reverse=True)
         dropped = [p for p in pages if p.path not in kept_paths]
-        return RelevanceResult(kept=kept, dropped=dropped)
+        return RelevanceResult(kept=kept, dropped=dropped, scores=scores)
 
 
 _service: RelevanceService | None = None

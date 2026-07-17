@@ -114,17 +114,31 @@ _VEC = [0.1, 0.2, 0.3]
 
 
 class _KeepFilter(RelevanceFilter):
-    """Fake filter: keeps every page, or only ``keep`` when given."""
+    """Fake filter: keeps every page, or only ``keep`` when given; exposes
+    ``scores`` (path -> score) when given."""
 
-    def __init__(self, keep: set[str] | None = None) -> None:
+    def __init__(
+        self, keep: set[str] | None = None, scores: dict[str, float] | None = None
+    ) -> None:
         self._keep = keep
+        self._scores = scores
 
     def is_relevant(self, doc: IngestionDocument, page: CandidatePage) -> bool:
         return self._keep is None or page.path in self._keep
 
+    def score_pages(
+        self, doc: IngestionDocument, pages: list[CandidatePage]
+    ) -> list[float | None] | None:
+        if self._scores is None:
+            return None
+        return [self._scores.get(p.path) for p in pages]
+
 
 def _stub_candidates(
-    monkeypatch: pytest.MonkeyPatch, paths: list[str], keep: set[str] | None = None
+    monkeypatch: pytest.MonkeyPatch,
+    paths: list[str],
+    keep: set[str] | None = None,
+    scores: dict[str, float] | None = None,
 ) -> None:
     """Point the candidate stage at ``paths``: the embedding store holds one
     vector per path, the document embeds locally (no API), and the relevance
@@ -139,7 +153,7 @@ def _stub_candidates(
     )
     monkeypatch.setattr(
         "app.tasks.wiki_update.get_relevance_service",
-        lambda: RelevanceService(_KeepFilter(keep)),
+        lambda: RelevanceService(_KeepFilter(keep, scores)),
     )
 
 
@@ -220,6 +234,24 @@ def test_relevance_filter_drops_recorded(monkeypatch):
     assert _outcome_count("filtered_by_relevance", "dropped.md") - before == 1.0
     candidates = mock_reconcile.call_args.kwargs["candidates"]
     assert [c.hit.path for c in candidates] == ["kept.md"]
+
+
+@patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
+@patch("app.tasks.wiki_update.ingest_batch_reconciler.batch_reconcile")
+def test_candidates_ordered_most_relevant_first(mock_reconcile, mock_read, monkeypatch):
+    # The reconciler (and its N-consecutive-IRRELEVANT early stop) sees kept
+    # candidates most-relevant-first, each hit carrying its relevance score.
+    monkeypatch.setattr("app.tasks.wiki_update.get_llm_settings", lambda: _settings_with_model())
+    _stub_candidates(
+        monkeypatch,
+        ["lo.md", "hi.md", "mid.md"],
+        scores={"lo.md": 0.2, "hi.md": 0.9, "mid.md": 0.5},
+    )
+    mock_reconcile.return_value = ([None, None, None], 1)
+    _run(_make_push())
+    candidates = mock_reconcile.call_args.kwargs["candidates"]
+    assert [c.hit.path for c in candidates] == ["hi.md", "mid.md", "lo.md"]
+    assert [c.hit.score for c in candidates] == [0.9, 0.5, 0.2]
 
 
 def test_all_pages_dropped_records_no_candidates(monkeypatch):

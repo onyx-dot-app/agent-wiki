@@ -69,11 +69,30 @@ class TwoTowerFilter(RelevanceFilter):
     ) -> list[CandidatePage]:
         if not pages:
             return []
+        scores = self.score_pages(doc, pages)
+        if scores is None:
+            return list(pages)  # nothing scorable / scorer failure → keep all
+        # An unscored page (missing embedding) is kept — fail-open.
+        return [
+            page
+            for page, score in zip(pages, scores, strict=True)
+            if score is None or score >= self._threshold
+        ]
+
+    def score_pages(
+        self, doc: IngestionDocument, pages: list[CandidatePage]
+    ) -> list[float | None] | None:
+        """P(relevant) per page; a ``None`` entry for a page without an
+        embedding. Returns ``None`` outright when nothing is scorable (no
+        document vector, no embedded page) or the scorer fails — the keep
+        decision fails open on that."""
+        if not pages:
+            return []
         doc_vec = doc.embedding
         if doc_vec is None:
-            return list(pages)  # no document vector to score against → keep all
+            return None
 
-        # Score only the pages that have an embedding; the rest are kept as-is.
+        # Score only the pages that have an embedding.
         idx: list[int] = []
         page_vecs: list[Sequence[float]] = []
         for i, page in enumerate(pages):
@@ -82,7 +101,7 @@ class TwoTowerFilter(RelevanceFilter):
                 idx.append(i)
                 page_vecs.append(vec)
         if not page_vecs:
-            return list(pages)  # nothing embedded to score → keep all
+            return None
 
         try:
             probs = self._scorer.score_batch(doc_vec, page_vecs)
@@ -95,7 +114,9 @@ class TwoTowerFilter(RelevanceFilter):
                 "two-tower scoring failed or returned malformed scores; keeping all candidates",
                 exc_info=True,
             )
-            return list(pages)
+            return None
 
-        keep = {idx[k] for k, prob in enumerate(probs) if prob >= self._threshold}
-        return [page for i, page in enumerate(pages) if page.embedding is None or i in keep]
+        scores: list[float | None] = [None] * len(pages)
+        for k, prob in enumerate(probs):
+            scores[idx[k]] = prob
+        return scores

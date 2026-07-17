@@ -70,3 +70,8 @@ class CosineSimilarityFilter(RelevanceFilter):
     def is_relevant(self, doc: IngestionDocument, page: CandidatePage) -> bool:
         sim = self.similarity(doc, page)
         return True if sim is None else sim >= self._threshold
+
+    def score_pages(
+        self, doc: IngestionDocument, pages: list[CandidatePage]
+    ) -> list[float | None] | None:
+        return [self.similarity(doc, page) for page in pages]
