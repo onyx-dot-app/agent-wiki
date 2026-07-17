@@ -22,7 +22,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm import client as llm_client
 from app.llm.agents.ingest_selector import select_candidates
@@ -59,13 +58,8 @@ def _load_cases(path: Path, *, case_id: str | None, limit: int | None) -> list[I
 def _to_wiki_update_candidates(case: IngestSelectorCase) -> list[WikiUpdateCandidate]:
     return [
         WikiUpdateCandidate(
-            hit=SearchHit(
-                doc_id=c.path,
-                path=c.path,
-                title=None,
-                snippet=c.body[:120],
-                score=1.0,
-            ),
+            path=c.path,
+            score=1.0,
             body=c.body,
         )
         for c in case.candidates
@@ -140,7 +134,7 @@ def _run_one(
         candidates=candidates,
         model=model,
     )
-    kept_paths = [k.hit.path for k in kept]
+    kept_paths = [k.path for k in kept]
     p, r, f1 = scorers.selector_set_metrics(case.expected_kept_paths, kept_paths)
     return (
         "ingest_selector",

@@ -23,7 +23,6 @@ from pathlib import Path
 
 import yaml
 
-from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents.common import IRRELEVANT_SENTINEL
 from app.llm.agents.ingest_batch_reconciler import batch_reconcile
@@ -99,13 +98,8 @@ def _invoke_agent(case: WikiUpdaterCase, *, model: str) -> tuple[str | None, str
         )
     else:
         candidate = WikiUpdateCandidate(
-            hit=SearchHit(
-                doc_id=case.wiki_path,
-                path=case.wiki_path,
-                title=None,
-                snippet=case.current_body[:120],
-                score=1.0,
-            ),
+            path=case.wiki_path,
+            score=1.0,
             body=case.current_body,
         )
         batch = batch_reconcile(
