@@ -39,6 +39,7 @@ import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
+import { DocSidePanel, type DocPanelTab } from "@/components/wiki/DocSidePanel";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
@@ -186,10 +187,11 @@ export function FileView({ path }: FileViewProps) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // One tabbed side panel hosts the per-doc surfaces (null = closed).
+  const [panelTab, setPanelTab] = useState<DocPanelTab | null>(null);
+  const commentsOpen = panelTab === "comments";
   // Comments (render-mode). `commentDraft` is a pending text selection being
   // composed; `selTool` is the floating "Comment" affordance shown on select.
-  const [commentsOpen, setCommentsOpen] = useState(false);
-  const [policyOpen, setPolicyOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -200,22 +202,34 @@ export function FileView({ path }: FileViewProps) {
   } | null>(null);
   const articleRef = useRef<HTMLElement | null>(null);
   // Page owns the comment threads (so highlights render even with the panel
-  // closed). Auto-open the panel once per path when a page has comments.
+  // closed). Auto-open the Comments tab once per path when a page has
+  // unresolved comments.
   const autoOpenedPathRef = useRef<string | null>(null);
   // A `?comment=<id>` deep-link is focused once per id (reset on path change).
   const focusedCommentRef = useRef<string | null>(null);
 
-  // The history and comments side panels are mutually exclusive — every
-  // path that opens one closes the other (toolbar toggles, the comments
-  // auto-open, the selection "💬 Comment" tool).
-  const openComments = useCallback(() => {
+  // The side panel is mutually exclusive with the history and triggers
+  // surfaces. Every path that opens one closes the others (toolbar
+  // toggles, the comments auto-open, the health banner, the selection
+  // "💬 Comment" tool).
+  const openPanel = useCallback((tab: DocPanelTab) => {
     setHistoryOpen(false);
-    setPolicyOpen(false);
     setAutomationsOpen(false);
     setTriggerModalOpen(false);
     setEditingTrigger(null);
-    setCommentsOpen(true);
+    setPanelTab(tab);
+    // A pending selection draft only makes sense on the Comments tab.
+    if (tab !== "comments") setCommentDraft(null);
   }, []);
+  const closePanel = useCallback(() => {
+    setPanelTab(null);
+    setCommentDraft(null);
+  }, []);
+  const togglePanel = useCallback(
+    (tab: DocPanelTab) => (panelTab === tab ? closePanel() : openPanel(tab)),
+    [panelTab, closePanel, openPanel],
+  );
+  const openComments = useCallback(() => openPanel("comments"), [openPanel]);
 
   const refreshComments = useCallback(async () => {
     try {
@@ -649,10 +663,9 @@ export function FileView({ path }: FileViewProps) {
       return;
     }
     setHistoryOpen(true);
-    // Mutual exclusion with the comments + policy + automations panels and
-    // the docked trigger editor (see ``openComments``).
-    setCommentsOpen(false);
-    setPolicyOpen(false);
+    // Mutual exclusion with the side panel and the docked trigger editor
+    // (see ``openPanel``).
+    setPanelTab(null);
     setAutomationsOpen(false);
     setTriggerModalOpen(false);
     setEditingTrigger(null);
@@ -842,9 +855,8 @@ export function FileView({ path }: FileViewProps) {
             return;
           }
           setHistoryOpen(false);
-          setCommentsOpen(false);
+          setPanelTab(null);
           setCommentDraft(null);
-          setPolicyOpen(false);
           setAutomationsOpen(true);
         }}
       />
@@ -864,25 +876,13 @@ export function FileView({ path }: FileViewProps) {
         icon={SvgBubbleText}
         state={commentsOpen ? "selected" : "empty"}
         tooltip="Comments"
-        onClick={() => (commentsOpen ? setCommentsOpen(false) : openComments())}
+        onClick={() => togglePanel("comments")}
       />
       <SelectButton
         icon={SvgShield}
-        state={policyOpen ? "selected" : "empty"}
+        state={panelTab === "updates" ? "selected" : "empty"}
         tooltip="Update Policy"
-        onClick={() => {
-          if (policyOpen) {
-            setPolicyOpen(false);
-            return;
-          }
-          setHistoryOpen(false);
-          setCommentsOpen(false);
-          setCommentDraft(null);
-          setAutomationsOpen(false);
-          setTriggerModalOpen(false);
-          setEditingTrigger(null);
-          setPolicyOpen(true);
-        }}
+        onClick={() => togglePanel("updates")}
       />
       {/* Editing always targets current HEAD via a co-edit session, so hide
           Edit while viewing an older commit — "Back to latest" first. */}
@@ -896,6 +896,34 @@ export function FileView({ path }: FileViewProps) {
       )}
     </>
   ) : null;
+
+  // Shared between the desktop right-rail portal and the mobile sheet.
+  const sidePanel = panelTab && (
+    <DocSidePanel
+      tab={panelTab}
+      onTabChange={openPanel}
+      updates={
+        <UpdatePolicyPanel
+          path={path}
+          onShowHistory={toggleHistory}
+          fullHeight
+        />
+      }
+      comments={
+        <CommentsPanel
+          path={path}
+          headSha={headSha}
+          draft={commentDraft}
+          threads={commentThreads}
+          onChanged={refreshComments}
+          activeId={activeCommentId}
+          onActivate={activateComment}
+          onDraftConsumed={() => setCommentDraft(null)}
+          fullHeight
+        />
+      }
+    />
+  );
 
   return (
     <main
@@ -1091,14 +1119,7 @@ export function FileView({ path }: FileViewProps) {
               <div className="mx-auto w-full max-w-[768px]">
                 <UpdateHealthBanner
                   path={path}
-                  onOpenPolicy={() => {
-                    setHistoryOpen(false);
-                    setCommentsOpen(false);
-                    setAutomationsOpen(false);
-                    setTriggerModalOpen(false);
-                    setEditingTrigger(null);
-                    setPolicyOpen(true);
-                  }}
+                  onOpenPolicy={() => openPanel("updates")}
                 />
               </div>
               <article
@@ -1131,40 +1152,12 @@ export function FileView({ path }: FileViewProps) {
               </div>,
               rightHost.el,
             )}
-          {commentsOpen &&
+          {panelTab &&
             !isMobile &&
             rightHost?.el &&
             createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <CommentsPanel
-                  path={path}
-                  headSha={headSha}
-                  draft={commentDraft}
-                  threads={commentThreads}
-                  onChanged={refreshComments}
-                  activeId={activeCommentId}
-                  onActivate={activateComment}
-                  onDraftConsumed={() => setCommentDraft(null)}
-                  onClose={() => {
-                    setCommentsOpen(false);
-                    setCommentDraft(null);
-                  }}
-                  fullHeight
-                />
-              </div>,
-              rightHost.el,
-            )}
-          {policyOpen &&
-            !isMobile &&
-            rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <UpdatePolicyPanel
-                  path={path}
-                  onClose={() => setPolicyOpen(false)}
-                  onShowHistory={toggleHistory}
-                  fullHeight
-                />
+              <div className="flex h-full w-[360px] bg-(--background-tint-00)">
+                {sidePanel}
               </div>,
               rightHost.el,
             )}
@@ -1208,46 +1201,15 @@ export function FileView({ path }: FileViewProps) {
           </div>
         </>
       )}
-      {commentsOpen && isMobile && (
+      {panelTab && isMobile && (
         <>
           <div
-            onClick={() => setCommentsOpen(false)}
+            onClick={closePanel}
             aria-hidden
             className="fixed inset-0 z-[60] bg-(--mask-03)"
           />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <CommentsPanel
-              path={path}
-              headSha={headSha}
-              draft={commentDraft}
-              threads={commentThreads}
-              onChanged={refreshComments}
-              activeId={activeCommentId}
-              onActivate={activateComment}
-              onDraftConsumed={() => setCommentDraft(null)}
-              onClose={() => {
-                setCommentsOpen(false);
-                setCommentDraft(null);
-              }}
-              fullHeight
-            />
-          </div>
-        </>
-      )}
-      {policyOpen && isMobile && (
-        <>
-          <div
-            onClick={() => setPolicyOpen(false)}
-            aria-hidden
-            className="fixed inset-0 z-[60] bg-(--mask-03)"
-          />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <UpdatePolicyPanel
-              path={path}
-              onClose={() => setPolicyOpen(false)}
-              onShowHistory={toggleHistory}
-              fullHeight
-            />
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] bg-(--background-tint-00) shadow-(--shadow-panel)">
+            {sidePanel}
           </div>
         </>
       )}

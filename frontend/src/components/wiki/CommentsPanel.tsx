@@ -52,7 +52,9 @@ interface Props {
   activeId: string | null;
   onActivate: (id: string | null) => void;
   onDraftConsumed: () => void;
-  onClose: () => void;
+  /** Renders the title + close header when set. Omit when a host surface
+   * (e.g. the tabbed doc side panel) already names and dismisses the panel. */
+  onClose?: () => void;
   fullHeight?: boolean;
 }
 
@@ -165,21 +167,25 @@ export function CommentsPanel({
   );
 
   return (
-    <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerTitle}>
-          <Text font="main-ui-action" color="text-04">
-            Comments
-          </Text>
+    <div
+      className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""} ${onClose ? "" : styles.inline}`}
+    >
+      {onClose && (
+        <div className={styles.headerRow}>
+          <div className={styles.headerTitle}>
+            <Text font="main-ui-action" color="text-04">
+              Comments
+            </Text>
+          </div>
+          <Button
+            icon={SvgX}
+            prominence="tertiary"
+            size="sm"
+            tooltip="Close comments"
+            onClick={onClose}
+          />
         </div>
-        <Button
-          icon={SvgX}
-          prominence="tertiary"
-          size="sm"
-          tooltip="Close comments"
-          onClick={onClose}
-        />
-      </div>
+      )}
 
       <div className={styles.scroll}>
         {error && <div className={styles.error}>{error}</div>}

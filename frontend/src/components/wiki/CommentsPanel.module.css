@@ -18,6 +18,13 @@
   border-radius: 0;
 }
 
+/* Headerless embed inside a host that supplies its own chrome (the tabbed
+   doc side panel): drop the card fill and padding so tabs share one surface. */
+.inline {
+  background: transparent;
+  padding: 0;
+}
+
 .headerRow {
   display: flex;
   flex-direction: row;
