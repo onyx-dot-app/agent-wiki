@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 
-import type { WordDiff } from "@/lib/wiki";
+import type { WordDiff } from "@/lib/wiki/types";
 
 import type { AnnotatedEntry } from "./diffEntries";
 import styles from "./DiffHunk.module.css";

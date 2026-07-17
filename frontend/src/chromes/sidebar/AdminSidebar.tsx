@@ -6,8 +6,8 @@ import { SidebarLayouts } from "@onyx-ai/opal/layouts";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { ADMIN_NAV_GROUPS } from "@/lib/nav/registry";
-import { sidebarLogo } from "@/sections/sidebar/shared";
-import UserMenu from "@/sections/sidebar/UserMenu";
+import { sidebarLogo } from "@/chromes/sidebar/shared";
+import UserMenu from "@/chromes/sidebar/UserMenu";
 
 export default function AdminSidebar() {
   const pathname = usePathname();

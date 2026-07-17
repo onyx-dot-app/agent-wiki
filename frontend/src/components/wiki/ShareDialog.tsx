@@ -46,7 +46,7 @@ import {
   useUserSearch,
   type UserLite,
 } from "@/lib/users";
-import { lastSegment } from "@/lib/wiki";
+import { lastSegment } from "@/lib/wiki/utils";
 import { shareableWikiUrl } from "@/lib/wikiHref";
 import { markdown } from "@onyx-ai/opal/utils";
 

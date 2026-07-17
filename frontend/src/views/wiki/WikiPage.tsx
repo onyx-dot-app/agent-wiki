@@ -18,6 +18,7 @@ import {
   MessageCard,
   Text,
 } from "@onyx-ai/opal/components";
+import { cn } from "@onyx-ai/opal/utils";
 import {
   SvgAlertTriangle,
   SvgArrowUpDown,
@@ -53,14 +54,15 @@ import {
   collectFolders,
   DestinationSelect,
   FilenameRow,
-} from "@/lib/fileview/components";
+} from "@/views/wiki/FileView";
+import { AI_DRAFT_KEY } from "@/lib/wiki/constants";
+import { pageTitle } from "@/lib/wiki/utils";
 import {
   useWikiTree,
   useDeletedTombstone,
   useDocIdResolve,
   usePathToId,
-} from "@/lib/fileview/hooks";
-import { pageTitle } from "@/lib/fileview/utils";
+} from "@/lib/wiki/hooks";
 import { useRequireAuth } from "@/lib/auth";
 import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
@@ -74,12 +76,15 @@ import {
 } from "@/lib/templates";
 import { relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
-import { AI_DRAFT_KEY } from "@/lib/wiki";
+
+interface WikiUnknownLinkProps {
+  status?: number;
+}
 
 /** A wiki URL that no longer points at a live doc — an unknown/expired id, or
  * a page that was deleted but is no longer in Trash (purged). A deleted page
  * still in Trash renders {@link WikiTombstone} instead. */
-function WikiUnknownLink({ status }: { status?: number }) {
+function WikiUnknownLink({ status }: WikiUnknownLinkProps) {
   const router = useRouter();
   return (
     <main className="flex h-full items-center justify-center p-8 pb-[16vh]">
@@ -102,10 +107,14 @@ function WikiUnknownLink({ status }: { status?: number }) {
   );
 }
 
+interface WikiTombstoneProps {
+  path: string;
+}
+
 /** Tombstone for a deleted page/folder reached via its id URL: shows who/when
  * and offers Restore. Falls back to {@link WikiUnknownLink} when the item is no
  * longer in Trash (purged, or deleted before Trash shipped). */
-function WikiTombstone({ path }: { path: string }) {
+function WikiTombstone({ path }: WikiTombstoneProps) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -171,7 +180,11 @@ function WikiTombstone({ path }: { path: string }) {
   );
 }
 
-function Explorer({ dir }: { dir: string }) {
+interface ExplorerProps {
+  dir: string;
+}
+
+function Explorer({ dir }: ExplorerProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
@@ -622,7 +635,11 @@ function Explorer({ dir }: { dir: string }) {
   );
 }
 
-function NewDocView({ dir }: { dir: string }) {
+interface NewDocViewProps {
+  dir: string;
+}
+
+function NewDocView({ dir }: NewDocViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
@@ -864,7 +881,10 @@ function NewDocView({ dir }: { dir: string }) {
 
   return (
     <main
-      className={`box-border flex h-full flex-col gap-3 ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={cn(
+        "box-border flex h-full flex-col gap-3",
+        isMobile ? "px-3 py-4" : "px-8 py-6",
+      )}
     >
       {host?.el && createPortal(headerActions, host.el)}
 
@@ -978,6 +998,27 @@ function BackRow({ onClick }: { onClick: () => void }) {
   );
 }
 
+interface RowProps {
+  icon: React.ReactNode;
+  label: string;
+  updatedAt: string;
+  href: string;
+  path: string;
+  isFile: boolean;
+  busy: boolean;
+  onDelete: () => void;
+  renaming: boolean;
+  onStartRename: () => void;
+  onCancelRename: () => void;
+  onSubmitRename: (newName: string) => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  dropActive: boolean;
+  onFolderDragOver?: () => void;
+  onFolderDragLeave?: () => void;
+  onFolderDrop?: () => void;
+}
+
 function Row({
   icon,
   label,
@@ -997,26 +1038,7 @@ function Row({
   onFolderDragOver,
   onFolderDragLeave,
   onFolderDrop,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  updatedAt: string;
-  href: string;
-  path: string;
-  isFile: boolean;
-  busy: boolean;
-  onDelete: () => void;
-  renaming: boolean;
-  onStartRename: () => void;
-  onCancelRename: () => void;
-  onSubmitRename: (newName: string) => void;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  dropActive: boolean;
-  onFolderDragOver?: () => void;
-  onFolderDragLeave?: () => void;
-  onFolderDrop?: () => void;
-}) {
+}: RowProps) {
   const router = useRouter();
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1080,7 +1102,16 @@ function Row({
       }
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className={`${ROW_CLASS} ${dropActive ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)" : hover || menuOpen ? "bg-(--background-tint-02)" : "bg-(--background-tint-00)"} ${busy ? "opacity-50" : "opacity-100"} ${renaming ? "cursor-default" : "cursor-pointer"}`}
+      className={cn(
+        ROW_CLASS,
+        dropActive
+          ? "bg-(--background-tint-03) outline outline-2 outline-(--background-tint-inverted-00)"
+          : hover || menuOpen
+            ? "bg-(--background-tint-02)"
+            : "bg-(--background-tint-00)",
+        busy ? "opacity-50" : "opacity-100",
+        renaming ? "cursor-default" : "cursor-pointer",
+      )}
     >
       <RowQualifier>{icon}</RowQualifier>
       {renaming ? (
@@ -1138,7 +1169,10 @@ function Row({
           {/* White container pops the menu trigger off the grey hover row
               (mock's Button/Icon Button, tint-00 on radius-08). */}
           <span
-            className={`flex rounded-(--radius-08) bg-(--background-tint-00) transition-opacity duration-100 ${hover || menuOpen ? "opacity-100" : "opacity-0"}`}
+            className={cn(
+              "flex rounded-(--radius-08) bg-(--background-tint-00) transition-opacity duration-100",
+              hover || menuOpen ? "opacity-100" : "opacity-0",
+            )}
             onClick={(e) => e.stopPropagation()}
           >
             <WikiItemMenu

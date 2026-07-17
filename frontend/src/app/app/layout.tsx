@@ -8,7 +8,7 @@ import {
 } from "@onyx-ai/opal/layouts";
 import { MessageCard } from "@onyx-ai/opal/components";
 import { markdown } from "@onyx-ai/opal/utils";
-import AppSidebar from "@/sections/sidebar/AppSidebar";
+import AppSidebar from "@/chromes/sidebar/AppSidebar";
 import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
 import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import {
@@ -17,7 +17,7 @@ import {
   useRightPanelHost,
 } from "@/providers/WikiHeaderActionsProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
-import { WikiHeader } from "@/components/wiki/WikiHeader";
+import { WikiHeader } from "@/chromes/header/WikiHeader";
 import ActivitiesPanel from "@/components/wiki/ActivitiesPanel";
 import { useAuth } from "@/lib/auth";
 import { useHealth } from "@/lib/health";

@@ -1,11 +1,8 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
-import useSWR from "swr";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   Button,
   Divider,
@@ -16,11 +13,11 @@ import {
   SelectButton,
 } from "@onyx-ai/opal/components";
 import { Content } from "@onyx-ai/opal/layouts";
+import { cn } from "@onyx-ai/opal/utils";
 import {
   SvgBubbleText,
   SvgChevronLeft,
   SvgChevronRight,
-  SvgEdit,
   SvgExternalLink,
   SvgDocFile,
   SvgFolder,
@@ -52,19 +49,18 @@ import {
 import { apiFetch } from "@/lib/api";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
 import { listComments } from "@/lib/comments";
-import {
-  paintCommentHighlights,
-  scrollCommentIntoView,
-  selectionToAnchor,
-  type CommentDraft,
-} from "@/lib/fileview/commentAnchor";
-import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
-import { rehypeSourcePos } from "@/lib/fileview/rehypeSourcePos";
-import { pageTitle } from "@/lib/fileview/utils";
+import type {
+  CommentDraft,
+  CommentHighlightTarget,
+} from "@/lib/editor/comments";
+import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
-import { Coeditor } from "@/lib/coeditor/components";
-import type { CoeditParticipant } from "@/lib/coeditor/types";
-import { useCoeditSession } from "@/lib/coeditor/hooks";
+import {
+  Coeditor,
+  CoeditPresenceBar,
+  type CoeditorHandle,
+} from "@/lib/editor/components";
+import { useCoeditSession } from "@/lib/editor/hooks";
 import {
   useAgentsBarHost,
   useHeaderActionsHost,
@@ -80,12 +76,8 @@ import {
 } from "@/lib/templates";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
-import {
-  type CommitInfo,
-  fetchFileDiff,
-  fetchFileHistory,
-  type FileDiffResponse,
-} from "@/lib/wiki";
+import { fetchFileDiff, fetchFileHistory } from "@/lib/wiki/svc";
+import type { CommitInfo, FileDiffResponse } from "@/lib/wiki/types";
 import type {
   CommentThreadView,
   DocumentActivity,
@@ -108,46 +100,30 @@ interface DocEntry {
 
 interface DocTitleProps {
   path: string;
+  /** Renders the title inline-editable (Opal's `Content editable`) and calls
+   * back with the committed new title. Omit to render a static title. */
+  onRename?: (newTitle: string) => void;
 }
 
-/** Renders the page title and a divider below it. */
-export function DocTitle({ path }: DocTitleProps) {
+/** Renders the page title (inline-editable when `onRename` is given) and a
+ * divider below it. Capped at the same `max-w-[768px]` and centered the same
+ * way as the editor column below it, so the title and the doc text share one
+ * left margin instead of drifting apart. */
+export function DocTitle({ path, onRename }: DocTitleProps) {
   return (
-    <div className="flex flex-col gap-6 px-4 pb-6">
+    <div className="mx-auto flex w-full max-w-[768px] flex-col gap-6 pb-6">
       <Content
         icon={SvgDocFile}
         sizePreset="headline"
         variant="heading"
         title={pageTitle(path)}
+        editable={!!onRename}
+        onTitleChange={onRename}
       />
       <Divider paddingParallel="fit" paddingPerpendicular="fit" />
     </div>
   );
 }
-
-interface MarkdownRendererProps {
-  body: string;
-}
-
-/** Memoized markdown renderer for wiki file content.
- *
- * Encapsulates the full plugin stack: GFM tables/task lists, space-link
- * re-encoding, and source-position annotation for comment anchoring.
- * `React.memo` means the article only re-renders when `body` changes, which
- * preserves CSS Highlight API ranges across unrelated re-renders.
- */
-export const MarkdownRenderer = memo(function MarkdownRenderer({
-  body,
-}: MarkdownRendererProps) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}
-      rehypePlugins={[rehypeSourcePos]}
-    >
-      {body}
-    </ReactMarkdown>
-  );
-});
 
 interface FileViewProps {
   path: string;
@@ -165,9 +141,6 @@ export function FileView({ path }: FileViewProps) {
   const { setDrafting, requestExpand } = useDrafting();
   const { user } = useAuth();
   const [body, setBody] = useState("");
-  const [editing, setEditing] = useState(false);
-  const [filenameDraft, setFilenameDraft] = useState("");
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
@@ -186,8 +159,8 @@ export function FileView({ path }: FileViewProps) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  // Comments (render-mode). `commentDraft` is a pending text selection being
-  // composed; `selTool` is the floating "Comment" affordance shown on select.
+  // Comments. `commentDraft` is a pending text selection being composed;
+  // `selTool` is the floating "Comment" affordance shown on select.
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
@@ -198,7 +171,18 @@ export function FileView({ path }: FileViewProps) {
     y: number;
     draft: CommentDraft;
   } | null>(null);
-  const articleRef = useRef<HTMLElement | null>(null);
+  const coeditorRef = useRef<CoeditorHandle | null>(null);
+  // `viewingVersion`: a history version is displayed in the main pane (no
+  // live editor — DiffView instead). `viewingOld`: that version is not the
+  // newest commit for this file (`headSha` tracks `commits[0]`), so the
+  // warning banner applies. Computed early: the comment effects and the
+  // coedit session below both key off it.
+  const viewingVersion = viewingSha !== null;
+  const viewingOld = viewingVersion && viewingSha !== headSha;
+  const segments = path.split("/");
+  const parentSlug = segments.slice(0, -1).join("/");
+  const currentBasename = segments[segments.length - 1] ?? path;
+  const currentBasenameNoExt = currentBasename.replace(/\.md$/i, "");
   // Page owns the comment threads (so highlights render even with the panel
   // closed). Auto-open the panel once per path when a page has comments.
   const autoOpenedPathRef = useRef<string | null>(null);
@@ -243,125 +227,106 @@ export function FileView({ path }: FileViewProps) {
     void refreshComments();
   }, [refreshComments]);
 
-  // MarkdownRenderer is React.memo'd on body — CSS Highlight API ranges painted
-  // over its text nodes stay valid across unrelated re-renders.
-  const renderedBody = <MarkdownRenderer body={body} />;
+  // Comment thread spans to highlight in the editor. CodeMirror decorations
+  // (unlike the old DOM/react-markdown approach) update synchronously with
+  // state — no retry loop or MutationObserver needed. Cleared while viewing
+  // an old commit (DiffView, no live editor).
+  const commentHighlights = useMemo<CommentHighlightTarget[]>(() => {
+    if (viewingVersion) return [];
+    return commentThreads
+      .map((t) => t.root)
+      .filter(
+        // Resolved threads disappear from the panel, so drop their doc
+        // highlight too; orphaned ones have no live span to paint.
+        (r) =>
+          r.status !== "orphaned" &&
+          r.status !== "resolved" &&
+          r.start_offset !== null &&
+          r.end_offset !== null,
+      )
+      .map((r) => ({
+        startOffset: r.start_offset as number,
+        endOffset: r.end_offset as number,
+        active: r.id === activeCommentId,
+      }));
+  }, [commentThreads, viewingVersion, activeCommentId]);
 
-  // Paint Google-Docs-style highlights over the rendered article for each
-  // (non-orphaned) anchored comment. Cleared in edit/diff mode (no article).
-  //
-  // On a fresh load the comments and the doc body arrive on separate renders,
-  // and react-markdown commits its text nodes a tick later than this effect
-  // runs — so a single synchronous (or even rAF-deferred) paint finds no text
-  // to range over and silently no-ops, which is why nothing was highlighted
-  // until a click happened to re-run the paint against a settled DOM. We make
-  // it robust by (a) painting now, (b) painting on the next frame, and (c)
-  // watching the article subtree with a MutationObserver and repainting whenever
-  // react-markdown finally swaps in / replaces the rendered nodes. The CSS
-  // Custom Highlight API doesn't mutate the DOM, so this never loops.
-  useEffect(() => {
-    const el = articleRef.current;
-    if (!el) return;
-    const clear = editing || viewingSha;
-    const targets = clear
-      ? []
-      : commentThreads
-          .map((t) => t.root)
-          .filter(
-            // Resolved threads disappear from the panel, so drop their doc
-            // highlight too; orphaned ones have no live span to paint.
-            (r) =>
-              r.status !== "orphaned" &&
-              r.status !== "resolved" &&
-              r.start_offset !== null &&
-              r.end_offset !== null &&
-              r.quoted_text !== null,
-          )
-          .map((r) => ({
-            startOffset: r.start_offset as number,
-            endOffset: r.end_offset as number,
-            quotedText: r.quoted_text as string,
-            active: r.id === activeCommentId,
-          }));
-
-    let cancelled = false;
-    let raf = 0;
-    let attempts = 0;
-    const MAX_ATTEMPTS = 60; // ~1s at 60fps, then give up (some spans may be unmappable)
-    const tick = () => {
-      if (cancelled) return;
-      const painted = paintCommentHighlights(el, body, targets);
-      attempts += 1;
-      // The markdown text nodes commit a tick after React renders, so the first
-      // paint can find nothing to range over. Retry per-frame until every target
-      // lands (or we hit the cap) — this is what makes highlights appear on a
-      // fresh load instead of only after a click re-ran the paint.
-      if (painted < targets.length && attempts < MAX_ATTEMPTS) {
-        raf = requestAnimationFrame(tick);
+  // Renaming is its own action now (Opal's `Content editable` on DocTitle),
+  // decoupled from the coedit session/checkpointing — no more "rename at
+  // Save time."
+  const handleRename = useCallback(
+    async (newTitle: string) => {
+      const trimmed = newTitle.trim().replace(/^\/+|\/+$/g, "");
+      const noExt = trimmed.replace(/\.md$/i, "");
+      if (!noExt || noExt.includes("/") || noExt === currentBasenameNoExt)
+        return;
+      setError(null);
+      try {
+        const finalName = noExt + ".md";
+        const newRel = parentSlug ? `${parentSlug}/${finalName}` : finalName;
+        await apiFetch("/wiki/move", {
+          method: "POST",
+          body: JSON.stringify({ old_path: path, new_path: newRel }),
+        });
+        // The id URL survives a rename, so the open page's id→path resolve now
+        // points at the old path. Revalidate every wiki cache (including that
+        // resolve and the content read) so the page follows to its new path,
+        // then route to the renamed doc's durable id URL — falling back to the
+        // path URL only for an id-less page.
+        await revalidateWiki();
+        const id = (await resolveIds([newRel]))[newRel];
+        router.replace(id ? wikiHref(id) : `/app/wiki/${newRel}`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "rename failed");
       }
-    };
-    tick();
+    },
+    [path, parentSlug, currentBasenameNoExt, router],
+  );
 
-    // Repaint when react-markdown later swaps nodes (e.g. an edit/remap rerenders
-    // the body). Reset the retry budget so the fresh DOM gets a full set of tries.
-    const observer = new MutationObserver(() => {
-      attempts = 0;
-      cancelAnimationFrame(raf);
-      tick();
-    });
-    observer.observe(el, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
+  // Live co-editing session: joined whenever the current (non-historical)
+  // version is showing, left when the user opens an old commit — see
+  // `useCoeditSession`'s `enabled` doc. No explicit Save; teardown (checkpoint
+  // + leave) fires from the hook itself on that transition/unmount, not from
+  // a button here.
+  const coedit = useCoeditSession({
+    path,
+    enabled: !viewingVersion,
+    committedBody: body,
+    myUserId: user?.id ?? null,
+    onEnd: () => {
+      void refreshComments();
+      void refreshDraftState();
+    },
+  });
 
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(raf);
-      observer.disconnect();
-    };
-    // `loading` gates whether <article> is mounted: when the body is primed by
-    // the SWR cache before `loading` flips, `body` doesn't change on mount, so
-    // without this dep the effect wouldn't re-run and the article would mount
-    // with no paint (highlights only appeared after a click). Re-run on mount.
-  }, [commentThreads, body, editing, viewingSha, activeCommentId, loading]);
-
-  // Select a thread (its span gets the orange highlight) and scroll the doc to
-  // bring that span into view. Only an explicit click runs this — keying a
-  // scroll off `activeCommentId` alone would also re-scroll on every comment
-  // refetch while a thread stays selected. Deferred a frame so the layout (and
-  // the active repaint) settles before we measure the range.
+  // Select a thread (its span gets the orange highlight) and scroll the
+  // editor to bring that span into view. Only an explicit click runs this —
+  // keying a scroll off `activeCommentId` alone would also re-scroll on
+  // every comment refetch while a thread stays selected.
   const activateComment = useCallback(
     (id: string | null) => {
       setActiveCommentId(id);
-      if (!id || editing || viewingSha) return;
-      const el = articleRef.current;
-      if (!el) return;
+      if (!id || viewingVersion) return;
       const root = commentThreads.find((t) => t.root.id === id)?.root;
       if (
         !root ||
         root.status === "orphaned" ||
         root.status === "resolved" ||
-        root.start_offset === null ||
-        root.end_offset === null
+        root.start_offset === null
       )
         return;
-      requestAnimationFrame(() => {
-        scrollCommentIntoView(el, body, root.start_offset!, root.end_offset!);
-      });
+      coeditorRef.current?.scrollToOffset(root.start_offset);
     },
-    [commentThreads, body, editing, viewingSha],
+    [commentThreads, viewingVersion],
   );
 
-  // Deep-link: `?comment=<id>` opens the panel, selects that thread, and scrolls
-  // to its anchored span — the shareable-link counterpart to click-to-focus.
-  // Runs once per id (focusedCommentRef), and only once the thread is loaded.
-  // The scroll retries per-frame because on a fresh load react-markdown commits
-  // its text nodes a tick after this effect runs (same reason the highlight
-  // paint retries).
+  // Deep-link: `?comment=<id>` opens the panel, selects that thread, and
+  // scrolls to its anchored span — the shareable-link counterpart to
+  // click-to-focus. Runs once per id (focusedCommentRef), and only once the
+  // thread is loaded and the editor has mounted (`coedit.session`).
   useEffect(() => {
     const target = searchParams?.get("comment");
-    if (!target || loading || editing || viewingSha) return;
+    if (!target || loading || viewingVersion || !coedit.session) return;
     if (focusedCommentRef.current === target) return;
     const root = commentThreads.find((t) => t.root.id === target)?.root;
     if (!root) return; // not loaded yet, or not a thread on this page
@@ -371,57 +336,28 @@ export function FileView({ path }: FileViewProps) {
     if (
       root.status === "orphaned" ||
       root.status === "resolved" ||
-      root.start_offset === null ||
-      root.end_offset === null
+      root.start_offset === null
     )
       return; // selected, but no live span to scroll to
-    const el = articleRef.current;
-    if (!el) return;
-    let raf = 0;
-    let attempts = 0;
-    const tick = () => {
-      if (scrollCommentIntoView(el, body, root.start_offset!, root.end_offset!))
-        return;
-      if (++attempts < 60) raf = requestAnimationFrame(tick);
-    };
-    tick();
-    return () => cancelAnimationFrame(raf);
+    coeditorRef.current?.scrollToOffset(root.start_offset);
   }, [
     searchParams,
     commentThreads,
     loading,
-    editing,
-    viewingSha,
-    body,
+    viewingVersion,
+    coedit.session,
     openComments,
   ]);
 
-  // On a text selection in the rendered article, offer a floating "Comment"
-  // affordance anchored above the selection (render mode only).
-  const onArticleMouseUp = useCallback(() => {
-    const el = articleRef.current;
-    const sel = window.getSelection();
-    if (!el || !sel || sel.rangeCount === 0) {
-      setSelTool(null);
-      return;
-    }
-    const draft = selectionToAnchor(el, body);
-    if (!draft) {
-      setSelTool(null);
-      return;
-    }
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    setSelTool({ x: rect.left + rect.width / 2, y: rect.top, draft });
-  }, [body]);
-
-  useEffect(() => {
-    const onSel = () => {
-      const s = window.getSelection();
-      if (!s || s.isCollapsed) setSelTool(null);
-    };
-    document.addEventListener("selectionchange", onSel);
-    return () => document.removeEventListener("selectionchange", onSel);
-  }, []);
+  // Selecting text in the editor offers a floating "Comment" affordance
+  // anchored above the selection — fed by the Coeditor's selection reporting
+  // instead of a DOM `mouseup`/`selectionchange` handler.
+  const handleSelectionForComment = useCallback(
+    (draft: CommentDraft | null, coords: { x: number; y: number } | null) => {
+      setSelTool(draft && coords ? { x: coords.x, y: coords.y, draft } : null);
+    },
+    [],
+  );
 
   // Active-agents panel (collapsible chip near the top of the doc).
   // We always know the count (so the chip can label "Active agents (N)"),
@@ -449,7 +385,6 @@ export function FileView({ path }: FileViewProps) {
   const loadLatest = useCallback(() => {
     setLoading(true);
     setError(null);
-    setEditing(false);
     setViewingSha(null);
     setDiffData(null);
     apiFetch<FileResponse>(`/wiki/file?path=${encodeURIComponent(path)}`)
@@ -466,19 +401,6 @@ export function FileView({ path }: FileViewProps) {
     setHistoryOpen(false);
     setCommits(null);
   }, [loadLatest]);
-
-  // SWR revalidates the doc so MCP-driven edit_doc writes appear
-  // without manual refresh. Skip when the user is editing the
-  // textarea or viewing an old commit — both would get clobbered.
-  const liveKey =
-    !editing && viewingSha === null
-      ? `/wiki/file?path=${encodeURIComponent(path)}`
-      : null;
-  const { data: liveDoc } = useSWR<FileResponse>(liveKey, {
-    refreshInterval: 1500,
-    revalidateOnFocus: true,
-    dedupingInterval: 0,
-  });
 
   // Active external agent sessions on this page — surfaced in the
   // Active agents bar alongside read/write activity.
@@ -514,20 +436,6 @@ export function FileView({ path }: FileViewProps) {
     },
     [refreshSessions, confirmDialog],
   );
-  useEffect(() => {
-    if (!liveDoc) return;
-    // Re-check the gate at apply time — an in-flight fetch from before
-    // the user toggled `editing` can still resolve here and would
-    // otherwise clobber the live session buffer. While editing, the
-    // co-edit SSE stream is the source of truth, not this poll.
-    if (editing || viewingSha !== null) return;
-    // The read is session-aware: while a co-edit session is open, /wiki/file
-    // serves the live buffer (a quick HEAD+buffer merge), so this poll reflects
-    // saved edits immediately — no dependency on the async checkpoint commit.
-    setBody((prev) => (prev === liveDoc.body ? prev : liveDoc.body));
-    setHeadSha(liveDoc.head_sha ?? null);
-  }, [liveDoc, editing, viewingSha]);
-
   // Fetch template summaries once; the gallery uses them as its menu
   // and falls back to "no templates configured" when the list is empty.
   useEffect(() => {
@@ -634,10 +542,9 @@ export function FileView({ path }: FileViewProps) {
 
   function closeHistory() {
     setHistoryOpen(false);
-    // Closing the panel exits history mode entirely — back to the rendered
-    // latest version. Skip while editing: `viewingSha` is the fork base the
-    // save needs, and the textarea is showing the user's draft anyway.
-    if (!editing && viewingSha !== null) {
+    // Closing the panel exits history mode entirely — back to the live
+    // editor, which rejoins the coedit session (`enabled: !viewingVersion`).
+    if (viewingSha !== null) {
       setViewingSha(null);
       setDiffData(null);
     }
@@ -670,7 +577,6 @@ export function FileView({ path }: FileViewProps) {
     if (sha === viewingSha) return;
     setLoading(true);
     setError(null);
-    setEditing(false);
     try {
       const r = await fetchFileDiff(path, sha);
       setDiffData(r);
@@ -679,100 +585,6 @@ export function FileView({ path }: FileViewProps) {
       setError(e instanceof Error ? e.message : "failed to load version");
     } finally {
       setLoading(false);
-    }
-  }
-
-  // Live co-editing session: clicking Edit joins the page's session and binds
-  // the textarea to the shared buffer; Save checkpoints, Cancel discards, a
-  // disconnect leaves. Only the current version is co-edited (the Edit button is
-  // hidden while viewing an old commit).
-  const coedit = useCoeditSession({
-    path,
-    enabled: editing,
-    committedBody: body,
-    myUserId: user?.id ?? null,
-    onEnd: () => {
-      setEditing(false);
-      setViewingSha(null);
-      // Don't refetch the body here. onSave sets it optimistically; the SWR
-      // poll then reconciles against the session-aware read (which serves the
-      // live buffer while the session is open), so there's no stale flash and
-      // no wait on the async checkpoint commit.
-      void refreshComments();
-      void refreshDraftState();
-    },
-  });
-
-  const segments = path.split("/");
-  const parentSlug = segments.slice(0, -1).join("/");
-  const currentBasename = segments[segments.length - 1] ?? path;
-  const currentBasenameNoExt = currentBasename.replace(/\.md$/i, "");
-  const trimmedFilename = filenameDraft.trim().replace(/^\/+|\/+$/g, "");
-  const filenameNoExt = trimmedFilename.replace(/\.md$/i, "");
-  const filenameValid = !!filenameNoExt && !filenameNoExt.includes("/");
-  const renamed =
-    editing && filenameValid && filenameNoExt !== currentBasenameNoExt;
-  // `viewingVersion`: a history version is displayed in the main pane.
-  // `viewingOld`: that version is not the newest commit for this file
-  // (`headSha` tracks `commits[0]`), so the warning banner applies.
-  const viewingVersion = viewingSha !== null;
-  const viewingOld = viewingVersion && viewingSha !== headSha;
-  // No navigate-away guard: editing writes to the shared session buffer, which
-  // is durable in Postgres and commits at session close — leaving the page
-  // never loses edits, so there's nothing to warn about.
-
-  function startEdit() {
-    // Entering edit mode joins the page's co-edit session (see the
-    // useCoeditSession hook, gated on `editing`), which seeds the buffer from
-    // current HEAD. The Edit button is hidden while viewing an old commit, so
-    // editing always targets the current version.
-    setFilenameDraft(currentBasenameNoExt);
-    setError(null);
-    setEditing(true);
-  }
-
-  async function onDone() {
-    if (!filenameValid) {
-      setError("Filename cannot be empty or contain '/'.");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    // Snapshot what we're committing so the viewer shows it immediately; the
-    // checkpoint commit runs on a worker, but the session-aware read serves the
-    // live buffer meanwhile, so the SWR poll keeps showing this content.
-    const finalText = coedit.buffer;
-    try {
-      // Commit the session buffer to git (checkpoint), then leave. onEnd exits
-      // edit mode + refreshes comments/drafting; co-editing removes the
-      // human-vs-human conflict, so there's no 409 path here. On a rename-only
-      // save the buffer is unchanged, so the checkpoint is a no-op server-side
-      // (version == checkpointed_version) — no empty commit before the move.
-      await coedit.save();
-      setBody(finalText);
-      setDiffData(null);
-      if (historyOpen) refreshHistory();
-      else setCommits(null);
-      if (renamed) {
-        const finalName = filenameNoExt + ".md";
-        const newRel = parentSlug ? `${parentSlug}/${finalName}` : finalName;
-        await apiFetch("/wiki/move", {
-          method: "POST",
-          body: JSON.stringify({ old_path: path, new_path: newRel }),
-        });
-        // The id URL survives a rename, so the open page's id→path resolve now
-        // points at the old path. Revalidate every wiki cache (including that
-        // resolve and the content read) so the page follows to its new path,
-        // then route to the renamed doc's durable id URL — falling back to the
-        // path URL only for an id-less page.
-        await revalidateWiki();
-        const id = (await resolveIds([newRel]))[newRel];
-        router.replace(id ? wikiHref(id) : `/app/wiki/${newRel}`);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "save failed");
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -813,98 +625,96 @@ export function FileView({ path }: FileViewProps) {
   // Page actions live in the single pinned header (WikiHeader), not a second
   // header inside the scroll area — they portal into its right-aligned slot.
   // The panel toggles are icon SelectButtons so the open panel shows the
-  // selected tint; the others are tertiary icon Buttons with the lone solid
-  // CTA (Edit). Editing swaps in labelled Cancel / Save for clarity.
-  const headerActions = editing ? (
-    // One exit: "Done" leaves the session (committing the shared buffer). There
-    // is no Cancel — the buffer is the live shared document, so a single
-    // participant can't discard everyone's in-progress edits.
-    <Button variant="action" onClick={onDone} disabled={saving}>
-      {saving ? "Finishing…" : "Done"}
-    </Button>
-  ) : !loading && !error ? (
-    <>
-      <Button
-        icon={SvgSparkle}
-        prominence="tertiary"
-        tooltip="Run Agent"
-        onClick={() => setRunAgentOpen(true)}
-      />
-      <SelectButton
-        icon={SvgWorkflow}
-        state={automationsOpen ? "selected" : "empty"}
-        tooltip="Triggers"
-        onClick={() => {
-          if (automationsOpen || triggerModalOpen) {
+  // selected tint; the others are tertiary icon Buttons. No Edit/Done button
+  // — the editor is always live and autosaves; `saveStatus` is the only
+  // feedback for that.
+  const headerActions =
+    !loading && !error ? (
+      <>
+        {!viewingVersion && (
+          <span className="mr-1 text-[12px] text-(--text-03)">
+            {coedit.saveStatus === "saving"
+              ? "Saving…"
+              : coedit.saveStatus === "error"
+                ? "Couldn't save"
+                : "Saved"}
+          </span>
+        )}
+        <Button
+          icon={SvgSparkle}
+          prominence="tertiary"
+          tooltip="Run Agent"
+          onClick={() => setRunAgentOpen(true)}
+        />
+        <SelectButton
+          icon={SvgWorkflow}
+          state={automationsOpen ? "selected" : "empty"}
+          tooltip="Triggers"
+          onClick={() => {
+            if (automationsOpen || triggerModalOpen) {
+              setAutomationsOpen(false);
+              setTriggerModalOpen(false);
+              setEditingTrigger(null);
+              return;
+            }
+            setHistoryOpen(false);
+            setCommentsOpen(false);
+            setCommentDraft(null);
+            setPolicyOpen(false);
+            setAutomationsOpen(true);
+          }}
+        />
+        <Button
+          icon={SvgShare}
+          prominence="tertiary"
+          tooltip="Share"
+          onClick={() => setShareOpen(true)}
+        />
+        <SelectButton
+          icon={SvgHistory}
+          state={historyOpen ? "selected" : "empty"}
+          tooltip="History"
+          onClick={toggleHistory}
+        />
+        <SelectButton
+          icon={SvgBubbleText}
+          state={commentsOpen ? "selected" : "empty"}
+          tooltip="Comments"
+          onClick={() =>
+            commentsOpen ? setCommentsOpen(false) : openComments()
+          }
+        />
+        <SelectButton
+          icon={SvgShield}
+          state={policyOpen ? "selected" : "empty"}
+          tooltip="Update Policy"
+          onClick={() => {
+            if (policyOpen) {
+              setPolicyOpen(false);
+              return;
+            }
+            setHistoryOpen(false);
+            setCommentsOpen(false);
+            setCommentDraft(null);
             setAutomationsOpen(false);
             setTriggerModalOpen(false);
             setEditingTrigger(null);
-            return;
-          }
-          setHistoryOpen(false);
-          setCommentsOpen(false);
-          setCommentDraft(null);
-          setPolicyOpen(false);
-          setAutomationsOpen(true);
-        }}
-      />
-      <Button
-        icon={SvgShare}
-        prominence="tertiary"
-        tooltip="Share"
-        onClick={() => setShareOpen(true)}
-      />
-      <SelectButton
-        icon={SvgHistory}
-        state={historyOpen ? "selected" : "empty"}
-        tooltip="History"
-        onClick={toggleHistory}
-      />
-      <SelectButton
-        icon={SvgBubbleText}
-        state={commentsOpen ? "selected" : "empty"}
-        tooltip="Comments"
-        onClick={() => (commentsOpen ? setCommentsOpen(false) : openComments())}
-      />
-      <SelectButton
-        icon={SvgShield}
-        state={policyOpen ? "selected" : "empty"}
-        tooltip="Update Policy"
-        onClick={() => {
-          if (policyOpen) {
-            setPolicyOpen(false);
-            return;
-          }
-          setHistoryOpen(false);
-          setCommentsOpen(false);
-          setCommentDraft(null);
-          setAutomationsOpen(false);
-          setTriggerModalOpen(false);
-          setEditingTrigger(null);
-          setPolicyOpen(true);
-        }}
-      />
-      {/* Editing always targets current HEAD via a co-edit session, so hide
-          Edit while viewing an older commit — "Back to latest" first. */}
-      {!viewingOld && (
-        <Button
-          icon={SvgEdit}
-          variant="action"
-          tooltip="Edit"
-          onClick={startEdit}
+            setPolicyOpen(true);
+          }}
         />
-      )}
-    </>
-  ) : null;
+      </>
+    ) : null;
 
   return (
     <main
-      className={`box-border flex h-full min-h-0 flex-col ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+      className={cn(
+        "box-border flex h-full min-h-0 flex-col",
+        isMobile ? "px-3 py-4" : "px-8 py-6",
+      )}
     >
       {host?.el && headerActions && createPortal(headerActions, host.el)}
 
       {agentsBarHost?.el &&
-        !editing &&
         createPortal(
           <ActiveAgentsBar
             agents={agents}
@@ -917,9 +727,12 @@ export function FileView({ path }: FileViewProps) {
           agentsBarHost.el,
         )}
 
-      {!editing && <DocTitle path={path} />}
+      <DocTitle
+        path={path}
+        onRename={viewingVersion ? undefined : handleRename}
+      />
 
-      {!editing && triggerStatus && (
+      {triggerStatus && (
         <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
       )}
 
@@ -994,122 +807,113 @@ export function FileView({ path }: FileViewProps) {
 
       {!loading && !error && (
         <>
-          {editing || (viewingVersion && diffData) ? (
-            // Editor / diff: fixed-height, capped + centered column with its own
-            // internal scroll (you edit against a pinned viewport, not a growing
-            // page).
-            <div className="flex min-h-0 flex-1 justify-center">
-              <div className="flex w-full max-w-[768px] min-w-0 flex-col gap-3">
-                {editing ? (
-                  <>
-                    <FilenameRow
-                      parent={parentSlug}
-                      value={filenameDraft}
-                      onChange={setFilenameDraft}
-                      disabled={saving}
-                    />
-                    <CoeditPresenceBar
-                      participants={coedit.participants}
-                      typing={coedit.typing}
-                      selfUserId={user?.id ?? null}
-                    />
-                    {(() => {
-                      // Cards visible while the body is still "empty enough"
-                      // to discard without losing user work: truly blank, or
-                      // still verbatim equal to the template the user just
-                      // applied (so they can keep swapping templates).
-                      const isBlank = coedit.buffer.trim() === "";
-                      const matchesApplied =
-                        appliedTemplateBody !== null &&
-                        coedit.buffer === appliedTemplateBody;
-                      const showGallery =
-                        (isBlank || matchesApplied) &&
-                        templates !== null &&
-                        templates.length > 0;
-                      if (!showGallery) return null;
-                      return (
-                        <TemplateGallery
-                          templates={templates!}
-                          activeId={matchesApplied ? appliedTemplateId : null}
-                          applyingId={applyingTemplateId}
-                          blankActive={isBlank && appliedTemplateId === null}
-                          onPick={(t) => void onPickTemplate(t)}
-                          onBlank={() => void onPickBlank()}
-                        />
+          {/* Fixed-height, capped + centered column with its own internal
+              scroll (you edit against a pinned viewport, not a growing
+              page) — the live editor when showing the current version, or
+              DiffView when viewing an old commit. */}
+          <div className="flex min-h-0 flex-1 justify-center">
+            <div className="flex w-full max-w-[768px] min-w-0 flex-col gap-3">
+              {viewingVersion && diffData ? (
+                <div className="flex min-h-0 flex-1 overflow-hidden">
+                  <DiffView
+                    data={diffData!}
+                    commit={
+                      commits?.find((c) => c.sha === viewingSha) ?? undefined
+                    }
+                    loadBody={async () => {
+                      const sha = viewingSha;
+                      if (!sha) return "";
+                      const r = await apiFetch<FileResponse>(
+                        `/wiki/file?path=${encodeURIComponent(
+                          path,
+                        )}&ref=${encodeURIComponent(sha)}`,
                       );
-                    })()}
-                    {coedit.session ? (
-                      <Coeditor
-                        key={coedit.session.id}
-                        session={coedit.session}
-                        peers={coedit.peers}
-                        onSelectionChange={coedit.reportSelection}
-                        onServerFrame={coedit.onServerFrame}
-                        reportDoc={coedit.reportDoc}
-                        registerFlush={coedit.registerFlush}
-                        registerSetDoc={coedit.registerSetDoc}
-                        placeholder="Start typing, or pick a template above…"
+                      return r.body;
+                    }}
+                  />
+                </div>
+              ) : (
+                <>
+                  <UpdateHealthBanner
+                    path={path}
+                    onOpenPolicy={() => {
+                      setHistoryOpen(false);
+                      setCommentsOpen(false);
+                      setAutomationsOpen(false);
+                      setTriggerModalOpen(false);
+                      setEditingTrigger(null);
+                      setPolicyOpen(true);
+                    }}
+                  />
+                  <CoeditPresenceBar
+                    participants={coedit.participants}
+                    typing={coedit.typing}
+                    selfUserId={user?.id ?? null}
+                  />
+                  {(() => {
+                    // Cards visible while the body is still "empty enough"
+                    // to discard without losing user work: truly blank, or
+                    // still verbatim equal to the template the user just
+                    // applied (so they can keep swapping templates).
+                    const isBlank = coedit.buffer.trim() === "";
+                    const matchesApplied =
+                      appliedTemplateBody !== null &&
+                      coedit.buffer === appliedTemplateBody;
+                    const showGallery =
+                      (isBlank || matchesApplied) &&
+                      templates !== null &&
+                      templates.length > 0;
+                    if (!showGallery) return null;
+                    return (
+                      <TemplateGallery
+                        templates={templates!}
+                        activeId={matchesApplied ? appliedTemplateId : null}
+                        applyingId={applyingTemplateId}
+                        blankActive={isBlank && appliedTemplateId === null}
+                        onPick={(t) => void onPickTemplate(t)}
+                        onBlank={() => void onPickBlank()}
                       />
-                    ) : (
-                      // Joining the session; the editor mounts once we have its
-                      // start version + doc.
-                      <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
-                        Connecting…
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="flex min-h-0 flex-1 overflow-hidden">
-                    <DiffView
-                      data={diffData!}
-                      commit={
-                        commits?.find((c) => c.sha === viewingSha) ?? undefined
-                      }
-                      loadBody={async () => {
-                        const sha = viewingSha;
-                        if (!sha) return "";
-                        const r = await apiFetch<FileResponse>(
-                          `/wiki/file?path=${encodeURIComponent(
-                            path,
-                          )}&ref=${encodeURIComponent(sha)}`,
-                        );
-                        return r.body;
-                      }}
+                    );
+                  })()}
+                  {coedit.session ? (
+                    <Coeditor
+                      key={coedit.session.id}
+                      ref={coeditorRef}
+                      session={coedit.session}
+                      peers={coedit.peers}
+                      onSelectionChange={coedit.reportSelection}
+                      onServerFrame={coedit.onServerFrame}
+                      reportDoc={coedit.reportDoc}
+                      registerFlush={coedit.registerFlush}
+                      registerSetDoc={coedit.registerSetDoc}
+                      commentHighlights={commentHighlights}
+                      onSelectionForComment={handleSelectionForComment}
+                      placeholder="Start typing, or pick a template above…"
                     />
-                  </div>
-                )}
-              </div>
+                  ) : coedit.joinError ? (
+                    // The join handshake itself failed — there's no read-only
+                    // fallback to fall back to, so this has to be an actionable
+                    // dead end, not a permanent "Connecting…".
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
+                      <span>
+                        Couldn't connect to the editing session:{" "}
+                        {coedit.joinError}
+                      </span>
+                      <Button size="sm" onClick={coedit.retryJoin}>
+                        Retry
+                      </Button>
+                    </div>
+                  ) : (
+                    // Joining the session; the editor mounts once we have its
+                    // start version + doc.
+                    <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
+                      Connecting…
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-          ) : (
-            // Render mode: the whole main-content area scrolls with the
-            // scrollbar flush at the far right edge (the negative margin cancels
-            // <main>'s horizontal padding, re-applied inside so the text keeps
-            // its gutter); the article text stays capped + centered.
-            <div
-              className={`min-h-0 flex-1 overflow-y-auto ${isMobile ? "-mx-3 px-3" : "-mx-8 px-8"}`}
-            >
-              <div className="mx-auto w-full max-w-[768px]">
-                <UpdateHealthBanner
-                  path={path}
-                  onOpenPolicy={() => {
-                    setHistoryOpen(false);
-                    setCommentsOpen(false);
-                    setAutomationsOpen(false);
-                    setTriggerModalOpen(false);
-                    setEditingTrigger(null);
-                    setPolicyOpen(true);
-                  }}
-                />
-              </div>
-              <article
-                ref={articleRef}
-                className="markdown mx-auto w-full max-w-[768px]"
-                onMouseUp={onArticleMouseUp}
-              >
-                {renderedBody}
-              </article>
-            </div>
-          )}
+          </div>
           {/* Desktop side panels dock at the app's right edge (full height,
               beside the header) by portaling into the shell's right-panel host,
               so they never eat into the reading column above. Mobile keeps the
@@ -1303,11 +1107,20 @@ function ActiveAgentsBar({
         onClick={expandable ? onToggle : undefined}
         aria-expanded={expandable ? open : undefined}
         disabled={!expandable}
-        className={`flex w-full items-center gap-2 border-none bg-transparent px-3 py-2 text-left text-[13px] ${expandable ? "cursor-pointer text-(--text-05)" : "cursor-default text-(--text-03)"}`}
+        className={cn(
+          "flex w-full items-center gap-2 border-none bg-transparent px-3 py-2 text-left text-[13px]",
+          expandable
+            ? "cursor-pointer text-(--text-05)"
+            : "cursor-default text-(--text-03)",
+        )}
       >
         <span
           aria-hidden
-          className={`flex shrink-0 transition-transform duration-[120ms] ease-in-out ${open ? "rotate-90" : "rotate-0"} ${!expandable ? "text-(--text-02)" : "text-(--text-03)"}`}
+          className={cn(
+            "flex shrink-0 transition-transform duration-[120ms] ease-in-out",
+            open ? "rotate-90" : "rotate-0",
+            !expandable ? "text-(--text-02)" : "text-(--text-03)",
+          )}
         >
           <SvgChevronRight size={10} />
         </span>
@@ -1358,10 +1171,10 @@ interface ActiveAgentRowProps {
 function ActiveAgentRow({ a, isLast }: ActiveAgentRowProps) {
   return (
     <li
-      className={
-        `flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap` +
-        (isLast ? `` : ` border-b border-(--border-01)`)
-      }
+      className={cn(
+        "flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap",
+        !isLast && "border-b border-(--border-01)",
+      )}
     >
       <span className="shrink-0 rounded-(--radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
         {a.activity}
@@ -1411,10 +1224,10 @@ interface ActiveSessionRowProps {
 function ActiveSessionRow({ s, isLast, onClose }: ActiveSessionRowProps) {
   return (
     <li
-      className={
-        `flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap` +
-        (isLast ? `` : ` border-b border-(--border-01)`)
-      }
+      className={cn(
+        "flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap",
+        !isLast && "border-b border-(--border-01)",
+      )}
     >
       <span className="shrink-0 rounded-(--radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
         {s.status}
@@ -1623,7 +1436,11 @@ function StripArrow({ direction, onClick }: StripArrowProps) {
       type="button"
       onClick={onClick}
       aria-label={direction === "left" ? "Scroll left" : "Scroll right"}
-      className={`absolute top-1/2 -translate-y-1/2 ${direction === "left" ? "left-1" : "right-1"} flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-(--border-01) bg-(--background-tint-00) p-0 text-(--text-04) shadow-(--shadow-sm)`}
+      className={cn(
+        "absolute top-1/2 -translate-y-1/2",
+        direction === "left" ? "left-1" : "right-1",
+        "flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-(--border-01) bg-(--background-tint-00) p-0 text-(--text-04) shadow-(--shadow-sm)",
+      )}
     >
       {direction === "left" ? (
         <SvgChevronLeft size={14} />
@@ -1656,7 +1473,12 @@ function TemplateCard({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className={`box-border flex h-full min-h-[64px] w-full flex-col gap-1 rounded-(--radius-04) border px-3 py-[10px] text-left text-(--text-05) transition-[background,border-color] duration-[80ms] ease-in-out ${busy ? "cursor-wait opacity-[0.7]" : "cursor-pointer"} ${active ? "border-(--border-01) bg-(--background-tint-03)" : "border-(--border-01) bg-(--background-tint-00)"}`}
+      className={cn(
+        "box-border flex h-full min-h-[64px] w-full flex-col gap-1 rounded-(--radius-04) border px-3 py-[10px] text-left text-(--text-05) transition-[background,border-color] duration-[80ms] ease-in-out",
+        busy ? "cursor-wait opacity-[0.7]" : "cursor-pointer",
+        "border-(--border-01)",
+        active ? "bg-(--background-tint-03)" : "bg-(--background-tint-00)",
+      )}
       onMouseEnter={(e) => {
         if (!active && !busy) {
           e.currentTarget.style.background = "var(--background-tint-03)";
@@ -1746,43 +1568,6 @@ export function DestinationSelect({
         </div>
       </Popover.Content>
     </Popover>
-  );
-}
-
-interface CoeditPresenceBarProps {
-  participants: CoeditParticipant[];
-  typing: string[];
-  selfUserId: string | null;
-}
-
-// Co-editing presence while editing: who else is in the session and who's
-// typing right now. Remote carets aren't drawn in a plain textarea (that waits
-// for CodeMirror) — but edits already merge into the shared buffer live, so
-// this makes the collaboration visible. Renders nothing when you're alone.
-export function CoeditPresenceBar({
-  participants,
-  typing,
-  selfUserId,
-}: CoeditPresenceBarProps) {
-  const others = participants.filter((p) => p.user_id !== selfUserId);
-  if (others.length === 0) return null;
-  const typingSet = new Set(typing);
-  return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-(--text-03)">
-      <span
-        className="inline-block h-[7px] w-[7px] rounded-full bg-(--status-success-05)"
-        aria-hidden
-      />
-      {others.map((p) => (
-        <span key={p.user_id} className="inline-flex items-center gap-1">
-          <span className="font-medium text-(--text-04)">{p.user_display}</span>
-          {typingSet.has(p.user_id) && (
-            <span className="text-(--text-03) italic">typing…</span>
-          )}
-        </span>
-      ))}
-      <span>also editing</span>
-    </div>
   );
 }
 

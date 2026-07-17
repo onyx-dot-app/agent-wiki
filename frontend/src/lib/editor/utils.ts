@@ -1,7 +1,7 @@
 import type { ChangeSet, EditorState } from "@codemirror/state";
 import { sendableUpdates } from "@codemirror/collab";
-import type { CoeditChange } from "@/lib/coeditor/types";
-import { PEER_COLORS } from "@/lib/coeditor/constants";
+import type { CoeditChange } from "@/lib/editor/types";
+import { PEER_COLORS } from "@/lib/editor/constants";
 
 /** Deterministically map a `userId` to a color from `PEER_COLORS` so a given
  * peer keeps the same color for the full session. */

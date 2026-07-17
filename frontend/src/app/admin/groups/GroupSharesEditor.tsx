@@ -30,7 +30,7 @@ import type {
   ResourceKind,
   WikiPathEntry,
 } from "@/lib/permissions";
-import { lastSegment } from "@/lib/wiki";
+import { lastSegment } from "@/lib/wiki/utils";
 
 import styles from "./groups.module.css";
 

@@ -22,7 +22,9 @@ import {
 import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { relativeTime } from "@/lib/time";
-import { AI_DRAFT_KEY, generateDraft, type RecentPage } from "@/lib/wiki";
+import { AI_DRAFT_KEY } from "@/lib/wiki/constants";
+import { generateDraft } from "@/lib/wiki/svc";
+import type { RecentPage } from "@/lib/wiki/types";
 import { wikiHref, wikiPath } from "@/lib/wikiHref";
 import { StartNewPage } from "@/components/wiki/StartNewPage";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";

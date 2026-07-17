@@ -19,7 +19,7 @@ import {
 import { markdown } from "@onyx-ai/opal/utils";
 
 import { apiFetch } from "@/lib/api";
-import { lastSegment } from "@/lib/wiki";
+import { lastSegment } from "@/lib/wiki/utils";
 
 import styles from "./WikiItemModals.module.css";
 
