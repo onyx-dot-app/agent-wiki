@@ -125,15 +125,16 @@ const peersField = StateField.define<{
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
 });
 
-/** Base CodeMirror theme: full-height layout, monospace scroller, Opal tokens,
- * and styles for the `.cm-coedit-caret` / `.cm-coedit-caret-label` widgets. */
+/** Base CodeMirror theme: full-height layout, borderless (the WYSIWYG surface
+ * reads as part of the page, not a boxed textarea), prose-font scroller,
+ * Opal tokens, and styles for the `.cm-coedit-caret` / `.cm-coedit-caret-label`
+ * widgets. No horizontal `.cm-content` padding — the surrounding column
+ * (`FileView`'s `max-w-[768px]` wrapper, shared with `DocTitle`) owns the
+ * left/right margin, so the editor's text lines up with the title above it. */
 const baseTheme = EditorView.theme({
   "&": {
     height: "100%",
     fontSize: "0.875rem",
-    borderRadius: "var(--border-radius-08)",
-    border: "1px solid var(--border-01)",
-    backgroundColor: "var(--background-00)",
     color: "var(--text-05)",
   },
   "&.cm-focused": { outline: "none" },
@@ -142,7 +143,7 @@ const baseTheme = EditorView.theme({
     fontFamily: "var(--font-sans, system-ui, -apple-system, sans-serif)",
     lineHeight: "1.6",
   },
-  ".cm-content": { padding: "1rem", caretColor: "var(--text-05)" },
+  ".cm-content": { padding: "0.5rem 0", caretColor: "var(--text-05)" },
   ".cm-line": { padding: "0" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text-05)" },
   "&.cm-focused .cm-selectionBackground, ::selection": {

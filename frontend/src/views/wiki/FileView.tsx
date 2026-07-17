@@ -105,10 +105,12 @@ interface DocTitleProps {
 }
 
 /** Renders the page title (inline-editable when `onRename` is given) and a
- * divider below it. */
+ * divider below it. Capped at the same `max-w-[768px]` and centered the same
+ * way as the editor column below it, so the title and the doc text share one
+ * left margin instead of drifting apart. */
 export function DocTitle({ path, onRename }: DocTitleProps) {
   return (
-    <div className="flex flex-col gap-6 px-4 pb-6">
+    <div className="mx-auto flex w-full max-w-[768px] flex-col gap-6 pb-6">
       <Content
         icon={SvgDocFile}
         sizePreset="headline"
