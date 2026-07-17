@@ -362,3 +362,29 @@ def test_ai_management_clearing_can_delete_row(tmp_db):
     # The flag was the row's only setting; clearing it removes the row.
     assert result is None
     assert update_policy.get("a/page.md") is None
+
+
+def test_count_ingest_enabled_pages_skips_trashed_scopes(tmp_db):
+    # Deleting a page keeps its policy row, re-keyed under .trash/ (restore
+    # brings the policy back). A trashed disabled row must neither abort the
+    # count (kind_for_path rejects trash paths — the metric would silently
+    # fall back to "all enabled") nor subtract from live pages.
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import UpdatePolicy
+    from app.db.session import session
+
+    update_policy.set_policy("solo.md", ingestion_auto_update_disabled=True)
+    update_policy.set_policy("doomed.md", ingestion_auto_update_disabled=True)
+    # Re-key one row into the trash the way the delete flow does (direct DB
+    # update; set_policy itself rejects trash paths).
+    with session() as s:
+        s.execute(
+            sa_update(UpdatePolicy)
+            .where(UpdatePolicy.path == "doomed.md")
+            .values(path=".trash/abc123/doomed.md")
+        )
+
+    enabled = update_policy.count_ingest_enabled_pages(10, lambda prefix: [])
+    # solo.md subtracted; the trashed scope ignored — and no exception.
+    assert enabled == 9

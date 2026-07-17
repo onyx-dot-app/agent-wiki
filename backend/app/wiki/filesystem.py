@@ -20,6 +20,12 @@ TRASH_DIR = ".trash"
 TRASH_PREFIX = TRASH_DIR + "/"
 
 
+def is_trash_path(rel_path: str) -> bool:
+    """Whether ``rel_path`` lives in the reserved ``.trash/`` area."""
+    normalized = os.path.normpath(rel_path)
+    return normalized == TRASH_DIR or normalized.startswith(TRASH_PREFIX)
+
+
 def safe_rel_path(rel_path: str) -> str:
     """Reject path traversal and the reserved ``.trash/`` area. Returns a
     normalized path or raises ValueError."""
@@ -27,7 +33,7 @@ def safe_rel_path(rel_path: str) -> str:
         log.warning("rejected unsafe wiki path: %r", rel_path)
         raise ValueError(f"unsafe path: {rel_path!r}")
     normalized = os.path.normpath(rel_path)
-    if normalized == TRASH_DIR or normalized.startswith(TRASH_PREFIX):
+    if is_trash_path(normalized):
         log.warning("rejected access to trash path: %r", rel_path)
         raise ValueError(f"path is in trash and not directly accessible: {rel_path!r}")
     return normalized
