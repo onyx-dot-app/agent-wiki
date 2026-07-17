@@ -81,17 +81,16 @@ def get_one_proposal(
     return ProposalView(**proposal)
 
 
-def _load_writable(proposal_id: int, user: User) -> dict[str, Any]:
-    """Fetch a proposal and require the caller can *write* every path it
-    touches — they become the acting user, so the change must fit their
-    permissions (PRD: executed on behalf of someone who could do it by hand).
-    Raises 404 if missing, 403 (via require_can) if not covered."""
+def _require_writable(proposal_id: int, user: User) -> None:
+    """Require the caller can *write* every path the proposal touches — they
+    become the acting user, so the change must fit their permissions (PRD:
+    executed on behalf of someone who could do it by hand). Side-effect only:
+    raises 404 if missing, 403 (via require_can) if not covered."""
     proposal = get_proposal(proposal_id)
     if proposal is None:
         raise HTTPException(status_code=404, detail="proposal not found")
     for path in list(proposal["source_paths"]) + list(proposal["target_paths"]):
         require_can("write", path, user)
-    return proposal
 
 
 @router.post("/proposals/{proposal_id}/approve", response_model=ProposalActionResponse)
@@ -100,7 +99,7 @@ def approve_one(
 ) -> ProposalActionResponse:
     """Approve a pending proposal and enqueue its execution. The approver
     becomes the acting user. 409 if it isn't pending (already actioned)."""
-    _load_writable(proposal_id, user)
+    _require_writable(proposal_id, user)
     if not review.approve(proposal_id, user_id=user.id):
         raise HTTPException(status_code=409, detail="proposal is not pending")
     return ProposalActionResponse(status="approved")
@@ -111,7 +110,7 @@ def reject_one(
     proposal_id: int, user: User = Depends(require_user)
 ) -> ProposalActionResponse:
     """Reject a pending proposal (durable do-not-propose). 409 if not pending."""
-    _load_writable(proposal_id, user)
+    _require_writable(proposal_id, user)
     if not review.reject(proposal_id, user_id=user.id):
         raise HTTPException(status_code=409, detail="proposal is not pending")
     return ProposalActionResponse(status="rejected")
