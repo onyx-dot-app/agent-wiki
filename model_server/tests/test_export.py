@@ -47,3 +47,20 @@ def test_export_matches_torch(make_bundle: Callable[..., Path], embed_dim: int, 
     assert onnx_out.shape == (len(pages),)
     for t, o in zip(torch_probs, onnx_out):
         assert abs(t - float(o)) < 1e-5
+
+
+def test_failed_parity_leaves_no_file(make_bundle: Callable[..., Path], tmp_path: Path, monkeypatch):
+    # A parity failure must not leave an unverified .onnx at the destination
+    # (deploy scripts key off the file's existence) — nor a stray temp file.
+    import export as export_mod
+
+    def boom(head, path, example):
+        raise RuntimeError("parity failed")
+
+    monkeypatch.setattr(export_mod, "_assert_parity", boom)
+    onnx_path = tmp_path / "model.onnx"
+    import pytest
+    with pytest.raises(RuntimeError):
+        export_mod.export_onnx(make_bundle(), onnx_path)
+    assert not onnx_path.exists()
+    assert not onnx_path.with_suffix(".onnx.tmp").exists()

@@ -10,6 +10,7 @@ verify the ONNX output matches torch before writing it.
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,8 @@ import torch
 from torch import nn
 
 from two_tower.bundle import LoadedBundle, load_inference_bundle
+
+log = logging.getLogger(__name__)
 
 # Two-tower output classes: index 1 == "update" (i.e. relevant).
 _UPDATE_CLASS_INDEX = 1
@@ -46,27 +49,36 @@ class _ProbHead(nn.Module):
 def export_onnx(bundle_path: Path, out_path: Path) -> None:
     """Export ``bundle_path`` (a .inference.pt) to an ONNX graph at ``out_path``.
 
-    Raises if the ONNX output doesn't match torch within tolerance.
+    Raises if the ONNX output doesn't match torch within tolerance. The graph
+    is written to a temp sibling and renamed into ``out_path`` only after the
+    parity check passes, so a failed export never leaves an unverified file at
+    the destination (deploy scripts key off the file's existence).
     """
     bundle = load_inference_bundle(bundle_path)
     head = _ProbHead(bundle.model).eval()
     embed_dim = bundle.model.input_proj.in_features // 2  # concat[wiki, doc]
 
     example = (torch.randn(3, embed_dim), torch.randn(3, embed_dim))
-    torch.onnx.export(
-        head,
-        example,
-        str(out_path),
-        input_names=_INPUT_NAMES,
-        output_names=[_OUTPUT_NAME],
-        # Batch (number of candidate pages) varies per request.
-        dynamic_axes={name: {0: "batch"} for name in [*_INPUT_NAMES, _OUTPUT_NAME]},
-        # Classic TorchScript exporter — the dynamo path pulls in onnxscript and
-        # is overkill for this plain MLP.
-        dynamo=False,
-    )
-    _embed_metadata(out_path, bundle)
-    _assert_parity(head, out_path, example)
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    try:
+        torch.onnx.export(
+            head,
+            example,
+            str(tmp_path),
+            input_names=_INPUT_NAMES,
+            output_names=[_OUTPUT_NAME],
+            # Batch (number of candidate pages) varies per request.
+            dynamic_axes={name: {0: "batch"} for name in [*_INPUT_NAMES, _OUTPUT_NAME]},
+            # Classic TorchScript exporter — the dynamo path pulls in onnxscript and
+            # is overkill for this plain MLP.
+            dynamo=False,
+        )
+        _embed_metadata(tmp_path, bundle)
+        _assert_parity(head, tmp_path, example)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    tmp_path.replace(out_path)
 
 
 def _embed_metadata(out_path: Path, bundle: LoadedBundle) -> None:
@@ -104,8 +116,9 @@ def main() -> None:
     parser.add_argument("bundle", type=Path, help="path to a *.inference.pt bundle")
     parser.add_argument("out", type=Path, help="destination *.onnx path")
     args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
     export_onnx(args.bundle, args.out)
-    print(f"exported {args.out} (parity within {_PARITY_ATOL})")
+    log.info("exported %s (parity within %s)", args.out, _PARITY_ATOL)
 
 
 if __name__ == "__main__":
