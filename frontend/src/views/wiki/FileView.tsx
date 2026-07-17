@@ -807,113 +807,121 @@ export function FileView({ path }: FileViewProps) {
 
       {!loading && !error && (
         <>
-          {/* Fixed-height, capped + centered column with its own internal
-              scroll (you edit against a pinned viewport, not a growing
-              page) — the live editor when showing the current version, or
-              DiffView when viewing an old commit. */}
-          <div className="flex min-h-0 flex-1 justify-center">
-            <div className="flex w-full max-w-[768px] min-w-0 flex-col gap-3">
-              {viewingVersion && diffData ? (
-                <div className="flex min-h-0 flex-1 overflow-hidden">
-                  <DiffView
-                    data={diffData!}
-                    commit={
-                      commits?.find((c) => c.sha === viewingSha) ?? undefined
-                    }
-                    loadBody={async () => {
-                      const sha = viewingSha;
-                      if (!sha) return "";
-                      const r = await apiFetch<FileResponse>(
-                        `/wiki/file?path=${encodeURIComponent(
-                          path,
-                        )}&ref=${encodeURIComponent(sha)}`,
-                      );
-                      return r.body;
-                    }}
-                  />
+          {/* The live editor when showing the current version, or DiffView
+              when viewing an old commit. The editor pins the viewport (its own
+              internal scroll) but spans full width so the scrollbar sits flush
+              at the far-right edge; the text is capped + centered. */}
+          {viewingVersion && diffData ? (
+            <div className="flex min-h-0 flex-1 justify-center">
+              <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
+                <DiffView
+                  data={diffData!}
+                  commit={
+                    commits?.find((c) => c.sha === viewingSha) ?? undefined
+                  }
+                  loadBody={async () => {
+                    const sha = viewingSha;
+                    if (!sha) return "";
+                    const r = await apiFetch<FileResponse>(
+                      `/wiki/file?path=${encodeURIComponent(
+                        path,
+                      )}&ref=${encodeURIComponent(sha)}`,
+                    );
+                    return r.body;
+                  }}
+                />
+              </div>
+            </div>
+          ) : (
+            // Live editor: the scroll lives on the full-width editor so its
+            // scrollbar sits flush at the far-right edge (matching the old read
+            // view); the text stays capped + centered by the editor theme. The
+            // banners stay capped + centered above it, aligned with the text
+            // and DocTitle (`empty:hidden` drops the gap when none render).
+            <div
+              className={`flex min-h-0 flex-1 flex-col gap-3 ${
+                isMobile ? "-mx-3" : "-mx-8"
+              }`}
+            >
+              <div className="mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden">
+                <UpdateHealthBanner
+                  path={path}
+                  onOpenPolicy={() => {
+                    setHistoryOpen(false);
+                    setCommentsOpen(false);
+                    setAutomationsOpen(false);
+                    setTriggerModalOpen(false);
+                    setEditingTrigger(null);
+                    setPolicyOpen(true);
+                  }}
+                />
+                <CoeditPresenceBar
+                  participants={coedit.participants}
+                  typing={coedit.typing}
+                  selfUserId={user?.id ?? null}
+                />
+                {(() => {
+                  // Cards visible while the body is still "empty enough"
+                  // to discard without losing user work: truly blank, or
+                  // still verbatim equal to the template the user just
+                  // applied (so they can keep swapping templates).
+                  const isBlank = coedit.buffer.trim() === "";
+                  const matchesApplied =
+                    appliedTemplateBody !== null &&
+                    coedit.buffer === appliedTemplateBody;
+                  const showGallery =
+                    (isBlank || matchesApplied) &&
+                    templates !== null &&
+                    templates.length > 0;
+                  if (!showGallery) return null;
+                  return (
+                    <TemplateGallery
+                      templates={templates!}
+                      activeId={matchesApplied ? appliedTemplateId : null}
+                      applyingId={applyingTemplateId}
+                      blankActive={isBlank && appliedTemplateId === null}
+                      onPick={(t) => void onPickTemplate(t)}
+                      onBlank={() => void onPickBlank()}
+                    />
+                  );
+                })()}
+              </div>
+              {coedit.session ? (
+                <Coeditor
+                  key={coedit.session.id}
+                  ref={coeditorRef}
+                  session={coedit.session}
+                  peers={coedit.peers}
+                  onSelectionChange={coedit.reportSelection}
+                  onServerFrame={coedit.onServerFrame}
+                  reportDoc={coedit.reportDoc}
+                  registerFlush={coedit.registerFlush}
+                  registerSetDoc={coedit.registerSetDoc}
+                  commentHighlights={commentHighlights}
+                  onSelectionForComment={handleSelectionForComment}
+                  placeholder="Start typing, or pick a template above…"
+                />
+              ) : coedit.joinError ? (
+                // The join handshake itself failed — there's no read-only
+                // fallback to fall back to, so this has to be an actionable
+                // dead end, not a permanent "Connecting…".
+                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
+                  <span>
+                    Couldn't connect to the editing session: {coedit.joinError}
+                  </span>
+                  <Button size="sm" onClick={coedit.retryJoin}>
+                    Retry
+                  </Button>
                 </div>
               ) : (
-                <>
-                  <UpdateHealthBanner
-                    path={path}
-                    onOpenPolicy={() => {
-                      setHistoryOpen(false);
-                      setCommentsOpen(false);
-                      setAutomationsOpen(false);
-                      setTriggerModalOpen(false);
-                      setEditingTrigger(null);
-                      setPolicyOpen(true);
-                    }}
-                  />
-                  <CoeditPresenceBar
-                    participants={coedit.participants}
-                    typing={coedit.typing}
-                    selfUserId={user?.id ?? null}
-                  />
-                  {(() => {
-                    // Cards visible while the body is still "empty enough"
-                    // to discard without losing user work: truly blank, or
-                    // still verbatim equal to the template the user just
-                    // applied (so they can keep swapping templates).
-                    const isBlank = coedit.buffer.trim() === "";
-                    const matchesApplied =
-                      appliedTemplateBody !== null &&
-                      coedit.buffer === appliedTemplateBody;
-                    const showGallery =
-                      (isBlank || matchesApplied) &&
-                      templates !== null &&
-                      templates.length > 0;
-                    if (!showGallery) return null;
-                    return (
-                      <TemplateGallery
-                        templates={templates!}
-                        activeId={matchesApplied ? appliedTemplateId : null}
-                        applyingId={applyingTemplateId}
-                        blankActive={isBlank && appliedTemplateId === null}
-                        onPick={(t) => void onPickTemplate(t)}
-                        onBlank={() => void onPickBlank()}
-                      />
-                    );
-                  })()}
-                  {coedit.session ? (
-                    <Coeditor
-                      key={coedit.session.id}
-                      ref={coeditorRef}
-                      session={coedit.session}
-                      peers={coedit.peers}
-                      onSelectionChange={coedit.reportSelection}
-                      onServerFrame={coedit.onServerFrame}
-                      reportDoc={coedit.reportDoc}
-                      registerFlush={coedit.registerFlush}
-                      registerSetDoc={coedit.registerSetDoc}
-                      commentHighlights={commentHighlights}
-                      onSelectionForComment={handleSelectionForComment}
-                      placeholder="Start typing, or pick a template above…"
-                    />
-                  ) : coedit.joinError ? (
-                    // The join handshake itself failed — there's no read-only
-                    // fallback to fall back to, so this has to be an actionable
-                    // dead end, not a permanent "Connecting…".
-                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
-                      <span>
-                        Couldn't connect to the editing session:{" "}
-                        {coedit.joinError}
-                      </span>
-                      <Button size="sm" onClick={coedit.retryJoin}>
-                        Retry
-                      </Button>
-                    </div>
-                  ) : (
-                    // Joining the session; the editor mounts once we have its
-                    // start version + doc.
-                    <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
-                      Connecting…
-                    </div>
-                  )}
-                </>
+                // Joining the session; the editor mounts once we have its
+                // start version + doc.
+                <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
+                  Connecting…
+                </div>
               )}
             </div>
-          </div>
+          )}
           {/* Desktop side panels dock at the app's right edge (full height,
               beside the header) by portaling into the shell's right-panel host,
               so they never eat into the reading column above. Mobile keeps the

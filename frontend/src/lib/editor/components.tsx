@@ -128,9 +128,11 @@ const peersField = StateField.define<{
 /** Base CodeMirror theme: full-height layout, borderless (the WYSIWYG surface
  * reads as part of the page, not a boxed textarea), prose-font scroller,
  * Opal tokens, and styles for the `.cm-coedit-caret` / `.cm-coedit-caret-label`
- * widgets. No horizontal `.cm-content` padding — the surrounding column
- * (`FileView`'s `max-w-[768px]` wrapper, shared with `DocTitle`) owns the
- * left/right margin, so the editor's text lines up with the title above it. */
+ * widgets. The scroller is full-width so its scrollbar sits flush at the
+ * far-right edge (matching the old read view); the text stays capped and
+ * centered by `.cm-content` (`max-width` + `margin: auto`), lining up with the
+ * `max-w-[768px]` `DocTitle` above it. `.cm-scroller` carries the horizontal
+ * gutter so the caret never hugs the edge on a narrow viewport. */
 const baseTheme = EditorView.theme({
   "&": {
     height: "100%",
@@ -142,8 +144,15 @@ const baseTheme = EditorView.theme({
     overflow: "auto",
     fontFamily: "var(--font-sans, system-ui, -apple-system, sans-serif)",
     lineHeight: "1.6",
+    padding: "0 2rem",
   },
-  ".cm-content": { padding: "0.5rem 0", caretColor: "var(--text-05)" },
+  ".cm-content": {
+    padding: "0.5rem 0",
+    width: "100%",
+    maxWidth: "768px",
+    marginInline: "auto",
+    caretColor: "var(--text-05)",
+  },
   ".cm-line": { padding: "0" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text-05)" },
   "&.cm-focused .cm-selectionBackground, ::selection": {
