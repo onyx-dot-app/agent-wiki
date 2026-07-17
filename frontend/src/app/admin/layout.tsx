@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { RootLayout, SidebarStateProvider } from "@onyx-ai/opal/layouts";
-import AdminSidebar from "@/sections/sidebar/AdminSidebar";
+import AdminSidebar from "@/chromes/sidebar/AdminSidebar";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   return (
