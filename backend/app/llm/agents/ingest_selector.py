@@ -87,7 +87,7 @@ def _select_batch(
     cache_doc: bool,
 ) -> list[WikiUpdateCandidate]:
     candidate_text = "\n\n".join(
-        f"[{i + 1}] {c.hit.path}\n{c.body}" for i, c in enumerate(batch)
+        f"[{i + 1}] {c.path}\n{c.body}" for i, c in enumerate(batch)
     )
 
     system = load_prompt("ingest_selector.system")

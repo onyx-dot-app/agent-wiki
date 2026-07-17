@@ -233,7 +233,7 @@ def test_relevance_filter_drops_recorded(monkeypatch):
         _run(_make_push())
     assert _outcome_count("filtered_by_relevance", "dropped.md") - before == 1.0
     candidates = mock_reconcile.call_args.kwargs["candidates"]
-    assert [c.hit.path for c in candidates] == ["kept.md"]
+    assert [c.path for c in candidates] == ["kept.md"]
 
 
 @patch("app.tasks.wiki_update.wiki_git.read_file", return_value="body")
@@ -250,8 +250,8 @@ def test_candidates_ordered_most_relevant_first(mock_reconcile, mock_read, monke
     mock_reconcile.return_value = ([None, None, None], 1)
     _run(_make_push())
     candidates = mock_reconcile.call_args.kwargs["candidates"]
-    assert [c.hit.path for c in candidates] == ["hi.md", "mid.md", "lo.md"]
-    assert [c.hit.score for c in candidates] == [0.9, 0.5, 0.2]
+    assert [c.path for c in candidates] == ["hi.md", "mid.md", "lo.md"]
+    assert [c.score for c in candidates] == [0.9, 0.5, 0.2]
 
 
 def test_all_pages_dropped_records_no_candidates(monkeypatch):

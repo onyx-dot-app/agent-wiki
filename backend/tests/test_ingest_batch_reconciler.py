@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 from unittest.mock import MagicMock, patch
 
-from app.db.fts import SearchHit
 from app.ingest.models import WikiUpdateCandidate
 from app.llm.agents.common import IRRELEVANT_SENTINEL, TextEdit, batch_by_chars, today_str
 from app.llm.agents.ingest_batch_reconciler import (
@@ -16,12 +15,8 @@ from app.llm.agents.ingest_batch_reconciler import (
 from app.llm.client import ToolCall
 
 
-def _hit(path: str, score: float = 1.0) -> SearchHit:
-    return SearchHit(doc_id=path, path=path, title=None, snippet="", score=score)
-
-
 def _candidate(path: str, body: str = "body") -> WikiUpdateCandidate:
-    return WikiUpdateCandidate(hit=_hit(path), body=body)
+    return WikiUpdateCandidate(path=path, score=1.0, body=body)
 
 
 def _tool_call(arguments: dict) -> ToolCall:
@@ -350,7 +345,7 @@ def test_update_instruction_rendered_in_prompt(mock_client):
         {"results": [{"candidate_index": 1, "action": "no_change"}]}
     )
     cand = WikiUpdateCandidate(
-        hit=_hit("page.md"), body="body", update_instruction="Keep it terse."
+        path="page.md", score=1.0, body="body", update_instruction="Keep it terse."
     )
     batch_reconcile(
         title="T", url="", content="doc", source="s", candidates=[cand], model="m"

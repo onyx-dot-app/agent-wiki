@@ -25,7 +25,6 @@ import time
 from typing import Any
 
 from app.config import CONFIG
-from app.db.fts import SearchHit
 from app.ingest import eval_sample as ingest_eval_sample
 from app.ingest import settings as ingest_settings
 from app.ingest.relevance.service import get_relevance_service
@@ -399,16 +398,8 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
             continue
         readable.append(
             WikiUpdateCandidate(
-                # Synthesized hit carrying the filter's relevance score (0.0
-                # when the pair was kept fail-open, unscored); downstream reads
-                # .path and records .score on eval rows.
-                hit=SearchHit(
-                    doc_id=page.path,
-                    path=page.path,
-                    title=None,
-                    snippet="",
-                    score=relevance_result.scores.get(page.path, 0.0),
-                ),
+                path=page.path,
+                score=relevance_result.scores.get(page.path),
                 body=body,
                 update_instruction=policy.update_instruction if policy else None,
             )
@@ -435,14 +426,14 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         ingest_selector_duration_seconds.observe(time.monotonic() - t_selector)
         dropped = len(before_filter) - len(readable)
         ingest_selector_candidates_filtered.observe(dropped)
-        kept_paths = {c.hit.path for c in readable}
+        kept_paths = {c.path for c in readable}
         for c in before_filter:
-            if c.hit.path not in kept_paths:
+            if c.path not in kept_paths:
                 ingest_outcomes_total.labels(
-                    outcome="filtered_by_selector", wiki_path=c.hit.path
+                    outcome="filtered_by_selector", wiki_path=c.path
                 ).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.hit.score)
-                log.debug("process_pushed_document: filtered_by_selector path=%s", c.hit.path)
+                ingest_bm25_score_by_outcome.labels(outcome="filtered_by_selector").observe(c.score or 0.0)
+                log.debug("process_pushed_document: filtered_by_selector path=%s", c.path)
                 if CONFIG.ingest_eval_logging:
                     try:
                         ingest_eval_sample.log_sample(
@@ -451,10 +442,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                             source_title=title,
                             source_url=url if url else None,
                             source_content=content,
-                            wiki_path=c.hit.path,
+                            wiki_path=c.path,
                             wiki_body_before=c.body,
                             outcome="filtered_by_selector",
-                            bm25_score=c.hit.score,
+                            bm25_score=c.score,
                             commit_sha=None,
                         )
                     except Exception:
@@ -491,11 +482,11 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         if result == IRRELEVANT_SENTINEL:
             irrelevant += 1
             consecutive_irrelevant += 1
-            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.hit.score)
+            ingest_outcomes_total.labels(outcome="irrelevant", wiki_path=c.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="irrelevant").observe(c.score or 0.0)
             log.debug(
                 "process_pushed_document: IRRELEVANT path=%s consecutive=%d",
-                c.hit.path,
+                c.path,
                 consecutive_irrelevant,
             )
             if CONFIG.ingest_eval_logging:
@@ -506,10 +497,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         source_title=title,
                         source_url=url if url else None,
                         source_content=content,
-                        wiki_path=c.hit.path,
+                        wiki_path=c.path,
                         wiki_body_before=c.body,
                         outcome="irrelevant",
-                        bm25_score=c.hit.score,
+                        bm25_score=c.score,
                         commit_sha=None,
                     )
                 except Exception:
@@ -519,7 +510,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 break
         elif result is not None:
             consecutive_irrelevant = 0
-            message = f"ingest({source_label}): update {c.hit.path}"
+            message = f"ingest({source_label}): update {c.path}"
             meta_lines: list[str] = []
             if title:
                 meta_lines.append(f"Title: {title}")
@@ -529,7 +520,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 message += "\n\n" + "\n".join(meta_lines)
             try:
                 commit_result = wiki_utils.commit_and_fan_out(
-                    path=c.hit.path,
+                    path=c.path,
                     body=result,
                     message=message,
                     change_kind=ChangeKind.EDIT,
@@ -538,23 +529,23 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                     skip_acl=True,
                 )
             except CommitMaxRetriesError:
-                log.warning("process_pushed_document: max retries for %s, skipping", c.hit.path)
+                log.warning("process_pushed_document: max retries for %s, skipping", c.path)
                 continue
             except LLMError as exc:
                 # ai_merge fallback failed — skip this candidate, don't abort the batch.
-                log.warning("process_pushed_document: merge LLM error for %s: %s", c.hit.path, exc)
+                log.warning("process_pushed_document: merge LLM error for %s: %s", c.path, exc)
                 continue
             if commit_result is None:
                 # Concurrent edit produced identical content — treat as no_change.
                 no_change += 1
-                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
-                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+                ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.path).inc()
+                ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.score or 0.0)
                 continue
             sha = commit_result.sha
             committed += 1
-            ingest_outcomes_total.labels(outcome="committed", wiki_path=c.hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.hit.score)
-            log.info("process_pushed_document: committed %s sha=%s", c.hit.path, sha)
+            ingest_outcomes_total.labels(outcome="committed", wiki_path=c.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="committed").observe(c.score or 0.0)
+            log.info("process_pushed_document: committed %s sha=%s", c.path, sha)
             if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
@@ -563,10 +554,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         source_title=title,
                         source_url=url if url else None,
                         source_content=content,
-                        wiki_path=c.hit.path,
+                        wiki_path=c.path,
                         wiki_body_before=c.body,
                         outcome="committed",
-                        bm25_score=c.hit.score,
+                        bm25_score=c.score,
                         commit_sha=sha,
                     )
                 except Exception:
@@ -574,8 +565,8 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
         else:
             consecutive_irrelevant = 0
             no_change += 1
-            ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.hit.path).inc()
-            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.hit.score)
+            ingest_outcomes_total.labels(outcome="no_change", wiki_path=c.path).inc()
+            ingest_bm25_score_by_outcome.labels(outcome="no_change").observe(c.score or 0.0)
             if CONFIG.ingest_eval_logging:
                 try:
                     ingest_eval_sample.log_sample(
@@ -584,10 +575,10 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         source_title=title,
                         source_url=url if url else None,
                         source_content=content,
-                        wiki_path=c.hit.path,
+                        wiki_path=c.path,
                         wiki_body_before=c.body,
                         outcome="no_change",
-                        bm25_score=c.hit.score,
+                        bm25_score=c.score,
                         commit_sha=None,
                     )
                 except Exception:
