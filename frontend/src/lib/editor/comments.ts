@@ -1,8 +1,7 @@
 /** CodeMirror-native comment anchoring.
  *
  * CodeMirror's doc *is* the raw markdown string, so a comment's anchor is
- * just a `[from, to)` offset pair into it — no DOM-alignment bridge needed
- * (contrast the old rendered-HTML-vs-raw-offset mapping this replaces).
+ * just a `[from, to)` offset pair into it — no DOM-alignment bridge needed.
  */
 import type { EditorState, Range } from "@codemirror/state";
 import { StateEffect, StateField } from "@codemirror/state";
