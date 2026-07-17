@@ -5,6 +5,7 @@ import { SWR_KEYS } from "@/lib/swr-keys";
 export interface LLMStatus {
   configured: boolean;
   provider: string;
+  model: string;
 }
 
 export function useLLMStatus(opts: { skip?: boolean } = {}) {

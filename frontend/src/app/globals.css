@@ -36,6 +36,8 @@ body {
   --shadow-fab: 0 6px 20px var(--shadow-03);
   --shadow-modal: 0 24px 60px var(--shadow-03);
   --shadow-panel: -4px 0 24px var(--shadow-02);
+  --shadow-bar: 0 2px 12px var(--shadow-02), 0 0 4px 1px var(--shadow-01);
+  --shadow-chip: 0 0 2px 1px var(--shadow-01);
   --toast-width: 24rem;
 }
 

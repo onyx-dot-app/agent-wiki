@@ -17,16 +17,15 @@ import styles from "./ChatWidget.module.css";
 
 import { Button } from "@onyx-ai/opal/components";
 import {
-  SvgBubbleText,
   SvgCheck,
   SvgDocFile,
   SvgEdit,
-  SvgExpand,
   SvgFold,
   SvgHistory,
   SvgX,
   SvgXCircle,
 } from "@onyx-ai/opal/icons";
+import { ChatBar } from "@/components/chat/ChatBar";
 
 import { apiFetch, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -120,9 +119,9 @@ export function ChatWidget() {
   } | null>(null);
   // Mode the widget was in before drafting force-expanded it ("closed" or
   // "widget"). Restored when drafting ends so the doc-creation flow doesn't
-  // permanently commandeer the chat. Any manual mode change (FAB, expand
-  // toggle, close) clears it — the user's explicit choice wins over the
-  // automatic restore.
+  // permanently commandeer the chat. Any manual mode change (bar
+  // expand/collapse/dock, panel collapse/close) clears it: the user's
+  // explicit choice wins over the automatic restore.
   const preDraftingModeRef = useRef<Mode | null>(null);
 
   const setModeManually = useCallback((m: Mode) => {
@@ -359,8 +358,8 @@ export function ChatWidget() {
       setItems([]);
     }
     // If drafting force-expanded the widget (and the user never
-    // touched the mode since), drop back to whatever it was before —
-    // open widget or fully collapsed.
+    // touched the mode since), drop back to whatever it was before,
+    // the expanded bar or the collapsed pill.
     const priorMode = preDraftingModeRef.current;
     preDraftingModeRef.current = null;
     if (priorMode !== null) setMode(priorMode);
@@ -541,50 +540,44 @@ export function ChatWidget() {
     inputRef.current?.focus();
   }, []);
 
+  // A send from the bar docks the panel first so the streamed reply has
+  // somewhere visible to land.
+  const sendFromBar = useCallback(() => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput("");
+    setModeManually("expanded");
+    void sendUserMessage(text);
+  }, [input, sending, sendUserMessage, setModeManually]);
+
   if (!user) return null;
 
-  if (mode === "closed") {
+  if (mode !== "expanded") {
     return (
-      <div className="fixed right-5 bottom-5 z-[1000] rounded-(--radius-12) shadow-(--shadow-fab)">
-        <Button
-          icon={SvgBubbleText}
-          variant="action"
-          prominence="primary"
-          size="lg"
-          tooltip="Open chat"
-          onClick={() => setModeManually("widget")}
-          aria-label="Open chat"
-        />
-      </div>
+      <ChatBar
+        collapsed={mode === "closed"}
+        onExpand={() => setModeManually("widget")}
+        onCollapse={() => setModeManually("closed")}
+        onDock={() => setModeManually("expanded")}
+        input={input}
+        onInputChange={setInput}
+        onSubmit={sendFromBar}
+        sending={sending}
+      />
     );
   }
-
-  const isExpanded = mode === "expanded";
 
   return (
     <div
       role="dialog"
       aria-label="Chat"
-      className={
-        isExpanded
-          ? "fixed top-0 right-0 z-[1000] h-screen border-l border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-panel)"
-          : "fixed right-5 bottom-5 z-[1000] rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00) shadow-(--shadow-modal)"
-      }
-      style={
-        isExpanded
-          ? { width: expandedWidth }
-          : {
-              width: "min(380px, calc(100vw - 24px))",
-              height: "min(560px, calc(100vh - 80px))",
-            }
-      }
+      className="fixed top-0 right-0 z-[1000] h-screen border-l border-(--border-02) bg-(--background-tint-00) shadow-(--shadow-panel)"
+      style={{ width: expandedWidth }}
     >
-      {/* Inner clipped surface — keeps the history panel's slide animation
-          contained and lets it cover the chat header. The resize handle in
-          expanded mode lives outside this so it can extend past the left edge. */}
-      <div
-        className={`relative flex h-full w-full flex-col overflow-hidden ${isExpanded ? "" : "rounded-(--radius-12)"}`}
-      >
+      {/* Inner clipped surface. Keeps the history panel's slide animation
+          contained and lets it cover the chat header. The resize handle
+          lives outside this so it can extend past the left edge. */}
+      <div className="relative flex h-full w-full flex-col overflow-hidden">
         <header className="flex shrink-0 items-center gap-2 border-b border-(--border-01) bg-(--background-tint-01) px-3 py-[10px]">
           <div className="text-sm font-semibold">Chat</div>
           <div className="flex-1" />
@@ -604,11 +597,11 @@ export function ChatWidget() {
             onClick={() => setHistoryOpen((v) => !v)}
           />
           <Button
-            icon={isExpanded ? SvgFold : SvgExpand}
+            icon={SvgFold}
             prominence="tertiary"
             size="sm"
-            tooltip={isExpanded ? "Collapse" : "Expand"}
-            onClick={() => setModeManually(isExpanded ? "widget" : "expanded")}
+            tooltip="Collapse to bar"
+            onClick={() => setModeManually("widget")}
           />
           <Button
             icon={SvgX}
@@ -705,15 +698,13 @@ export function ChatWidget() {
         />
       </div>
 
-      {isExpanded && (
-        <div
-          onMouseDown={startResize}
-          title="Drag to resize"
-          aria-label="Resize chat panel"
-          role="separator"
-          className="absolute top-0 left-[-3px] z-[1001] h-full w-[6px] cursor-col-resize"
-        />
-      )}
+      <div
+        onMouseDown={startResize}
+        title="Drag to resize"
+        aria-label="Resize chat panel"
+        role="separator"
+        className="absolute top-0 left-[-3px] z-[1001] h-full w-[6px] cursor-col-resize"
+      />
     </div>
   );
 }
