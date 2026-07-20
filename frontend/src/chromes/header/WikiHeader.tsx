@@ -8,6 +8,7 @@ import { Button, LineItemButton, Popover } from "@onyx-ai/opal/components";
 import {
   SvgChevronRight,
   SvgFolder,
+  SvgHome,
   SvgListTree,
   SvgMoreHorizontal,
 } from "@onyx-ai/opal/icons";
@@ -130,11 +131,14 @@ export function WikiHeader() {
       {/* min-w-0 + nowrap + overflow-hidden: one line, always. The container
           only clips, the per-crumb truncate classes render the ellipsis. */}
       <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-sm whitespace-nowrap">
+        {/* Home renders as its glyph, not text. The entry stays in crumbs so
+            the fold math counts it, and its label becomes the aria-label. */}
         <Link
           href={crumbs[0].href}
-          className="shrink-0 text-(--text-03) hover:text-(--text-05)"
+          aria-label={crumbs[0].label}
+          className="flex shrink-0 items-center text-(--text-03) hover:text-(--text-05)"
         >
-          {crumbs[0].label}
+          <SvgHome size={16} />
         </Link>
         {folded.length > 0 && (
           <span className="flex shrink-0 items-center gap-1.5">
