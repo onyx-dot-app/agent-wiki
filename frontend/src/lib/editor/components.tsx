@@ -23,7 +23,13 @@ import {
   placeholder as placeholderExt,
   WidgetType,
 } from "@codemirror/view";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { ApiError } from "@/lib/api";
 import type {
   CoeditFrame,
@@ -272,6 +278,10 @@ interface CoeditorProps {
   registerFlush: (fn: (() => Promise<void>) | null) => void;
   registerSetDoc: (fn: ((text: string) => void) | null) => void;
   placeholder?: string;
+  /** Render the doc without accepting edits — for participants whose
+   * `can_write` is false. They stay in the live session (presence + real-time
+   * updates); only local mutation is disabled. */
+  readOnly?: boolean;
   /** Comment thread spans to highlight in the doc (the active/selected thread
    * gets the stronger highlight). */
   commentHighlights?: CommentHighlightTarget[];
@@ -315,6 +325,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       registerFlush,
       registerSetDoc,
       placeholder,
+      readOnly,
       commentHighlights,
       onSelectionForComment,
     },
@@ -513,6 +524,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           markdown({ base: markdownLanguage }),
           wysiwygMarkdown(),
           EditorView.lineWrapping,
+          EditorState.readOnly.of(!!readOnly),
+          EditorView.editable.of(!readOnly),
           placeholderExt(placeholder ?? ""),
           peersField,
           commentsField,
@@ -631,15 +644,37 @@ interface CoeditPresenceBarProps {
   selfUserId: string | null;
 }
 
-// Co-editing presence: who else is in the session and who's typing right now,
-// as a name/typing summary above the editor — complements the in-editor peer
-// carets (CaretWidget/peersField above) rather than duplicating them. Renders
-// nothing when you're alone.
+// How recently a participant must have edited to be labeled "editing" rather
+// than "viewing". Everyone on the page is in the live session; the label — not
+// membership — is what distinguishes editors from readers.
+const EDITING_LABEL_WINDOW_MS = 5 * 60 * 1000;
+
+function presenceLabel(p: CoeditParticipant, now: number): string {
+  if (
+    p.last_edited_at !== null &&
+    now - Date.parse(p.last_edited_at) < EDITING_LABEL_WINDOW_MS
+  ) {
+    return "editing";
+  }
+  return "viewing";
+}
+
+// Live-session presence: who else is on the page — labeled "editing" when
+// they've applied an edit recently, "viewing" otherwise — and who's typing
+// right now. Complements the in-editor peer carets (CaretWidget/peersField
+// above) rather than duplicating them. Renders nothing when you're alone.
+// The minute tick re-renders so an idle editor's label decays to "viewing"
+// even when no new presence frames arrive.
 export function CoeditPresenceBar({
   participants,
   typing,
   selfUserId,
 }: CoeditPresenceBarProps) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   const others = participants.filter((p) => p.user_id !== selfUserId);
   if (others.length === 0) return null;
   const typingSet = new Set(typing);
@@ -652,12 +687,11 @@ export function CoeditPresenceBar({
       {others.map((p) => (
         <span key={p.user_id} className="inline-flex items-center gap-1">
           <span className="font-medium text-(--text-04)">{p.user_display}</span>
-          {typingSet.has(p.user_id) && (
-            <span className="text-(--text-03) italic">typing…</span>
-          )}
+          <span className="text-(--text-03) italic">
+            {typingSet.has(p.user_id) ? "typing…" : presenceLabel(p, now)}
+          </span>
         </span>
       ))}
-      <span>also editing</span>
     </div>
   );
 }

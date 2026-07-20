@@ -1,4 +1,9 @@
-"""Co-editing live channel — SSE down, HTTP POST up (cookie-authed humans).
+"""The page live-session channel — SSE down, HTTP POST up (cookie-authed humans).
+
+A "co-edit session" is the page's *live session*: everyone viewing the page
+joins it (read-gated — presence + real-time updates), and editing is a
+capability inside it (`/op`/`/cursor` are write-gated; `last_edited_at`
+separates editors from viewers in presence).
 
 Thin HTTP layer: gate by page permission, drive the ``app/wiki/coedit.py`` store
 and the ``app/wiki/coedit_channel.py`` broadcast layer. The SSE stream is a
