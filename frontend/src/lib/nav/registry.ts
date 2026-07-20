@@ -9,6 +9,7 @@ import {
   SvgHistory,
   SvgOnyxLogo,
   SvgMail,
+  SvgSliders,
   SvgSlack,
   SvgUser,
   SvgUsers,
@@ -70,6 +71,11 @@ export const ADMIN_NAV_GROUPS = [
     label: "Documents",
     entries: [
       { href: "/admin/templates", label: "Wiki Templates", icon: SvgFile },
+      {
+        href: "/admin/auto-organize",
+        label: "Auto Organize",
+        icon: SvgSliders,
+      },
       {
         href: "/admin/ingest",
         label: "Onyx Integration",
