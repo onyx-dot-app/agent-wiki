@@ -27,7 +27,7 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
@@ -654,6 +654,38 @@ def close_if_clean(session_id: int) -> bool:
             .execution_options(synchronize_session=False)
         ).one_or_none()
         return closed is not None
+
+
+def purge_viewer_sessions(limit: int = 500) -> int:
+    """Delete closed sessions that never received an edit op. Returns the count.
+
+    With join-on-landing, every page view mints a session whose buffer is a
+    full copy of the page — a closed ``version == 0`` row carries no ops, no
+    participants (removed on leave; FK cascade catches stragglers), and nothing
+    the op-log or checkpoint dedupe ever references, so it is pure dead weight.
+    Runs against *closed* rows only: deleting at the close point instead would
+    race a concurrent join into an FK violation, while a closed session is a
+    soft state joins already tolerate. Bounded so the periodic scan stays
+    cheap; the backlog drains across successive runs.
+    """
+    with session() as s:
+        ids = s.scalars(
+            select(CoeditSession.id)
+            .where(
+                CoeditSession.status == SessionStatus.CLOSED.value,
+                CoeditSession.version == 0,
+                CoeditSession.checkpointed_version == 0,
+            )
+            .limit(limit)
+        ).all()
+        if not ids:
+            return 0
+        s.execute(
+            delete(CoeditSession)
+            .where(CoeditSession.id.in_(ids))
+            .execution_options(synchronize_session=False)
+        )
+        return len(ids)
 
 
 # Namespace for checkpoint advisory-lock keys. The whole DB shares one 64-bit

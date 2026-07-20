@@ -57,7 +57,9 @@ def checkpoint_coedit_session(session_id: int) -> None:
 
 @coedit_queue.periodic_task(crontab(minute="*"))
 def scan_and_checkpoint() -> None:
-    """Enqueue a checkpoint for every dirty session that's idle or overdue."""
+    """Enqueue a checkpoint for every dirty session that's idle or overdue,
+    and purge closed never-edited sessions (view-only leftovers — see
+    ``coedit.purge_viewer_sessions``)."""
     due = coedit.sessions_due_for_checkpoint(
         idle_seconds=_IDLE_SECONDS, max_interval_seconds=_MAX_INTERVAL_SECONDS
     )
@@ -65,3 +67,6 @@ def scan_and_checkpoint() -> None:
         checkpoint_coedit_session(sess.id)
     if due:
         log.info("coedit checkpoint scan: enqueued %d session(s)", len(due))
+    purged = coedit.purge_viewer_sessions()
+    if purged:
+        log.info("coedit checkpoint scan: purged %d viewer-only session(s)", purged)
