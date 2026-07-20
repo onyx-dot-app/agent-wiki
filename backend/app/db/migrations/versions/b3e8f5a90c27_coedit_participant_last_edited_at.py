@@ -7,7 +7,7 @@ inspector because ``0001_initial`` builds fresh databases from the current
 models.
 
 Revision ID: b3e8f5a90c27
-Revises: f1a2b3c4d5e6
+Revises: c7a1f0e3b2d9
 Create Date: 2026-07-20 00:00:00.000000+00:00
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "b3e8f5a90c27"
-down_revision: str | None = "f1a2b3c4d5e6"
+down_revision: str | None = "c7a1f0e3b2d9"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
