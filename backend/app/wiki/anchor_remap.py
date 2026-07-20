@@ -2,8 +2,8 @@
 
 Comments and ingest source ranges both anchor a ``[start_offset, end_offset)``
 range to a page at an ``anchor_sha`` and re-derive it against later commits. This
-holds the one non-trivial part they share: run synchronously from
-``app.wiki.notify`` right after a write, batch the git reads by ``anchor_sha``
+holds the one non-trivial part they share: run synchronously at the call
+site, batch the git reads by ``anchor_sha``
 (a page's records almost always share the previous HEAD, so it reads the old
 body once and the new body once), follow renames, and run the pure
 ``comment_anchor.remap_range`` diff per record. The per-type differences (which

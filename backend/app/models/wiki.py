@@ -125,6 +125,15 @@ class SourceRef(WriteProvenance):
     last_updated: str
 
 
+class SourceSpan(WriteProvenance):
+    """A live span of a page mapped to the document it was ingested from, for
+    in-document highlighting. Offsets are character positions into the page's
+    current body."""
+
+    start_offset: int
+    end_offset: int
+
+
 class CommitMaxRetriesError(Exception):
     """Raised by ``commit_and_fan_out`` when HEAD keeps moving past the retry budget."""
 

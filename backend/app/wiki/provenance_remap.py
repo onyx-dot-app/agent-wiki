@@ -2,7 +2,7 @@
 
 A thin binding of the shared ``anchor_remap`` skeleton to the provenance repo. A
 range whose span survives is advanced to the new HEAD, one whose span was
-rewritten is retired. The caller in ``notify`` swallows failures so a remap
+rewritten is retired. The write path (``notify``) swallows failures so a remap
 hiccup can never break a save.
 """
 from __future__ import annotations

@@ -1,8 +1,7 @@
 """Source ranges (app/wiki/provenance.py service + app/db/provenance.py repo +
-provenance_remap.py). Diff-to-span
-capture, the ledger-id return that links them, the remap CRUD and orchestration,
-move follow, and the per-page source list. Real DB, and a tmp git repo
-for the remap tests.
+provenance_remap.py). Diff-to-span capture, the ledger-id return that links
+them, the remap CRUD and orchestration, move follow, the per-page source list,
+and the content-span read. Real DB, and a tmp git repo for the remap tests.
 """
 
 from __future__ import annotations
@@ -254,3 +253,51 @@ def test_sources_for_path_keeps_anonymous_rows(tmp_db):
     _ingest("a1", body="x", source=WriteProvenance(source_type="slack"))
     _ingest("a2", body="y", source=WriteProvenance(source_type="slack"))
     assert len(provenance.sources_for_path(_PATH)) == 2
+
+
+def test_live_spans_for_doc_orders_and_carries_source(tmp_db):
+    pid = provenance.record(
+        commit_sha="c1",
+        doc_path=_PATH,
+        user_id=None,
+        agent_name=None,
+        agent_session_id=None,
+        source=WriteProvenance(source_document_id="d1", source_url="http://x"),
+    )
+    assert pid is not None
+    provenance.capture_source_ranges(
+        provenance_id=pid, doc_path=_PATH, anchor_sha="c1", old_body="ac", new_body="aXcY"
+    )
+    spans = db_provenance.live_spans_for_doc(_PATH, "c1")
+    assert [(s["start_offset"], s["end_offset"]) for s in spans] == [(1, 2), (3, 4)]
+    assert all(s["source_document_id"] == "d1" and s["source_url"] == "http://x" for s in spans)
+
+
+def test_live_spans_for_doc_excludes_retired(tmp_db):
+    pid = _ingest("c1", body="hello", source=WriteProvenance(source_document_id="d1"))
+    with session() as s:
+        rid = s.scalar(select(SourceRange.id).where(SourceRange.provenance_id == pid))
+    assert rid is not None
+    db_provenance.retire_range(rid)
+    assert db_provenance.live_spans_for_doc(_PATH, "c1") == []
+
+
+def test_content_spans_for_path_remaps_to_head(tmp_repo):
+    body1 = "The target sentence stays put.\n"
+    sha1 = wiki_git.commit_file(_PATH, body1, "create")
+    _ingest(sha1, body=body1)
+    prefix = "Intro added.\n"
+    wiki_git.commit_file(_PATH, prefix + body1, "edit")
+    spans = provenance.content_spans_for_path(_PATH)
+    assert len(spans) == 1
+    # the span followed the edit: its offset shifted by the prepended prefix
+    assert spans[0].start_offset == len(prefix)
+
+
+def test_content_spans_omit_span_stuck_on_unreachable_anchor(tmp_repo):
+    body = "Some page body here.\n"
+    wiki_git.commit_file(_PATH, body, "create")
+    # a span anchored to a sha the repo cannot read: remap skips it, and the
+    # head-anchored read then omits it instead of returning stale offsets
+    _ingest("deadbeef" * 5, body=body)
+    assert provenance.content_spans_for_path(_PATH) == []

@@ -80,7 +80,7 @@ from app.wiki import (
 )
 from app.ingest import settings as ingest_settings
 from app.models.update_policy import UpdateHealthResponse
-from app.models.wiki import ChangeKind, CommitMaxRetriesError, PageKind, PathMove
+from app.models.wiki import ChangeKind, CommitMaxRetriesError, PageKind, PathMove, SourceSpan
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -369,6 +369,22 @@ def get_document_by_path(
         sources=provenance.sources_for_path(rel),
         can_write=can_write,
     )
+
+
+@router.get("/source-spans", response_model=list[SourceSpan])
+def get_source_spans(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> list[SourceSpan]:
+    """Live content-to-source spans for a page, for in-document highlighting."""
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        rel = filesystem.safe_rel_path(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    require_can("read", rel, user)
+    return provenance.content_spans_for_path(rel)
 
 
 @router.put("/file", response_model=PutDocumentResponse)
