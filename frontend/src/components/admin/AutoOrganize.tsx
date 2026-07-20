@@ -78,7 +78,7 @@ function EnabledToggle({
           variant="section"
           icon={SvgSliders}
           title="Auto Organize"
-          description="Master switch. When off, no sweeps run, nothing is auto-applied, and pending proposals are frozen — per-page settings are kept."
+          description="Master switch. When off, no sweeps run, nothing is auto-applied, and pending proposals are frozen."
           rightChildren={
             <Switch
               checked={enabled}
