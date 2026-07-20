@@ -8,7 +8,7 @@ import {
   sendableUpdates,
 } from "@codemirror/collab";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   ChangeSet,
   EditorState,
@@ -212,6 +212,14 @@ const baseTheme = EditorView.theme({
   ".cm-md-list-bullet, .cm-md-list-number": {
     color: "var(--text-03)",
     userSelect: "none",
+  },
+  ".cm-md-task-checkbox": {
+    width: "0.95em",
+    height: "0.95em",
+    margin: "0 0.35em 0 0",
+    verticalAlign: "middle",
+    accentColor: "var(--accent-01)",
+    cursor: "pointer",
   },
   ".cm-comment-highlight": {
     backgroundColor: "var(--status-warning-01)",
@@ -489,7 +497,9 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           }),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
-          markdown(),
+          // GFM base (not the commonmark default) so task-list markers parse
+          // as TaskMarker.
+          markdown({ base: markdownLanguage }),
           wysiwygMarkdown(),
           EditorView.lineWrapping,
           placeholderExt(placeholder ?? ""),

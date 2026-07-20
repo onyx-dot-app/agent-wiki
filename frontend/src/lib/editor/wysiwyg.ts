@@ -70,6 +70,46 @@ class HrWidget extends WidgetType {
   }
 }
 
+/** Renders a checkbox in place of a task item's `[ ]`/`[x]` marker. Clicking
+ * it rewrites the marker text in the doc — a normal local edit, so the toggle
+ * flows through the collab op stream and history like any keystroke. */
+class TaskCheckboxWidget extends WidgetType {
+  constructor(
+    readonly checked: boolean,
+    readonly markerLen: number,
+  ) {
+    super();
+  }
+  eq(other: TaskCheckboxWidget) {
+    return other.checked === this.checked && other.markerLen === this.markerLen;
+  }
+  toDOM(view: EditorView) {
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = this.checked;
+    box.className = "cm-md-task-checkbox";
+    box.addEventListener("mousedown", (e) => {
+      // Toggle without moving the caret into the marker (which would reveal
+      // the raw `[x]` mid-click).
+      e.preventDefault();
+      const pos = view.posAtDOM(box);
+      view.dispatch({
+        changes: {
+          from: pos,
+          to: pos + this.markerLen,
+          insert: this.checked ? "[ ]" : "[x]",
+        },
+      });
+    });
+    return box;
+  }
+  /** Clicks are fully handled by the widget's own listener — never let the
+   * editor also process them (e.g. place the caret through the checkbox). */
+  ignoreEvent() {
+    return true;
+  }
+}
+
 /** True if any selection range overlaps `[from, to]` (touching counts). */
 function spanRevealed(state: EditorState, from: number, to: number): boolean {
   return state.selection.ranges.some((r) => r.from <= to && r.to >= from);
@@ -191,6 +231,14 @@ function buildDecorations(view: EditorView): DecorationSet {
             break;
           case "ListMark": {
             if (lineRevealed(state, node.from)) break;
+            // A task item's checkbox (TaskMarker below) stands in for the
+            // bullet, so hide the `-` marker and its trailing space entirely.
+            if (node.node.nextSibling?.name === "Task") {
+              let to = node.to;
+              if (state.doc.sliceString(to, to + 1) === " ") to++;
+              ranges.push(Decoration.replace({}).range(node.from, to));
+              break;
+            }
             const parent = node.node.parent;
             const ordered = parent?.parent?.name === "OrderedList";
             const widget = ordered
@@ -200,6 +248,18 @@ function buildDecorations(view: EditorView): DecorationSet {
               : new BulletWidget();
             ranges.push(
               Decoration.replace({ widget }).range(node.from, node.to),
+            );
+            break;
+          }
+          case "TaskMarker": {
+            if (lineRevealed(state, node.from)) break;
+            const checked = /[xX]/.test(
+              state.doc.sliceString(node.from, node.to),
+            );
+            ranges.push(
+              Decoration.replace({
+                widget: new TaskCheckboxWidget(checked, node.to - node.from),
+              }).range(node.from, node.to),
             );
             break;
           }
