@@ -1,5 +1,5 @@
-"""Provenance read side (app/wiki/provenance.py). Attribution resolution, the
-batched history lookup, and the per-page source list. Real DB for the queries.
+"""Provenance read side (app/wiki/provenance.py). Attribution resolution and
+the batched history lookup. Real DB for the queries.
 """
 
 from __future__ import annotations
@@ -93,30 +93,3 @@ def test_head_attribution_from_ledger(tmp_db):
     assert a is not None
     assert a.actor_kind == "ingestion"
     assert a.source_title == "Doc"
-
-
-def test_sources_for_path_dedups_newest_first(tmp_db):
-    for sha, doc_id in [("s1", "dup"), ("s2", "dup"), ("s3", "other")]:
-        provenance.record(
-            commit_sha=sha,
-            doc_path="P.md",
-            user_id=None,
-            agent_name=None,
-            agent_session_id=None,
-            source=WriteProvenance(source_document_id=doc_id, source_title=sha),
-        )
-    ids = [s.source_document_id for s in provenance.sources_for_path("P.md")]
-    assert ids == ["other", "dup"]
-
-
-def test_sources_for_path_keeps_anonymous_rows(tmp_db):
-    for sha in ["a1", "a2"]:
-        provenance.record(
-            commit_sha=sha,
-            doc_path="P.md",
-            user_id=None,
-            agent_name=None,
-            agent_session_id=None,
-            source=WriteProvenance(source_type="slack"),
-        )
-    assert len(provenance.sources_for_path("P.md")) == 2

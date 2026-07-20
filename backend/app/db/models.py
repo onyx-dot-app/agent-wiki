@@ -1505,6 +1505,42 @@ class ProvenanceLedger(Base):
     )
 
 
+class SourceRange(Base):
+    """A span of a wiki page mapped to the ingested document that produced it.
+
+    One row per changed span of an ingest commit. Anchored like a comment
+    (``doc_path`` + ``anchor_sha`` + ``[start_offset, end_offset)``) so the remap
+    in ``app/wiki/provenance_remap.py`` keeps it accurate across later edits and
+    retires it (``status='retired'``) when its span is rewritten. ``provenance_id``
+    links to the ledger row that carries the source document.
+    """
+
+    __tablename__ = "source_ranges"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provenance_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("provenance_ledger.id", ondelete="CASCADE"), nullable=False
+    )
+    doc_path: Mapped[str] = mapped_column(Text, nullable=False)
+    anchor_sha: Mapped[str] = mapped_column(Text, nullable=False)
+    start_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    quoted_text: Mapped[str] = mapped_column(Text, nullable=False)
+    # SourceRangeStatus values (app/models/wiki.py), mirrored by the CHECK below.
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'live'"))
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('live', 'retired')", name="source_ranges_status_check"
+        ),
+        Index("idx_source_ranges_doc_path_status", "doc_path", "status"),
+        Index("idx_source_ranges_provenance_id", "provenance_id"),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Comments — human discussion anchored to wiki pages (Postgres-only)          #
 # --------------------------------------------------------------------------- #

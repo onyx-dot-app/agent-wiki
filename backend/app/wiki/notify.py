@@ -40,6 +40,7 @@ from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
 from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, doc_ids, drafts, update_policy
 from app.wiki.comment_remap import remap_comments
+from app.wiki.provenance_remap import remap_source_ranges
 from app.models.wiki import ChangeKind, PathMove
 
 log = logging.getLogger(__name__)
@@ -64,6 +65,15 @@ def _delete_provenance_safe(doc_path: str) -> None:
         db_provenance.delete_for_doc(doc_path)
     except Exception:
         log.exception("provenance delete failed for %s", doc_path)
+
+
+def _remap_source_ranges_safe(path: str) -> None:
+    """Re-anchor ingest source ranges inline, but never let a remap failure
+    abort a save. A stale range self-heals on the next edit."""
+    try:
+        remap_source_ranges(path)
+    except Exception:
+        log.exception("source range remap failed for %s", path)
 
 
 def _remap_comments_safe(path: str) -> None:
@@ -120,6 +130,7 @@ def after_doc_write(
     # Drift any comments anchored to this page onto the new body. A no-op on
     # CREATE (no comments yet); the real work is on EDIT.
     _remap_comments_safe(rel_path)
+    _remap_source_ranges_safe(rel_path)
     mcp_pubsub.publish_doc_update(rel_path, sha, change_kind)
     # Fold this commit into any open co-edit session for the page (skip for a
     # session's own checkpoint commit — trigger_coedit_rebase=False).
@@ -303,6 +314,8 @@ def after_path_move(
             # Other live pointers follow the page to its new path.
             agent_activity.rename_doc(old_p, new_p)
             _rename_provenance_safe(old_p, new_p)
+            # Ranges are re-keyed to new_p now, so the remap query finds them.
+            _remap_source_ranges_safe(new_p)
             drafts.rename(old_p, new_p)
             page_dirs.rename_page(old_wiki_path=old_p, new_wiki_path=new_p)
         elif old_is_md:
