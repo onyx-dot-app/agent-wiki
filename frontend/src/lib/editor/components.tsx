@@ -11,6 +11,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   ChangeSet,
+  Compartment,
   EditorState,
   StateEffect,
   StateField,
@@ -333,6 +334,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
   ) {
     const host = useRef<HTMLDivElement | null>(null);
     const view = useRef<EditorView | null>(null);
+    // Swappable slot for the read-only facets — see readOnlyExtensions.
+    const readOnlyCompartment = useRef(new Compartment());
     // Latest callbacks without re-creating the editor.
     const onSelRef = useRef(onSelectionChange);
     const reportDocRef = useRef(reportDoc);
@@ -524,8 +527,11 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           markdown({ base: markdownLanguage }),
           wysiwygMarkdown(),
           EditorView.lineWrapping,
-          EditorState.readOnly.of(!!readOnly),
-          EditorView.editable.of(!readOnly),
+          // In a compartment so a later `readOnly` prop change reconfigures
+          // the live editor (facets are otherwise baked in at create time —
+          // e.g. can_write flipping after a permissions change must not
+          // leave the editor writable).
+          readOnlyCompartment.current.of(readOnlyExtensions(!!readOnly)),
           placeholderExt(placeholder ?? ""),
           peersField,
           commentsField,
@@ -629,6 +635,18 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       });
     }, [commentHighlights]);
 
+    // Reconfigure the read-only facets when the prop changes — they're baked
+    // into the state at create time otherwise, and a `can_write` correction
+    // (e.g. permissions revoked mid-session) must not leave the editor
+    // writable.
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: readOnlyCompartment.current.reconfigure(
+          readOnlyExtensions(!!readOnly),
+        ),
+      });
+    }, [readOnly]);
+
     return (
       <div
         ref={host}
@@ -638,6 +656,13 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
   },
 );
 
+/** The facets that make the editor a pure preview for `readOnly` viewers.
+ * Always installed through `readOnlyCompartment` so a prop change can
+ * reconfigure the live editor. */
+function readOnlyExtensions(readOnly: boolean) {
+  return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+}
+
 interface CoeditPresenceBarProps {
   participants: CoeditParticipant[];
   typing: string[];
@@ -646,8 +671,10 @@ interface CoeditPresenceBarProps {
 
 // How recently a participant must have edited to be labeled "editing" rather
 // than "viewing". Everyone on the page is in the live session; the label — not
-// membership — is what distinguishes editors from readers.
-const EDITING_LABEL_WINDOW_MS = 5 * 60 * 1000;
+// membership — is what distinguishes editors from readers. Generous on
+// purpose: a long think-pause mid-edit shouldn't demote the label, and every
+// op refreshes the timestamp, so only a genuinely idle editor decays.
+const EDITING_LABEL_WINDOW_MS = 30 * 60 * 1000;
 
 function presenceLabel(p: CoeditParticipant, now: number): string {
   if (
