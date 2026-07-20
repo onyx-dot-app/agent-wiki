@@ -24,6 +24,7 @@ from typing import Any
 from app.auth import users
 from app.models.wiki import PathMove
 from app.wiki import change_proposals, git, notify, trash
+from app.wiki.automanage import settings
 from app.wiki.change_proposals import ProposalOp, ProposalStatus
 
 log = logging.getLogger(__name__)
@@ -49,7 +50,11 @@ def _folder_still_empty(folder: str) -> bool:
 
 def execute(proposal_id: int) -> None:
     """Apply an approved proposal. No-op (logged) if it isn't ``approved`` — a
-    concurrent reject/expire/apply already moved it on."""
+    concurrent reject/expire/apply already moved it on — or if Auto Organize is
+    disabled (approved proposals are frozen while off; re-enabling resumes)."""
+    if not settings.is_enabled():
+        log.info("execute: Auto Organize disabled — proposal %s frozen", proposal_id)
+        return
     p = change_proposals.get(proposal_id)
     if p is None:
         log.warning("execute: proposal %s is gone", proposal_id)

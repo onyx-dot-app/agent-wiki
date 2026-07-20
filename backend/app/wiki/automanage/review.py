@@ -15,6 +15,7 @@ neither path re-implements it and the API router stays thin.
 from __future__ import annotations
 
 from app.wiki import change_proposals
+from app.wiki.automanage import settings
 from app.wiki.change_proposals import ProposalStatus
 
 
@@ -45,7 +46,10 @@ def _actionable_after(proposal_id: int, transitioned: bool) -> bool:
 def approve(proposal_id: int, *, user_id: str) -> bool:
     """Human approval: transition ``pending → approved`` (the approver becomes
     the acting user), then execute. Idempotent on an already-approved proposal
-    (re-dispatches). Returns False if the proposal is missing or terminal."""
+    (re-dispatches). Returns False if the proposal is missing or terminal, or
+    if Auto Organize is disabled (proposals are frozen while off)."""
+    if not settings.is_enabled():
+        return False
     transitioned = change_proposals.approve(proposal_id, user_id=user_id)
     if not _actionable_after(proposal_id, transitioned):
         return False
@@ -57,7 +61,10 @@ def auto_approve(proposal_id: int, *, acting_user_id: str) -> bool:
     """AI-managed auto-approval (no human): ``pending → approved`` with no
     reviewer, then execute — the same execution path as human approval. For
     scopes with ``ai_management_allowed`` effective. Idempotent on an
-    already-approved proposal. Returns False if missing or terminal."""
+    already-approved proposal. Returns False if missing or terminal, or if Auto
+    Organize is disabled."""
+    if not settings.is_enabled():
+        return False
     transitioned = change_proposals.auto_approve(
         proposal_id, acting_user_id=acting_user_id
     )
@@ -69,5 +76,8 @@ def auto_approve(proposal_id: int, *, acting_user_id: str) -> bool:
 
 def reject(proposal_id: int, *, user_id: str, reason: str | None = None) -> bool:
     """Reject a pending proposal (durable do-not-propose). No execution.
-    Returns False if it wasn't pending."""
+    Returns False if it wasn't pending, or if Auto Organize is disabled (pending
+    proposals are frozen while off)."""
+    if not settings.is_enabled():
+        return False
     return change_proposals.reject(proposal_id, user_id=user_id, reason=reason)
