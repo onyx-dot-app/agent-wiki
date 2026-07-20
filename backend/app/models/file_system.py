@@ -179,7 +179,9 @@ class GetDocumentResponse(BaseModel):
     # Whether the caller may edit this page. Joining the co-edit session is
     # read-gated (page-open presence), so the frontend uses this to suppress
     # ops/cursors and render read-only affordances for read-only viewers.
-    can_write: bool = True
+    # Required (no default): every constructor must resolve it from the ACL,
+    # so a new call site can't silently advertise write access.
+    can_write: bool
 
 
 class PutDocumentResponse(BaseModel):
