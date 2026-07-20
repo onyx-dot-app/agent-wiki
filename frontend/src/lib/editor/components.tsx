@@ -142,7 +142,7 @@ const baseTheme = EditorView.theme({
     // @onyx-ai/opal styles.css) — the doc text matches the design system's
     // content type ramp. CM manages these nodes, so the utility class can't
     // be applied directly; reference the same tokens instead.
-    fontSize: "var(--height-font-label)",
+    fontSize: "var(--height-font-label, 1rem)",
     fontWeight: "450",
     color: "var(--text-04)",
   },
@@ -152,7 +152,7 @@ const baseTheme = EditorView.theme({
     // The app's font (set on <html> by next/font in layout.tsx) — the doc
     // text must match DocTitle and the rest of the chrome.
     fontFamily: "var(--font-hanken-grotesk, system-ui, sans-serif)",
-    lineHeight: "var(--height-line-label)",
+    lineHeight: "var(--height-line-label, 1.5rem)",
     padding: "0 var(--cm-gutter, 2rem)",
     scrollbarWidth: "thin",
     scrollbarColor: "var(--border-03) transparent",
