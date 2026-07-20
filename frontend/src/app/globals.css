@@ -262,10 +262,28 @@ body {
   border: 1px solid green;
 }
 
-/* Doc side panel tab strip: the mock's tabs use the 14px Main UI size, which
-   Opal's Tabs component does not expose as a prop. Scoped to the panel strip
-   so other tab surfaces keep Opal's default size. */
+/* Doc side panel tab strip: the mock's tabs use the 14px semibold Main UI
+   style, which Opal's Tabs does not expose as props. Labels render through a
+   Text child carrying its own font classes, so descendants must inherit.
+   Scoped to the panel strip so other tab surfaces keep Opal's defaults. */
 .doc-panel-tabs .opal-tabs-trigger {
   font-size: 14px;
   line-height: 20px;
+  font-weight: 600;
+}
+.doc-panel-tabs .opal-tabs-trigger * {
+  font-weight: inherit;
+}
+
+/* The mock's strip has no fill, the page background shows through. Opal's
+   underline list paints background-tint-00, an opaque fill that reads as a
+   band on the tinted app shell. */
+.doc-panel-tabs .opal-tabs-list {
+  background: transparent;
+}
+
+/* The mock's active-tab underline is theme primary, not Opal's default
+   background-tint-inverted-03 gray. */
+.doc-panel-tabs .opal-tabs-pill-indicator {
+  background: var(--theme-primary-05);
 }
