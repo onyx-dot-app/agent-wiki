@@ -7,6 +7,7 @@ import { SvgSliders } from "@onyx-ai/opal/icons";
 import { ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
 
 import {
+  type AutoOrganizeSettings,
   triggerSweep,
   updateAutoOrganizeEnabled,
   useAutoOrganizeSettings,
@@ -14,7 +15,10 @@ import {
 
 export function AutoOrganize() {
   const { settings, isLoading, error, refresh } = useAutoOrganizeSettings();
-  const enabled = settings?.enabled ?? true;
+  // Fail safe until the real setting loads: an unknown/failed state shows the
+  // switch off and keeps "Run a sweep" disabled, so an admin can't fire a
+  // sweep that the backend would 409 when the persisted setting is disabled.
+  const enabled = settings?.enabled ?? false;
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -27,7 +31,7 @@ export function AutoOrganize() {
         enabled={enabled}
         loading={isLoading}
         loadError={error instanceof Error ? error.message : null}
-        onChanged={() => void refresh()}
+        onUpdated={(next) => void refresh(next, { revalidate: false })}
       />
       <SweepControl disabled={!enabled} />
     </div>
@@ -38,14 +42,14 @@ interface EnabledToggleProps {
   enabled: boolean;
   loading: boolean;
   loadError: string | null;
-  onChanged: () => void;
+  onUpdated: (next: AutoOrganizeSettings) => void;
 }
 
 function EnabledToggle({
   enabled,
   loading,
   loadError,
-  onChanged,
+  onUpdated,
 }: EnabledToggleProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +59,10 @@ function EnabledToggle({
     setBusy(true);
     setError(null);
     try {
-      await updateAutoOrganizeEnabled(next);
-      onChanged();
+      // Seed the cache from the PUT's authoritative response (no revalidating
+      // GET) so a rapid second toggle can't be clobbered by a stale in-flight
+      // read.
+      onUpdated(await updateAutoOrganizeEnabled(next));
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to update setting");
     } finally {
