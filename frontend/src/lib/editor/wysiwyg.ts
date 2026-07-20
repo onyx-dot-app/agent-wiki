@@ -4,7 +4,8 @@
  * builds a `DecorationSet` that hides markup characters (`#`, `**`, `` ` ``,
  * `> `, link brackets/URLs) and applies `cm-md-*` classes to the surrounding
  * span for visual styling. The raw markup for a span is revealed again while
- * the selection touches it, so the user can still see/edit what they typed.
+ * the editor is focused and the selection touches it, so the user can still
+ * see/edit what they typed — an unfocused editor is pure preview.
  *
  * Storage is untouched — this only decorates the view; the doc string (and
  * the collab op stream, which operates on that string) never changes.
@@ -133,17 +134,19 @@ function revealScope(node: SyntaxNodeRef): { from: number; to: number } {
   return parent ? { from: parent.from, to: parent.to } : node;
 }
 
-/** Hides `node`'s range unless the selection touches its enclosing span,
- * extending the hidden range over one trailing space (the un-tokenized gap
- * after `#`/`>` markers) so hiding it doesn't leave a stray leading space. */
+/** Hides `node`'s range unless `revealed` says the selection touches its
+ * enclosing span, extending the hidden range over one trailing space (the
+ * un-tokenized gap after `#`/`>` markers) so hiding it doesn't leave a stray
+ * leading space. */
 function hideMark(
   state: EditorState,
   node: SyntaxNodeRef,
   ranges: Range<Decoration>[],
+  revealed: (from: number, to: number) => boolean,
   swallowTrailingSpace = false,
 ): void {
   const scope = revealScope(node);
-  if (spanRevealed(state, scope.from, scope.to)) return;
+  if (revealed(scope.from, scope.to)) return;
   let to = node.to;
   if (swallowTrailingSpace && state.doc.sliceString(to, to + 1) === " ") to++;
   ranges.push(Decoration.replace({}).range(node.from, to));
@@ -151,6 +154,13 @@ function hideMark(
 
 function buildDecorations(view: EditorView): DecorationSet {
   const { state } = view;
+  // CM always has a selection — a freshly mounted editor rests at doc start —
+  // so gate reveal on focus: an unfocused editor is being *read*, and must not
+  // expose line 1's raw markup under a caret the user never placed.
+  const canReveal = view.hasFocus;
+  const revealedSpan = (from: number, to: number) =>
+    canReveal && spanRevealed(state, from, to);
+  const revealedLine = (pos: number) => canReveal && lineRevealed(state, pos);
   const ranges: Range<Decoration>[] = [];
 
   for (const { from, to } of view.visibleRanges) {
@@ -218,24 +228,24 @@ function buildDecorations(view: EditorView): DecorationSet {
             );
             break;
           case "HeaderMark":
-            hideMark(state, node, ranges, true);
+            hideMark(state, node, ranges, revealedSpan, true);
             break;
           case "QuoteMark":
-            hideMark(state, node, ranges, true);
+            hideMark(state, node, ranges, revealedSpan, true);
             break;
           case "EmphasisMark":
           case "CodeMark":
           case "LinkMark":
-            hideMark(state, node, ranges);
+            hideMark(state, node, ranges, revealedSpan);
             break;
           case "URL":
             // Only the URL inside a `[text](url)` link is markup to hide —
             // a bare autolink's URL is its own visible content.
             if (node.node.parent?.name === "Link")
-              hideMark(state, node, ranges);
+              hideMark(state, node, ranges, revealedSpan);
             break;
           case "ListMark": {
-            if (lineRevealed(state, node.from)) break;
+            if (revealedLine(node.from)) break;
             // A task item's checkbox (TaskMarker below) stands in for the
             // bullet, so hide the `-` marker and its trailing space entirely.
             if (node.node.nextSibling?.name === "Task") {
@@ -257,7 +267,7 @@ function buildDecorations(view: EditorView): DecorationSet {
             break;
           }
           case "TaskMarker": {
-            if (lineRevealed(state, node.from)) break;
+            if (revealedLine(node.from)) break;
             const checked = /[xX]/.test(
               state.doc.sliceString(node.from, node.to),
             );
@@ -269,7 +279,7 @@ function buildDecorations(view: EditorView): DecorationSet {
             break;
           }
           case "HorizontalRule":
-            if (lineRevealed(state, node.from)) break;
+            if (revealedLine(node.from)) break;
             ranges.push(
               Decoration.replace({ widget: new HrWidget() }).range(
                 node.from,
@@ -286,9 +296,10 @@ function buildDecorations(view: EditorView): DecorationSet {
 }
 
 /** Live-preview markdown decorations: hides markup characters and applies
- * `cm-md-*` visual styling, revealing raw syntax while the caret is inside a
- * span. Requires `markdown()` (from `@codemirror/lang-markdown`) earlier in
- * the extension list so `syntaxTree` has a parse to walk. */
+ * `cm-md-*` visual styling, revealing raw syntax while the editor is focused
+ * and the caret is inside a span. Requires `markdown()` (from
+ * `@codemirror/lang-markdown`) earlier in the extension list so `syntaxTree`
+ * has a parse to walk. */
 export function wysiwygMarkdown() {
   return ViewPlugin.fromClass(
     class {
@@ -300,7 +311,9 @@ export function wysiwygMarkdown() {
         if (
           update.docChanged ||
           update.selectionSet ||
-          update.viewportChanged
+          update.viewportChanged ||
+          // Reveal is focus-gated, so focus/blur changes what's hidden.
+          update.focusChanged
         ) {
           this.decorations = buildDecorations(update.view);
         }
