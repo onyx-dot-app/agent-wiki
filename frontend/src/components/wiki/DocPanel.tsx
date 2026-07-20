@@ -26,8 +26,11 @@ interface DocPanelProps {
  * rather than as their own rail columns. */
 export function DocPanel({ tab, onTabChange, children }: DocPanelProps) {
   return (
-    <div className="flex h-full w-[360px] max-w-[100vw] flex-col border-l border-(--border-01)">
-      <div className="shrink-0 px-2 pt-1">
+    <div className="flex h-full w-[360px] max-w-[100vw] flex-col">
+      {/* Strip metrics from the mock's panel Header (1790:52552): 12px
+          sides, 8px top, 4px below the strip. The region draws no left
+          border, the cards inside each tab carry their own. */}
+      <div className="shrink-0 px-3 pt-2 pb-1">
         <Tabs
           variant="underline"
           value={tab}
