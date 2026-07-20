@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Button,
   Divider,
+  EmptyMessageCard,
   LineItemButton,
   OpenButton,
   Popover,
@@ -15,22 +16,21 @@ import {
 import { Content } from "@onyx-ai/opal/layouts";
 import { cn } from "@onyx-ai/opal/utils";
 import {
-  SvgBubbleText,
   SvgChevronLeft,
   SvgChevronRight,
   SvgExternalLink,
   SvgDocFile,
   SvgFolder,
   SvgHistory,
+  SvgMoreHorizontal,
   SvgShare,
-  SvgShield,
+  SvgSidebar,
   SvgSparkle,
-  SvgWorkflow,
 } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { TriggerPanel } from "@/components/triggers/TriggerPanel";
 import { TriggersSidePanel } from "@/components/wiki/TriggersSidePanel";
+import { DocPanel, type DocPanelTab } from "@/components/wiki/DocPanel";
 import { DiffView } from "@/components/wiki/DiffView";
 import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
@@ -40,7 +40,6 @@ import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
-import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { craftFailureMessage } from "@/lib/craft";
 import {
   closeSession,
@@ -141,18 +140,15 @@ export function FileView({ path }: FileViewProps) {
   const agentsBarHost = useAgentsBarHost();
   const rightHost = useRightPanelHost();
   const { isActivitiesOpen, toggleActivities } = useLeftPanel();
-  const { refresh: refreshTriggers } = useTriggers();
   const { setDrafting, requestExpand } = useDrafting();
   const { user } = useAuth();
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
-  const [automationsOpen, setAutomationsOpen] = useState(false);
-  const [editingTrigger, setEditingTrigger] = useState<Trigger | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const confirmDialog = useConfirm();
   // History state. `viewingSha` is null when looking at the working-tree
   // (latest) version; otherwise it's the sha being viewed and is what we
@@ -167,10 +163,11 @@ export function FileView({ path }: FileViewProps) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // Active tab of the tabbed side panel (null = closed). The rail holds one
+  // occupant at a time: this panel or history mode, never both.
+  const [panelTab, setPanelTab] = useState<DocPanelTab | null>(null);
   // Comments. `commentDraft` is a pending text selection being composed;
   // `selTool` is the floating "Comment" affordance shown on select.
-  const [commentsOpen, setCommentsOpen] = useState(false);
-  const [policyOpen, setPolicyOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
@@ -192,22 +189,24 @@ export function FileView({ path }: FileViewProps) {
   const currentBasename = segments[segments.length - 1] ?? path;
   const currentBasenameNoExt = currentBasename.replace(/\.md$/i, "");
   // Page owns the comment threads (so highlights render even with the panel
-  // closed). Auto-open the panel once per path when a page has comments.
+  // closed). Auto-open the panel once per path on unresolved comments.
   const autoOpenedPathRef = useRef<string | null>(null);
   // A `?comment=<id>` deep-link is focused once per id (reset on path change).
   const focusedCommentRef = useRef<string | null>(null);
 
-  // The history and comments side panels are mutually exclusive — every
-  // path that opens one closes the other (toolbar toggles, the comments
-  // auto-open, the selection "💬 Comment" tool).
-  const openComments = useCallback(() => {
+  // Opening the panel closes history mode, the other rail occupant. Every
+  // entry point routes through here.
+  const openPanel = useCallback((tab: DocPanelTab) => {
     setHistoryOpen(false);
-    setPolicyOpen(false);
-    setAutomationsOpen(false);
-    setTriggerModalOpen(false);
-    setEditingTrigger(null);
-    setCommentsOpen(true);
+    setPanelTab(tab);
   }, []);
+
+  const closePanel = useCallback(() => {
+    setPanelTab(null);
+    setCommentDraft(null);
+  }, []);
+
+  const openComments = useCallback(() => openPanel("comments"), [openPanel]);
 
   const refreshComments = useCallback(async () => {
     try {
@@ -567,13 +566,9 @@ export function FileView({ path }: FileViewProps) {
       return;
     }
     setHistoryOpen(true);
-    // Mutual exclusion with the comments + policy + automations panels and
-    // the docked trigger editor (see ``openComments``).
-    setCommentsOpen(false);
-    setPolicyOpen(false);
-    setAutomationsOpen(false);
-    setTriggerModalOpen(false);
-    setEditingTrigger(null);
+    // History mode takes the rail, so the tabbed panel closes (the
+    // one-occupant counterpart of ``openPanel``).
+    setPanelTab(null);
     setCommentDraft(null);
     // Opening history: show the newest commit's diff immediately rather
     // than leaving the rendered body up until the user clicks a row.
@@ -634,11 +629,12 @@ export function FileView({ path }: FileViewProps) {
   }
 
   // Page actions live in the single pinned header (WikiHeader), not a second
-  // header inside the scroll area — they portal into its right-aligned slot.
-  // The panel toggles are icon SelectButtons so the open panel shows the
-  // selected tint; the others are tertiary icon Buttons. No Edit/Done button
-  // — the editor is always live and autosaves; `saveStatus` is the only
-  // feedback for that.
+  // header inside the scroll area. They portal into its right-aligned slot.
+  // The panel toggle is a SelectButton so an open panel shows the selected
+  // tint, the others are tertiary icon Buttons. There is no Edit/Done button
+  // since the editor is always live and autosaves, with `saveStatus` as the
+  // only feedback for that.
+  const panelOpen = panelTab !== null;
   const headerActions =
     !loading && !error ? (
       <>
@@ -652,69 +648,102 @@ export function FileView({ path }: FileViewProps) {
           </span>
         )}
         <Button
-          icon={SvgSparkle}
-          prominence="tertiary"
-          tooltip="Run Agent"
-          onClick={() => setRunAgentOpen(true)}
-        />
-        <SelectButton
-          icon={SvgWorkflow}
-          state={automationsOpen ? "selected" : "empty"}
-          tooltip="Triggers"
-          onClick={() => {
-            if (automationsOpen || triggerModalOpen) {
-              setAutomationsOpen(false);
-              setTriggerModalOpen(false);
-              setEditingTrigger(null);
-              return;
-            }
-            setHistoryOpen(false);
-            setCommentsOpen(false);
-            setCommentDraft(null);
-            setPolicyOpen(false);
-            setAutomationsOpen(true);
-          }}
-        />
-        <Button
           icon={SvgShare}
           prominence="tertiary"
           tooltip="Share"
           onClick={() => setShareOpen(true)}
         />
+        <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+          <Popover.Trigger asChild>
+            <span className="inline-flex">
+              <Button
+                icon={SvgMoreHorizontal}
+                prominence="tertiary"
+                tooltip="More"
+              />
+            </span>
+          </Popover.Trigger>
+          <Popover.Content width="fit" align="end">
+            <PopoverMenu>
+              <LineItemButton
+                title="Run Agent"
+                icon={SvgSparkle}
+                sizePreset="main-ui"
+                variant="section"
+                onClick={() => {
+                  setMoreOpen(false);
+                  setRunAgentOpen(true);
+                }}
+              />
+              <LineItemButton
+                title="Version history"
+                icon={SvgHistory}
+                sizePreset="main-ui"
+                variant="section"
+                onClick={() => {
+                  setMoreOpen(false);
+                  void toggleHistory();
+                }}
+              />
+            </PopoverMenu>
+          </Popover.Content>
+        </Popover>
         <SelectButton
-          icon={SvgHistory}
-          state={historyOpen ? "selected" : "empty"}
-          tooltip="History"
-          onClick={toggleHistory}
-        />
-        <SelectButton
-          icon={SvgBubbleText}
-          state={commentsOpen ? "selected" : "empty"}
-          tooltip="Comments"
-          onClick={() =>
-            commentsOpen ? setCommentsOpen(false) : openComments()
-          }
-        />
-        <SelectButton
-          icon={SvgShield}
-          state={policyOpen ? "selected" : "empty"}
-          tooltip="Update Policy"
-          onClick={() => {
-            if (policyOpen) {
-              setPolicyOpen(false);
-              return;
-            }
-            setHistoryOpen(false);
-            setCommentsOpen(false);
-            setCommentDraft(null);
-            setAutomationsOpen(false);
-            setTriggerModalOpen(false);
-            setEditingTrigger(null);
-            setPolicyOpen(true);
-          }}
+          icon={SvgSidebar}
+          state={panelOpen ? "selected" : "empty"}
+          tooltip={panelOpen ? "Close panel" : "Open panel"}
+          onClick={() => (panelOpen ? closePanel() : openPanel("updates"))}
         />
       </>
     ) : null;
+
+  // One body per tab, shared by the desktop rail portal and the mobile sheet.
+  const panelBody = (() => {
+    switch (panelTab) {
+      case "updates":
+        return (
+          <UpdatePolicyPanel
+            path={path}
+            onShowHistory={() => void toggleHistory()}
+            fullHeight
+          />
+        );
+      case "comments":
+        return (
+          <CommentsPanel
+            path={path}
+            headSha={headSha}
+            draft={commentDraft}
+            threads={commentThreads}
+            onChanged={refreshComments}
+            activeId={activeCommentId}
+            onActivate={activateComment}
+            onDraftConsumed={() => setCommentDraft(null)}
+            onClose={closePanel}
+            fullHeight
+          />
+        );
+      case "sources":
+        return (
+          <div className="flex flex-1 items-center justify-center p-4">
+            <EmptyMessageCard
+              sizePreset="main-ui"
+              icon={SvgExternalLink}
+              title="Sources"
+              description="Source attribution for this page is coming soon."
+            />
+          </div>
+        );
+      case "watching":
+        return (
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
+            <TriggersSidePanel path={path} onStatus={setTriggerStatus} />
+          </div>
+        );
+      default:
+        return null;
+    }
+  })();
 
   return (
     <main
@@ -746,42 +775,6 @@ export function FileView({ path }: FileViewProps) {
       {triggerStatus && (
         <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
       )}
-
-      <TriggerPanel
-        open={triggerModalOpen && (isMobile || !rightHost?.el)}
-        initial={editingTrigger ?? { scope_path: path }}
-        lockScope={!editingTrigger}
-        onDelete={
-          editingTrigger
-            ? async () => {
-                if (
-                  !(await confirmDialog({
-                    title: "Delete this trigger?",
-                    body: `"${editingTrigger.nl_description}"`,
-                    confirmLabel: "Delete",
-                  }))
-                )
-                  return;
-                await deleteTrigger(editingTrigger.id);
-                await refreshTriggers();
-                setTriggerModalOpen(false);
-                setEditingTrigger(null);
-              }
-            : undefined
-        }
-        onClose={() => {
-          setTriggerModalOpen(false);
-          setEditingTrigger(null);
-        }}
-        onSaved={(t) => {
-          setTriggerStatus(
-            editingTrigger
-              ? `Updated trigger for ${t.scope_path}`
-              : `Created trigger for ${t.scope_path}`,
-          );
-          void refreshTriggers();
-        }}
-      />
 
       <ShareDialog
         path={path}
@@ -866,14 +859,7 @@ export function FileView({ path }: FileViewProps) {
               >
                 <UpdateHealthBanner
                   path={path}
-                  onOpenPolicy={() => {
-                    setHistoryOpen(false);
-                    setCommentsOpen(false);
-                    setAutomationsOpen(false);
-                    setTriggerModalOpen(false);
-                    setEditingTrigger(null);
-                    setPolicyOpen(true);
-                  }}
+                  onOpenPolicy={() => openPanel("updates")}
                 />
                 <Path2ReviewBanner path={path} canWrite={canWrite} />
                 <CoeditPresenceBar
@@ -969,50 +955,13 @@ export function FileView({ path }: FileViewProps) {
               </div>,
               rightHost.el,
             )}
-          {commentsOpen &&
+          {panelTab &&
             !isMobile &&
             rightHost?.el &&
             createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <CommentsPanel
-                  path={path}
-                  headSha={headSha}
-                  draft={commentDraft}
-                  threads={commentThreads}
-                  onChanged={refreshComments}
-                  activeId={activeCommentId}
-                  onActivate={activateComment}
-                  onDraftConsumed={() => setCommentDraft(null)}
-                  onClose={() => {
-                    setCommentsOpen(false);
-                    setCommentDraft(null);
-                  }}
-                  fullHeight
-                />
-              </div>,
-              rightHost.el,
-            )}
-          {policyOpen &&
-            !isMobile &&
-            rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <UpdatePolicyPanel
-                  path={path}
-                  onClose={() => setPolicyOpen(false)}
-                  onShowHistory={toggleHistory}
-                  fullHeight
-                />
-              </div>,
-              rightHost.el,
-            )}
-          {automationsOpen &&
-            !isMobile &&
-            rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[480px] flex-col border-l border-(--border-01) bg-(--background-tint-01) p-2">
-                <TriggersSidePanel path={path} onStatus={setTriggerStatus} />
-              </div>,
+              <DocPanel tab={panelTab} onTabChange={setPanelTab}>
+                {panelBody}
+              </DocPanel>,
               rightHost.el,
             )}
         </>
@@ -1046,46 +995,17 @@ export function FileView({ path }: FileViewProps) {
           </div>
         </>
       )}
-      {commentsOpen && isMobile && (
+      {panelTab && isMobile && (
         <>
           <div
-            onClick={() => setCommentsOpen(false)}
+            onClick={closePanel}
             aria-hidden
             className="fixed inset-0 z-[60] bg-(--mask-03)"
           />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <CommentsPanel
-              path={path}
-              headSha={headSha}
-              draft={commentDraft}
-              threads={commentThreads}
-              onChanged={refreshComments}
-              activeId={activeCommentId}
-              onActivate={activateComment}
-              onDraftConsumed={() => setCommentDraft(null)}
-              onClose={() => {
-                setCommentsOpen(false);
-                setCommentDraft(null);
-              }}
-              fullHeight
-            />
-          </div>
-        </>
-      )}
-      {policyOpen && isMobile && (
-        <>
-          <div
-            onClick={() => setPolicyOpen(false)}
-            aria-hidden
-            className="fixed inset-0 z-[60] bg-(--mask-03)"
-          />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <UpdatePolicyPanel
-              path={path}
-              onClose={() => setPolicyOpen(false)}
-              onShowHistory={toggleHistory}
-              fullHeight
-            />
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] bg-(--background-tint-00) shadow-(--shadow-panel)">
+            <DocPanel tab={panelTab} onTabChange={setPanelTab}>
+              {panelBody}
+            </DocPanel>
           </div>
         </>
       )}
