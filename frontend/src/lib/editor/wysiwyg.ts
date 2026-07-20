@@ -276,11 +276,7 @@ export function wysiwygMarkdown() {
         this.decorations = buildDecorations(view);
       }
       update(update: ViewUpdate) {
-        if (
-          update.docChanged ||
-          update.selectionSet ||
-          update.viewportChanged
-        ) {
+        if (update.docChanged || update.viewportChanged) {
           this.decorations = buildDecorations(update.view);
         }
       }
