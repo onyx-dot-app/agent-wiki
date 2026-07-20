@@ -13,6 +13,19 @@ class SweepTriggerResponse(BaseModel):
     status: str = "queued"
 
 
+class DetectionSettingsView(BaseModel):
+    """Org-wide Auto Organize settings (the kill switch)."""
+
+    enabled: bool
+    updated_at: str | None
+
+
+class DetectionSettingsUpdate(BaseModel):
+    """Patch for the Auto Organize settings — only the fields provided change."""
+
+    enabled: bool | None = None
+
+
 class DetectionRunView(BaseModel):
     """One ``detection_runs`` row for the admin sweep history."""
 

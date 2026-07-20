@@ -14,6 +14,8 @@ from app.auth import User, require_can
 from app.auth.deps import require_admin, require_user
 from app.models.detection import (
     DetectionRunView,
+    DetectionSettingsUpdate,
+    DetectionSettingsView,
     ProposalActionResponse,
     ProposalsResponse,
     ProposalView,
@@ -22,7 +24,7 @@ from app.models.detection import (
 )
 from app.tasks.detection import run_detection_sweep
 from app.wiki import acl
-from app.wiki.automanage import review, runs
+from app.wiki.automanage import review, runs, settings
 from app.wiki.change_proposals import (
     ProposalStatus,
     get as get_proposal,
@@ -39,9 +41,30 @@ def _can_see(user: User, proposal: dict[str, Any]) -> bool:
     return all(acl.can(user.id, user.is_admin, "read", p) for p in paths)
 
 
+@router.get("/settings", response_model=DetectionSettingsView)
+def get_settings(user: User = Depends(require_admin)) -> DetectionSettingsView:
+    """The org-wide Auto Organize settings (the kill switch)."""
+    s = settings.get()
+    return DetectionSettingsView(enabled=s.enabled, updated_at=s.updated_at)
+
+
+@router.put("/settings", response_model=DetectionSettingsView)
+def update_settings(
+    req: DetectionSettingsUpdate, user: User = Depends(require_admin)
+) -> DetectionSettingsView:
+    """Update the Auto Organize settings. Turning ``enabled`` off makes the
+    whole feature inert (no detection, no proposals, no auto-apply; pending
+    proposals frozen) — per-page policies are untouched."""
+    s = settings.update(enabled=req.enabled, updated_by_user_id=user.id)
+    return DetectionSettingsView(enabled=s.enabled, updated_at=s.updated_at)
+
+
 @router.post("/sweep", response_model=SweepTriggerResponse, status_code=202)
 def trigger_sweep(user: User = Depends(require_admin)) -> SweepTriggerResponse:
-    """Kick off a whole-space detection sweep on the detection queue."""
+    """Kick off a whole-space detection sweep on the detection queue. 409 if
+    Auto Organize is disabled."""
+    if not settings.is_enabled():
+        raise HTTPException(status_code=409, detail="Auto Organize is disabled")
     run_detection_sweep(user.id)
     return SweepTriggerResponse()
 

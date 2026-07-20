@@ -1455,6 +1455,35 @@ class DetectionRun(Base):
     )
 
 
+class AIManagementSettings(Base):
+    """Org-wide AI-management (Auto Organize) settings — a singleton row (id=1).
+
+    ``enabled`` is the master kill switch: when false the whole feature is inert
+    (no detection, no proposals, no auto-apply, human approve/reject frozen);
+    per-page ``ai_management_allowed`` policies are untouched, so re-enabling
+    resumes exactly where they left off. Named generically (not
+    detection-specific) so it can hold future AI-management-wide settings (e.g.
+    the sweep schedule).
+    """
+
+    __tablename__ = "ai_management_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_by_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ai_management_settings_singleton"),
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Provenance: who produced each commit, and for ingestion, from what source    #
 # --------------------------------------------------------------------------- #
