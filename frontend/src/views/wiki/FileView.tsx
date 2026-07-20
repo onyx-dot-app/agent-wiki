@@ -26,13 +26,17 @@ import {
   SvgShare,
   SvgSidebar,
   SvgSparkle,
+  SvgX,
 } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggersSidePanel } from "@/components/wiki/TriggersSidePanel";
 import { DocPanel, type DocPanelTab } from "@/components/wiki/DocPanel";
 import { DiffView } from "@/components/wiki/DiffView";
-import { HistoryPanel } from "@/components/wiki/HistoryPanel";
+import {
+  UpdateHistoryRail,
+  VersionHistoryList,
+} from "@/components/wiki/VersionHistoryList";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
@@ -64,6 +68,7 @@ import { useCoeditSession } from "@/lib/editor/hooks";
 import {
   useAgentsBarHost,
   useHeaderActionsHost,
+  useHeaderCrumbHost,
   useRightPanelHost,
 } from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
@@ -74,7 +79,7 @@ import {
   setDraftTemplate,
   type DocumentTemplateSummary,
 } from "@/lib/templates";
-import { absoluteTime, relativeTime } from "@/lib/time";
+import { absoluteTime, longDateTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import { fetchFileDiff, fetchFileHistory } from "@/lib/wiki/svc";
 import type { CommitInfo, FileDiffResponse } from "@/lib/wiki/types";
@@ -137,6 +142,7 @@ export function FileView({ path }: FileViewProps) {
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const crumbHost = useHeaderCrumbHost();
   const agentsBarHost = useAgentsBarHost();
   const rightHost = useRightPanelHost();
   const { isActivitiesOpen, toggleActivities } = useLeftPanel();
@@ -151,8 +157,11 @@ export function FileView({ path }: FileViewProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const confirmDialog = useConfirm();
   // History state. `viewingSha` is null when looking at the working-tree
-  // (latest) version; otherwise it's the sha being viewed and is what we
-  // pass back as `base_sha` on save so the server records a rollback.
+  // (latest) version, otherwise it's the version whose diff fills the doc
+  // column. `historyOpen` is version mode: the rail becomes the Update
+  // History surface and the header collapses to the version chip.
+  // `historyListOpen` is the milder state: the Updates tab's history card
+  // expanded into its inline version list.
   const [headSha, setHeadSha] = useState<string | null>(null);
   // From the file read's `can_write` — false renders the live session as a
   // pure viewer (read-only editor, no write calls). Optimistic `true` until
@@ -160,9 +169,11 @@ export function FileView({ path }: FileViewProps) {
   const [canWrite, setCanWrite] = useState(true);
   const [viewingSha, setViewingSha] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyListOpen, setHistoryListOpen] = useState(false);
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
   // Active tab of the tabbed side panel (null = closed). The rail holds one
   // occupant at a time: this panel or history mode, never both.
   const [panelTab, setPanelTab] = useState<DocPanelTab | null>(null);
@@ -180,8 +191,9 @@ export function FileView({ path }: FileViewProps) {
   // `viewingVersion`: a history version is displayed in the main pane (no
   // live editor — DiffView instead). `viewingOld`: that version is not the
   // newest commit for this file (`headSha` tracks `commits[0]`), so the
-  // warning banner applies. Computed early: the comment effects and the
-  // coedit session below both key off it.
+  // Restore/Back actions replace the Exit action and the chip shows a
+  // relative age. Computed early: the comment effects and the coedit
+  // session below both key off it.
   const viewingVersion = viewingSha !== null;
   const viewingOld = viewingVersion && viewingSha !== headSha;
   const segments = path.split("/");
@@ -290,12 +302,13 @@ export function FileView({ path }: FileViewProps) {
     [path, parentSlug, currentBasenameNoExt, router],
   );
 
-  // The page's live session: everyone viewing the current (non-historical)
-  // version joins it — presence plus real-time updates; editing is just a
-  // capability inside it (`canWrite`, ops write-gated server-side). Left when
-  // the user opens an old commit — see `useCoeditSession`'s `enabled` doc. No
-  // explicit Save; teardown (checkpoint + leave) fires from the hook itself
-  // on that transition/unmount, not from a button here.
+  // The page's live session: everyone viewing the live editor joins it for
+  // presence plus real-time updates, and editing is just a capability inside
+  // it (`canWrite`, ops write-gated server-side). Left whenever a version
+  // diff is showing (including the current version's). See
+  // `useCoeditSession`'s `enabled` doc. No explicit Save. Teardown
+  // (checkpoint + leave) fires from the hook itself on that
+  // transition/unmount, not from a button here.
   const coedit = useCoeditSession({
     path,
     enabled: !viewingVersion,
@@ -409,6 +422,7 @@ export function FileView({ path }: FileViewProps) {
   useEffect(() => {
     loadLatest();
     setHistoryOpen(false);
+    setHistoryListOpen(false);
     setCommits(null);
   }, [loadLatest]);
 
@@ -552,12 +566,14 @@ export function FileView({ path }: FileViewProps) {
 
   function closeHistory() {
     setHistoryOpen(false);
-    // Closing the panel exits history mode entirely — back to the live
-    // editor, which rejoins the coedit session (`enabled: !viewingVersion`).
+    // Exiting version mode goes back to the live editor, which rejoins the
+    // coedit session (`enabled: !viewingVersion`), and lands on the Updates
+    // tab, where the version list lives.
     if (viewingSha !== null) {
       setViewingSha(null);
       setDiffData(null);
     }
+    setPanelTab("updates");
   }
 
   async function toggleHistory() {
@@ -565,21 +581,27 @@ export function FileView({ path }: FileViewProps) {
       closeHistory();
       return;
     }
-    setHistoryOpen(true);
-    // History mode takes the rail, so the tabbed panel closes (the
-    // one-occupant counterpart of ``openPanel``).
-    setPanelTab(null);
-    setCommentDraft(null);
-    // Opening history: show the newest commit's diff immediately rather
-    // than leaving the rendered body up until the user clicks a row.
+    // Entering version mode lands on the newest commit's diff rather than
+    // leaving the rendered body up until the user clicks a row.
     const loaded = commits ?? (await refreshHistory())?.commits ?? null;
     const newest = loaded?.[0];
-    if (newest && viewingSha === null) {
+    if (newest) {
       void onPickCommit(newest.sha);
+      return;
     }
+    // No commits: still take the rail so the empty list explains itself.
+    setHistoryOpen(true);
+    setPanelTab(null);
+    setCommentDraft(null);
   }
 
+  // Viewing any version = version mode: the rail becomes the Update History
+  // surface and the tabbed panel yields (one rail occupant). Callers must
+  // load commits before picking.
   async function onPickCommit(sha: string) {
+    setHistoryOpen(true);
+    setPanelTab(null);
+    setCommentDraft(null);
     if (sha === viewingSha) return;
     setLoading(true);
     setError(null);
@@ -591,6 +613,41 @@ export function FileView({ path }: FileViewProps) {
       setError(e instanceof Error ? e.message : "failed to load version");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function toggleHistoryList() {
+    const next = !historyListOpen;
+    setHistoryListOpen(next);
+    if (next && commits === null) void refreshHistory();
+  }
+
+  // Write the viewed version's body back as a new commit, then return to
+  // the live editor on it. `base_sha` is the server's merge base: passing
+  // HEAD makes the revert a diff applied onto the latest version, so a
+  // concurrent edit merges instead of being clobbered (a true conflict 409s
+  // into the error slot).
+  async function restoreVersion() {
+    const sha = viewingSha;
+    if (!sha || restoring) return;
+    setRestoring(true);
+    setError(null);
+    try {
+      const r = await apiFetch<FileResponse>(
+        `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(sha)}`,
+      );
+      await apiFetch("/wiki/file", {
+        method: "PUT",
+        body: JSON.stringify({ path, body: r.body, base_sha: headSha }),
+      });
+      setHistoryOpen(false);
+      setPanelTab("updates");
+      loadLatest();
+      void refreshHistory();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to restore version");
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -635,8 +692,89 @@ export function FileView({ path }: FileViewProps) {
   // since the editor is always live and autosaves, with `saveStatus` as the
   // only feedback for that.
   const panelOpen = panelTab !== null;
+
+  // Version mode strips the header down to crumbs + version chip (mock
+  // 1912:355117 hides every action). Back to Current / Restore / Exit live
+  // in the rail's own header row instead.
+  const viewingCommit = commits?.find((c) => c.sha === viewingSha) ?? null;
+  const versionActions = viewingOld ? (
+    <>
+      <Button
+        prominence="secondary"
+        disabled={loading}
+        onClick={() => headSha && void onPickCommit(headSha)}
+      >
+        Back to Current
+      </Button>
+      <Button
+        variant="action"
+        disabled={restoring}
+        onClick={() => void restoreVersion()}
+      >
+        {restoring ? "Restoring…" : "Restore This Version"}
+      </Button>
+    </>
+  ) : (
+    <Button prominence="tertiary" rightIcon={SvgX} onClick={closeHistory}>
+      Exit Update History
+    </Button>
+  );
+
+  // Dismissible version chip joining the breadcrumbs (mock chip in
+  // 1912:355220): history glyph, spelled-out timestamp, relative age or
+  // "(Current)", and an x back to the live editor.
+  const versionChip = viewingCommit ? (
+    <span className="flex items-center gap-[2px] overflow-hidden rounded-(--radius-08) bg-(--background-tint-02) px-1 py-[2px]">
+      <span className="flex size-4 shrink-0 items-center justify-center text-(--text-04)">
+        <SvgHistory size={13} />
+      </span>
+      <span className="flex items-baseline gap-[2px] px-[2px] text-[14px] leading-5 whitespace-nowrap">
+        <span className="max-w-40 truncate font-medium text-(--text-04)">
+          {longDateTime(viewingCommit.ts)}
+        </span>
+        <span className="max-w-40 truncate text-(--text-03)">
+          {viewingOld
+            ? `(${relativeTime(viewingCommit.ts, "long")})`
+            : "(Current)"}
+        </span>
+      </span>
+      <Button
+        size="2xs"
+        prominence="tertiary"
+        icon={SvgX}
+        tooltip="Exit update history"
+        onClick={closeHistory}
+      />
+    </span>
+  ) : null;
+
+  const versionList = (
+    <VersionHistoryList
+      commits={commits}
+      error={historyError}
+      headSha={headSha}
+      viewingSha={viewingSha}
+      selfName={user?.name ?? null}
+      onPick={(sha) => void onPickCommit(sha)}
+    />
+  );
+
+  // One element for both hosts: the desktop right-rail portal and the
+  // mobile sheet render the identical rail.
+  const historyRail = (
+    <UpdateHistoryRail
+      commits={commits}
+      error={historyError}
+      headSha={headSha}
+      viewingSha={viewingSha}
+      selfName={user?.name ?? null}
+      onPick={(sha) => void onPickCommit(sha)}
+      headerActions={versionActions}
+    />
+  );
+
   const headerActions =
-    !loading && !error ? (
+    !loading && !error && !historyOpen ? (
       <>
         {!viewingVersion && (
           <span className="mr-1 text-[12px] text-(--text-03)">
@@ -706,8 +844,9 @@ export function FileView({ path }: FileViewProps) {
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
             <UpdatePolicyPanel
               path={path}
-              onShowHistory={() => void toggleHistory()}
-              historyOpen={historyOpen}
+              onShowHistory={toggleHistoryList}
+              historyOpen={historyListOpen}
+              historyList={versionList}
               fullHeight
             />
           </div>
@@ -757,6 +896,10 @@ export function FileView({ path }: FileViewProps) {
       )}
     >
       {host?.el && headerActions && createPortal(headerActions, host.el)}
+      {historyOpen &&
+        versionChip &&
+        crumbHost?.el &&
+        createPortal(versionChip, crumbHost.el)}
 
       {agentsBarHost?.el &&
         createPortal(
@@ -798,19 +941,6 @@ export function FileView({ path }: FileViewProps) {
         </div>
       )}
 
-      {viewingOld && !loading && !error && (
-        <div className="mb-3 flex items-center gap-3 rounded-(--radius-08) border border-(--status-warning-02) bg-(--status-warning-01) px-3 py-2 text-[13px] text-(--status-text-warning-05)">
-          <span>
-            Viewing an older version
-            {viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
-          </span>
-          <div className="flex-1" />
-          <Button size="sm" onClick={loadLatest}>
-            Back to latest
-          </Button>
-        </div>
-      )}
-
       {loading && <LoadingSpinner />}
 
       {!loading && !error && (
@@ -824,9 +954,6 @@ export function FileView({ path }: FileViewProps) {
               <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
                 <DiffView
                   data={diffData!}
-                  commit={
-                    commits?.find((c) => c.sha === viewingSha) ?? undefined
-                  }
                   loadBody={async () => {
                     const sha = viewingSha;
                     if (!sha) return "";
@@ -945,20 +1072,7 @@ export function FileView({ path }: FileViewProps) {
           {historyOpen &&
             !isMobile &&
             rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <HistoryPanel
-                  commits={commits}
-                  error={historyError}
-                  headSha={headSha}
-                  viewingSha={viewingSha}
-                  onPick={onPickCommit}
-                  onClose={closeHistory}
-                  fullHeight
-                />
-              </div>,
-              rightHost.el,
-            )}
+            createPortal(historyRail, rightHost.el)}
           {panelTab &&
             !isMobile &&
             rightHost?.el &&
@@ -971,31 +1085,17 @@ export function FileView({ path }: FileViewProps) {
         </>
       )}
       {historyOpen && isMobile && (
-        // Mobile: render history as a fixed slide-in sheet over the
-        // markdown content rather than a 320px side-panel that would
-        // squeeze the body to nothing on a 375px screen.
+        // Mobile: render the version-mode rail as a fixed slide-in sheet
+        // over the content rather than a side column that would squeeze
+        // the body to nothing on a 375px screen.
         <>
           <div
             onClick={closeHistory}
             aria-hidden
             className="fixed inset-0 z-[60] bg-(--mask-03)"
           />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <HistoryPanel
-              commits={commits}
-              error={historyError}
-              headSha={headSha}
-              viewingSha={viewingSha}
-              onPick={(sha) => {
-                onPickCommit(sha);
-                // Plain close (no reset): the sheet covers the content, so a
-                // deliberate pick must keep the chosen version visible. The
-                // banner's "Back to latest" is the way back.
-                setHistoryOpen(false);
-              }}
-              onClose={closeHistory}
-              fullHeight
-            />
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] bg-(--background-tint-00) shadow-(--shadow-panel)">
+            {historyRail}
           </div>
         </>
       )}

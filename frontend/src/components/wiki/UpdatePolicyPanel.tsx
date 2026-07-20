@@ -47,6 +47,9 @@ interface Props {
   onShowHistory?: () => void;
   /** Whether the host's version list is showing (tints the expander). */
   historyOpen?: boolean;
+  /** The version list itself, rendered inside the history card while
+   * `historyOpen` (mock 1855:273363 expands the card in place). */
+  historyList?: React.ReactNode;
 }
 
 function capNote(health: UpdateHealth): string {
@@ -73,6 +76,7 @@ export function UpdatePolicyPanel({
   fullHeight,
   onShowHistory,
   historyOpen,
+  historyList,
 }: Props) {
   const kind = path.endsWith(".md") ? "page" : "folder";
 
@@ -444,6 +448,7 @@ export function UpdatePolicyPanel({
                     </Text>
                   </div>
                 )}
+                {historyOpen && historyList}
               </div>
             )}
           </>

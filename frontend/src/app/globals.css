@@ -287,3 +287,10 @@ body {
 .doc-panel-tabs .opal-tabs-pill-indicator {
   background: var(--theme-primary-05);
 }
+
+/* The update-history search uses the 14px Main UI size, which InputTypeIn
+   does not expose as a prop. Scoped so other inputs keep Opal's default. */
+.version-history-search .opal-input input {
+  font-size: 14px;
+  line-height: 20px;
+}

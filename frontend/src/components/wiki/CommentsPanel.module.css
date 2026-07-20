@@ -1,5 +1,5 @@
-/* Same chrome as HistoryPanel: a 400px rounded tint-01 card with a titled
-   header row, so the two side panels read as one family. */
+/* A 400px rounded tint-01 card with a titled header row, the doc side
+   panels' shared chrome. */
 .panel {
   display: flex;
   flex-direction: column;

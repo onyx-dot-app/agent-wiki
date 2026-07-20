@@ -15,7 +15,10 @@ import {
 import { CraftNotifier } from "@/components/wiki/CraftNotifier";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
-import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
+import {
+  useHeaderActionsHost,
+  useHeaderCrumbHost,
+} from "@/providers/WikiHeaderActionsProvider";
 import { resolveIds, wikiHref } from "@/lib/wikiHref";
 
 function segmentLabel(segment: string): string {
@@ -83,6 +86,7 @@ export function WikiHeader() {
   const treeVisible = view === "wiki-tree";
   const { wikiPath } = useAppFocus();
   const host = useHeaderActionsHost();
+  const crumbHost = useHeaderCrumbHost();
   const [foldOpen, setFoldOpen] = useState(false);
 
   const segments = wikiPath ? wikiPath.split("/") : [];
@@ -196,6 +200,9 @@ export function WikiHeader() {
             </span>
           );
         })}
+        {/* Version chip slot. The active wiki route portals a dismissible
+            version chip here while viewing update history. */}
+        <span ref={crumbHost?.setEl} className="flex shrink-0 items-center" />
       </nav>
       {/* Page-level actions portal here from the active wiki route (see
           WikiHeaderActionsProvider). Pushed right by the flex spacer. */}

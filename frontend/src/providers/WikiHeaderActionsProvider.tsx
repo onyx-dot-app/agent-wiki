@@ -22,6 +22,7 @@ interface ChromeHost {
 }
 
 const HeaderActionsContext = createContext<ChromeHost | null>(null);
+const HeaderCrumbContext = createContext<ChromeHost | null>(null);
 const AgentsBarContext = createContext<ChromeHost | null>(null);
 const RightPanelContext = createContext<ChromeHost | null>(null);
 
@@ -31,15 +32,20 @@ export function WikiHeaderActionsProvider({
   children: ReactNode;
 }) {
   const [headerEl, setHeaderEl] = useState<HTMLElement | null>(null);
+  const [crumbEl, setCrumbEl] = useState<HTMLElement | null>(null);
   const [agentsEl, setAgentsEl] = useState<HTMLElement | null>(null);
   const [rightEl, setRightEl] = useState<HTMLElement | null>(null);
   return (
     <HeaderActionsContext.Provider value={{ el: headerEl, setEl: setHeaderEl }}>
-      <AgentsBarContext.Provider value={{ el: agentsEl, setEl: setAgentsEl }}>
-        <RightPanelContext.Provider value={{ el: rightEl, setEl: setRightEl }}>
-          {children}
-        </RightPanelContext.Provider>
-      </AgentsBarContext.Provider>
+      <HeaderCrumbContext.Provider value={{ el: crumbEl, setEl: setCrumbEl }}>
+        <AgentsBarContext.Provider value={{ el: agentsEl, setEl: setAgentsEl }}>
+          <RightPanelContext.Provider
+            value={{ el: rightEl, setEl: setRightEl }}
+          >
+            {children}
+          </RightPanelContext.Provider>
+        </AgentsBarContext.Provider>
+      </HeaderCrumbContext.Provider>
     </HeaderActionsContext.Provider>
   );
 }
@@ -47,6 +53,12 @@ export function WikiHeaderActionsProvider({
 /** Read the pinned-header actions host. Null outside the provider. */
 export function useHeaderActionsHost(): ChromeHost | null {
   return useContext(HeaderActionsContext);
+}
+
+/** Read the host sitting after the breadcrumb trail (version chip slot).
+ * Null outside the provider. */
+export function useHeaderCrumbHost(): ChromeHost | null {
+  return useContext(HeaderCrumbContext);
 }
 
 /** Read the sub-header agents bar host. Null outside the provider. */

@@ -12,29 +12,8 @@
 .header {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  justify-content: flex-end;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border-01);
-  font-size: 13px;
-  color: var(--text-04);
-}
-
-.headerInfo {
-  flex: 1;
-  min-width: 0;
-}
-
-.title {
-  font-weight: 600;
-  color: var(--text-05);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.meta {
-  color: var(--text-03);
-  font-size: 12px;
 }
 
 .toggle {

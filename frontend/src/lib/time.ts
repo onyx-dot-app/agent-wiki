@@ -54,3 +54,21 @@ export function absoluteTime(iso: string): string {
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
 }
+
+/** Spelled-out local timestamp ("July 16, 2026, 3:05 PM"). Date and time
+ * are joined by a comma explicitly because a single `toLocaleString`
+ * inserts "at" between them in current ICU en locales. */
+export function longDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const date = d.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${date}, ${time}`;
+}
