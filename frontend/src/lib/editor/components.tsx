@@ -221,6 +221,12 @@ const baseTheme = EditorView.theme({
     accentColor: "var(--accent-01)",
     cursor: "pointer",
   },
+  ".cm-md-hr": {
+    display: "inline-block",
+    width: "100%",
+    borderTop: "1px solid var(--border-02)",
+    verticalAlign: "middle",
+  },
   ".cm-comment-highlight": {
     backgroundColor: "var(--status-warning-01)",
   },

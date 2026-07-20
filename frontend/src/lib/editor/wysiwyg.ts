@@ -60,13 +60,18 @@ class OrderedMarkerWidget extends WidgetType {
   }
 }
 
-/** Renders a `<hr>` in place of a `---`/`***`/`___` horizontal rule line. */
+/** Renders a full-width rule in place of a `---`/`***`/`___` horizontal rule
+ * line. Deliberately an *inline* widget (a styled span, `.cm-md-hr`) — CM6
+ * forbids block decorations from a ViewPlugin, and violating that throws
+ * mid-measure and freezes rendering of everything past the first viewport. */
 class HrWidget extends WidgetType {
   eq() {
     return true;
   }
   toDOM() {
-    return document.createElement("hr");
+    const span = document.createElement("span");
+    span.className = "cm-md-hr";
+    return span;
   }
 }
 
@@ -266,7 +271,7 @@ function buildDecorations(view: EditorView): DecorationSet {
           case "HorizontalRule":
             if (lineRevealed(state, node.from)) break;
             ranges.push(
-              Decoration.replace({ widget: new HrWidget(), block: true }).range(
+              Decoration.replace({ widget: new HrWidget() }).range(
                 node.from,
                 node.to,
               ),
