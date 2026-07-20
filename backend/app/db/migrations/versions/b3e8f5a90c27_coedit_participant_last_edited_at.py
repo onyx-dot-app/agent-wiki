@@ -2,9 +2,9 @@
 
 Adds ``coedit_participants.last_edited_at`` — when the participant last
 applied an edit op (NULL for a participant who has only viewed). Presence
-uses it to label roster members "viewing" vs "editing" now that joining a
-session means opening the page, not editing it. Guarded with the inspector
-because ``0001_initial`` builds fresh databases from the current models.
+uses it to label roster members "viewing" vs "editing". Guarded with the
+inspector because ``0001_initial`` builds fresh databases from the current
+models.
 
 Revision ID: b3e8f5a90c27
 Revises: f1a2b3c4d5e6
