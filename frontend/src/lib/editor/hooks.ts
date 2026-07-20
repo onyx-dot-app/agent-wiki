@@ -276,6 +276,18 @@ export function useCoeditSession(opts: {
         }
         return;
       }
+      // The roster's last_edited_at only refreshes on join/leave presence
+      // frames, so bump the author's locally from each op — their "editing"
+      // label flips in real time instead of waiting for a roster broadcast.
+      if (frame.type === "op" && frame.author !== null) {
+        const author = frame.author;
+        const nowIso = new Date().toISOString();
+        setParticipants((prev) =>
+          prev.map((p) =>
+            p.user_id === author ? { ...p, last_edited_at: nowIso } : p,
+          ),
+        );
+      }
       // op / resync → the editor's collab layer applies + rebases.
       serverFrame.current?.(frame);
     },
