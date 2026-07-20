@@ -103,6 +103,11 @@ class TaskCheckboxWidget extends WidgetType {
     });
     return box;
   }
+  /** Clicks are fully handled by the widget's own listener — never let the
+   * editor also process them (e.g. place the caret through the checkbox). */
+  ignoreEvent() {
+    return true;
+  }
 }
 
 /** True if any selection range overlaps `[from, to]` (touching counts). */

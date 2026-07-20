@@ -498,8 +498,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           // GFM base (not the commonmark default) so task-list markers parse
-          // as TaskMarker — under commonmark, `[x]` in a list mis-parses as a
-          // link and the WYSIWYG renders it as an underlined `x`.
+          // as TaskMarker.
           markdown({ base: markdownLanguage }),
           wysiwygMarkdown(),
           EditorView.lineWrapping,
