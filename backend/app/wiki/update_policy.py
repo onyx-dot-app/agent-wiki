@@ -11,6 +11,7 @@ and its ancestor folders. See the design page
 Free functions over the ``UpdatePolicy`` model; each opens its own session and
 returns plain dicts so callers don't depend on the ORM.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,6 +29,7 @@ from app.ingest import settings as ingest_settings
 from app.wiki import filesystem
 
 log = logging.getLogger(__name__)
+
 
 # Sentinel for "field not provided" in ``set_policy``. ``None`` and ``""`` are
 # meaningful (clear the field), so they can't double as the no-op marker. A
@@ -94,9 +96,9 @@ def resolve_warn_threshold(path: str) -> int:
     """Effective too-frequent-update warning threshold for ``path``.
 
     The page's own ``warn_update_threshold`` if set, else the wiki-wide default
-    (``ingest_settings.warn_update_threshold_default``). Per-page only — unlike
-    the two cascaded fields, this does not walk ancestor folders. ``0`` means
-    warnings are off for the page.
+    (``ingest_settings.warn_update_threshold_default``). Per-page only, unlike
+    the two cascaded fields it does not walk ancestor folders. ``0`` warns
+    on every auto-update.
     """
     with session() as s:
         row = s.get(UpdatePolicy, normalize_path(path))
@@ -206,11 +208,7 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
         return
     with session() as s:
         for mv in moves:
-            s.execute(
-                update(UpdatePolicy)
-                .where(UpdatePolicy.path == mv.old)
-                .values(path=mv.new)
-            )
+            s.execute(update(UpdatePolicy).where(UpdatePolicy.path == mv.old).values(path=mv.new))
         if root_move is not None:
             # A `.md`-page root is a single page move: the per-file loop above
             # re-keys it and there is no folder-prefix rewrite. Only a folder
@@ -219,18 +217,14 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
             # folder rename, and would rewrite the source folder's row onto the
             # destination's.)
             old_prefix, new_prefix = (
-                (None, None)
-                if root_move.old.endswith(".md")
-                else (root_move.old, root_move.new)
+                (None, None) if root_move.old.endswith(".md") else (root_move.old, root_move.new)
             )
         else:
             old_prefix, new_prefix = filesystem.common_folder_rename(moves)
         if old_prefix is not None and new_prefix is not None:
             # The renamed folder's own policy row.
             s.execute(
-                update(UpdatePolicy)
-                .where(UpdatePolicy.path == old_prefix)
-                .values(path=new_prefix)
+                update(UpdatePolicy).where(UpdatePolicy.path == old_prefix).values(path=new_prefix)
             )
             # Policy rows nested under the renamed folder.
             s.execute(
@@ -290,9 +284,7 @@ def resolve_ai_management_for_paths(paths: Iterable[str]) -> dict[str, bool | No
         return {}
     scopes = {scope for chain in chains.values() for scope in chain}
     with session() as s:
-        rows = s.scalars(
-            select(UpdatePolicy).where(UpdatePolicy.path.in_(scopes))
-        ).all()
+        rows = s.scalars(select(UpdatePolicy).where(UpdatePolicy.path.in_(scopes))).all()
     by_path = {r.path: r for r in rows}
     result: dict[str, bool | None] = {}
     for p, chain in chains.items():
@@ -331,11 +323,7 @@ def resolve_for_paths(paths: Iterable[str]) -> dict[str, ResolvedPolicy]:
         return {}
 
     with session() as s:
-        rows = (
-            s.execute(select(UpdatePolicy).where(UpdatePolicy.path.in_(scopes)))
-            .scalars()
-            .all()
-        )
+        rows = s.execute(select(UpdatePolicy).where(UpdatePolicy.path.in_(scopes))).scalars().all()
     by_path = {r.path: r for r in rows}
     return {orig: _resolve_chain(chain, by_path) for orig, chain in chains.items()}
 
@@ -362,11 +350,7 @@ def is_ai_management_allowed(path: str) -> bool:
 def disabled_paths(paths: Iterable[str]) -> set[str]:
     """Subset of ``paths`` whose effective policy disables ingestion auto-update
     (one query, via :func:`resolve_for_paths`). Keyed by the input path strings."""
-    return {
-        p
-        for p, r in resolve_for_paths(paths).items()
-        if r.ingestion_auto_update_disabled
-    }
+    return {p for p, r in resolve_for_paths(paths).items() if r.ingestion_auto_update_disabled}
 
 
 def _disabled_true_scopes() -> list[str]:
@@ -381,11 +365,15 @@ def _disabled_true_scopes() -> list[str]:
     count and make the metric silently fall back to "all enabled".
     """
     with session() as s:
-        rows = s.execute(
-            select(UpdatePolicy.path).where(
-                UpdatePolicy.ingestion_auto_update_disabled.is_(True)
+        rows = (
+            s.execute(
+                select(UpdatePolicy.path).where(
+                    UpdatePolicy.ingestion_auto_update_disabled.is_(True)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return [p for p in rows if not filesystem.is_trash_path(p)]
 
 

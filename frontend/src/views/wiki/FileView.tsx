@@ -702,11 +702,15 @@ export function FileView({ path }: FileViewProps) {
     switch (panelTab) {
       case "updates":
         return (
-          <UpdatePolicyPanel
-            path={path}
-            onShowHistory={() => void toggleHistory()}
-            fullHeight
-          />
+          // The mock's Panel body (1790:52468) pads the card stack 8px/4px.
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
+            <UpdatePolicyPanel
+              path={path}
+              onShowHistory={() => void toggleHistory()}
+              historyOpen={historyOpen}
+              fullHeight
+            />
+          </div>
         );
       case "comments":
         return (
