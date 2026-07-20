@@ -29,8 +29,9 @@ export function DocPanel({ tab, onTabChange, children }: DocPanelProps) {
     <div className="flex h-full w-[360px] max-w-[100vw] flex-col">
       {/* Strip metrics from the mock's panel Header (1790:52552): 12px
           sides, 8px top, 4px below the strip. The region draws no left
-          border, the cards inside each tab carry their own. */}
-      <div className="shrink-0 px-3 pt-2 pb-1">
+          border, the cards inside each tab carry their own. doc-panel-tabs
+          scopes the strip's 14px trigger override (globals.css). */}
+      <div className="doc-panel-tabs shrink-0 px-3 pt-2 pb-1">
         <Tabs
           variant="underline"
           value={tab}

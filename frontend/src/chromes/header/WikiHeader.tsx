@@ -12,7 +12,6 @@ import {
   SvgListTree,
   SvgMoreHorizontal,
 } from "@onyx-ai/opal/icons";
-import { NotificationBell } from "@/components/common/NotificationBell";
 import { CraftNotifier } from "@/components/wiki/CraftNotifier";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
@@ -202,7 +201,6 @@ export function WikiHeader() {
           WikiHeaderActionsProvider). Pushed right by the flex spacer. */}
       <div className="min-w-4 flex-1" />
       <div ref={host?.setEl} className="flex items-center gap-2" />
-      <NotificationBell />
       <CraftNotifier />
     </div>
   );

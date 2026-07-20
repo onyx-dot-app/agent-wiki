@@ -11,6 +11,7 @@ import {
 } from "@onyx-ai/opal/components";
 import { InputHorizontal } from "@onyx-ai/opal/layouts";
 import {
+  SvgAddLines,
   SvgBell,
   SvgExpand,
   SvgHistory,
@@ -254,111 +255,123 @@ export function UpdatePolicyPanel({
           </div>
         ) : (
           <>
-            <div className="group/policy flex flex-col gap-2 rounded-(--radius-12) border border-(--border-01) p-3">
-              <InputHorizontal
-                icon={SvgSparkle}
-                title="AI Auto-Edits"
-                description={`Let AI update/organize this ${kind} on its own.`}
-              >
-                {policySwitch(
-                  aiSwitchOn,
-                  onToggleAiManaged,
-                  aiManagedSetHere,
-                  () => void save({ ai_management_allowed: null }),
-                )}
-              </InputHorizontal>
-              <InputHorizontal
-                title="Update"
-                description="Periodically scan ingested data sources to add relevant new information."
-              >
-                {policySwitch(
-                  switchOn,
-                  onToggle,
-                  disableSetHere,
-                  () => void save({ ingestion_auto_update_disabled: null }),
-                )}
-              </InputHorizontal>
-              <InputHorizontal
-                title="Organize"
-                description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
-              >
-                <Tooltip tooltip="Coming soon" side="left">
-                  {/* The span keeps hover alive: a disabled control swallows
-                      pointer events, so the tooltip would never fire on it. */}
-                  <span className="inline-flex">
-                    <Switch checked={false} disabled />
-                  </span>
-                </Tooltip>
-              </InputHorizontal>
+            {/* Mock nesting (1790:52546): card p-1 gap-1, toggle group p-2
+                gap-2 with sub-rows indented past the master row's icon,
+                divider, then the instructions section p-2. */}
+            <div className="group/policy flex flex-col gap-1 rounded-(--radius-12) border border-(--border-01) p-1">
+              <div className="flex flex-col gap-2 p-2">
+                <InputHorizontal
+                  icon={SvgSparkle}
+                  title="AI Auto-Edits"
+                  description={`Let AI update/organize this ${kind} on its own.`}
+                >
+                  {policySwitch(
+                    aiSwitchOn,
+                    onToggleAiManaged,
+                    aiManagedSetHere,
+                    () => void save({ ai_management_allowed: null }),
+                  )}
+                </InputHorizontal>
+                <div className="flex flex-col gap-2 pl-6">
+                  <InputHorizontal
+                    title="Update"
+                    description="Periodically scan ingested data sources to add relevant new information."
+                  >
+                    {policySwitch(
+                      switchOn,
+                      onToggle,
+                      disableSetHere,
+                      () => void save({ ingestion_auto_update_disabled: null }),
+                    )}
+                  </InputHorizontal>
+                  <InputHorizontal
+                    title="Organize"
+                    description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
+                  >
+                    <Tooltip tooltip="Coming soon" side="left">
+                      {/* The span keeps hover alive: a disabled control
+                          swallows pointer events, so the tooltip would never
+                          fire on it. */}
+                      <span className="inline-flex">
+                        <Switch checked={false} disabled />
+                      </span>
+                    </Tooltip>
+                  </InputHorizontal>
+                </div>
+              </div>
 
               <Divider paddingParallel="fit" paddingPerpendicular="fit" />
 
-              {/* Collapsed, the row's description is the instruction when one
-                  exists (mock 1855:273683). The expander opens the editor. */}
-              <InputHorizontal
-                title="Page Instructions"
-                description={
-                  ownInstruction ||
-                  effInstruction ||
-                  `Instruct the wiki on how to update this ${kind}.`
-                }
-              >
-                <SelectButton
-                  icon={SvgExpand}
-                  state={editing ? "selected" : "empty"}
-                  tooltip={editing ? "Collapse" : "Edit instructions"}
-                  onClick={() => {
-                    if (editing) {
-                      setEditing(false);
-                      return;
-                    }
-                    setDraft(ownInstruction);
-                    setEditing(true);
-                  }}
-                />
-              </InputHorizontal>
-
-              {!editing && !ownInstruction && effInstruction && (
-                <Text font="secondary-body" color="text-03">
-                  Inherited from a parent folder
-                </Text>
-              )}
-
-              {editing && (
-                <div>
-                  <InputTextArea
-                    rows={4}
-                    resizable
-                    value={draft}
-                    autoFocus
-                    placeholder={`How should this ${kind} be updated?`}
-                    onChange={(e) => setDraft(e.target.value)}
-                  />
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      prominence="tertiary"
-                      size="sm"
-                      disabled={saving}
-                      onClick={() => setEditing(false)}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="action"
-                      size="sm"
-                      disabled={saving}
-                      onClick={() =>
-                        void save(
-                          { update_instruction: draft.trim() || null },
-                          () => setEditing(false),
-                        )
+              <div className="flex flex-col gap-1 p-2">
+                {/* Collapsed, the row's description is the instruction when
+                    one exists (mock 1855:273683). The expander opens the
+                    editor. */}
+                <InputHorizontal
+                  icon={SvgAddLines}
+                  title="Page Instructions"
+                  description={
+                    ownInstruction ||
+                    effInstruction ||
+                    `Instruct the wiki on how to update this ${kind}.`
+                  }
+                >
+                  <SelectButton
+                    icon={SvgExpand}
+                    state={editing ? "selected" : "empty"}
+                    tooltip={editing ? "Collapse" : "Edit instructions"}
+                    onClick={() => {
+                      if (editing) {
+                        setEditing(false);
+                        return;
                       }
-                    >
-                      {saving ? "Saving…" : "Save"}
-                    </Button>
+                      setDraft(ownInstruction);
+                      setEditing(true);
+                    }}
+                  />
+                </InputHorizontal>
+
+                {!editing && !ownInstruction && effInstruction && (
+                  <Text font="secondary-body" color="text-03">
+                    Inherited from a parent folder
+                  </Text>
+                )}
+
+                {editing && (
+                  <div>
+                    <InputTextArea
+                      rows={4}
+                      resizable
+                      value={draft}
+                      autoFocus
+                      placeholder={`How should this ${kind} be updated?`}
+                      onChange={(e) => setDraft(e.target.value)}
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        prominence="tertiary"
+                        size="sm"
+                        disabled={saving}
+                        onClick={() => setEditing(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="action"
+                        size="sm"
+                        disabled={saving}
+                        onClick={() =>
+                          void save(
+                            { update_instruction: draft.trim() || null },
+                            () => setEditing(false),
+                          )
+                        }
+                      >
+                        {saving ? "Saving…" : "Save"}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {health !== null && (

@@ -261,3 +261,11 @@ body {
 @utility dbg-green {
   border: 1px solid green;
 }
+
+/* Doc side panel tab strip: the mock's tabs use the 14px Main UI size, which
+   Opal's Tabs component does not expose as a prop. Scoped to the panel strip
+   so other tab surfaces keep Opal's default size. */
+.doc-panel-tabs .opal-tabs-trigger {
+  font-size: 14px;
+  line-height: 20px;
+}
