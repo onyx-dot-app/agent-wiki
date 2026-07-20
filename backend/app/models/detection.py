@@ -14,9 +14,10 @@ class SweepTriggerResponse(BaseModel):
 
 
 class DetectionSettingsView(BaseModel):
-    """Org-wide Auto Organize settings (the kill switch)."""
+    """Org-wide Auto Organize settings (the kill switch + sweep schedule)."""
 
     enabled: bool
+    schedule: str
     updated_at: str | None
 
 
@@ -24,6 +25,7 @@ class DetectionSettingsUpdate(BaseModel):
     """Patch for the Auto Organize settings — only the fields provided change."""
 
     enabled: bool | None = None
+    schedule: Literal["off", "daily", "weekly"] | None = None
 
 
 class DetectionRunView(BaseModel):
