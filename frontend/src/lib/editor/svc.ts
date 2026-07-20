@@ -1,9 +1,10 @@
-/** API client for the co-editing session endpoints (`/api/coedit/*`).
+/** API client for the live-session endpoints (`/api/coedit/*`).
  *
- * A page is edited by joining a live session: the shared buffer lives on the
- * server, edits are sent as range-change ops, and inbound ops/presence/resync
- * arrive over an SSE stream. Save (checkpoint) commits the buffer to git; save
- * or disconnect leaves the session. See the backend in `app/api/coedit.py` and
+ * Every page view joins the page's live session: the shared buffer lives on
+ * the server, and inbound ops/presence/resync arrive over an SSE stream —
+ * viewers get real-time updates, editors additionally send range-change ops
+ * (write-gated server-side). Checkpoint commits the buffer to git; leaving or
+ * disconnecting exits the session. See the backend in `app/api/coedit.py` and
  * the design in `design/Co-Editing.md`.
  *
  * Offsets are UTF-16 code units — which is exactly what JS string indexing and

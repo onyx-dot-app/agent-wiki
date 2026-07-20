@@ -7,12 +7,15 @@ export interface CoeditChange {
   insert: string;
 }
 
-/** A session participant as returned by join / presence frames. */
+/** A session participant as returned by join / presence frames. The live
+ * session is joined by everyone on the page; `last_edited_at` (null until the
+ * participant applies an edit op) is what separates editors from viewers. */
 export interface CoeditParticipant {
   user_id: string;
   user_display: string;
   joined_at: string;
   last_seen_at: string;
+  last_edited_at: string | null;
 }
 
 /** A peer's live caret/selection, from their latest `cursor` frame. Offsets are

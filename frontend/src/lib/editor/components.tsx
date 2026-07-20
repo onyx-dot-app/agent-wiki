@@ -11,6 +11,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import {
   ChangeSet,
+  Compartment,
   EditorState,
   StateEffect,
   StateField,
@@ -23,7 +24,13 @@ import {
   placeholder as placeholderExt,
   WidgetType,
 } from "@codemirror/view";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { ApiError } from "@/lib/api";
 import type {
   CoeditFrame,
@@ -272,6 +279,10 @@ interface CoeditorProps {
   registerFlush: (fn: (() => Promise<void>) | null) => void;
   registerSetDoc: (fn: ((text: string) => void) | null) => void;
   placeholder?: string;
+  /** Render the doc without accepting edits — for participants whose
+   * `can_write` is false. They stay in the live session (presence + real-time
+   * updates); only local mutation is disabled. */
+  readOnly?: boolean;
   /** Comment thread spans to highlight in the doc (the active/selected thread
    * gets the stronger highlight). */
   commentHighlights?: CommentHighlightTarget[];
@@ -315,6 +326,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       registerFlush,
       registerSetDoc,
       placeholder,
+      readOnly,
       commentHighlights,
       onSelectionForComment,
     },
@@ -322,6 +334,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
   ) {
     const host = useRef<HTMLDivElement | null>(null);
     const view = useRef<EditorView | null>(null);
+    // Swappable slot for the read-only facets — see readOnlyExtensions.
+    const readOnlyCompartment = useRef(new Compartment());
     // Latest callbacks without re-creating the editor.
     const onSelRef = useRef(onSelectionChange);
     const reportDocRef = useRef(reportDoc);
@@ -513,6 +527,11 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           markdown({ base: markdownLanguage }),
           wysiwygMarkdown(),
           EditorView.lineWrapping,
+          // In a compartment so a later `readOnly` prop change reconfigures
+          // the live editor (facets are otherwise baked in at create time —
+          // e.g. can_write flipping after a permissions change must not
+          // leave the editor writable).
+          readOnlyCompartment.current.of(readOnlyExtensions(!!readOnly)),
           placeholderExt(placeholder ?? ""),
           peersField,
           commentsField,
@@ -616,6 +635,18 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       });
     }, [commentHighlights]);
 
+    // Reconfigure the read-only facets when the prop changes — they're baked
+    // into the state at create time otherwise, and a `can_write` correction
+    // (e.g. permissions revoked mid-session) must not leave the editor
+    // writable.
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: readOnlyCompartment.current.reconfigure(
+          readOnlyExtensions(!!readOnly),
+        ),
+      });
+    }, [readOnly]);
+
     return (
       <div
         ref={host}
@@ -625,21 +656,52 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
   },
 );
 
+/** The facets that make the editor a pure preview for `readOnly` viewers.
+ * Always installed through `readOnlyCompartment` so a prop change can
+ * reconfigure the live editor. */
+function readOnlyExtensions(readOnly: boolean) {
+  return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+}
+
 interface CoeditPresenceBarProps {
   participants: CoeditParticipant[];
   typing: string[];
   selfUserId: string | null;
 }
 
-// Co-editing presence: who else is in the session and who's typing right now,
-// as a name/typing summary above the editor — complements the in-editor peer
-// carets (CaretWidget/peersField above) rather than duplicating them. Renders
-// nothing when you're alone.
+// How recently a participant must have edited to be labeled "editing" rather
+// than "viewing". Everyone on the page is in the live session; the label — not
+// membership — is what distinguishes editors from readers. Generous on
+// purpose: a long think-pause mid-edit shouldn't demote the label, and every
+// op refreshes the timestamp, so only a genuinely idle editor decays.
+const EDITING_LABEL_WINDOW_MS = 30 * 60 * 1000;
+
+function presenceLabel(p: CoeditParticipant, now: number): string {
+  if (
+    p.last_edited_at !== null &&
+    now - Date.parse(p.last_edited_at) < EDITING_LABEL_WINDOW_MS
+  ) {
+    return "editing";
+  }
+  return "viewing";
+}
+
+// Live-session presence: who else is on the page — labeled "editing" when
+// they've applied an edit recently, "viewing" otherwise — and who's typing
+// right now. Complements the in-editor peer carets (CaretWidget/peersField
+// above) rather than duplicating them. Renders nothing when you're alone.
+// The minute tick re-renders so an idle editor's label decays to "viewing"
+// even when no new presence frames arrive.
 export function CoeditPresenceBar({
   participants,
   typing,
   selfUserId,
 }: CoeditPresenceBarProps) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   const others = participants.filter((p) => p.user_id !== selfUserId);
   if (others.length === 0) return null;
   const typingSet = new Set(typing);
@@ -652,12 +714,11 @@ export function CoeditPresenceBar({
       {others.map((p) => (
         <span key={p.user_id} className="inline-flex items-center gap-1">
           <span className="font-medium text-(--text-04)">{p.user_display}</span>
-          {typingSet.has(p.user_id) && (
-            <span className="text-(--text-03) italic">typing…</span>
-          )}
+          <span className="text-(--text-03) italic">
+            {typingSet.has(p.user_id) ? "typing…" : presenceLabel(p, now)}
+          </span>
         </span>
       ))}
-      <span>also editing</span>
     </div>
   );
 }

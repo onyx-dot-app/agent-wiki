@@ -1,10 +1,10 @@
-"""Co-editing session store — the Postgres editing buffer.
+"""Live-session store — the Postgres editing buffer.
 
 The DB is the source of truth for an in-progress *live* edit. There is **one
-active session per page** (path-keyed); multiple humans join it and converge on
-a single server-authoritative ``buffer_text`` + monotonic ``version``. A
-single-user edit is just a 1-participant session — the model the per-user draft
-will eventually fold into.
+active session per page** (path-keyed); everyone viewing the page joins it
+(the session is the page's live channel — participants include pure viewers,
+distinguished from editors by ``last_edited_at``), and its editors converge on
+a single server-authoritative ``buffer_text`` + monotonic ``version``.
 
 This module is the *storage* seam only: get-or-create a session, join/leave/
 touch participants, and compare-and-swap the buffer. The op/patch channel and

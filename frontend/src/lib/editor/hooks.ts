@@ -1,6 +1,11 @@
 "use client";
 
-/** React hook that owns a live co-edit session's lifecycle + presence.
+/** React hook that owns a page's live-session lifecycle + presence.
+ *
+ * The "co-edit session" is the page's *live session*: everyone viewing the
+ * page joins it (presence + real-time updates); editing is a capability
+ * inside it (`canWrite`), and presence labels participants "viewing" vs
+ * "editing" by whether they've actually edited.
  *
  * On `enabled` it joins the session for `path`, streams inbound frames, and
  * exposes presence (`participants`/`typing`/`peers`) and autosave
@@ -8,7 +13,8 @@
  * that order — leaving/disconnecting first would let the server's last-leave
  * forced commit race ahead of the final ops) happens entirely inside the
  * hook's own effect cleanup — driven by `enabled`/`path` changing or the
- * component unmounting, never by the caller invoking a function. The *document* is owned by the editor via
+ * component unmounting, never by the caller invoking a function. The
+ * *document* is owned by the editor via
  * `@codemirror/collab` (see `Coeditor`), not here — the hook just hands the
  * editor what it needs to run collab (`session` = id/clientId/start
  * version+doc), forwards inbound `op`/`resync` frames to it (`onServerFrame`),
@@ -58,16 +64,30 @@ function newClientId(): string {
   return crypto.randomUUID();
 }
 
-/** Manage the full lifecycle of a co-edit session: join, stream, presence, and save.
- * Disable with `enabled: false` to leave the session and tear down the stream. */
+/** Manage the full lifecycle of a page's live session: join, stream,
+ * presence, and save. Disable with `enabled: false` to leave the session and
+ * tear down the stream. */
 export function useCoeditSession(opts: {
   path: string;
   enabled: boolean;
   committedBody: string;
   myUserId: string | null;
+  /** Whether the user may edit this page (`can_write` from the file read).
+   * False joins the live session as a pure viewer: presence + real-time
+   * updates flow as usual, but every write call (ops come from the read-only
+   * editor anyway, cursor pings, checkpoints) is suppressed — the server
+   * would 403 them. Defaults to true. */
+  canWrite?: boolean;
   onEnd?: () => void;
 }): UseCoeditSession {
-  const { path, enabled, committedBody, myUserId, onEnd } = opts;
+  const {
+    path,
+    enabled,
+    committedBody,
+    myUserId,
+    canWrite = true,
+    onEnd,
+  } = opts;
 
   const [buffer, setBuffer] = useState("");
   const [participants, setParticipants] = useState<CoeditParticipant[]>([]);
@@ -140,7 +160,7 @@ export function useCoeditSession(opts: {
   // Flush + checkpoint without leaving the session — the autosave action.
   const checkpoint = useCallback(async () => {
     const sid = sessionId.current;
-    if (sid === null) return;
+    if (sid === null || !canWrite) return;
     setSaveStatus("saving");
     try {
       await flushFn.current?.();
@@ -149,7 +169,7 @@ export function useCoeditSession(opts: {
     } catch {
       setSaveStatus("error");
     }
-  }, []);
+  }, [canWrite]);
 
   const runAutoCheckpoint = useCallback(() => {
     clearAutosaveTimers();
@@ -177,7 +197,9 @@ export function useCoeditSession(opts: {
 
   const reportSelection = useCallback(
     (anchor: number, head: number, isEdit: boolean) => {
-      if (sessionId.current === null) return;
+      // Cursor broadcasts are writes (the endpoint is write-gated); a pure
+      // viewer's caret stays local.
+      if (sessionId.current === null || !canWrite) return;
       lastCursor.current = { anchor, head };
       // A caret move (isEdit=false) must not clobber the "typing…" a recent edit
       // set — browsers fire `select` right after every `input`, so onSelect
@@ -213,7 +235,7 @@ export function useCoeditSession(opts: {
         }, TYPING_IDLE_MS);
       }
     },
-    [],
+    [canWrite],
   );
 
   const onFrame = useCallback(
@@ -253,6 +275,18 @@ export function useCoeditSession(opts: {
           setTyping((prev) => prev.filter((u) => u !== uid));
         }
         return;
+      }
+      // The roster's last_edited_at only refreshes on join/leave presence
+      // frames, so bump the author's locally from each op — their "editing"
+      // label flips in real time instead of waiting for a roster broadcast.
+      if (frame.type === "op" && frame.author !== null) {
+        const author = frame.author;
+        const nowIso = new Date().toISOString();
+        setParticipants((prev) =>
+          prev.map((p) =>
+            p.user_id === author ? { ...p, last_edited_at: nowIso } : p,
+          ),
+        );
       }
       // op / resync → the editor's collab layer applies + rebases.
       serverFrame.current?.(frame);
@@ -379,10 +413,12 @@ export function useCoeditSession(opts: {
           // concurrent edit mid-teardown). Still checkpoint — committing what
           // the server has beats leaving it all to the forced commit.
         }
-        try {
-          await checkpointSession(sid, { keepalive: true });
-        } catch {
-          // The last-leave forced commit below is the backstop.
+        if (canWrite) {
+          try {
+            await checkpointSession(sid, { keepalive: true });
+          } catch {
+            // The last-leave forced commit below is the backstop.
+          }
         }
         try {
           await leaveSession(sid, { keepalive: true });
@@ -402,7 +438,7 @@ export function useCoeditSession(opts: {
     if (!active) return;
     const checkpointNow = () => {
       const sid = sessionId.current;
-      if (sid === null) return;
+      if (sid === null || !canWrite) return;
       void checkpointSession(sid, { keepalive: true }).catch(() => {});
     };
     const onVisibilityChange = () => {
@@ -414,7 +450,7 @@ export function useCoeditSession(opts: {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", checkpointNow);
     };
-  }, [active]);
+  }, [active, canWrite]);
 
   return {
     active,

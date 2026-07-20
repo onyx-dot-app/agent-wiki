@@ -90,6 +90,9 @@ interface FileResponse {
   body: string;
   ref?: string;
   head_sha?: string | null;
+  // Whether the caller may edit this page. False renders the live session as
+  // a pure viewer: read-only editor, no cursor/checkpoint sends.
+  can_write?: boolean;
 }
 
 // Minimal doc-entry shape needed by collectFolders / DestinationSelect.
@@ -154,6 +157,10 @@ export function FileView({ path }: FileViewProps) {
   // (latest) version; otherwise it's the sha being viewed and is what we
   // pass back as `base_sha` on save so the server records a rollback.
   const [headSha, setHeadSha] = useState<string | null>(null);
+  // From the file read's `can_write` — false renders the live session as a
+  // pure viewer (read-only editor, no write calls). Optimistic `true` until
+  // the read lands; the server rejects any write regardless.
+  const [canWrite, setCanWrite] = useState(true);
   const [viewingSha, setViewingSha] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
@@ -283,16 +290,18 @@ export function FileView({ path }: FileViewProps) {
     [path, parentSlug, currentBasenameNoExt, router],
   );
 
-  // Live co-editing session: joined whenever the current (non-historical)
-  // version is showing, left when the user opens an old commit — see
-  // `useCoeditSession`'s `enabled` doc. No explicit Save; teardown (checkpoint
-  // + leave) fires from the hook itself on that transition/unmount, not from
-  // a button here.
+  // The page's live session: everyone viewing the current (non-historical)
+  // version joins it — presence plus real-time updates; editing is just a
+  // capability inside it (`canWrite`, ops write-gated server-side). Left when
+  // the user opens an old commit — see `useCoeditSession`'s `enabled` doc. No
+  // explicit Save; teardown (checkpoint + leave) fires from the hook itself
+  // on that transition/unmount, not from a button here.
   const coedit = useCoeditSession({
     path,
     enabled: !viewingVersion,
     committedBody: body,
     myUserId: user?.id ?? null,
+    canWrite,
     onEnd: () => {
       void refreshComments();
       void refreshDraftState();
@@ -391,6 +400,7 @@ export function FileView({ path }: FileViewProps) {
       .then((r) => {
         setBody(r.body);
         setHeadSha(r.head_sha ?? null);
+        setCanWrite(r.can_write ?? true);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "failed to load"))
       .finally(() => setLoading(false));
@@ -906,6 +916,7 @@ export function FileView({ path }: FileViewProps) {
                   reportDoc={coedit.reportDoc}
                   registerFlush={coedit.registerFlush}
                   registerSetDoc={coedit.registerSetDoc}
+                  readOnly={!canWrite}
                   commentHighlights={commentHighlights}
                   onSelectionForComment={handleSelectionForComment}
                   placeholder="Start typing, or pick a template above…"
@@ -916,7 +927,7 @@ export function FileView({ path }: FileViewProps) {
                 // dead end, not a permanent "Connecting…".
                 <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
                   <span>
-                    Couldn't connect to the editing session: {coedit.joinError}
+                    Couldn't connect to the live session: {coedit.joinError}
                   </span>
                   <Button size="sm" onClick={coedit.retryJoin}>
                     Retry
