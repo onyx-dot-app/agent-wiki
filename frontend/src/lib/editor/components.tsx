@@ -138,14 +138,21 @@ const peersField = StateField.define<{
 const baseTheme = EditorView.theme({
   "&": {
     height: "100%",
-    fontSize: "0.875rem",
-    color: "var(--text-05)",
+    // Opal's Main Content/Body preset (see `font-main-content-body` in
+    // @onyx-ai/opal styles.css) — the doc text matches the design system's
+    // content type ramp. CM manages these nodes, so the utility class can't
+    // be applied directly; reference the same tokens instead.
+    fontSize: "var(--height-font-label, 1rem)",
+    fontWeight: "450",
+    color: "var(--text-04)",
   },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": {
     overflow: "auto",
-    fontFamily: "var(--font-sans, system-ui, -apple-system, sans-serif)",
-    lineHeight: "1.6",
+    // The app's font (set on <html> by next/font in layout.tsx) — the doc
+    // text must match DocTitle and the rest of the chrome.
+    fontFamily: "var(--font-hanken-grotesk, system-ui, sans-serif)",
+    lineHeight: "var(--height-line-label, 1.5rem)",
     padding: "0 var(--cm-gutter, 2rem)",
     scrollbarWidth: "thin",
     scrollbarColor: "var(--border-03) transparent",
@@ -186,15 +193,13 @@ const baseTheme = EditorView.theme({
   ".cm-md-strong": { fontWeight: "bold" },
   ".cm-md-em": { fontStyle: "italic" },
   ".cm-md-code-inline": {
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontFamily: "var(--font-dm-mono, ui-monospace, monospace)",
     backgroundColor: "var(--background-tint-01)",
     borderRadius: "var(--radius-04, 4px)",
     padding: "0.1em 0.3em",
   },
   ".cm-md-code-block": {
-    fontFamily:
-      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+    fontFamily: "var(--font-dm-mono, ui-monospace, monospace)",
     display: "block",
     backgroundColor: "var(--background-tint-01)",
     borderRadius: "var(--radius-08)",
@@ -252,7 +257,7 @@ const baseTheme = EditorView.theme({
     borderRadius: "3px",
     color: "var(--text-inverse, #fff)",
     whiteSpace: "nowrap",
-    fontFamily: "var(--font-sans, system-ui)",
+    fontFamily: "var(--font-hanken-grotesk, system-ui, sans-serif)",
     pointerEvents: "none",
     userSelect: "none",
   },
