@@ -988,9 +988,17 @@ function AssistantActions({ content }: { content: string }) {
         size="sm"
         tooltip={copied ? "Copied" : "Copy"}
         onClick={() => {
-          void navigator.clipboard.writeText(content);
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
+          // Insecure contexts have no clipboard object at all.
+          if (!navigator.clipboard) return;
+          navigator.clipboard.writeText(content).then(
+            () => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1500);
+            },
+            // A rejected write (permission denied, document not focused)
+            // leaves the icon state unchanged, nothing landed on the clipboard.
+            () => {},
+          );
         }}
       />
       <Button
