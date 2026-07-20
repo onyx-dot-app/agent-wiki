@@ -55,7 +55,7 @@ from app.auth import UserMissingError, load_user, set_current_user
 from app.tasks import update_frequency
 from app.tasks.queues import documents_queue
 from app.wiki import agent_activity, constants as wiki_constants, git as wiki_git, update_policy
-from app.models.wiki import ChangeKind, CommitMaxRetriesError
+from app.models.wiki import ChangeKind, CommitMaxRetriesError, WriteProvenance
 
 
 log = logging.getLogger(__name__)
@@ -510,6 +510,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                 break
         elif result is not None:
             consecutive_irrelevant = 0
+            source_document_id = push.get("source_document_id")
             message = f"ingest({source_label}): update {c.path}"
             meta_lines: list[str] = []
             if title:
@@ -527,6 +528,12 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                     base_body=c.body,
                     ai_merge=True,
                     skip_acl=True,
+                    source=WriteProvenance(
+                        source_document_id=source_document_id,
+                        source_type=source_type,
+                        source_url=url or None,
+                        source_title=title or None,
+                    ),
                 )
             except CommitMaxRetriesError:
                 log.warning("process_pushed_document: max retries for %s, skipping", c.path)

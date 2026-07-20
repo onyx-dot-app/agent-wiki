@@ -1452,6 +1452,56 @@ class DetectionRun(Base):
 
 
 # --------------------------------------------------------------------------- #
+# Provenance: who produced each commit, and for ingestion, from what source    #
+# --------------------------------------------------------------------------- #
+
+
+class ProvenanceLedger(Base):
+    """Who produced each wiki commit and, for ingestion, which source document
+    it came from. Append-only, one row per ``(commit_sha, doc_path)``.
+
+    ``doc_path`` follows a page move (``provenance.rename_doc``) so readers can
+    key on the current path. The ``source_*`` columns are populated only for
+    ``actor_kind='ingestion'``. A human or agent write leaves them NULL.
+    """
+
+    __tablename__ = "provenance_ledger"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    commit_sha: Mapped[str] = mapped_column(Text, nullable=False)
+    doc_path: Mapped[str] = mapped_column(Text, nullable=False)
+    # ActorKind values (app/models/wiki.py), mirrored by the CHECK below.
+    actor_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    agent_name: Mapped[str | None] = mapped_column(Text)
+    agent_session_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("agent_sessions.id", ondelete="SET NULL")
+    )
+    source_document_id: Mapped[str | None] = mapped_column(Text)
+    source_type: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    source_title: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "actor_kind IN ('human', 'agent', 'ingestion', 'system')",
+            name="provenance_ledger_actor_kind_check",
+        ),
+        UniqueConstraint(
+            "commit_sha", "doc_path", name="uq_provenance_ledger_commit_path"
+        ),
+        Index("idx_provenance_ledger_doc_path", "doc_path"),
+        Index("idx_provenance_ledger_user_id", "user_id"),
+        Index("idx_provenance_ledger_source_document_id", "source_document_id"),
+    )
+
+
+# --------------------------------------------------------------------------- #
 # Comments — human discussion anchored to wiki pages (Postgres-only)          #
 # --------------------------------------------------------------------------- #
 

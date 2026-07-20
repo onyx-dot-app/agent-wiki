@@ -20,13 +20,19 @@ from typing import Any
 from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
-from app.models.wiki import ChangeKind, CommitMaxRetriesError, CommitResult
+from app.models.wiki import (
+    ChangeKind,
+    CommitMaxRetriesError,
+    CommitResult,
+    WriteProvenance,
+)
 from app.wiki import (
     agent_activity,
     filesystem,
     git as wiki_git,
     links,
     notify as wiki_notify,
+    provenance,
 )
 
 log = logging.getLogger(__name__)
@@ -164,6 +170,7 @@ def commit_and_fan_out(
     max_retries: int = _MERGE_MAX_RETRIES,
     record_activity: bool = True,
     trigger_coedit_rebase: bool = True,
+    source: WriteProvenance | None = None,
 ) -> CommitResult | None:
     """The single write gateway: commit ``body`` to ``path``, fan out to triggers.
 
@@ -212,6 +219,7 @@ def commit_and_fan_out(
             path, body, message, change_kind, activity_ttl,
             old_body=_read_head_or_empty(path), record_activity=record_activity,
             trigger_coedit_rebase=trigger_coedit_rebase,
+            source=source,
         )
 
     # Read-modify-write: 3-way merge against concurrent changes, retrying when
@@ -249,6 +257,7 @@ def commit_and_fan_out(
                     old_body=current, record_activity=record_activity,
                     expected_head=head_sha,
                     trigger_coedit_rebase=trigger_coedit_rebase,
+                    source=source,
                 )
             except (wiki_git.GitNothingToCommitError, wiki_git.GitHeadMovedError):
                 # A concurrent writer committed in the window between our
@@ -287,6 +296,7 @@ def _commit_resolved(
     record_activity: bool = True,
     expected_head: str | None = None,
     trigger_coedit_rebase: bool = True,
+    source: WriteProvenance | None = None,
 ) -> CommitResult:
     """Commit ``body``, record activity, and run the reindex + trigger fan-out.
 
@@ -302,20 +312,36 @@ def _commit_resolved(
     author = author_string()
     sha = wiki_git.commit_file(path, body, message, author=author, expected_head=expected_head)
 
-    if user is not None and record_activity:
-        agent_name = agent_activity.agent_name_var.get()
-        # if a launcher session is driving this commit, override
-        # agent_name with the manifest's tool_id so the UI attributes
-        # the edit to "claude-code" / "codex" instead of nothing.
-        from app.launchers.current_session import current_agent_session_id
+    # Resolve the acting agent once: an explicit agent_name_var wins, else a
+    # driving launcher session's tool_id, so the activity rail and the
+    # provenance ledger both attribute the edit to "claude-code" / "codex".
+    from app.launchers.current_session import current_agent_session_id
+
+    launcher_sid = current_agent_session_id()
+    agent_name = agent_activity.agent_name_var.get()
+    if launcher_sid is not None and agent_name is None:
         from app.db import agent_sessions as _sessions
 
-        launcher_sid = current_agent_session_id()
-        if launcher_sid is not None and agent_name is None:
-            sess_row = _sessions.get(launcher_sid)
-            if sess_row is not None:
-                agent_name = sess_row["tool_id"]
+        sess_row = _sessions.get(launcher_sid)
+        if sess_row is not None:
+            agent_name = sess_row["tool_id"]
 
+    # Provenance ledger: one row per commit that lands through this gateway.
+    # Best-effort, the commit already succeeded, so a ledger failure must
+    # never turn a successful save into an error.
+    try:
+        provenance.record(
+            commit_sha=sha,
+            doc_path=path,
+            user_id=user.id if user is not None else None,
+            agent_name=agent_name,
+            agent_session_id=launcher_sid,
+            source=source,
+        )
+    except Exception:
+        log.warning("provenance.record failed for %s @ %s", path, sha, exc_info=True)
+
+    if user is not None and record_activity:
         upsert_kwargs: dict[str, Any] = dict(
             user_id=user.id,
             agent_name=agent_name,
