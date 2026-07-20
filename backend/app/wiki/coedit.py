@@ -27,7 +27,7 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
@@ -102,6 +102,9 @@ class ParticipantRow(BaseModel):
     user_display: str
     joined_at: str
     last_seen_at: str
+    # NULL until the participant applies an edit op — presence renders such
+    # members "viewing" (joining a session is page-open, not edit intent).
+    last_edited_at: str | None = None
 
 
 def _session_row(s: CoeditSession) -> SessionRow:
@@ -126,6 +129,7 @@ def _participant_row(p: CoeditParticipant, user_display: str) -> ParticipantRow:
         user_display=user_display,
         joined_at=p.joined_at,
         last_seen_at=p.last_seen_at,
+        last_edited_at=p.last_edited_at,
     )
 
 
@@ -652,6 +656,38 @@ def close_if_clean(session_id: int) -> bool:
         return closed is not None
 
 
+def purge_viewer_sessions(limit: int = 500) -> int:
+    """Delete closed sessions that never received an edit op. Returns the count.
+
+    With join-on-landing, every page view mints a session whose buffer is a
+    full copy of the page — a closed ``version == 0`` row carries no ops, no
+    participants (removed on leave; FK cascade catches stragglers), and nothing
+    the op-log or checkpoint dedupe ever references, so it is pure dead weight.
+    Runs against *closed* rows only: deleting at the close point instead would
+    race a concurrent join into an FK violation, while a closed session is a
+    soft state joins already tolerate. Bounded so the periodic scan stays
+    cheap; the backlog drains across successive runs.
+    """
+    with session() as s:
+        ids = s.scalars(
+            select(CoeditSession.id)
+            .where(
+                CoeditSession.status == SessionStatus.CLOSED.value,
+                CoeditSession.version == 0,
+                CoeditSession.checkpointed_version == 0,
+            )
+            .limit(limit)
+        ).all()
+        if not ids:
+            return 0
+        s.execute(
+            delete(CoeditSession)
+            .where(CoeditSession.id.in_(ids))
+            .execution_options(synchronize_session=False)
+        )
+        return len(ids)
+
+
 # Namespace for checkpoint advisory-lock keys. The whole DB shares one 64-bit
 # advisory keyspace (see triggers/repo.py's _REBUILD_ADVISORY_LOCK), so pack a
 # tag into the high 32 bits to keep checkpoint keys in their own band and off
@@ -736,12 +772,18 @@ def join(session_id: int, user_id: str) -> None:
             )
 
 
-def touch(session_id: int, user_id: str) -> None:
-    """Refresh a participant's ``last_seen_at`` (presence heartbeat)."""
+def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
+    """Refresh a participant's ``last_seen_at`` (presence heartbeat).
+
+    ``edited=True`` (the ``/op`` path) also stamps ``last_edited_at``, which is
+    what flips their presence label from "viewing" to "editing"."""
     with session() as s:
         existing = s.get(CoeditParticipant, (session_id, user_id))
         if existing is not None:
-            existing.last_seen_at = _iso(_now())
+            now = _iso(_now())
+            existing.last_seen_at = now
+            if edited:
+                existing.last_edited_at = now
 
 
 def leave(session_id: int, user_id: str) -> None:

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.auth import User, require_can
+from app.auth import PermissionDenied, User, require_can
 from app.auth.deps import require_user
 from app.models.file_system import (
     ActivityRowView,
@@ -153,10 +153,8 @@ def list_documents(
 ) -> ListDocumentsResponse:
     raw = wiki_git.list_paths_with_mtime(prefix)
     if not user.is_admin:
-        from app.wiki import acl as _acl
-
         md_paths = [p for p, _ in raw if p.endswith(".md")]
-        visible = set(_acl.filter_paths_in_python(user.id, False, md_paths))
+        visible = set(acl.filter_paths_in_python(user.id, False, md_paths))
         # Keep non-md paths (folders, .gitkeep) so the explorer can render
         # the tree; permission checks happen on actual page access.
         raw = [(p, ts) for p, ts in raw if not p.endswith(".md") or p in visible]
@@ -250,9 +248,7 @@ def list_recent_pages(
     raw = wiki_git.paths_authored_by(user.email)
     md = [(p, ts) for p, ts in raw if p.endswith(".md")]
     if not user.is_admin:
-        from app.wiki import acl as _acl
-
-        visible = set(_acl.filter_paths_in_python(user.id, False, [p for p, _ in md]))
+        visible = set(acl.filter_paths_in_python(user.id, False, [p for p, _ in md]))
         md = [(p, ts) for p, ts in md if p in visible]
     # Newest first; empty timestamps sink to the bottom.
     md.sort(key=lambda pt: pt[1], reverse=True)
@@ -294,7 +290,14 @@ def get_document_by_path(
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    require_can("read", rel, user)
+
+    # One ACL resolution serves both the read gate and can_write — require_can
+    # plus a separate can("write") would run the grants query twice on this
+    # hot path. Same error shape as require_can (PermissionDenied → 403).
+    perms = acl.effective(user.id, user.is_admin, rel)
+    if "read" not in perms:
+        raise PermissionDenied(f"forbidden: read on {rel}")
+    can_write = "write" in perms
     head_sha = wiki_git.head_sha_for_path(rel)
     # Stable id: reading a live page lazily backfills its row (pre-id pages);
     # historical/deleted reads only report an id if a live row exists.
@@ -311,7 +314,9 @@ def get_document_by_path(
             body = wiki_git.read_file(historical, ref=ref)
         except wiki_git.UnknownSha as exc:
             raise HTTPException(status_code=404, detail="not found at ref") from exc
-        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref, id=page_id)
+        return GetDocumentResponse(
+            path=rel, body=body, head_sha=head_sha, ref=ref, id=page_id, can_write=can_write
+        )
 
     # Session-aware live read: when a co-edit session is open on this page, its
     # Postgres buffer holds the freshest edits. The checkpoint that commits the
@@ -362,6 +367,7 @@ def get_document_by_path(
         id=page_id,
         attribution=provenance.head_attribution(rel, head_sha),
         sources=provenance.sources_for_path(rel),
+        can_write=can_write,
     )
 
 
@@ -854,9 +860,7 @@ def list_recent_docs(user: User = Depends(require_user)) -> RecentDocsResponse:
     # revoke access after the fact, so re-filter on every read.
     paths = [p for p in paths if filesystem.absolute(p).is_file()]
     if not user.is_admin:
-        from app.wiki import acl as _acl
-
-        paths = _acl.filter_paths_in_python(user.id, False, paths)
+        paths = acl.filter_paths_in_python(user.id, False, paths)
     ids = doc_ids.ids_for_paths(paths)
     items = [DocRef(path=p, id=ids.get(p)) for p in paths]
     return RecentDocsResponse(paths=paths, items=items)
@@ -882,9 +886,7 @@ def list_starred_docs(user: User = Depends(require_user)) -> StarredDocsResponse
     # after the star must hide the entry.
     paths = [p for p in paths if filesystem.absolute(p).is_file()]
     if not user.is_admin:
-        from app.wiki import acl as _acl
-
-        paths = _acl.filter_paths_in_python(user.id, False, paths)
+        paths = acl.filter_paths_in_python(user.id, False, paths)
     ids = doc_ids.ids_for_paths(paths)
     items = [DocRef(path=p, id=ids.get(p)) for p in paths]
     return StarredDocsResponse(paths=paths, items=items)

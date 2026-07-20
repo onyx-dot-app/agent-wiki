@@ -176,6 +176,12 @@ class GetDocumentResponse(BaseModel):
     id: str | None = None  # stable wiki_doc_id; None for historical/deleted reads
     attribution: Attribution | None = None
     sources: list[SourceRef] = Field(default_factory=list)
+    # Whether the caller may edit this page. Joining the co-edit session is
+    # read-gated (page-open presence), so the frontend uses this to suppress
+    # ops/cursors and render read-only affordances for read-only viewers.
+    # Required (no default): every constructor must resolve it from the ACL,
+    # so a new call site can't silently advertise write access.
+    can_write: bool
 
 
 class PutDocumentResponse(BaseModel):

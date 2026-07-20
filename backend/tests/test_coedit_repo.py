@@ -381,3 +381,28 @@ def test_ops_since_with_head_returns_ops_after_version(users):
     assert coedit.ops_since_with_head(s.id, 2).ops == []
     # Head version comes back alongside the ops, from one consistent read.
     assert coedit.ops_since_with_head(s.id, 0).head_version == 2
+
+
+def test_purge_viewer_sessions_deletes_only_closed_never_edited(users):
+    # Viewer-only session: opened (buffer seeded), no ops, closed.
+    viewer_only = coedit.open_session("viewed.md", base_sha=None, initial_buffer="body")
+    coedit.join(viewer_only.id, "usr_a")
+    coedit.leave(viewer_only.id, "usr_a")
+    coedit.close_session(viewer_only.id)
+
+    # Edited session: has an op, closed after checkpoint — must be retained
+    # (its coedit_ops history hangs off it).
+    edited = coedit.open_session("edited.md", base_sha=None, initial_buffer="hi")
+    coedit.apply_op(edited.id, base_version=0, changes=[_ch(0, 0, "x")], author_user_id="usr_a")
+    coedit.mark_checkpointed(edited.id, base_sha="sha", version=1)
+    coedit.close_session(edited.id)
+
+    # Active viewer-only session: still occupied — must be retained.
+    active = coedit.open_session("open.md", base_sha=None, initial_buffer="live")
+
+    assert coedit.purge_viewer_sessions() == 1
+    assert coedit.get_session(viewer_only.id) is None
+    assert coedit.get_session(edited.id) is not None
+    assert coedit.get_session(active.id) is not None
+    # Idempotent: nothing left to purge.
+    assert coedit.purge_viewer_sessions() == 0
