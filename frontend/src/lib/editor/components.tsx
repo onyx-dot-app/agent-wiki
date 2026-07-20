@@ -549,6 +549,10 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           } catch (e) {
             if (e instanceof ApiError && e.status === 409) {
               // A peer's op interleaved — rebase through the op log and retry.
+              // Safe even when the teardown flush runs after `v.destroy()`:
+              // CM6's dispatch on a destroyed view still advances the state
+              // (it only skips DOM work — see EditorView.update's destroyed
+              // path), so receiveUpdates rebases and the retry sees it.
               await pull();
               continue;
             }
