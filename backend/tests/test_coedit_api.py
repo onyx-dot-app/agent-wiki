@@ -59,7 +59,7 @@ def test_join_is_idempotent_and_shared(client):
     assert {p["user_id"] for p in second["participants"]} == {a, b}
 
 
-def test_join_without_write_is_forbidden(client):
+def test_join_without_read_is_forbidden(client):
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
     _seed_page()
@@ -71,10 +71,11 @@ def test_join_without_write_is_forbidden(client):
     assert client.post("/api/coedit/join", json={"path": _PATH}).status_code == 403
 
 
-def test_stream_requires_write(client):
-    # Opening the stream is editing (it joins the roster), so a non-writer is
-    # rejected — symmetric with /join. require_can raises before the response
-    # starts streaming, so this returns 403 without hanging.
+def test_stream_requires_read(client):
+    # Opening the stream joins the roster (page-open presence), gated on read
+    # — symmetric with /join; writes are gated at /op. require_can raises
+    # before the response starts streaming, so this returns 403 without
+    # hanging.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
     _seed_page()
@@ -85,6 +86,69 @@ def test_stream_requires_write(client):
 
     login_fastapi(client, other)
     assert client.get(f"/api/coedit/stream?session_id={sid}").status_code == 403
+
+
+def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
+    # Joining is page-open presence (read-gated); the write boundary is /op
+    # and /cursor. A read-only user lands in the roster with no
+    # last_edited_at — presence renders them "viewing".
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    reader = users_repo.create(email="reader@x.com", password="hunter2-x", name="Reader")
+    _seed_page()
+    acl.set_owner(_PATH, owner)  # owner-only page...
+    acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=reader,
+        permission="read",
+        granted_by_user_id=owner,
+    )  # ...plus an explicit read grant for the viewer
+
+    login_fastapi(client, reader)
+    resp = client.post("/api/coedit/join", json={"path": _PATH})
+    assert resp.status_code == 200
+    sid = resp.json()["session_id"]
+    me = [p for p in resp.json()["participants"] if p["user_id"] == reader]
+    assert me and me[0]["last_edited_at"] is None
+
+    op = client.post(
+        "/api/coedit/op",
+        json={
+            "session_id": sid,
+            "base_version": 0,
+            "changes": [{"from": 0, "to": 0, "insert": "x"}],
+        },
+    )
+    assert op.status_code == 403
+    cursor = client.post(
+        "/api/coedit/cursor",
+        json={"session_id": sid, "anchor": 0, "head": 0, "typing": False},
+    )
+    assert cursor.status_code == 403
+
+    # The read tells the frontend not to offer editing at all.
+    doc = client.get(f"/api/wiki/file?path={_PATH}")
+    assert doc.status_code == 200
+    assert doc.json()["can_write"] is False
+
+    login_fastapi(client, owner)
+    assert client.get(f"/api/wiki/file?path={_PATH}").json()["can_write"] is True
+
+
+def test_op_stamps_last_edited_at(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page()
+
+    joined = client.post("/api/coedit/join", json={"path": _PATH}).json()
+    sid = joined["session_id"]
+    assert joined["participants"][0]["last_edited_at"] is None
+
+    _apply_op(client, sid, 0, [{"from": 0, "to": 0, "insert": "x"}])
+    after = client.get(f"/api/coedit/session?session_id={sid}").json()
+    me = [p for p in after["participants"] if p["user_id"] == uid]
+    assert me and me[0]["last_edited_at"] is not None
 
 
 def test_leave_removes_participant(client):

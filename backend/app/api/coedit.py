@@ -45,6 +45,7 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
             user_display=p.user_display,
             joined_at=p.joined_at,
             last_seen_at=p.last_seen_at,
+            last_edited_at=p.last_edited_at,
         )
         for p in coedit.list_participants(session_id)
     ]
@@ -54,11 +55,14 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
 def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResponse:
     """Open (or join) the live session for a page and return its buffer.
 
-    Joining is editing, so it requires write. A fresh session is seeded from the
+    Joining is opening the page — presence + the live op stream — so it
+    requires only read; *writing* is gated at ``/op``/``/cursor``. A
+    participant who never sends an op shows as "viewing" in presence
+    (``last_edited_at`` stays NULL). A fresh session is seeded from the
     page's current HEAD; an already-open session is adopted as-is (its live
     buffer wins).
     """
-    require_can("write", req.path, user)
+    require_can("read", req.path, user)
     head = git.head_sha_for_path(req.path)
     initial = git.read_file_opt(req.path) or ""
     sess = coedit.open_session(req.path, base_sha=head, initial_buffer=initial)
@@ -125,7 +129,7 @@ def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
         raise HTTPException(status_code=422, detail=str(e)) from e
     if out is None:
         raise HTTPException(status_code=409, detail="stale base_version; re-sync and retry")
-    coedit.touch(req.session_id, user.id)
+    coedit.touch(req.session_id, user.id, edited=True)
     coedit_channel.broadcast_op(
         req.session_id, out.version, req.changes, user.id, client_id=req.client_id
     )
@@ -223,9 +227,9 @@ def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResp
     if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail="no active session")
     # Opening the stream makes the user a session participant (roster +
-    # heartbeat + commit attribution), so it requires write — symmetric with
-    # POST /join. Read-only observation would be a separate non-participant path.
-    require_can("write", sess.path, user)
+    # heartbeat), which is page-open presence, not edit intent — so it
+    # requires read, symmetric with POST /join. Writes stay gated at /op.
+    require_can("read", sess.path, user)
 
     coedit.join(session_id, user.id)
     # Announce the new participant to existing connections *before* registering

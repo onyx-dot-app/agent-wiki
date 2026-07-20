@@ -57,6 +57,9 @@ class ParticipantOut(BaseModel):
     user_display: str
     joined_at: str
     last_seen_at: str
+    # None until the participant applies an edit op — presence renders such
+    # members "viewing" rather than "editing".
+    last_edited_at: str | None = None
 
 
 class JoinResponse(BaseModel):

@@ -102,6 +102,9 @@ class ParticipantRow(BaseModel):
     user_display: str
     joined_at: str
     last_seen_at: str
+    # NULL until the participant applies an edit op — presence renders such
+    # members "viewing" (joining a session is page-open, not edit intent).
+    last_edited_at: str | None = None
 
 
 def _session_row(s: CoeditSession) -> SessionRow:
@@ -126,6 +129,7 @@ def _participant_row(p: CoeditParticipant, user_display: str) -> ParticipantRow:
         user_display=user_display,
         joined_at=p.joined_at,
         last_seen_at=p.last_seen_at,
+        last_edited_at=p.last_edited_at,
     )
 
 
@@ -736,12 +740,18 @@ def join(session_id: int, user_id: str) -> None:
             )
 
 
-def touch(session_id: int, user_id: str) -> None:
-    """Refresh a participant's ``last_seen_at`` (presence heartbeat)."""
+def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
+    """Refresh a participant's ``last_seen_at`` (presence heartbeat).
+
+    ``edited=True`` (the ``/op`` path) also stamps ``last_edited_at``, which is
+    what flips their presence label from "viewing" to "editing"."""
     with session() as s:
         existing = s.get(CoeditParticipant, (session_id, user_id))
         if existing is not None:
-            existing.last_seen_at = _iso(_now())
+            now = _iso(_now())
+            existing.last_seen_at = now
+            if edited:
+                existing.last_edited_at = now
 
 
 def leave(session_id: int, user_id: str) -> None:

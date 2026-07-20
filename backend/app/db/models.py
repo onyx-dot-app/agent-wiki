@@ -1005,6 +1005,10 @@ class CoeditParticipant(Base):
     last_seen_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
+    # When this participant last applied an edit op, ISO 8601 UTC. NULL for a
+    # participant who has only viewed — presence renders them "viewing", not
+    # "editing" (joining a session is page-open, not edit intent).
+    last_edited_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
 

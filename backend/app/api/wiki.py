@@ -295,6 +295,9 @@ def get_document_by_path(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", rel, user)
+    from app.wiki import acl as _acl
+
+    can_write = _acl.can(user.id, user.is_admin, "write", rel)
     head_sha = wiki_git.head_sha_for_path(rel)
     # Stable id: reading a live page lazily backfills its row (pre-id pages);
     # historical/deleted reads only report an id if a live row exists.
@@ -311,7 +314,9 @@ def get_document_by_path(
             body = wiki_git.read_file(historical, ref=ref)
         except wiki_git.UnknownSha as exc:
             raise HTTPException(status_code=404, detail="not found at ref") from exc
-        return GetDocumentResponse(path=rel, body=body, head_sha=head_sha, ref=ref, id=page_id)
+        return GetDocumentResponse(
+            path=rel, body=body, head_sha=head_sha, ref=ref, id=page_id, can_write=can_write
+        )
 
     # Session-aware live read: when a co-edit session is open on this page, its
     # Postgres buffer holds the freshest edits. The checkpoint that commits the
@@ -362,6 +367,7 @@ def get_document_by_path(
         id=page_id,
         attribution=provenance.head_attribution(rel, head_sha),
         sources=provenance.sources_for_path(rel),
+        can_write=can_write,
     )
 
 
