@@ -9,7 +9,7 @@ from typing import Any
 
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
-from app.wiki import git as wiki_git
+from app.wiki import git as wiki_git, provenance
 
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 100
@@ -38,10 +38,17 @@ def handle(args: dict[str, Any]) -> Any:
     rows = wiki_git.history(path, limit=limit)
     if not rows:
         return {"path": path, "history": [], "note": "no history"}
+    attr = provenance.for_history(rows, path)
     return {
         "path": path,
         "history": [
-            {"sha": r.sha, "author": r.author, "ts": r.ts, "message": r.message}
+            {
+                "sha": r.sha,
+                "author": r.author,
+                "ts": r.ts,
+                "message": r.message,
+                "attribution": attr[r.sha].model_dump(),
+            }
             for r in rows
         ],
     }

@@ -12,11 +12,33 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.models import ProvenanceLedger, User
 from app.db.session import session
+from app.models.wiki import ActorKind
+
+# Ledger columns a reader needs; returned as a plain dict so callers don't hold
+# an ORM row past the session.
+_LEDGER_COLUMNS = (
+    "id",
+    "commit_sha",
+    "doc_path",
+    "actor_kind",
+    "user_id",
+    "agent_name",
+    "agent_session_id",
+    "source_document_id",
+    "source_type",
+    "source_url",
+    "source_title",
+    "created_at",
+)
+
+
+def _ledger_dict(row: ProvenanceLedger) -> dict[str, Any]:
+    return {c: getattr(row, c) for c in _LEDGER_COLUMNS}
 
 
 def user_kind(user_id: str) -> str | None:
@@ -83,3 +105,41 @@ def delete_for_doc(doc_path: str) -> None:
     """
     with session() as s:
         s.execute(delete(ProvenanceLedger).where(ProvenanceLedger.doc_path == doc_path))
+
+
+def ledger_rows_for_commits(commit_shas: list[str], doc_path: str) -> list[dict[str, Any]]:
+    """Ledger rows for the given commits on a path, each with the owner's display
+    name (name or email) under ``owner_display``. Batched to one query."""
+    if not commit_shas:
+        return []
+    owner_display = func.coalesce(User.name, User.email)
+    with session() as s:
+        rows = s.execute(
+            select(ProvenanceLedger, owner_display.label("owner_display"))
+            .join(User, User.id == ProvenanceLedger.user_id, isouter=True)
+            .where(
+                ProvenanceLedger.doc_path == doc_path,
+                ProvenanceLedger.commit_sha.in_(commit_shas),
+            )
+        ).all()
+    return [{**_ledger_dict(row), "owner_display": display} for row, display in rows]
+
+
+def ingestion_source_rows(doc_path: str, limit: int) -> list[dict[str, Any]]:
+    """Ingestion ledger rows for a page, newest first, capped at ``limit`` — the
+    raw rows behind the Sources list, before dedup."""
+    with session() as s:
+        rows = (
+            s.execute(
+                select(ProvenanceLedger)
+                .where(
+                    ProvenanceLedger.doc_path == doc_path,
+                    ProvenanceLedger.actor_kind == ActorKind.INGESTION.value,
+                )
+                .order_by(ProvenanceLedger.id.desc())
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
+    return [_ledger_dict(r) for r in rows]

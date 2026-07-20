@@ -90,6 +90,33 @@ class WriteProvenance(BaseModel):
     source_title: str | None = None
 
 
+class Attribution(BaseModel):
+    """Structured provenance for one commit, resolved ledger-first with a git
+    author-string parse as the fallback for any commit with no ledger row.
+
+    ``person`` and ``agent`` describe a human or agent write, ``source_*`` an
+    ingestion write.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    actor_kind: ActorKind
+    person: str | None = None
+    agent: str | None = None
+    source_document_id: str | None = None
+    source_type: str | None = None
+    source_url: str | None = None
+    source_title: str | None = None
+
+
+class SourceRef(WriteProvenance):
+    """One ingested document that has contributed to a page (the Sources tab
+    list). Compact by design: identity and links, no content ranges.
+    """
+
+    last_updated: str
+
+
 class CommitMaxRetriesError(Exception):
     """Raised by ``commit_and_fan_out`` when HEAD keeps moving past the retry budget."""
 

@@ -9,7 +9,7 @@ from typing import Any
 
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
-from app.wiki import agent_activity, git as wiki_git, update_policy
+from app.wiki import agent_activity, git as wiki_git, provenance, update_policy
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -66,4 +66,13 @@ def handle(args: dict[str, Any]) -> Any:
     instruction = update_policy.resolve_for_path(path).update_instruction
     if instruction:
         result["update_instruction"] = instruction
+
+    if is_head:
+        attr = provenance.head_attribution(path, head_sha)
+    else:
+        # A historical read resolves from the ledger only.
+        attr = provenance.for_commits([sha], path).get(sha) if sha else None
+    result["attribution"] = attr.model_dump() if attr is not None else None
+    # Sources are page-level at current HEAD, including on a historical read.
+    result["sources"] = [sr.model_dump() for sr in provenance.sources_for_path(path)]
     return result
