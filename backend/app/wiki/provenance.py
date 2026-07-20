@@ -14,6 +14,7 @@ document it came from, anchored like a comment so it survives later edits.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterable, Sequence
 from difflib import SequenceMatcher
@@ -21,9 +22,11 @@ from typing import Any
 
 from app.auth.users import UserKind
 from app.db import provenance as repo
-from app.models.wiki import ActorKind, Attribution, SourceRef, WriteProvenance
-from app.wiki import git as wiki_git
+from app.models.wiki import ActorKind, Attribution, SourceRef, SourceSpan, WriteProvenance
+from app.wiki import git as wiki_git, provenance_remap
 from app.wiki.constants import INGEST_AUTHOR
+
+log = logging.getLogger(__name__)
 
 # The ledger's source columns, named once by the model that mirrors them.
 _SOURCE_FIELDS = tuple(WriteProvenance.model_fields)
@@ -211,3 +214,19 @@ def sources_for_path(doc_path: str) -> list[SourceRef]:
             seen.add(key)
         out.append(SourceRef(last_updated=row["created_at"], **_source_facts(row)))
     return out
+
+
+def content_spans_for_path(doc_path: str) -> list[SourceSpan]:
+    """Live spans of a page mapped to the documents they were ingested from, for
+    in-document highlighting. Stale spans are remapped to HEAD first, and only
+    spans anchored at HEAD are returned, so every offset lines up with the
+    page's current body. A remap hiccup degrades to fewer highlights, never a
+    failed read or a misplaced one."""
+    head_sha = wiki_git.head_sha_for_path(doc_path)
+    if head_sha is None:
+        return []
+    try:
+        provenance_remap.remap_source_ranges(doc_path)
+    except Exception:
+        log.exception("source range remap failed for %s", doc_path)
+    return [SourceSpan(**row) for row in repo.live_spans_for_doc(doc_path, head_sha)]

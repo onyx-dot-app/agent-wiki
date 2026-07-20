@@ -157,6 +157,32 @@ def ingestion_source_rows(doc_path: str, limit: int) -> list[dict[str, Any]]:
     return [_ledger_dict(r) for r in rows]
 
 
+def live_spans_for_doc(doc_path: str, anchor_sha: str) -> list[dict[str, Any]]:
+    """Live source ranges on a page anchored at ``anchor_sha``, with the source
+    facts of the ingest that produced each, ordered by start offset. Callers
+    pass HEAD so a span whose anchor lags (an unremapped leftover) is omitted
+    rather than returned with offsets against an older body."""
+    with session() as s:
+        rows = s.execute(
+            select(
+                SourceRange.start_offset,
+                SourceRange.end_offset,
+                ProvenanceLedger.source_document_id,
+                ProvenanceLedger.source_type,
+                ProvenanceLedger.source_url,
+                ProvenanceLedger.source_title,
+            )
+            .join(ProvenanceLedger, ProvenanceLedger.id == SourceRange.provenance_id)
+            .where(
+                SourceRange.doc_path == doc_path,
+                SourceRange.status == SourceRangeStatus.LIVE.value,
+                SourceRange.anchor_sha == anchor_sha,
+            )
+            .order_by(SourceRange.start_offset)
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
 # --------------------------------------------------------------------------- #
 # Source ranges                                                                 #
 # --------------------------------------------------------------------------- #
