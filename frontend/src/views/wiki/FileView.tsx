@@ -36,6 +36,7 @@ import { HistoryPanel } from "@/components/wiki/HistoryPanel";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
+import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
@@ -874,6 +875,7 @@ export function FileView({ path }: FileViewProps) {
                     setPolicyOpen(true);
                   }}
                 />
+                <Path2ReviewBanner path={path} canWrite={canWrite} />
                 <CoeditPresenceBar
                   participants={coedit.participants}
                   typing={coedit.typing}
