@@ -104,6 +104,14 @@ def crontab(
 _stop_event = threading.Event()
 
 
+def install_signal_handlers() -> None:
+    """Public entry point: install SIGTERM/SIGINT handlers that set the shared
+    stop event. Call once from a process's main thread (e.g. ``run_worker``)
+    before spawning consumer threads. A no-op off the main thread, so
+    ``run_consumer`` calling it from a worker thread is harmless."""
+    _install_signal_handlers()
+
+
 def _install_signal_handlers() -> None:
     if threading.current_thread() is not threading.main_thread():
         return

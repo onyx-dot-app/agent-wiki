@@ -74,10 +74,12 @@ Queues:
       (``prune_ingest_eval_samples``) — a daily, per-run-bounded indexed
       ``DELETE`` of rows past ``INGEST_EVAL_RETENTION_DAYS``.
 
-Each consumer runs as a separate worker container — see
-``docker-compose.yml`` (``worker-documents``, ``worker-triggers``,
-``worker-coedit``, ``worker-lightweight-maintenance``) and
-``app/tasks/run_worker.py``.
+Queues are the *isolation* unit (each its own Redis stream + consumer/thread
+pool); worker **processes** are the *memory* unit and may host several queues
+at once, each as its own consumer. Deployment groups them into two pods —
+``worker-coedit`` (the only real-time path) and ``worker-background`` (the
+rest) — see ``docker-compose.yml``, the ``worker.groups`` values in the helm
+chart, and ``app/tasks/run_worker.py``.
 """
 from __future__ import annotations
 

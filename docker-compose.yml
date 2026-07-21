@@ -91,53 +91,11 @@ services:
       opensearch:
         condition: service_healthy
 
-  # Three workers, one per queue (see backend/app/tasks/queues.py).
-  worker-documents:
-    profiles: ["app"]
-    build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "documents"]
-    env_file: .env
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
-      - REDIS_URL=redis://redis:6379/0
-      - OPENSEARCH_URL=http://opensearch:9200
-      - WIKI_DIR=/data/wiki
-      - DEV_MODE=true
-    volumes:
-      - ./local_data:/data
-    depends_on:
-      backend:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      opensearch:
-        condition: service_healthy
-
-  worker-triggers:
-    profiles: ["app"]
-    build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "triggers"]
-    env_file: .env
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
-      - REDIS_URL=redis://redis:6379/0
-      - OPENSEARCH_URL=http://opensearch:9200
-      - WIKI_DIR=/data/wiki
-      - DEV_MODE=true
-    volumes:
-      - ./local_data:/data
-    depends_on:
-      backend:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      opensearch:
-        condition: service_healthy
-
+  # Two worker pods (see backend/app/tasks/queues.py + run_worker.py). Queues
+  # stay independent (own Redis stream + thread pool); pods are grouped to share
+  # the ~185 MiB Python import-graph floor. `coedit` is the only real-time,
+  # user-visible-freshness path, so it gets its own pod; everything else runs in
+  # one `background` process, each queue as its own consumer.
   worker-coedit:
     profiles: ["app"]
     build: ./backend
@@ -161,33 +119,19 @@ services:
       opensearch:
         condition: service_healthy
 
-  worker-automanage:
+  worker-background:
     profiles: ["app"]
     build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "automanage"]
-    env_file: .env
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
-      - REDIS_URL=redis://redis:6379/0
-      - OPENSEARCH_URL=http://opensearch:9200
-      - WIKI_DIR=/data/wiki
-      - DEV_MODE=true
-    volumes:
-      - ./local_data:/data
-    depends_on:
-      backend:
-        condition: service_started
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      opensearch:
-        condition: service_healthy
-
-  worker-lightweight-maintenance:
-    profiles: ["app"]
-    build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "lightweight_maintenance"]
+    command:
+      [
+        "python",
+        "-m",
+        "app.tasks.run_worker",
+        "documents",
+        "triggers",
+        "automanage",
+        "lightweight_maintenance",
+      ]
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
