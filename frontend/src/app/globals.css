@@ -150,6 +150,24 @@ body {
   display: none;
 }
 
+/* Opal's side-panel regions never scroll themselves, occupants own their
+   scrolling. Without the clip the region computes a few px of phantom
+   scroll area and paints a scrollbar beside the card on classic-scrollbar
+   setups. */
+.opal-root-layout__panel {
+  overflow: clip;
+}
+
+/* The editor hides its scroll chrome per the mocks. The scroll-position
+   tick rail is the intended indicator surface. */
+.cm-scroller {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.cm-scroller::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Doc panel tab transitions ────────────────────────────────────────────
    Enter-only fade + directional slide for the incoming tab surface, matched
    to the underline indicator's travel (DocPanel keys the body by tab). No
