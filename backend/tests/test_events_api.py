@@ -108,3 +108,40 @@ def test_get_event_404s_for_other_owners_event(client):
 
     login_fastapi(client, b)
     assert client.get(f"/api/events/{eid}").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# Admin audit view of automanage.* events                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_admin_sees_automanage_events_on_unowned_paths(client):
+    """Auto Organize auto-applies on paths with no owner — an admin sees those
+    ``automanage.*`` events regardless of ownership (the space-wide audit)."""
+    admin = seed_user("adm", "adm@x.com", is_admin=True)
+    insert_event("automanage.applied", "orphan/folder", {"op": "delete_empty_folder"})
+
+    login_fastapi(client, admin)
+    body = client.get("/api/events").json()
+    targets = [e["target"] for e in body["events"]]
+    assert "orphan/folder" in targets
+
+
+def test_non_admin_does_not_see_automanage_event_on_unowned_path(client):
+    """A non-admin who owns neither the path nor a trigger does not see the
+    auto-applied event — the admin audit clause is admin-only."""
+    user = seed_user("usr", "usr@x.com")
+    insert_event("automanage.applied", "orphan/folder", {"op": "delete_empty_folder"})
+
+    login_fastapi(client, user)
+    assert client.get("/api/events").json()["events"] == []
+
+
+def test_admin_can_fetch_automanage_event_detail(client):
+    """The detail endpoint mirrors the list: an admin can read an automanage
+    event even when the target path isn't a trigger they own."""
+    admin = seed_user("adm", "adm@x.com", is_admin=True)
+    eid = insert_event("automanage.applied", "orphan/folder", {"op": "x"})
+
+    login_fastapi(client, admin)
+    assert client.get(f"/api/events/{eid}").status_code == 200

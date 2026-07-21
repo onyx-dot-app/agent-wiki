@@ -51,14 +51,18 @@ def list_events(
     owned_page_paths = select(WikiOwner.path).where(
         WikiOwner.owner_user_id == user.id
     )
+    visibility = or_(
+        EventRow.target.in_(owned_trigger_ids),
+        EventRow.target.in_(owned_page_paths),
+    )
+    # Auto Organize auto-applies cleanups across the space, often on paths with
+    # no explicit owner — an admin audit concern. So admins additionally see
+    # every ``automanage.*`` event regardless of ownership.
+    if user.is_admin:
+        visibility = or_(visibility, EventRow.kind.like("automanage.%"))
     stmt = (
         select(EventRow)
-        .where(
-            or_(
-                EventRow.target.in_(owned_trigger_ids),
-                EventRow.target.in_(owned_page_paths),
-            )
-        )
+        .where(visibility)
         .order_by(EventRow.id.desc())
         .limit(limit)
     )
@@ -77,6 +81,9 @@ def get_event(event_id: int, user: User = Depends(require_user)) -> Event:
         e = s.get(EventRow, event_id)
         if e is None:
             raise HTTPException(status_code=404, detail="not found")
+        # Admins can read any automanage event (mirrors the list's audit view).
+        if user.is_admin and e.kind.startswith("automanage."):
+            return _to_view(e)
         # Hide cross-owner rows behind a 404 so we don't leak existence.
         if e.target is None:
             raise HTTPException(status_code=404, detail="not found")
