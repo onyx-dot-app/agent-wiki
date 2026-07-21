@@ -122,8 +122,12 @@ def _finalize_applied(
     visible to the approver (they watched the outcome in the review banner), so
     only the silent AI-managed path needs the audit trail. ``path_ids`` maps the
     affected paths to their stable doc ids (captured before mutation)."""
-    change_proposals.mark_applied(p["id"], applied_sha=applied_sha)
-    if p["reviewed_by_user_id"] is None:
+    # `mark_applied` is a conditional approved→applied transition: it returns
+    # False if a concurrent change (reject/expire/stale) already moved the
+    # proposal off `approved`. Only emit the event when the transition actually
+    # happened, so the audit feed can't disagree with the persisted status.
+    applied = change_proposals.mark_applied(p["id"], applied_sha=applied_sha)
+    if applied and p["reviewed_by_user_id"] is None:
         _record_applied_event(p, applied_sha, path_ids)
 
 

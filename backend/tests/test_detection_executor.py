@@ -101,6 +101,24 @@ def test_trashed_folder_owner_still_resolves_at_original_path(repo):
     assert acl.get_owner("keep/gone") == uid  # owner row stayed → event reaches them
 
 
+def test_no_event_when_apply_transition_loses_race(repo):
+    """If the approved→applied transition loses to a concurrent change (the
+    proposal was rejected/expired/stale meanwhile), `mark_applied` returns
+    False — and we must NOT emit `automanage.applied`, or the audit feed would
+    disagree with the persisted status. Drive `_finalize_applied` on a proposal
+    that isn't `approved` so the transition fails."""
+    wiki_git.commit_file("racy/.gitkeep", "", "c", author=None)
+    pid = _proposal_for("racy")  # still pending — never approved
+    p = get(pid)
+    assert p is not None
+    p["reviewed_by_user_id"] = None  # auto-apply shape
+
+    executor._finalize_applied(p, applied_sha="deadbeef", path_ids={"racy": "x"})
+
+    assert get(pid)["status"] == "pending"  # type: ignore[index] # transition didn't happen
+    assert list_events(kind=executor.EVENT_AUTOMANAGE_APPLIED) == []
+
+
 def test_human_approved_delete_records_no_event(repo):
     """A human-approved apply is already visible to the approver (they watched
     the review banner), so it must NOT emit the auto-applied audit event."""
