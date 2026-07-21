@@ -4,8 +4,11 @@
  *
  * The "co-edit session" is the page's *live session*: everyone viewing the
  * page joins it (presence + real-time updates); editing is a capability
- * inside it (`canWrite`), and presence labels participants "viewing" vs
- * "editing" by whether they've actually edited.
+ * inside it (`canWrite`), and presence labels a participant "editing" when
+ * their caret is rendered in the content, "viewing" otherwise — the label is
+ * derived from `peers`, so it can never disagree with the carets on screen.
+ * Nothing is persisted: carets appear from live cursor/op frames and go away
+ * on a clear (editor blur / hidden tab) or when the peer leaves.
  *
  * On `enabled` it joins the session for `path`, streams inbound frames, and
  * exposes presence (`participants`/`typing`/`peers`) and autosave
@@ -124,9 +127,25 @@ export function useCoeditSession(opts: {
     anchor: number;
     head: number;
     typing: boolean;
+    seq: number;
   } | null>(null);
   const lastCursor = useRef<{ anchor: number; head: number } | null>(null);
   const typingIdle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Client-local frame counter stamped onto peer entries (CoeditPeer.seq) so
+  // the editor can tell fresh cursor frames from re-sent array entries.
+  const frameSeq = useRef(0);
+  // Roster mirror for synchronous display-name lookups (the op branch in
+  // `onFrame` needs the author's display to restore their caret). Synced on
+  // join and on presence frames — the only points membership changes.
+  const participantsRef = useRef<CoeditParticipant[]>([]);
+  // Our caret epoch: stamped fresh on every place/clear transition and
+  // echoed on movement pings and ops, so peers can drop reordered stale
+  // frames. Wall-clock based (monotonicized) — stays ordered across
+  // reconnects and tabs without any server-side state.
+  const caretEpoch = useRef(0);
+  const caretPlaced = useRef(false);
+  // Latest caret epoch seen per peer — frames from older epochs are dropped.
+  const peerCaretSeq = useRef<Map<string, number>>(new Map());
   // Inbound: per-peer expiry timers so a silent "typing" peer clears.
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
@@ -200,19 +219,34 @@ export function useCoeditSession(opts: {
       // Cursor broadcasts are writes (the endpoint is write-gated); a pure
       // viewer's caret stays local.
       if (sessionId.current === null || !canWrite) return;
+      // Reporting a position places the caret — a transition (first placement
+      // or a refocus after a clear) opens a new epoch.
+      if (!caretPlaced.current) {
+        caretEpoch.current = Math.max(Date.now(), caretEpoch.current + 1);
+        caretPlaced.current = true;
+      }
       lastCursor.current = { anchor, head };
       // A caret move (isEdit=false) must not clobber the "typing…" a recent edit
       // set — browsers fire `select` right after every `input`, so onSelect
       // lands one keystroke behind onChange. Derive typing from the idle timer.
       const isTyping = isEdit || typingIdle.current !== null;
-      pendingCursor.current = { anchor, head, typing: isTyping };
+      pendingCursor.current = {
+        anchor,
+        head,
+        typing: isTyping,
+        seq: caretEpoch.current,
+      };
       const send = () => {
         const c = pendingCursor.current;
         pendingCursor.current = null;
         if (c && sessionId.current !== null) {
-          void sendCursor(sessionId.current, c.anchor, c.head, c.typing).catch(
-            () => {},
-          );
+          void sendCursor(
+            sessionId.current,
+            c.anchor,
+            c.head,
+            c.typing,
+            c.seq,
+          ).catch(() => {});
         }
       };
       if (!cursorThrottle.current) {
@@ -228,9 +262,13 @@ export function useCoeditSession(opts: {
           typingIdle.current = null;
           const lc = lastCursor.current;
           if (sessionId.current !== null && lc) {
-            void sendCursor(sessionId.current, lc.anchor, lc.head, false).catch(
-              () => {},
-            );
+            void sendCursor(
+              sessionId.current,
+              lc.anchor,
+              lc.head,
+              false,
+              caretEpoch.current,
+            ).catch(() => {});
           }
         }, TYPING_IDLE_MS);
       }
@@ -238,27 +276,76 @@ export function useCoeditSession(opts: {
     [canWrite],
   );
 
+  const reportCaretCleared = useCallback(() => {
+    if (sessionId.current === null || !canWrite) return;
+    // Clearing a placed caret opens a new epoch, so any still-in-flight
+    // place/op frame from the old epoch is dropped by peers.
+    if (caretPlaced.current) {
+      caretEpoch.current = Math.max(Date.now(), caretEpoch.current + 1);
+      caretPlaced.current = false;
+    }
+    // Drop any queued position first — a throttled send landing after the
+    // clear would resurrect the caret.
+    pendingCursor.current = null;
+    lastCursor.current = null;
+    if (typingIdle.current) {
+      clearTimeout(typingIdle.current);
+      typingIdle.current = null;
+    }
+    // Immediate (clears are rare) + keepalive so the hidden-tab clear
+    // survives the page backgrounding.
+    void sendCursor(sessionId.current, null, null, false, caretEpoch.current, {
+      keepalive: true,
+    }).catch(() => {});
+  }, [canWrite]);
+
+  const getCaretSeq = useCallback(
+    () => (caretPlaced.current ? caretEpoch.current : null),
+    [],
+  );
+
   const onFrame = useCallback(
     (frame: CoeditFrame) => {
       if (frame.type === "presence") {
+        participantsRef.current = frame.participants;
         setParticipants(frame.participants);
         const ids = new Set(frame.participants.map((p) => p.user_id));
         setPeers((prev) => prev.filter((p) => ids.has(p.user_id)));
         setTyping((prev) => prev.filter((u) => ids.has(u)));
+        // Prune departed users from the per-peer epoch guard.
+        for (const uid of peerCaretSeq.current.keys()) {
+          if (!ids.has(uid)) peerCaretSeq.current.delete(uid);
+        }
         return;
       }
       if (frame.type === "cursor") {
         if (myUserId !== null && frame.user_id === myUserId) return;
         const uid = frame.user_id;
-        setPeers((prev) => [
-          ...prev.filter((p) => p.user_id !== uid),
-          {
-            user_id: uid,
-            user_display: frame.user_display,
-            anchor: frame.anchor,
-            head: frame.head,
-          },
-        ]);
+        // Drop frames from an older caret epoch — a place broadcast that was
+        // reordered behind a newer clear (or vice versa) must not apply.
+        if (frame.seq !== null) {
+          const known = peerCaretSeq.current.get(uid) ?? 0;
+          if (frame.seq < known) return;
+          peerCaretSeq.current.set(uid, frame.seq);
+        }
+        const anchor = frame.anchor;
+        const head = frame.head;
+        if (anchor === null || head === null) {
+          // The peer cleared their caret (editor blur / hidden tab).
+          setPeers((prev) => prev.filter((p) => p.user_id !== uid));
+        } else {
+          frameSeq.current += 1;
+          setPeers((prev) => [
+            ...prev.filter((p) => p.user_id !== uid),
+            {
+              user_id: uid,
+              user_display: frame.user_display,
+              anchor,
+              head,
+              seq: frameSeq.current,
+            },
+          ]);
+        }
         const existing = typingTimers.current.get(uid);
         if (existing) clearTimeout(existing);
         typingTimers.current.delete(uid);
@@ -276,17 +363,46 @@ export function useCoeditSession(opts: {
         }
         return;
       }
-      // The roster's last_edited_at only refreshes on join/leave presence
-      // frames, so bump the author's locally from each op — their "editing"
-      // label flips in real time instead of waiting for a roster broadcast.
-      if (frame.type === "op" && frame.author !== null) {
+      // An op carrying a caret epoch asserts caret placement, and the op
+      // itself says where: the end of its last change, in post-edit
+      // coordinates. Rendering the author's caret from it is what flips their
+      // label too (the label IS the rendered caret), so a lost cursor frame
+      // can't leave an active editor unlabeled. Gated on the epoch like
+      // cursor frames — a stale op must not resurrect a cleared caret — and
+      // skipped when the op makes no caret assertion (caret_seq null, e.g. a
+      // teardown flush after blur).
+      if (
+        frame.type === "op" &&
+        frame.author !== null &&
+        frame.caret_seq !== null &&
+        frame.caret_seq >= (peerCaretSeq.current.get(frame.author) ?? 0)
+      ) {
         const author = frame.author;
-        const nowIso = new Date().toISOString();
-        setParticipants((prev) =>
-          prev.map((p) =>
-            p.user_id === author ? { ...p, last_edited_at: nowIso } : p,
-          ),
-        );
+        peerCaretSeq.current.set(author, frame.caret_seq);
+        const display =
+          myUserId !== null && author === myUserId
+            ? undefined // never render self as a peer
+            : participantsRef.current.find((p) => p.user_id === author)
+                ?.user_display;
+        if (display !== undefined && frame.changes.length > 0) {
+          let delta = 0;
+          let caret = 0;
+          for (const c of frame.changes) {
+            caret = c.from + delta + c.insert.length;
+            delta += c.insert.length - (c.to - c.from);
+          }
+          frameSeq.current += 1;
+          setPeers((prev) => [
+            ...prev.filter((p) => p.user_id !== author),
+            {
+              user_id: author,
+              user_display: display,
+              anchor: caret,
+              head: caret,
+              seq: frameSeq.current,
+            },
+          ]);
+        }
       }
       // op / resync → the editor's collab layer applies + rebases.
       serverFrame.current?.(frame);
@@ -312,6 +428,9 @@ export function useCoeditSession(opts: {
     for (const t of typingTimers.current.values()) clearTimeout(t);
     typingTimers.current.clear();
     pendingCursor.current = null;
+    lastCursor.current = null;
+    caretPlaced.current = false;
+    peerCaretSeq.current.clear();
     setTyping([]);
     setPeers([]);
     sessionId.current = null;
@@ -354,7 +473,9 @@ export function useCoeditSession(opts: {
       if (cancelled) return;
       sessionId.current = snap.session_id;
       setBuffer(snap.buffer);
+      participantsRef.current = snap.participants;
       setParticipants(snap.participants);
+      caretPlaced.current = false;
       setSession({
         id: snap.session_id,
         clientId: clientId.current,
@@ -433,7 +554,9 @@ export function useCoeditSession(opts: {
 
   // Best-effort checkpoint when the tab is backgrounded/closed — `keepalive`
   // lets the request survive the page tearing down. Covers the gap between
-  // the last edit and the idle-autosave timer firing.
+  // the last edit and the idle-autosave timer firing. A hidden tab also
+  // clears our caret: the user isn't positioned to edit anymore, and CM blur
+  // doesn't fire reliably on tab switches.
   useEffect(() => {
     if (!active) return;
     const checkpointNow = () => {
@@ -442,7 +565,10 @@ export function useCoeditSession(opts: {
       void checkpointSession(sid, { keepalive: true }).catch(() => {});
     };
     const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") checkpointNow();
+      if (document.visibilityState === "hidden") {
+        checkpointNow();
+        reportCaretCleared();
+      }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pagehide", checkpointNow);
@@ -450,7 +576,7 @@ export function useCoeditSession(opts: {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", checkpointNow);
     };
-  }, [active, canWrite]);
+  }, [active, canWrite, reportCaretCleared]);
 
   return {
     active,
@@ -468,5 +594,7 @@ export function useCoeditSession(opts: {
     registerSetDoc,
     setDoc,
     reportSelection,
+    reportCaretCleared,
+    getCaretSeq,
   };
 }

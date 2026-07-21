@@ -876,6 +876,7 @@ export function FileView({ path }: FileViewProps) {
                 />
                 <CoeditPresenceBar
                   participants={coedit.participants}
+                  peers={coedit.peers}
                   typing={coedit.typing}
                   selfUserId={user?.id ?? null}
                 />
@@ -912,6 +913,8 @@ export function FileView({ path }: FileViewProps) {
                   session={coedit.session}
                   peers={coedit.peers}
                   onSelectionChange={coedit.reportSelection}
+                  onCaretCleared={coedit.reportCaretCleared}
+                  getCaretSeq={coedit.getCaretSeq}
                   onServerFrame={coedit.onServerFrame}
                   reportDoc={coedit.reportDoc}
                   registerFlush={coedit.registerFlush}

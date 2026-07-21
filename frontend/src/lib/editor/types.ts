@@ -8,8 +8,9 @@ export interface CoeditChange {
 }
 
 /** A session participant as returned by join / presence frames. The live
- * session is joined by everyone on the page; `last_edited_at` (null until the
- * participant applies an edit op) is what separates editors from viewers. */
+ * session is joined by everyone on the page. The "editing"/"viewing" label
+ * is NOT carried here — it derives from `CoeditPeer` (a rendered caret IS
+ * the editing state), so the roster is membership + display names only. */
 export interface CoeditParticipant {
   user_id: string;
   user_display: string;
@@ -19,12 +20,17 @@ export interface CoeditParticipant {
 }
 
 /** A peer's live caret/selection, from their latest `cursor` frame. Offsets are
- * UTF-16 code units (JS-native), collapsed (anchor === head) = caret. */
+ * UTF-16 code units (JS-native), collapsed (anchor === head) = caret. `seq` is
+ * a client-local counter bumped per received frame — it lets the editor tell a
+ * fresh frame (adopt its raw offsets) from an entry merely re-sent when the
+ * peer array was rebuilt (keep the position it has mapped through doc
+ * changes). */
 export interface CoeditPeer {
   user_id: string;
   user_display: string;
   anchor: number;
   head: number;
+  seq: number;
 }
 
 /** Snapshot returned by join / session (the live buffer + roster). */
@@ -46,15 +52,23 @@ export type CoeditFrame =
       changes: CoeditChange[];
       author: string | null;
       client_id: string | null;
+      // The author's caret epoch when placed — an edit asserts caret
+      // placement at that epoch. Null = no caret assertion.
+      caret_seq: number | null;
     }
   | {
       type: "cursor";
       session_id: number;
       user_id: string;
       user_display: string;
-      anchor: number;
-      head: number;
+      // Null anchor/head = the sender cleared their caret (editor blur /
+      // hidden tab) — drop it and flip their presence label to "viewing".
+      anchor: number | null;
+      head: number | null;
       typing: boolean;
+      // Sender's caret epoch: frames older than the latest epoch seen for
+      // this user are dropped, so reordered place/clear can't apply stale.
+      seq: number | null;
     }
   | { type: "resync"; session_id: number; version: number };
 
@@ -122,4 +136,13 @@ export interface UseCoeditSession {
    * marks "typing…" + arms its auto-clear; `isEdit=false` (a caret move) reports
    * position without changing the typing state. Throttled + coalesced. */
   reportSelection: (anchor: number, head: number, isEdit: boolean) => void;
+  /** Report that the local caret is gone (editor blur / hidden tab) — peers
+   * drop it and presence flips us to "viewing". Sent immediately (clears are
+   * rare), dropping any queued position so a throttled send can't resurrect
+   * the caret. */
+  reportCaretCleared: () => void;
+  /** The current caret epoch while our caret is placed, else null. Ops carry
+   * it so an edit asserts caret placement with the same ordering guarantees
+   * as cursor writes (null = the op makes no caret assertion). */
+  getCaretSeq: () => number | null;
 }
