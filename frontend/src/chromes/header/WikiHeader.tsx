@@ -83,7 +83,6 @@ function FoldedCrumb({
 export function WikiHeader() {
   const router = useRouter();
   const { view, toggleTree } = useLeftPanel();
-  const treeVisible = view === "wiki-tree";
   const { wikiPath } = useAppFocus();
   const host = useHeaderActionsHost();
   const crumbHost = useHeaderCrumbHost();
@@ -121,9 +120,11 @@ export function WikiHeader() {
 
   return (
     <div className="flex h-13 items-center gap-3 px-2">
-      {/* The expand control lives here only while the tree is closed. When
-          open, the collapse control sits in the tree panel's own header. */}
-      {!treeVisible && (
+      {/* The expand control shows only while no left panel is open. The
+          tree's collapse control sits in its own header, and while the
+          activities panel occupies the slot a tree toggle would flip state
+          invisibly underneath it. */}
+      {view === null && (
         <Button
           icon={SvgListTree}
           prominence="tertiary"
