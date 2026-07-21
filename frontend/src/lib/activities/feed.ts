@@ -59,7 +59,12 @@ export function useActivityFeed() {
     items,
     unreadCount: items.filter((i) => i.unread).length,
     isLoading: ev.isLoading || nf.isLoading,
-    error: ev.error ?? nf.error,
+    // Split so consumers can tell "everything failed" from "the feed is
+    // partial": one side failing coerces to [] and the merged list would
+    // otherwise look complete.
+    eventsError: ev.error,
+    notificationsError: nf.error,
+    refreshNotifications: nf.refresh,
     refresh: async () => {
       await Promise.all([ev.refresh(), nf.refresh()]);
     },

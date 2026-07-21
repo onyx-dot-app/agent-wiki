@@ -1,7 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { Button, Divider, Tag, Text } from "@onyx-ai/opal/components";
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  Button,
+  Divider,
+  LineItemButton,
+  Tag,
+  Text,
+} from "@onyx-ai/opal/components";
 import { SvgEmpty, SvgNotFound } from "@onyx-ai/opal/illustrations";
 import {
   SvgActivity,
@@ -25,6 +33,7 @@ import {
   type NotificationView,
 } from "@/lib/notifications";
 import { useAuth } from "@/lib/auth";
+import { toast } from "@/hooks/useToast";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 
 interface ActivityPayload {
@@ -192,8 +201,14 @@ function UnreadBadge({ unread }: { unread: boolean }) {
 
 /** One feed row (mock Activity 37:131140 expanded / 37:133188 collapsed):
  *  scope tag + workflow glyph + avatars + time + badge over a body line
- *  that expands from a bold one-liner to the full detail paragraph. */
+ *  that expands from a bold one-liner to the full detail paragraph.
+ *
+ *  Mounting an unread notification reads it (the panel being open is the
+ *  seen signal, like the bell dropdown it replaces). The visible unread
+ *  state stays put until the panel's close-time refresh so rows never
+ *  jump sections mid-read. Clicking a linked notification navigates. */
 function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
+  const router = useRouter();
   const { chipScope, prefix, subject, body, destinationTypes } =
     itemTexts(item);
   const [override, setOverride] = useState<boolean | null>(null);
@@ -201,23 +216,64 @@ function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
   // read ones collapsed. The chevron overrides.
   const open = override ?? (item.unread && body !== null);
 
-  const toggle = () => {
-    setOverride(!open);
-    // Expanding an unread notification is reading it: the server flips
-    // dismissed, and the row drifts to "Older" on the next revalidation
-    // rather than jumping mid-read.
-    if (item.kind === "notification" && !item.notification.dismissed && !open) {
-      void dismissNotification(item.notification.id);
-    }
+  const link =
+    item.kind === "notification" ? notifLink(item.notification) : null;
+
+  useEffect(() => {
+    if (item.kind !== "notification" || item.notification.dismissed) return;
+    dismissNotification(item.notification.id).catch(() => {
+      toast.error("Couldn't mark a notification as read.");
+    });
+    // The id is stable for the row's lifetime, so this runs once per view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toggle = () => setOverride(!open);
+  // The body line's primary action: follow the notification's link when it
+  // has one, otherwise expand or collapse in place.
+  const activate = () => {
+    if (link) router.push(link);
+    else if (body) toggle();
   };
 
   const oneLiner = prefix ? `${prefix} **${subject}**` : `**${subject}**`;
 
   return (
-    <div className="flex w-full shrink-0 flex-col rounded-(--radius-08) p-1">
-      <div className="flex w-full items-center p-[2px]">
-        <div className="flex min-w-0 flex-1 items-center gap-1 p-[2px]">
-          <ScopeChip scope={chipScope} />
+    <Section
+      justifyContent="start"
+      alignItems="stretch"
+      height="fit"
+      gap={0}
+      padding={0.25}
+      className="shrink-0 rounded-(--radius-08)"
+    >
+      <Section
+        flexDirection="row"
+        justifyContent="start"
+        alignItems="center"
+        height="fit"
+        gap={0}
+        padding={0.125}
+      >
+        <Section
+          flexDirection="row"
+          justifyContent="start"
+          alignItems="center"
+          height="fit"
+          gap={0.25}
+          padding={0.125}
+          className="min-w-0 flex-1"
+        >
+          {chipScope ? (
+            <Link
+              href={`/app/wiki/${chipScope}`}
+              className="flex min-w-0 shrink items-center"
+            >
+              <ScopeChip scope={chipScope} />
+            </Link>
+          ) : (
+            <ScopeChip scope={chipScope} />
+          )}
           <span className="flex size-4 shrink-0 items-center justify-center p-[2px]">
             {item.kind === "event" && item.event.kind === "trigger.fire" ? (
               <SvgWorkflow className="size-3 text-(--text-02)" />
@@ -235,21 +291,41 @@ function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
             }
             destinationTypes={destinationTypes}
           />
-        </div>
-        <div className="flex shrink-0 items-center gap-1 p-[2px]">
+        </Section>
+        <Section
+          flexDirection="row"
+          justifyContent="end"
+          alignItems="center"
+          width="fit"
+          height="fit"
+          gap={0.25}
+          padding={0.125}
+        >
           <Text font="secondary-body" color="text-03" nowrap>
             {timeAgo(item.iso) ?? ""}
           </Text>
           <UnreadBadge unread={item.unread} />
-        </div>
-      </div>
-      <div className="flex w-full items-start gap-[2px] p-1 pt-0">
+        </Section>
+      </Section>
+      <Section
+        flexDirection="row"
+        justifyContent="start"
+        alignItems="start"
+        height="fit"
+        gap={0.125}
+        padding={0.25}
+      >
         {open && body ? (
           <>
-            <div className="min-w-0 flex-1 px-[2px]">
-              <Text font="main-ui-body" color="text-03">
-                {markdown(body)}
-              </Text>
+            <div className="min-w-0 flex-1">
+              <LineItemButton
+                title={markdown(body)}
+                sizePreset="secondary"
+                variant="body"
+                state="empty"
+                width="full"
+                onClick={activate}
+              />
             </div>
             <Button
               icon={SvgChevronUp}
@@ -261,12 +337,16 @@ function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
           </>
         ) : (
           <>
-            <div className="flex min-w-0 flex-1 items-center py-[2px]">
-              <span className="min-w-0 px-[2px]">
-                <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
-                  {markdown(oneLiner)}
-                </Text>
-              </span>
+            <div className="min-w-0 flex-1">
+              <LineItemButton
+                title={markdown(oneLiner)}
+                titleMaxLines={1}
+                sizePreset="secondary"
+                variant="body"
+                state="empty"
+                width="full"
+                onClick={activate}
+              />
             </div>
             {body && (
               <Button
@@ -279,8 +359,8 @@ function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
             )}
           </>
         )}
-      </div>
-    </div>
+      </Section>
+    </Section>
   );
 }
 
@@ -292,6 +372,13 @@ export default function ActivitiesPanel() {
   const ownerName = user?.name || user?.email || "?";
   const [query, setQuery] = useState("");
   const feed = useActivityFeed();
+  const refreshNotifications = feed.refreshNotifications;
+
+  // Rows read themselves on view but the visible unread state stays put;
+  // revalidating on close makes the next open show them under "Older".
+  useEffect(() => () => void refreshNotifications(), [refreshNotifications]);
+
+  const anyError = feed.eventsError ?? feed.notificationsError;
 
   const filtered = query
     ? feed.items.filter((i) => itemHaystack(i).includes(query.toLowerCase()))
@@ -302,15 +389,28 @@ export default function ActivitiesPanel() {
   return (
     <div className="left-panel-card gap-1">
       {/* Title Line (36px): title, unread tag, close. */}
-      <div className="flex shrink-0 items-start gap-1">
-        <div className="min-w-0 flex-1 p-2 text-(--text-04)">
+      <Section
+        flexDirection="row"
+        justifyContent="start"
+        alignItems="start"
+        height="fit"
+        gap={0.25}
+        className="shrink-0"
+      >
+        <Section
+          height="fit"
+          alignItems="start"
+          gap={0}
+          padding={0.5}
+          className="min-w-0 flex-1 text-(--text-04)"
+        >
           <Content
             sizePreset="main-ui"
             variant="section"
             icon={SvgActivity}
             title="Activity History"
           />
-        </div>
+        </Section>
         {feed.unreadCount > 0 && (
           <span className="flex shrink-0 items-center px-1 py-[6px]">
             <Tag title={`${feed.unreadCount} new`} color="blue" size="md" />
@@ -322,17 +422,24 @@ export default function ActivitiesPanel() {
           tooltip="Close Panel"
           onClick={toggleActivities}
         />
-      </div>
+      </Section>
 
       {/* Actions Bar (36px): search plus the mock's reserved action slot. */}
-      <div className="flex shrink-0 items-center gap-1">
+      <Section
+        flexDirection="row"
+        justifyContent="start"
+        alignItems="center"
+        height="fit"
+        gap={0.25}
+        className="shrink-0"
+      >
         <PanelSearchField
           value={query}
           onChange={setQuery}
           placeholder="Search activity history…"
         />
         <span aria-hidden className="size-9 shrink-0" />
-      </div>
+      </Section>
 
       {/* Feed: no visible scrollbar, bottom fade from the mock's Mask. */}
       <Section
@@ -344,22 +451,49 @@ export default function ActivitiesPanel() {
       >
         {feed.isLoading && <LoadingSpinner center />}
 
-        {!feed.isLoading && feed.items.length === 0 && (
-          <div className="flex h-full items-center justify-center">
+        {/* A fetch failure must not masquerade as an empty account, and a
+            half-failed feed must not look complete. */}
+        {!feed.isLoading && feed.items.length === 0 && anyError && (
+          <Section>
+            <IllustrationContent
+              illustration={SvgNotFound}
+              title="Couldn't load activity."
+            />
+          </Section>
+        )}
+
+        {!feed.isLoading && feed.items.length > 0 && anyError && (
+          <Section
+            flexDirection="row"
+            justifyContent="start"
+            height="fit"
+            gap={0}
+            padding={0.25}
+          >
+            <Text font="secondary-body" color="text-03">
+              {feed.notificationsError
+                ? "Couldn't load notifications, showing activity only."
+                : "Couldn't load activity events, showing notifications only."}
+            </Text>
+          </Section>
+        )}
+
+        {!feed.isLoading && feed.items.length === 0 && !anyError && (
+          <Section>
             <IllustrationContent
               illustration={SvgEmpty}
               title="No activity yet."
             />
-          </div>
+          </Section>
         )}
 
         {!feed.isLoading && feed.items.length > 0 && filtered.length === 0 && (
-          <div className="flex h-full items-center justify-center">
+          <Section>
             <IllustrationContent
               illustration={SvgNotFound}
               title="No matching activity found."
             />
-          </div>
+          </Section>
         )}
 
         {fresh.length > 0 && (
