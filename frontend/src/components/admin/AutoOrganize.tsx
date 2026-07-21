@@ -7,18 +7,44 @@ import { SvgSliders } from "@onyx-ai/opal/icons";
 import { ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
 
 import {
-  type AutoOrganizeSettings,
+  type AutoOrganizeSchedule,
   triggerSweep,
-  updateAutoOrganizeEnabled,
+  updateAutoOrganizeSettings,
   useAutoOrganizeSettings,
 } from "@/lib/autoOrganize";
 
 export function AutoOrganize() {
   const { settings, isLoading, error, refresh } = useAutoOrganizeSettings();
   // Fail safe until the real setting loads: an unknown/failed state shows the
-  // switch off and keeps "Run a sweep" disabled, so an admin can't fire a
-  // sweep that the backend would 409 when the persisted setting is disabled.
+  // feature off (switch off, schedule Off, sweep disabled), so an admin can't
+  // act on a state the backend would reject.
   const enabled = settings?.enabled ?? false;
+  const schedule: AutoOrganizeSchedule = settings?.schedule ?? "off";
+
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  async function update(patch: {
+    enabled?: boolean;
+    schedule?: AutoOrganizeSchedule;
+  }) {
+    setBusy(true);
+    setSaveError(null);
+    try {
+      // Seed the cache from the PUT's authoritative response (no revalidating
+      // GET) so a rapid second change can't be clobbered by a stale in-flight
+      // read.
+      await refresh(await updateAutoOrganizeSettings(patch), {
+        revalidate: false,
+      });
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "failed to update setting");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const message = saveError || (error instanceof Error ? error.message : null);
 
   return (
     <div className="flex w-full flex-col gap-4">
@@ -27,69 +53,78 @@ export function AutoOrganize() {
         folders). Cleanups in AI-managed scopes are applied automatically;
         others are proposed for review.
       </Text>
-      <EnabledToggle
-        enabled={enabled}
-        loading={isLoading}
-        loadError={error instanceof Error ? error.message : null}
-        onUpdated={(next) => void refresh(next, { revalidate: false })}
-      />
+
+      <Card padding="xs" rounding="md" border="solid" background="heavy">
+        <div className="flex w-full flex-col gap-1 p-1">
+          <ContentAction
+            sizePreset="main-ui"
+            variant="section"
+            icon={SvgSliders}
+            title="Auto Organize"
+            description="Master switch. When off, no sweeps run, nothing is auto-applied, and pending proposals are frozen."
+            rightChildren={
+              <Switch
+                checked={enabled}
+                disabled={isLoading || busy}
+                onCheckedChange={(next) => void update({ enabled: next })}
+              />
+            }
+          />
+          <ContentAction
+            sizePreset="main-ui"
+            variant="section"
+            icon={SvgSliders}
+            title="Automatic sweeps"
+            description="Run a scheduled whole-wiki sweep. Daily and weekly run at a fixed off-peak time (UTC)."
+            rightChildren={
+              <ScheduleSelector
+                value={schedule}
+                disabled={!enabled || isLoading || busy}
+                onChange={(next) => void update({ schedule: next })}
+              />
+            }
+          />
+          {message && <InputErrorText type="error">{message}</InputErrorText>}
+        </div>
+      </Card>
+
       <SweepControl disabled={!enabled} />
     </div>
   );
 }
 
-interface EnabledToggleProps {
-  enabled: boolean;
-  loading: boolean;
-  loadError: string | null;
-  onUpdated: (next: AutoOrganizeSettings) => void;
+const SCHEDULE_OPTIONS: { value: AutoOrganizeSchedule; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+];
+
+interface ScheduleSelectorProps {
+  value: AutoOrganizeSchedule;
+  disabled: boolean;
+  onChange: (next: AutoOrganizeSchedule) => void;
 }
 
-function EnabledToggle({
-  enabled,
-  loading,
-  loadError,
-  onUpdated,
-}: EnabledToggleProps) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const message = loadError || error;
-
-  async function toggle(next: boolean) {
-    setBusy(true);
-    setError(null);
-    try {
-      // Seed the cache from the PUT's authoritative response (no revalidating
-      // GET) so a rapid second toggle can't be clobbered by a stale in-flight
-      // read.
-      onUpdated(await updateAutoOrganizeEnabled(next));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "failed to update setting");
-    } finally {
-      setBusy(false);
-    }
-  }
-
+function ScheduleSelector({
+  value,
+  disabled,
+  onChange,
+}: ScheduleSelectorProps) {
   return (
-    <Card padding="xs" rounding="md" border="solid" background="heavy">
-      <div className="flex w-full flex-col gap-1 p-1">
-        <ContentAction
-          sizePreset="main-ui"
-          variant="section"
-          icon={SvgSliders}
-          title="Auto Organize"
-          description="Master switch. When off, no sweeps run, nothing is auto-applied, and pending proposals are frozen."
-          rightChildren={
-            <Switch
-              checked={enabled}
-              disabled={loading || busy}
-              onCheckedChange={(next) => void toggle(next)}
-            />
-          }
-        />
-        {message && <InputErrorText type="error">{message}</InputErrorText>}
-      </div>
-    </Card>
+    <div className="flex items-center gap-1">
+      {SCHEDULE_OPTIONS.map((opt) => (
+        <Button
+          key={opt.value}
+          type="button"
+          size="sm"
+          prominence={opt.value === value ? "primary" : "secondary"}
+          disabled={disabled}
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.label}
+        </Button>
+      ))}
+    </div>
   );
 }
 
