@@ -38,6 +38,7 @@ import {
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
+import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { WikiHome } from "@/components/wiki/WikiHome";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { StartNewPage } from "@/components/wiki/StartNewPage";
@@ -440,6 +441,10 @@ function Explorer({ dir }: ExplorerProps) {
             setTriggerStatus(`Created trigger for ${t.scope_path}`)
           }
         />
+
+        {/* Auto Organize review banner for this folder's subtree (not root —
+            a wiki-wide review is the admin queue's job). */}
+        {dir && <Path2ReviewBanner path={dir} />}
 
         {triggerStatus && (
           <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
