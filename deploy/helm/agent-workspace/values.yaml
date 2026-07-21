@@ -125,20 +125,26 @@ backend:
     periodSeconds: 10
 
 worker:
-  # One Deployment is created per queue; replicaCount applies per queue.
+  # One Deployment per group; replicaCount applies per group.
   # Keep at 1 — backend + worker pods share an RWO wiki-data PVC and must
-  # co-schedule, AND the per-queue periodic-task scheduler runs in-process
-  # (running multiple replicas would double-fire the cron tasks).
+  # co-schedule, AND the in-process periodic-task scheduler would double-fire
+  # cron tasks across multiple replicas.
   replicaCount: 1
-  # Five Redis Stream queues, one consumer process each. Match
-  # `backend/app/tasks/queues.py:QUEUES` (and the $metricsPorts dict in
-  # worker-deployment.yaml). Adding one requires corresponding code.
-  queues:
-    - documents
-    - triggers
-    - coedit
-    - detection
-    - lightweight_maintenance
+  # Worker groups: each Deployment runs one process consuming the listed queues,
+  # each as its own consumer (thread pool) — queues stay isolated (separate Redis
+  # streams) while sharing one process's memory floor. Every queue name must
+  # exist in `backend/app/tasks/queues.py:QUEUES`; `metricsPort` must equal the
+  # lowest run_worker `_METRICS_PORT` among the group's queues (run_worker binds
+  # that port). Split by blast risk: `heavy` quarantines the LLM-bound work so an
+  # OOM can't take down the `light` tenants (real-time coedit, interactive
+  # executes, fast maintenance).
+  groups:
+    - name: heavy
+      queues: [documents, triggers, automanage_offline]
+      metricsPort: 9091
+    - name: light
+      queues: [coedit, automanage_nearline, lightweight_maintenance]
+      metricsPort: 9093
   resources:
     requests:
       cpu: 100m

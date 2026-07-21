@@ -101,7 +101,8 @@ def test_task_queue_collector_labels_every_queue(monkeypatch):
         "documents",
         "triggers",
         "coedit",
-        "detection",
+        "automanage_offline",
+        "automanage_nearline",
         "lightweight_maintenance",
     }
     assert all(s.value == 2 for s in depth.samples)

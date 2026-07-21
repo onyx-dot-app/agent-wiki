@@ -1,22 +1,25 @@
 {{- /*
-One Deployment per queue. The backend's `app.tasks.run_worker`
-requires a queue argument (`documents`, `triggers`, `coedit`,
-`detection`, or `lightweight_maintenance`), and each queue gets its own
-consumer process to keep slow LLM doc work from backpressuring fast paths
-like the BM25 reindex, co-edit checkpoints, or agent-activity cleanup.
+One Deployment per worker group. The backend's `app.tasks.run_worker` takes one
+or more queue names and runs each as its own consumer (thread pool) in a single
+process — queues stay isolated (separate Redis streams) while a group shares one
+process's memory floor. Groups are defined in `.Values.worker.groups`; queue
+names must exist in `backend/app/tasks/queues.py:QUEUES`, and `metricsPort` must
+equal the lowest run_worker `_METRICS_PORT` among the group's queues (run_worker
+binds that port).
 */ -}}
-{{- /* Per-queue Prometheus port — must match _METRICS_PORT in app/tasks/run_worker.py. */ -}}
-{{- $metricsPorts := dict "documents" 9091 "triggers" 9092 "lightweight_maintenance" 9093 "coedit" 9094 "detection" 9095 -}}
-{{- range $queue := .Values.worker.queues }}
+{{- if not .Values.worker.groups }}
+{{- fail "worker.groups must be configured; migrate the legacy worker.queues setting before upgrading" }}
+{{- end }}
+{{- range $group := .Values.worker.groups }}
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "agent-workspace.fullname" $ }}-worker-{{ $queue | replace "_" "-" }}
+  name: {{ include "agent-workspace.fullname" $ }}-worker-{{ $group.name | replace "_" "-" }}
   labels:
     {{- include "agent-workspace.labels" $ | nindent 4 }}
     app.kubernetes.io/component: worker
-    agent-workspace.onyx.app/queue: {{ $queue }}
+    agent-workspace.onyx.app/worker-group: {{ $group.name }}
 spec:
   replicas: {{ $.Values.worker.replicaCount }}
   # The worker mounts the same RWO wiki-data PVC as the backend; Recreate
@@ -29,13 +32,13 @@ spec:
       app.kubernetes.io/name: {{ include "agent-workspace.name" $ }}
       app.kubernetes.io/instance: {{ $.Release.Name }}
       app.kubernetes.io/component: worker
-      agent-workspace.onyx.app/queue: {{ $queue }}
+      agent-workspace.onyx.app/worker-group: {{ $group.name }}
   template:
     metadata:
       labels:
         {{- include "agent-workspace.labels" $ | nindent 8 }}
         app.kubernetes.io/component: worker
-        agent-workspace.onyx.app/queue: {{ $queue }}
+        agent-workspace.onyx.app/worker-group: {{ $group.name }}
     spec:
       serviceAccountName: {{ include "agent-workspace.serviceAccountName" $ }}
       {{- with $.Values.imagePullSecrets }}
@@ -46,9 +49,9 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- /* The relevance filter runs only in the documents worker; fetch the */ -}}
-      {{- /* warm model only there, and only when one is configured.           */ -}}
-      {{- $relevanceModel := and (eq $queue "documents") (not (empty $.Values.ingestRelevance.twoTower.s3Uri)) }}
+      {{- /* The relevance filter runs only where the documents queue lives;   */ -}}
+      {{- /* fetch the warm model only there, and only when one is configured.  */ -}}
+      {{- $relevanceModel := and (has "documents" $group.queues) (not (empty $.Values.ingestRelevance.twoTower.s3Uri)) }}
       {{- $modelPath := printf "%s/model.onnx" $.Values.ingestRelevance.twoTower.mountPath }}
       {{- if $relevanceModel }}
       initContainers:
@@ -77,10 +80,16 @@ spec:
         - name: worker
           image: "{{ $.Values.image.backend.repository }}:{{ $.Values.image.backend.tag }}"
           imagePullPolicy: {{ $.Values.image.backend.pullPolicy }}
-          command: ["python", "-m", "app.tasks.run_worker", {{ $queue | quote }}]
+          command:
+            - python
+            - -m
+            - app.tasks.run_worker
+            {{- range $q := $group.queues }}
+            - {{ $q | quote }}
+            {{- end }}
           ports:
             - name: metrics
-              containerPort: {{ index $metricsPorts $queue }}
+              containerPort: {{ required (printf "worker group %q requires metricsPort" $group.name) $group.metricsPort }}
               protocol: TCP
           {{- with $.Values.securityContext }}
           securityContext:
