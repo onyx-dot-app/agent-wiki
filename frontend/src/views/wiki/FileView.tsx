@@ -44,6 +44,8 @@ import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
+import { CommentMarginRail } from "@/components/wiki/CommentMarginRail";
+import { toast } from "@/hooks/useToast";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 import { craftFailureMessage } from "@/lib/craft";
 import {
@@ -54,7 +56,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
-import { listComments } from "@/lib/comments";
+import { createComment, listComments } from "@/lib/comments";
 import type {
   CommentDraft,
   CommentHighlightTarget,
@@ -381,6 +383,49 @@ export function FileView({ path }: FileViewProps) {
   // Selecting text in the editor offers a floating "Comment" affordance
   // anchored above the selection — fed by the Coeditor's selection reporting
   // instead of a DOM `mouseup`/`selectionchange` handler.
+  // The margin rail's mutation runner mirrors the panel's success gate;
+  // failures surface as toasts since the rail has no error slot.
+  const [marginBusy, setMarginBusy] = useState(false);
+  const runMargin = useCallback(
+    async (fn: () => Promise<unknown>): Promise<boolean> => {
+      setMarginBusy(true);
+      try {
+        await fn();
+        await refreshComments();
+        return true;
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Comment action failed");
+        return false;
+      } finally {
+        setMarginBusy(false);
+      }
+    },
+    [refreshComments],
+  );
+
+  const submitMarginDraft = useCallback(
+    async (body: string) => {
+      const draft = commentDraft;
+      if (!draft) return;
+      if (!headSha) {
+        toast.error("Page version unknown, reload and retry");
+        return;
+      }
+      const ok = await runMargin(() =>
+        createComment({
+          path,
+          anchorSha: headSha,
+          startOffset: draft.startOffset,
+          endOffset: draft.endOffset,
+          quotedText: draft.quotedText,
+          body,
+        }),
+      );
+      if (ok) setCommentDraft(null);
+    },
+    [commentDraft, headSha, path, runMargin],
+  );
+
   const handleSelectionForComment = useCallback(
     (draft: CommentDraft | null, coords: { x: number; y: number } | null) => {
       setSelTool(draft && coords ? { x: coords.x, y: coords.y, draft } : null);
@@ -1072,24 +1117,48 @@ export function FileView({ path }: FileViewProps) {
                 })()}
               </div>
               {coedit.session ? (
-                <Coeditor
-                  key={coedit.session.id}
-                  ref={coeditorRef}
-                  session={coedit.session}
-                  peers={coedit.peers}
-                  onSelectionChange={coedit.reportSelection}
-                  onCaretCleared={coedit.reportCaretCleared}
-                  getCaretSeq={coedit.getCaretSeq}
-                  onServerFrame={coedit.onServerFrame}
-                  reportDoc={coedit.reportDoc}
-                  registerFlush={coedit.registerFlush}
-                  registerSetDoc={coedit.registerSetDoc}
-                  registerCatchUp={coedit.registerCatchUp}
-                  readOnly={!canWrite}
-                  commentHighlights={commentHighlights}
-                  onSelectionForComment={handleSelectionForComment}
-                  placeholder="Start typing, or pick a template above…"
-                />
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  <Coeditor
+                    key={coedit.session.id}
+                    ref={coeditorRef}
+                    session={coedit.session}
+                    peers={coedit.peers}
+                    onSelectionChange={coedit.reportSelection}
+                    onCaretCleared={coedit.reportCaretCleared}
+                    getCaretSeq={coedit.getCaretSeq}
+                    onServerFrame={coedit.onServerFrame}
+                    reportDoc={coedit.reportDoc}
+                    registerFlush={coedit.registerFlush}
+                    registerSetDoc={coedit.registerSetDoc}
+                    registerCatchUp={coedit.registerCatchUp}
+                    readOnly={!canWrite}
+                    commentHighlights={commentHighlights}
+                    onSelectionForComment={handleSelectionForComment}
+                    placeholder="Start typing, or pick a template above…"
+                  />
+                  {/* Floating margin comments while no side panel is open
+                    (mocks 566/669): cards track their anchors in the doc's
+                    right whitespace. */}
+                  {panelTab === null &&
+                    !isMobile &&
+                    (commentThreads.length > 0 || commentDraft) && (
+                      <CommentMarginRail
+                        threads={commentThreads}
+                        draft={commentDraft}
+                        editorRef={coeditorRef}
+                        activeId={activeCommentId}
+                        onActivate={activateComment}
+                        selfName={user?.name || user?.email || "You"}
+                        path={path}
+                        selfId={user?.id}
+                        isAdmin={!!user?.is_admin}
+                        busy={marginBusy}
+                        run={runMargin}
+                        onSubmitDraft={(body) => void submitMarginDraft(body)}
+                        onCancelDraft={() => setCommentDraft(null)}
+                      />
+                    )}
+                </div>
               ) : coedit.joinError ? (
                 // The join handshake itself failed — there's no read-only
                 // fallback to fall back to, so this has to be an actionable
@@ -1173,7 +1242,7 @@ export function FileView({ path }: FileViewProps) {
             size="sm"
             onClick={() => {
               setCommentDraft(selTool.draft);
-              openComments();
+              if (panelTab !== null) openComments();
               setSelTool(null);
               window.getSelection()?.removeAllRanges();
             }}

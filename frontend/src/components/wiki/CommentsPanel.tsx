@@ -166,7 +166,7 @@ export function CommentsPanel({
       height="auto"
       gap={0}
       padding={0.25}
-      className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01)"
+      className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)"
     >
       <Section
         flexDirection="row"
@@ -261,17 +261,19 @@ export function CommentsPanel({
   );
 }
 
-/** One thread card (mock 1856 list rows): collapsed shows the root message,
- *  active/expanded shows the whole conversation with a reply input below
- *  (mock 778:262971). Unread = white card with the blue marker, read blends
- *  into the panel tint, resolved sits on tint-02. */
-function ThreadCard({
+/** One thread card (mock 1856 list rows, mock 669 anchored): collapsed
+ *  shows the root message, active/expanded shows the whole conversation with
+ *  a reply input below (mock 778:262971). Unread = white card with the blue
+ *  marker, read sits on tint-01, resolved on tint-02. Anchored cards round
+ *  at 12 instead of the list's 8. */
+export function ThreadCard({
   thread,
   path,
   selfId,
   isAdmin,
   busy,
   active,
+  anchored,
   onActivate,
   run,
 }: {
@@ -281,6 +283,7 @@ function ThreadCard({
   isAdmin: boolean;
   busy: boolean;
   active: boolean;
+  anchored?: boolean;
   onActivate: () => void;
   run: (fn: () => Promise<unknown>) => Promise<boolean>;
 }) {
@@ -339,7 +342,7 @@ function ThreadCard({
             onActivate();
           }
         }}
-        className={`flex w-full cursor-pointer flex-col overflow-clip rounded-(--radius-08) text-left ${bg} ${shadow}`}
+        className={`flex w-full cursor-pointer flex-col overflow-clip text-left ${anchored ? "rounded-(--radius-12)" : "rounded-(--radius-08)"} ${bg} ${shadow}`}
       >
         {root.status === "orphaned" && (
           <div className="px-2 pt-1 text-[12px] leading-4 text-(--text-03)">

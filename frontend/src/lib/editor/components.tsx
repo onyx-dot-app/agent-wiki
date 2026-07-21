@@ -325,6 +325,14 @@ interface CoeditorProps {
  * links). */
 export interface CoeditorHandle {
   scrollToOffset: (offset: number) => void;
+  /** Doc-space top (px from the document's start) of the line holding a
+   * character offset. Stable for off-screen positions (line-block geometry,
+   * not rendered coordinates). */
+  anchorTop: (offset: number) => number | null;
+  /** The editor scroller's current scrollTop. */
+  scrollTop: () => number;
+  /** Subscribe to scroll and geometry changes. Returns the unsubscriber. */
+  subscribeLayout: (cb: () => void) => () => void;
 }
 
 /** CodeMirror 6 editor that owns the co-edit document via `@codemirror/collab`.
@@ -362,6 +370,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
   ) {
     const host = useRef<HTMLDivElement | null>(null);
     const view = useRef<EditorView | null>(null);
+    // Margin-rail subscribers, notified on scroll and geometry changes.
+    const layoutSubs = useRef<Set<() => void>>(new Set());
     // Swappable slot for the read-only facets — see readOnlyExtensions.
     const readOnlyCompartment = useRef(new Compartment());
     // Latest callbacks without re-creating the editor.
@@ -388,6 +398,27 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
               { y: "center" },
             ),
           });
+        },
+        anchorTop: (offset: number) => {
+          const v = view.current;
+          if (!v) return null;
+          const pos = Math.max(0, Math.min(offset, v.state.doc.length));
+          // Line-block geometry is defined for the whole document, unlike
+          // coordsAtPos, which returns null outside the rendered viewport.
+          // documentTop folds the scroller's content padding into the
+          // scroller-space result.
+          const contentOffset =
+            v.documentTop -
+            v.scrollDOM.getBoundingClientRect().top +
+            v.scrollDOM.scrollTop;
+          return v.lineBlockAt(pos).top + contentOffset;
+        },
+        scrollTop: () => view.current?.scrollDOM.scrollTop ?? 0,
+        subscribeLayout: (cb: () => void) => {
+          layoutSubs.current.add(cb);
+          return () => {
+            layoutSubs.current.delete(cb);
+          };
         },
       }),
       [],
@@ -545,11 +576,15 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         if (sendableUpdates(v.state).length > 0) void doPush();
       };
 
+      const notifyLayout = () => {
+        for (const cb of layoutSubs.current) cb();
+      };
       const updateListener = EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           reportDocRef.current(u.state.doc.toString());
           void doPush();
         }
+        if (u.geometryChanged || u.docChanged) notifyLayout();
         // Remote-applied transactions aren't local input — don't report them as
         // our caret/typing.
         if (applyingRemote.current) return;
@@ -606,6 +641,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       });
       v = new EditorView({ state, parent: host.current });
       view.current = v;
+      v.scrollDOM.addEventListener("scroll", notifyLayout, { passive: true });
       onServerFrame(applyFrame);
       registerFlush(async () => {
         // Deliver every un-acked local op over plain HTTP, treating a 200 as
@@ -692,6 +728,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         // for peers explicitly instead of leaving it parked until the
         // server-side session leave catches up.
         if (v.hasFocus) onCaretClearedRef.current();
+        v.scrollDOM.removeEventListener("scroll", notifyLayout);
         v.destroy();
         view.current = null;
       };
