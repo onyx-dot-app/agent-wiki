@@ -64,6 +64,11 @@ export interface Proposal {
 export function useProposalsByPath(path: string, enabled = true) {
   const { data, error, isLoading, mutate } = useSWR<{ proposals: Proposal[] }>(
     enabled ? SWR_KEYS.automanageProposals(path) : null,
+    // Don't auto-revalidate on focus/reconnect: an acted-on proposal leaves
+    // `pending`, so a background revalidation would drop its row and cancel the
+    // in-flight applied/went-stale poll. The banner refreshes explicitly (via
+    // `refresh`) once a row has shown its outcome.
+    { revalidateOnFocus: false, revalidateOnReconnect: false },
   );
   return {
     proposals: data?.proposals ?? [],

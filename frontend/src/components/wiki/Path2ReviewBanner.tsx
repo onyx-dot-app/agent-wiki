@@ -44,11 +44,7 @@ export function Path2ReviewBanner({ path, canWrite = true }: Props) {
         bottomChildren={
           <ul className="m-0 flex list-none flex-col gap-2 pl-0">
             {proposals.map((p) => (
-              <ProposalRow
-                key={p.id}
-                proposal={p}
-                onActioned={() => void refresh()}
-              />
+              <ProposalRow key={p.id} proposal={p} onActioned={refresh} />
             ))}
           </ul>
         }
@@ -80,21 +76,43 @@ function ProposalRow({
   const alive = useRef(true);
   useEffect(() => () => void (alive.current = false), []);
 
-  // Execution runs async on the automanage_nearline worker; poll the proposal a
-  // few times so we can report applied / went-stale instead of just "approved".
-  async function pollOutcome() {
-    for (let i = 0; i < 8; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
+  // Once a row has shown its terminal outcome, briefly leave it up, then refresh
+  // the list so it drops out (it has left `pending`). `onActioned` is SWR's
+  // stable mutate, so this effect doesn't churn.
+  useEffect(() => {
+    if (
+      outcome !== "applied" &&
+      outcome !== "stale" &&
+      outcome !== "rejected"
+    ) {
+      return;
+    }
+    const t = setTimeout(() => {
+      if (alive.current) onActioned();
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [outcome, onActioned]);
+
+  // Execution runs async on the automanage_nearline worker. Show "Applying…"
+  // and poll for the terminal status. A transient fetch error must NOT abort
+  // the poll (that would strand the row), and if it doesn't settle within the
+  // budget we drop back to the list — the proposal has left `pending`, so a
+  // refresh removes the row rather than freezing it at "Applying…".
+  async function pollApplied() {
+    setOutcome("applying");
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, Math.min(1000 + i * 250, 3000)));
       if (!alive.current) return;
       try {
         const fresh = await fetchProposal(proposal.id);
         if (fresh.status === "applied") return setOutcome("applied");
         if (fresh.status === "stale") return setOutcome("stale");
+        // still pending/approved → keep polling
       } catch {
-        return; // gone (e.g. purged) — stop polling
+        // transient failure (or the row was purged) — keep polling
       }
     }
-    if (alive.current) setOutcome("applying"); // approved, still applying
+    if (alive.current) onActioned(); // didn't settle in-window → refresh the list
   }
 
   async function act(kind: "approve" | "reject") {
@@ -103,7 +121,7 @@ function ProposalRow({
     try {
       if (kind === "approve") {
         await approveProposal(proposal.id);
-        if (alive.current) await pollOutcome();
+        if (alive.current) await pollApplied();
       } else {
         await rejectProposal(proposal.id);
         if (alive.current) setOutcome("rejected");
