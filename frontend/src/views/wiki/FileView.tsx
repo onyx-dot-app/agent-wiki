@@ -572,6 +572,12 @@ export function FileView({ path }: FileViewProps) {
     }
   }, [path]);
 
+  // The Updates tab's Total Edits summary needs the commit count, so the
+  // history loads as soon as the tab opens, not only on card expand.
+  useEffect(() => {
+    if (panelTab === "updates" && commits === null) void refreshHistory();
+  }, [panelTab, commits, refreshHistory]);
+
   function closeHistory() {
     setHistoryOpen(false);
     // Exiting version mode goes back to the live editor, which rejoins the
@@ -732,7 +738,7 @@ export function FileView({ path }: FileViewProps) {
   // 1912:355220): history glyph, spelled-out timestamp, relative age or
   // "(Current)", and an x back to the live editor.
   const versionChip = viewingCommit ? (
-    <span className="flex items-center gap-[2px] overflow-hidden rounded-(--radius-08) bg-(--background-tint-02) px-1 py-[2px]">
+    <span className="flex items-center overflow-hidden rounded-(--radius-08) bg-(--background-tint-02) px-1 py-[2px]">
       <span className="flex size-4 shrink-0 items-center justify-center text-(--text-04)">
         <SvgHistory size={13} />
       </span>
@@ -833,12 +839,14 @@ export function FileView({ path }: FileViewProps) {
             </PopoverMenu>
           </Popover.Content>
         </Popover>
-        <SelectButton
-          icon={SvgSidebar}
-          state={panelOpen ? "selected" : "empty"}
-          tooltip={panelOpen ? "Close panel" : "Open panel"}
-          onClick={() => (panelOpen ? closePanel() : openPanel("updates"))}
-        />
+        <span className="panel-toggle inline-flex">
+          <SelectButton
+            icon={SvgSidebar}
+            state={panelOpen ? "selected" : "empty"}
+            tooltip={panelOpen ? "Close panel" : "Open panel"}
+            onClick={() => (panelOpen ? closePanel() : openPanel("updates"))}
+          />
+        </span>
       </>
     ) : null;
 
@@ -854,6 +862,7 @@ export function FileView({ path }: FileViewProps) {
               onShowHistory={toggleHistoryList}
               historyOpen={historyListOpen}
               historyList={versionList}
+              totalEdits={commits ? commits.length : null}
               fullHeight
             />
           </div>
@@ -886,7 +895,13 @@ export function FileView({ path }: FileViewProps) {
         );
       case "watching":
         return (
-          <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
+          // The watcher list scrolls inside its bordered panel. Only the
+          // docked editor needs this wrapper to scroll.
+          <div
+            className={`flex min-h-0 flex-1 flex-col px-2 py-1 ${
+              watcherEditor ? "scroll-y-hidden overflow-y-auto" : ""
+            }`}
+          >
             {watcherEditor ? (
               <TriggerPanel
                 open
@@ -991,19 +1006,7 @@ export function FileView({ path }: FileViewProps) {
           {viewingVersion && diffData ? (
             <div className="flex min-h-0 flex-1 justify-center">
               <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
-                <DiffView
-                  data={diffData!}
-                  loadBody={async () => {
-                    const sha = viewingSha;
-                    if (!sha) return "";
-                    const r = await apiFetch<FileResponse>(
-                      `/wiki/file?path=${encodeURIComponent(
-                        path,
-                      )}&ref=${encodeURIComponent(sha)}`,
-                    );
-                    return r.body;
-                  }}
-                />
+                <DiffView data={diffData!} />
               </div>
             </div>
           ) : (

@@ -9,73 +9,18 @@
   min-width: 0;
 }
 
-.header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  padding: 8px 12px;
-}
-
-.toggle {
-  display: inline-flex;
-  border: 1px solid var(--border-01);
-  border-radius: var(--radius-04);
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.toggleBtn {
-  appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--text-04);
-  font: inherit;
-  font-size: 12px;
-  padding: 4px 10px;
-  cursor: pointer;
-  line-height: 1.2;
-}
-
-.toggleBtn:not(:last-child) {
-  border-right: 1px solid var(--border-01);
-}
-
-.toggleBtn:hover {
-  background: var(--background-tint-03);
-}
-
-.toggleBtnActive {
-  background: var(--background-tint-inverted-00);
-  color: var(--text-inverted-05);
-}
-
-.toggleBtnActive:hover {
-  background: var(--background-tint-inverted-01);
-}
-
 .body {
   overflow: auto;
   padding: 12px;
-  /* Keep the layout width identical whether or not this mode's content
-     overflows — otherwise toggling Diff/Doc shifts content sideways as
-     the scrollbar appears/disappears (non-overlay scrollbars). */
+  /* Keep the layout width identical whether or not the diff overflows.
+     Otherwise switching commits shifts content sideways as the scrollbar
+     appears/disappears (non-overlay scrollbars). */
   scrollbar-gutter: stable;
 }
 
-/* Doc mode: match the 12px horizontal text inset that diff mode gets
-   from .context / the add-remove bands' inner padding, so toggling
-   between the modes doesn't shift the text left/right. The diff bands
-   need that inset so their colored backgrounds extend past the text. */
-.doc {
-  padding: 0 12px;
-}
-
-/* Both modes (Diff bands, Doc markdown render) drop the top margin on
-   their first rendered child so toggling between them doesn't shift
-   the content down. The wiki .markdown h1/p/section all carry their
-   own top margin — that's correct in a full-page render, but jumps
-   the layout when swapped with a diff band that starts at margin-top:
-   4px. */
+/* Drop the top margin on the first rendered child so the diff starts flush
+   with the view. The wiki .markdown h1/p/section all carry their own top
+   margin, which is correct mid-document but a gap at the top of the pane. */
 .body > * > :first-child,
 .body > :first-child {
   margin-top: 0;
@@ -88,9 +33,9 @@
 }
 
 /* Right gutter keeps the diff content clear of the floating navigator so the
-   selector sits in whitespace, never over the text. */
+   selector sits in whitespace, never over the text (mock reserves 60px). */
 .diffContent {
-  padding-right: 128px;
+  padding-right: 60px;
 }
 
 /* Floating change navigator (Figma 283:22157) — pinned to the diff viewport

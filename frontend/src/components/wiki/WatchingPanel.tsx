@@ -21,11 +21,12 @@ import {
   SvgPlus,
   SvgSettings,
   SvgShareWebhook,
-  SvgSlack,
   SvgWorkflow,
 } from "@onyx-ai/opal/icons";
-import { SvgOnyxLogo } from "@onyx-ai/opal/logos";
+import { SvgOnyxLogo, SvgSlack } from "@onyx-ai/opal/logos";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
+
+import { Section } from "@onyx-ai/opal/layouts";
 
 import { PanelSearchField } from "@/components/wiki/PanelSearch";
 import { pageTitle } from "@/lib/wiki/utils";
@@ -165,11 +166,12 @@ export function WatchingPanel({ path, onNew, onEdit }: Props) {
     }
   }
 
-  const card = (t: Trigger) => (
+  const card = (t: Trigger, muted = false) => (
     <WatcherCard
       key={t.id}
       trigger={t}
       configs={configs}
+      muted={muted}
       fire={latestFire.get(t.id) ?? null}
       busy={busyId === t.id}
       detailsOpen={openIds.has(t.id)}
@@ -187,7 +189,14 @@ export function WatchingPanel({ path, onNew, onEdit }: Props) {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <Section
+      justifyContent="start"
+      alignItems="stretch"
+      height="auto"
+      gap={0}
+      padding={0.25}
+      className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01)"
+    >
       <div className="flex shrink-0 items-center gap-1">
         <PanelSearchField
           value={search}
@@ -211,8 +220,14 @@ export function WatchingPanel({ path, onNew, onEdit }: Props) {
           />
         </div>
       </div>
-      <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-      <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pt-1">
+      <Divider />
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        height="auto"
+        gap={0.25}
+        className="scroll-y-hidden min-h-0 flex-1 overflow-y-auto"
+      >
         {error && (
           <Text font="secondary-body" color="text-03">
             {error.message}
@@ -225,24 +240,28 @@ export function WatchingPanel({ path, onNew, onEdit }: Props) {
             </Text>
           </div>
         )}
-        {active.map(card)}
+        {active.map((t) => card(t))}
         {inactive.length > 0 && (
           <div className="py-1">
             <Divider title="Inactive" />
           </div>
         )}
-        {inactive.map(card)}
+        {inactive.map((t) => card(t, true))}
         {visible.length > 0 && (
-          <EndOfList title={`${visible.length} Watching`} />
+          <div className="px-4 py-2">
+            <EndOfList title={`${visible.length} Watching`} />
+          </div>
         )}
-      </div>
-    </div>
+      </Section>
+    </Section>
   );
 }
 
 interface WatcherCardProps {
   trigger: Trigger;
   configs: DestinationConfig[];
+  /** Inactive cards sit flush on the panel tint instead of raised white. */
+  muted: boolean;
   fire: TriggerFire | null;
   busy: boolean;
   detailsOpen: boolean;
@@ -255,6 +274,7 @@ interface WatcherCardProps {
 function WatcherCard({
   trigger,
   configs,
+  muted,
   fire,
   busy,
   detailsOpen,
@@ -277,7 +297,18 @@ function WatcherCard({
     : null;
 
   return (
-    <div className="flex w-full shrink-0 flex-col rounded-(--radius-12) bg-(--background-tint-00) p-1 shadow-(--shadow-box-00)">
+    <Section
+      justifyContent="start"
+      alignItems="stretch"
+      height="fit"
+      gap={0}
+      padding={0.25}
+      className={`shrink-0 overflow-clip rounded-(--radius-12) ${
+        muted
+          ? "bg-(--background-tint-01)"
+          : "bg-(--background-tint-00) shadow-(--shadow-box-00)"
+      } hover:shadow-(--shadow-box-01)`}
+    >
       <div className="flex w-full items-start p-[2px]">
         <div className="flex min-w-0 flex-1 items-center gap-1 p-[2px]">
           {scopes.map((s, i) => (
@@ -306,7 +337,7 @@ function WatcherCard({
                     i > 0 ? "-ml-1" : ""
                   }`}
                 >
-                  <Icon size={14} />
+                  <Icon size={16} />
                 </span>
               );
             })}
@@ -321,7 +352,9 @@ function WatcherCard({
         </div>
       </div>
       <div className="flex w-full items-start gap-[2px] px-[2px] pb-[2px]">
-        <div className="flex min-w-0 flex-1 flex-col px-[2px] py-1">
+        <div
+          className={`flex min-w-0 flex-1 flex-col px-[2px] ${fire ? "pt-1" : "py-1"}`}
+        >
           <p className="px-[2px] text-[12px] leading-4 text-(--text-03)">
             <span className="font-bold">IF</span> {trigger.nl_description}
           </p>
@@ -355,7 +388,13 @@ function WatcherCard({
         </div>
       </div>
       {fire && (
-        <div className="flex w-full flex-col gap-1 p-1">
+        <Section
+          justifyContent="start"
+          alignItems="stretch"
+          height="fit"
+          gap={0}
+          padding={0.25}
+        >
           <div className="flex w-full items-start gap-[2px]">
             <div className="flex min-w-0 flex-1 items-center py-[2px]">
               <span className="shrink-0 px-[2px] text-[12px] leading-4 whitespace-nowrap text-(--text-03)">
@@ -385,8 +424,8 @@ function WatcherCard({
               </p>
             </div>
           )}
-        </div>
+        </Section>
       )}
-    </div>
+    </Section>
   );
 }

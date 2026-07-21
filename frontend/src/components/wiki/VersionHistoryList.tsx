@@ -1,4 +1,5 @@
 import { Button, Divider, EndOfList, Text } from "@onyx-ai/opal/components";
+import { Content, Section } from "@onyx-ai/opal/layouts";
 import { SvgArrowUpRight, SvgHistory } from "@onyx-ai/opal/icons";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import type { IconProps } from "@onyx-ai/opal/types";
@@ -87,15 +88,36 @@ export function VersionHistoryList({
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center">
+    <Section
+      justifyContent="start"
+      alignItems="stretch"
+      height="auto"
+      gap={0}
+      className="min-h-0 flex-1"
+    >
+      <div className="shrink-0">
+        <Divider />
+      </div>
+      <Section
+        flexDirection="row"
+        justifyContent="start"
+        height="fit"
+        gap={0}
+        className="shrink-0 bg-(--background-tint-01)"
+      >
         <PanelSearchField
           value={query}
           onChange={setQuery}
           placeholder="Search update history…"
         />
-      </div>
-      <div className="scroll-fade-bottom scroll-y-hidden flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+      </Section>
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        height="auto"
+        gap={0.25}
+        className="scroll-fade-bottom scroll-y-hidden min-h-0 flex-1 overflow-y-auto"
+      >
         {error && <ListMessage>{error}</ListMessage>}
         {!error && filtered === null && (
           <div className="p-3">
@@ -116,13 +138,15 @@ export function VersionHistoryList({
               </div>
             )}
             {older.map(row)}
-            <EndOfList
-              title={`${filtered.length} Version${filtered.length === 1 ? "" : "s"}`}
-            />
+            <div className="px-4 py-2">
+              <EndOfList
+                title={`${filtered.length} Version${filtered.length === 1 ? "" : "s"}`}
+              />
+            </div>
           </>
         )}
-      </div>
-    </div>
+      </Section>
+    </Section>
   );
 }
 
@@ -135,7 +159,7 @@ export interface UpdateHistoryRailProps extends VersionHistoryListProps {
 
 /**
  * The version-mode rail: the tab strip is replaced by a single Update
- * History surface. A header action row, then a tinted card holding the
+ * History surface. A header action row, then a bordered card holding the
  * title row, search, and version list (mock 1912:355447).
  */
 export function UpdateHistoryRail({
@@ -147,18 +171,25 @@ export function UpdateHistoryRail({
       <div className="flex h-12 shrink-0 items-center justify-end gap-2 px-3 py-2">
         {headerActions}
       </div>
-      <div className="mx-2 mb-2 flex min-h-0 flex-1 flex-col rounded-(--radius-12) bg-(--background-tint-01) p-1">
-        <div className="flex shrink-0 items-center gap-1 p-2">
-          <span className="flex size-5 shrink-0 items-center justify-center text-(--text-04)">
-            <SvgHistory size={16} />
-          </span>
-          <Text font="main-ui-action" color="text-04">
-            Update History
-          </Text>
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        width="auto"
+        height="auto"
+        gap={0}
+        padding={0.25}
+        className="mx-2 my-1 min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01)"
+      >
+        <div className="shrink-0 px-2 pt-2 pb-1 text-(--text-04)">
+          <Content
+            sizePreset="main-ui"
+            variant="section"
+            icon={SvgHistory}
+            title="Update History"
+          />
         </div>
-        <Divider paddingParallel="fit" paddingPerpendicular="fit" />
         <VersionHistoryList {...listProps} />
-      </div>
+      </Section>
     </div>
   );
 }
@@ -220,7 +251,7 @@ function VersionRow({
           <Avatar initial={person.charAt(0).toUpperCase()} />
           {AgentLogo ? <LogoAvatar Logo={AgentLogo} /> : null}
         </div>
-        <div className="min-w-0 flex-1 overflow-hidden px-[2px] text-ellipsis whitespace-nowrap">
+        <div className="flex h-5 min-w-0 flex-1 items-center overflow-hidden px-[2px]">
           <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
             {name}
           </Text>
@@ -248,7 +279,7 @@ function VersionRow({
         </div>
       </div>
       <div className="flex w-full items-start gap-[2px] p-1">
-        <div className="min-w-0 flex-1 overflow-hidden px-[2px] py-[2px] text-ellipsis whitespace-nowrap">
+        <div className="flex h-5 min-w-0 flex-1 items-center overflow-hidden px-[2px]">
           <Text font="secondary-body" color="text-03" nowrap maxLines={1}>
             {action}
           </Text>
@@ -261,7 +292,7 @@ function VersionRow({
           )}
           {url && (
             <span
-              className="flex shrink-0 items-center"
+              className="flex shrink-0 items-center p-[2px]"
               onClick={(e) => e.stopPropagation()}
             >
               <Button

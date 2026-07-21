@@ -1,4 +1,4 @@
-import { SelectButton, Text } from "@onyx-ai/opal/components";
+import { Text } from "@onyx-ai/opal/components";
 import { SvgChevronDown, SvgChevronUp } from "@onyx-ai/opal/icons";
 import {
   useCallback,
@@ -8,19 +8,12 @@ import {
   useRef,
   useState,
 } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 
-import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
-
-import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import type { FileDiffResponse } from "@/lib/wiki/types";
 
 import { DiffHunk } from "./DiffHunk";
 import { annotateHunks } from "./diffEntries";
 import styles from "./DiffView.module.css";
-
-type Mode = "diff" | "doc";
 
 /** Floating pill (Figma 283:22157): change position + prev/next steppers. */
 function ChangeNavigator({
@@ -45,6 +38,7 @@ function ChangeNavigator({
         {`${current + 1} / ${total}`}
       </Text>
       <div className={styles.navArrows}>
+        {/* raw-ok: pill steppers use the module's compact hit targets. Opal icon Buttons carry their own padding/radius that fight the pill geometry */}
         <button
           type="button"
           className={styles.navBtn}
@@ -53,6 +47,7 @@ function ChangeNavigator({
         >
           <SvgChevronUp size={16} />
         </button>
+        {/* raw-ok: same pill stepper as above */}
         <button
           type="button"
           className={styles.navBtn}
@@ -66,17 +61,7 @@ function ChangeNavigator({
   );
 }
 
-export function DiffView({
-  data,
-  loadBody,
-}: {
-  data: FileDiffResponse;
-  loadBody: () => Promise<string>;
-}) {
-  const [mode, setMode] = useState<Mode>("diff");
-  const [body, setBody] = useState<string | null>(null);
-  const [bodyError, setBodyError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+export function DiffView({ data }: { data: FileDiffResponse }) {
   const [current, setCurrent] = useState(0);
   const [navTop, setNavTop] = useState<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -130,9 +115,8 @@ export function DiffView({
     [total, scrollToChange, updateNavPosition],
   );
 
-  // New commit selected → back to diff mode at the first change.
+  // New commit selected → back to the first change.
   useEffect(() => {
-    setMode("diff");
     setCurrent(0);
     currentRef.current = 0;
   }, [data]);
@@ -140,7 +124,6 @@ export function DiffView({
   // Once the diff for a new commit has painted, jump to the first change so a
   // commit click lands you on the change, not the top of the file.
   useLayoutEffect(() => {
-    if (mode !== "diff") return;
     let cancelled = false;
     const jump = () => {
       if (cancelled) return;
@@ -155,12 +138,12 @@ export function DiffView({
       cancelled = true;
       cancelAnimationFrame(raf);
     };
-  }, [data, mode, scrollToChange, updateNavPosition]);
+  }, [data, scrollToChange, updateNavPosition]);
 
   // Keep the navigator beside the active change while the diff is scrolled.
   useEffect(() => {
     const container = bodyRef.current;
-    if (mode !== "diff" || !container) return;
+    if (!container) return;
     let raf = 0;
     const onScroll = () => {
       cancelAnimationFrame(raf);
@@ -171,81 +154,26 @@ export function DiffView({
       container.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(raf);
     };
-  }, [data, mode, total, updateNavPosition]);
-
-  async function pickMode(next: Mode) {
-    if (next === mode) return;
-    setMode(next);
-    if (next === "doc" && body === null) {
-      setLoading(true);
-      setBodyError(null);
-      try {
-        const text = await loadBody();
-        setBody(text);
-      } catch (e) {
-        setBodyError(e instanceof Error ? e.message : "failed to load doc");
-      } finally {
-        setLoading(false);
-      }
-    }
-  }
+  }, [data, total, updateNavPosition]);
 
   return (
     <div className={styles.view} ref={viewRef}>
-      {/* The viewed version's meta (author, time) lives in the header chip
-          and the rail's version list, so this row is only the Diff/Doc toggle. */}
-      <div className={styles.header}>
-        <div role="tablist" aria-label="View mode" className={styles.toggle}>
-          <SelectButton
-            size="sm"
-            state={mode === "diff" ? "selected" : "empty"}
-            onClick={() => pickMode("diff")}
-          >
-            Diff
-          </SelectButton>
-          <SelectButton
-            size="sm"
-            state={mode === "doc" ? "selected" : "empty"}
-            onClick={() => void pickMode("doc")}
-          >
-            Doc
-          </SelectButton>
-        </div>
-      </div>
       <div className={styles.body} ref={bodyRef}>
-        {mode === "diff" ? (
-          data.hunks.length === 0 ? (
-            <div className={styles.empty}>
-              <Text font="secondary-body" color="text-03">
-                No changes for this file in that commit.
-              </Text>
-            </div>
-          ) : (
-            <div className={styles.diffContent}>
-              {perHunk.map((entries, idx) => (
-                <DiffHunk key={idx} entries={entries} />
-              ))}
-            </div>
-          )
-        ) : loading ? (
-          <div className={styles.empty}>
-            <LoadingSpinner />
-          </div>
-        ) : bodyError ? (
+        {data.hunks.length === 0 ? (
           <div className={styles.empty}>
             <Text font="secondary-body" color="text-03">
-              {bodyError}
+              No changes for this file in that commit.
             </Text>
           </div>
         ) : (
-          <article className={`${styles.doc} markdown`}>
-            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBareSpaceLinks]}>
-              {body ?? ""}
-            </ReactMarkdown>
-          </article>
+          <div className={styles.diffContent}>
+            {perHunk.map((entries, idx) => (
+              <DiffHunk key={idx} entries={entries} />
+            ))}
+          </div>
         )}
       </div>
-      {mode === "diff" && total > 0 ? (
+      {total > 0 ? (
         <ChangeNavigator
           current={current}
           total={total}

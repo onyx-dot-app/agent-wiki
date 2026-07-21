@@ -4,25 +4,25 @@ import {
   Button,
   Divider,
   InputTextArea,
-  SelectButton,
   Switch,
   Text,
   Tooltip,
 } from "@onyx-ai/opal/components";
-import { InputHorizontal } from "@onyx-ai/opal/layouts";
+import { InputHorizontal, Section } from "@onyx-ai/opal/layouts";
 import {
   SvgAddLines,
+  SvgAlertTriangle,
   SvgBell,
   SvgExpand,
   SvgFold,
   SvgHistory,
-  SvgPauseCircle,
   SvgSparkle,
   SvgX,
 } from "@onyx-ai/opal/icons";
 import { useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import {
   AutoEditLimitModal,
   UsageBar,
@@ -50,6 +50,9 @@ interface Props {
   /** The version list itself, rendered inside the history card while
    * `historyOpen` (mock 1855:273363 expands the card in place). */
   historyList?: React.ReactNode;
+  /** All-time commit count for the "Total Edits" summary column. Null while
+   * the host hasn't loaded history yet, which hides the column. */
+  totalEdits?: number | null;
 }
 
 function capNote(health: UpdateHealth): string {
@@ -77,6 +80,7 @@ export function UpdatePolicyPanel({
   onShowHistory,
   historyOpen,
   historyList,
+  totalEdits,
 }: Props) {
   const kind = path.endsWith(".md") ? "page" : "folder";
 
@@ -93,6 +97,7 @@ export function UpdatePolicyPanel({
   // Live health poll backs the history card. A failure never blocks the
   // policy card, null just hides the history card.
   const { health, refresh: refreshHealth } = useUpdateHealth(path);
+  const { user } = useAuth();
 
   useEffect(() => {
     let alive = true;
@@ -248,7 +253,13 @@ export function UpdatePolicyPanel({
         </div>
       )}
 
-      <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        height="auto"
+        gap={0.25}
+        className="scroll-y-hidden min-h-0 flex-1 overflow-y-auto"
+      >
         {loading ? (
           <div className="p-2 text-[13px] text-(--text-03)">Loading…</div>
         ) : !loaded ? (
@@ -262,7 +273,14 @@ export function UpdatePolicyPanel({
             {/* Mock nesting (1790:52546): card p-1 gap-1, toggle group p-2
                 gap-2 with sub-rows indented past the master row's icon,
                 divider, then the instructions section p-2. */}
-            <div className="group/policy flex flex-col gap-1 rounded-(--radius-12) border border-(--border-01) p-1">
+            <Section
+              justifyContent="start"
+              alignItems="stretch"
+              height="fit"
+              gap={0.25}
+              padding={0.25}
+              className="group/policy rounded-(--radius-12) border border-(--border-01)"
+            >
               <div className="flex flex-col gap-2 p-2">
                 <InputHorizontal
                   icon={SvgSparkle}
@@ -304,24 +322,27 @@ export function UpdatePolicyPanel({
                 </div>
               </div>
 
-              <Divider paddingParallel="fit" paddingPerpendicular="fit" />
+              <Divider />
 
               <div className="flex flex-col gap-1 p-2">
                 {/* Collapsed, the row's description is the instruction when
-                    one exists (mock 1855:273683). The expander opens the
-                    editor. */}
+                    one exists (mock 1855:273683). While the editor is open
+                    the row shows the generic hint (mock 1855:273690). */}
                 <InputHorizontal
                   icon={SvgAddLines}
                   title="Page Instructions"
                   description={
-                    ownInstruction ||
-                    effInstruction ||
-                    `Instruct the wiki on how to update this ${kind}.`
+                    editing
+                      ? `Instruct the wiki on how to update this ${kind}.`
+                      : ownInstruction ||
+                        effInstruction ||
+                        `Instruct the wiki on how to update this ${kind}.`
                   }
                 >
-                  <SelectButton
-                    icon={SvgExpand}
-                    state={editing ? "selected" : "empty"}
+                  <Button
+                    icon={editing ? SvgFold : SvgExpand}
+                    prominence="tertiary"
+                    size="md"
                     tooltip={editing ? "Collapse" : "Edit instructions"}
                     onClick={() => {
                       if (editing) {
@@ -341,139 +362,163 @@ export function UpdatePolicyPanel({
                 )}
 
                 {editing && (
-                  <div>
+                  // Implicit save (the mock has no Save/Cancel controls):
+                  // blurring the editor persists a changed draft, collapsing
+                  // just hides it. A failed save reopens the editor with the
+                  // draft intact so the text can't be lost to a collapse.
+                  <div className="instructions-editor">
                     <InputTextArea
-                      rows={4}
+                      rows={5}
                       resizable
                       value={draft}
                       autoFocus
                       placeholder={`How should this ${kind} be updated?`}
                       onChange={(e) => setDraft(e.target.value)}
+                      onBlur={() => {
+                        const trimmed = draft.trim();
+                        if (trimmed === ownInstruction.trim()) return;
+                        void save({ update_instruction: trimmed || null }).then(
+                          (ok) => {
+                            if (!ok) setEditing(true);
+                          },
+                        );
+                      }}
                     />
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        prominence="tertiary"
-                        size="sm"
-                        disabled={saving}
-                        onClick={() => setEditing(false)}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        variant="action"
-                        size="sm"
-                        disabled={saving}
-                        onClick={() =>
-                          void save(
-                            { update_instruction: draft.trim() || null },
-                            () => setEditing(false),
-                          )
-                        }
-                      >
-                        {saving ? "Saving…" : "Save"}
-                      </Button>
-                    </div>
                   </div>
                 )}
               </div>
-            </div>
+            </Section>
 
             {health !== null && (
-              <div
-                className={`flex flex-col gap-1 rounded-(--radius-12) border p-2 ${
+              <Section
+                justifyContent="start"
+                alignItems="stretch"
+                height={historyOpen ? "auto" : "fit"}
+                gap={0}
+                padding={0.25}
+                className={`rounded-(--radius-12) border ${
                   historyOpen ? "min-h-0 flex-1" : ""
                 } ${historyCardChrome}`}
               >
-                <div className="flex shrink-0 items-start gap-3">
-                  <div className="flex min-w-0 flex-1 items-start gap-4 p-1">
-                    <div className="flex min-w-0 flex-1 gap-1">
-                      <span className="flex size-5 shrink-0 items-center justify-center text-(--text-04)">
-                        <SvgHistory size={16} />
-                      </span>
-                      <div className="flex min-w-0 flex-col">
-                        <Text font="main-ui-action" color="text-04">
-                          Update History
-                        </Text>
+                {/* Collapsed content keeps its 8px inset via this p-1; the
+                    expanded list below sits at the card's own 4px (mock
+                    1855:273693). */}
+                <Section
+                  justifyContent="start"
+                  alignItems="stretch"
+                  height="fit"
+                  gap={0.25}
+                  padding={0.25}
+                  className="shrink-0"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="flex min-w-0 flex-1 items-start gap-4">
+                      <div className="flex min-w-0 flex-1 gap-1">
+                        <span className="flex size-5 shrink-0 items-center justify-center text-(--text-04)">
+                          <SvgHistory size={16} />
+                        </span>
+                        <div className="flex min-w-0 flex-col">
+                          <Text font="main-ui-action" color="text-04">
+                            Update History
+                          </Text>
+                          <Text font="secondary-body" color="text-03">
+                            Last 24 hours
+                          </Text>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end">
+                        <div className="flex min-h-5 items-center gap-0.5">
+                          <Text font="main-ui-action" color="text-04">
+                            {String(health.count_24h)}
+                          </Text>
+                          {(overCap || nearCap) && (
+                            <Tooltip tooltip={capNote(health)} side="top">
+                              <span className="flex size-4 items-center justify-center text-(--text-04)">
+                                {overCap ? (
+                                  <SvgAlertTriangle size={12} />
+                                ) : (
+                                  <SvgBell size={12} />
+                                )}
+                              </span>
+                            </Tooltip>
+                          )}
+                        </div>
                         <Text font="secondary-body" color="text-03">
-                          Last 24 hours
+                          Auto-Edits
                         </Text>
                       </div>
+                      {totalEdits != null && (
+                        <div className="flex shrink-0 flex-col items-end">
+                          <div className="flex min-h-5 items-center">
+                            <Text font="main-ui-action" color="text-04">
+                              {String(totalEdits)}
+                            </Text>
+                          </div>
+                          <Text font="secondary-body" color="text-03">
+                            Total Edits
+                          </Text>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex shrink-0 flex-col items-end">
-                      <div className="flex min-h-5 items-center gap-0.5">
-                        <Text font="main-ui-action" color="text-04">
-                          {String(health.count_24h)}
-                        </Text>
-                        {(overCap || nearCap) && (
-                          <span className="flex size-4 items-center justify-center text-(--text-04)">
-                            {overCap ? (
-                              <SvgPauseCircle size={12} />
-                            ) : (
-                              <SvgBell size={12} />
-                            )}
-                          </span>
-                        )}
-                      </div>
-                      <Text font="secondary-body" color="text-03">
-                        Auto-Edits
-                      </Text>
-                    </div>
-                  </div>
-                  {onShowHistory && (
-                    <Button
-                      icon={historyOpen ? SvgFold : SvgExpand}
-                      prominence="tertiary"
-                      size="md"
-                      tooltip="Version history"
-                      onClick={onShowHistory}
-                    />
-                  )}
-                </div>
-                <div className="shrink-0 px-1 pb-1">
-                  {kind === "page" &&
-                  health.can_manage &&
-                  health.cap_24h > 0 ? (
-                    // raw-ok: the mock's dialog trigger is the usage chart region itself. SelectCard, Opal's clickable card, is a selection-state div with no native button semantics, so a bare button keeps aria and keyboard.
-                    <button
-                      type="button"
-                      aria-label="Auto-edit limits"
-                      onClick={() => setLimitOpen(true)}
-                      className="block w-full cursor-pointer rounded-(--radius-08) border-none bg-transparent p-[2px] text-left hover:bg-(--background-tint-02)"
-                    >
-                      <UsageBar
-                        count={health.count_24h}
-                        threshold={health.threshold_24h}
-                        cap={health.cap_24h}
-                      />
-                    </button>
-                  ) : (
-                    <UsageBar
-                      count={health.count_24h}
-                      threshold={health.threshold_24h}
-                      cap={health.cap_24h}
-                    />
-                  )}
-                </div>
-                {(overCap || nearCap) && (
-                  <div className="flex shrink-0 items-start gap-1 px-1 pb-1">
-                    {overCap ? (
-                      <SvgPauseCircle
-                        size={12}
-                        className="mt-0.5 shrink-0 text-(--text-04)"
-                      />
-                    ) : (
-                      <SvgBell
-                        size={12}
-                        className="mt-0.5 shrink-0 text-(--text-04)"
+                    {onShowHistory && (
+                      <Button
+                        icon={historyOpen ? SvgFold : SvgExpand}
+                        prominence="tertiary"
+                        size="md"
+                        tooltip="Version history"
+                        onClick={onShowHistory}
                       />
                     )}
-                    <Text font="secondary-body" color="text-04">
-                      {capNote(health)}
-                    </Text>
                   </div>
-                )}
+                  <div className="shrink-0">
+                    {kind === "page" &&
+                    health.can_manage &&
+                    health.cap_24h > 0 ? (
+                      // raw-ok: the mock's dialog trigger is the usage chart region itself. SelectCard, Opal's clickable card, is a selection-state div with no native button semantics, so a bare button keeps aria and keyboard.
+                      <button
+                        type="button"
+                        aria-label="Auto-edit limits"
+                        onClick={() => setLimitOpen(true)}
+                        className="block w-full cursor-pointer rounded-(--radius-08) border-none bg-transparent p-[2px] text-left hover:bg-(--background-tint-02)"
+                      >
+                        <UsageBar
+                          count={health.count_24h}
+                          threshold={health.threshold_24h}
+                          cap={health.cap_24h}
+                        />
+                      </button>
+                    ) : (
+                      <div className="rounded-(--radius-08) p-[2px]">
+                        <UsageBar
+                          count={health.count_24h}
+                          threshold={health.threshold_24h}
+                          cap={health.cap_24h}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {(overCap || nearCap) && (
+                    <div className="flex shrink-0 items-start gap-0.5">
+                      <span className="flex size-4 shrink-0 items-center justify-center text-(--text-04)">
+                        {overCap ? (
+                          <SvgAlertTriangle size={12} />
+                        ) : (
+                          <SvgBell size={12} />
+                        )}
+                      </span>
+                      <span className="px-[2px]">
+                        <Text
+                          font="secondary-body"
+                          color={overCap ? "text-04" : "text-03"}
+                        >
+                          {capNote(health)}
+                        </Text>
+                      </span>
+                    </div>
+                  )}
+                </Section>
                 {historyOpen && historyList}
-              </div>
+              </Section>
             )}
           </>
         )}
@@ -483,7 +528,7 @@ export function UpdatePolicyPanel({
             {error}
           </div>
         )}
-      </div>
+      </Section>
 
       {limitOpen && health && (
         <AutoEditLimitModal
@@ -492,8 +537,11 @@ export function UpdatePolicyPanel({
           threshold={health.threshold_24h}
           cap={health.cap_24h}
           ownThreshold={ownThreshold}
+          totalEdits={totalEdits}
+          isAdmin={!!user?.is_admin}
           saving={saving}
           onSave={(value) => save({ warn_update_threshold: value })}
+          onCapSaved={() => void refreshHealth()}
         />
       )}
     </div>

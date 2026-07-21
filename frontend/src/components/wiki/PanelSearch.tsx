@@ -12,8 +12,9 @@ export function PanelSearchField({
   placeholder: string;
 }) {
   return (
-    // The 14px override lives in globals.css (.panel-search).
-    <div className="panel-search min-w-0 flex-1 p-[1px]">
+    // The 14px override lives in globals.css (.panel-search). min-w-40
+    // is the mock's 160px floor for the field beside sibling actions.
+    <div className="panel-search min-w-40 flex-1 p-[1px]">
       <InputTypeIn
         variant="internal"
         searchIcon

@@ -124,9 +124,7 @@ def _git_author(user: User | None) -> str | None:
     return f"{user.name or user.email} <{user.email}>"
 
 
-def _seed_template_policy(
-    rel: str, actor_user_id: str, template_id: str | None = None
-) -> None:
+def _seed_template_policy(rel: str, actor_user_id: str, template_id: str | None = None) -> None:
     """Seed a new page's update policy from the template it was created from.
 
     If that template carries a default policy (auto-update off, scope/update
@@ -220,9 +218,7 @@ def resolve_doc_id(
         entries = wiki_trash.entries_containing_path(path)
         readable = entries and all(
             "read"
-            in acl.effective(
-                user.id, user.is_admin, wiki_trash.trash_location(e.trash_id, path)
-            )
+            in acl.effective(user.id, user.is_admin, wiki_trash.trash_location(e.trash_id, path))
             for e in entries
         )
         if not readable:
@@ -265,9 +261,7 @@ def list_recent_pages(
             continue
         title, preview = _title_and_preview(body, path)
         pages.append(
-            RecentPageView(
-                path=path, title=title, updated_at=ts, preview=preview, id=ids.get(path)
-            )
+            RecentPageView(path=path, title=title, updated_at=ts, preview=preview, id=ids.get(path))
         )
     return ListRecentPagesResponse(pages=pages)
 
@@ -302,9 +296,7 @@ def get_document_by_path(
     # Stable id: reading a live page lazily backfills its row (pre-id pages);
     # historical/deleted reads only report an id if a live row exists.
     page_id = (
-        doc_ids.get_or_mint(rel)
-        if filesystem.absolute(rel).is_file()
-        else doc_ids.id_for_path(rel)
+        doc_ids.get_or_mint(rel) if filesystem.absolute(rel).is_file() else doc_ids.id_for_path(rel)
     )
     if ref:
         # The path may have been different at this ref (rename). Resolve
@@ -516,9 +508,7 @@ def move_document_or_folder(
     # (Unreachable for a page target — a valid path can't nest under a `.md`
     # file — but the string check is harmless there.)
     if new_rel.startswith(old_rel + "/"):
-        raise HTTPException(
-            status_code=400, detail="cannot move a folder into itself"
-        )
+        raise HTTPException(status_code=400, detail="cannot move a folder into itself")
     if new_abs.exists():
         raise HTTPException(
             status_code=409,
@@ -563,9 +553,7 @@ def move_document_or_folder(
     # activity, drafts, working-dirs) and reconverges the trigger cache.
     # root_move is the actual rename so folder-level grants re-point correctly
     # even when all of a folder's files sit in one subdirectory.
-    wiki_notify.after_path_move(
-        moves, sha, author, root_move=PathMove(old=old_rel, new=new_rel)
-    )
+    wiki_notify.after_path_move(moves, sha, author, root_move=PathMove(old=old_rel, new=new_rel))
 
     log.info(
         "move %s -> %s by %s sha=%s files=%d", old_rel, new_rel, author or "?", sha[:8], len(moves)
@@ -613,10 +601,10 @@ def delete_document_by_path(
     dest = wiki_trash.trash_location(trash_id, rel)
     msg = wiki_trash.trash_commit_message(rel)
     sha, moves = wiki_git.move_path(rel, dest, msg, author=author)
-    wiki_notify.after_doc_trashed(
-        moves, sha, author, root_move=PathMove(old=rel, new=dest)
+    wiki_notify.after_doc_trashed(moves, sha, author, root_move=PathMove(old=rel, new=dest))
+    log.info(
+        "doc trashed %s (%d pages) trash_id=%s by %s", rel, len(md_paths), trash_id, author or "?"
     )
-    log.info("doc trashed %s (%d pages) trash_id=%s by %s", rel, len(md_paths), trash_id, author or "?")
     return DeleteDocumentResponse(sha=sha, trash_id=trash_id)
 
 
@@ -704,9 +692,7 @@ def view_trash_item(
         raise HTTPException(status_code=403, detail="not permitted")
     body: str | None = None
     if entry.kind == PageKind.PAGE:
-        body = wiki_git.read_file_opt(
-            wiki_trash.trash_location(trash_id, entry.original_path)
-        )
+        body = wiki_git.read_file_opt(wiki_trash.trash_location(trash_id, entry.original_path))
     return TrashItemView(
         trash_id=entry.trash_id,
         path=entry.original_path,
@@ -763,9 +749,7 @@ def restore_trashed(
     prefix = f"{wiki_trash.TRASH_DIR}/{req.trash_id}/"
     for f in wiki_git.list_trash_files():
         if f.startswith(prefix) and filesystem.absolute(f[len(prefix) :]).exists():
-            raise HTTPException(
-                status_code=409, detail=f"'{f[len(prefix):]}' already exists"
-            )
+            raise HTTPException(status_code=409, detail=f"'{f[len(prefix) :]}' already exists")
     author = _git_author(user)
     sha, moves = wiki_git.restore_from_trash(
         req.trash_id, f"restore {entry.original_path}", author=author
@@ -787,9 +771,7 @@ def restore_trashed(
         len(moves),
         author or "?",
     )
-    return RestorePathResponse(
-        path=entry.original_path, sha=sha, restored=[m.new for m in moves]
-    )
+    return RestorePathResponse(path=entry.original_path, sha=sha, restored=[m.new for m in moves])
 
 
 @router.post("/reindex", response_model=ReindexResponse)
@@ -1011,9 +993,7 @@ def update_health(
     # 24h after it landed.
     cap_resets_at: str | None = None
     if cap > 0 and count >= cap:
-        reset = datetime.fromtimestamp(times[count - cap], tz=timezone.utc) + timedelta(
-            hours=24
-        )
+        reset = datetime.fromtimestamp(times[count - cap], tz=timezone.utc) + timedelta(hours=24)
         cap_resets_at = reset.isoformat()
     return UpdateHealthResponse(
         path=rel,
@@ -1023,7 +1003,9 @@ def update_health(
         auto_update_disabled=update_policy_repo.resolve_for_path(
             rel
         ).ingestion_auto_update_disabled,
-        can_manage=acl.can(user.id, user.is_admin, "write", rel),
+        # Managing limits is owner/admin only (mock annotation: "Only page
+        # owner and admins can click the usage bar to open this dialog").
+        can_manage=user.is_admin or acl.get_owner(rel) == user.id,
         cap_resets_at=cap_resets_at,
     )
 

@@ -105,6 +105,13 @@ body {
   --interactive-foreground-icon: var(--text-05) !important;
 }
 
+/* Header panel toggle: the mock's active state is a raised white square,
+   not Opal's selection tint. */
+.panel-toggle .interactive[data-interactive-state="selected"] {
+  background-color: var(--background-tint-00);
+  box-shadow: var(--shadow-box-00);
+}
+
 /* ── Horizontal scroll containers ─────────────────────────────────────────
    Native swipe/scroll without a visible scrollbar (e.g. mobile template
    picker). The container still scrolls — only the chrome is hidden.
@@ -127,10 +134,11 @@ body {
   display: none;
 }
 
-/* Scroll-edge fade from the mocks' full-size Mask layer (opaque until
-   95.17% of the 844px card, transparent at the bottom edge, ~40px). */
+/* Scroll-edge fade from the mocks' full-size Mask layer: an SVG gradient
+   with stops at 95.17% → 100%, so the fade depth scales with the container
+   (~40px on the version rail, ~23px on the expanded history card). */
 .scroll-fade-bottom {
-  mask-image: linear-gradient(to bottom, black calc(100% - 40px), transparent);
+  mask-image: linear-gradient(to bottom, black 95.17%, transparent);
 }
 
 /* ── Radix popovers ───────────────────────────────────────────────────────
@@ -293,9 +301,11 @@ body {
 
 /* The mock's strip has no fill, the page background shows through. Opal's
    underline list paints background-tint-00, an opaque fill that reads as a
-   band on the tinted app shell. */
+   band on the tinted app shell. The mock's label-to-underline gap is 2px
+   for a 36px strip total, so the list's 5px pad drops to 4px. */
 .doc-panel-tabs .opal-tabs-list {
   background: transparent;
+  padding-bottom: 4px;
 }
 
 /* The mock's active-tab underline is theme primary, not Opal's default
@@ -307,6 +317,27 @@ body {
 /* Panel search fields use the 14px Main UI size, which InputTypeIn does
    not expose as a prop. Scoped so other inputs keep Opal's default. */
 .panel-search .opal-input input {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Update-instructions editor uses the mock's 14/20 Medium text-04 style.
+   Opal's textarea field inherits the body font and exposes no size prop. */
+.instructions-editor .opal-input-field {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text-04);
+}
+
+/* Auto-edit limit inputs: the mock shows a 20px leading status glyph and a
+   DM Mono value. InputTypeIn has no leading-icon prop (the glyph overlays
+   via .limit-input's relative wrapper) and inherits the body font. */
+.limit-input .opal-input {
+  padding-left: 29px;
+}
+.limit-input .opal-input-field {
+  font-family: var(--font-dm-mono);
   font-size: 14px;
   line-height: 20px;
 }
