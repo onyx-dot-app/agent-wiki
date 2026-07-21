@@ -641,6 +641,11 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         // only reads `v.state` and POSTs — both safe after `v.destroy()` —
         // and the hook clears it once it has taken ownership.
         registerSetDoc(null);
+        // A focused editor unmounting (in-app navigation, session
+        // replacement) never gets a focusChanged update — clear our caret
+        // for peers explicitly instead of leaving it parked until the
+        // server-side session leave catches up.
+        if (v.hasFocus) onCaretClearedRef.current();
         v.destroy();
         view.current = null;
       };

@@ -132,6 +132,10 @@ export function useCoeditSession(opts: {
   // Client-local frame counter stamped onto peer entries (CoeditPeer.seq) so
   // the editor can tell fresh cursor frames from re-sent array entries.
   const frameSeq = useRef(0);
+  // Roster mirror for synchronous display-name lookups (the op branch in
+  // `onFrame` needs the author's display to restore their caret). Synced on
+  // join and on presence frames — the only points membership changes.
+  const participantsRef = useRef<CoeditParticipant[]>([]);
   // Inbound: per-peer expiry timers so a silent "typing" peer clears.
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
@@ -263,6 +267,7 @@ export function useCoeditSession(opts: {
   const onFrame = useCallback(
     (frame: CoeditFrame) => {
       if (frame.type === "presence") {
+        participantsRef.current = frame.participants;
         setParticipants(frame.participants);
         const ids = new Set(frame.participants.map((p) => p.user_id));
         setPeers((prev) => prev.filter((p) => ids.has(p.user_id)));
@@ -318,7 +323,10 @@ export function useCoeditSession(opts: {
         return;
       }
       // An applied edit implies caret placement (mirrors the server's /op
-      // stamp) — flip the author's label even if their cursor ping was lost.
+      // stamp), and the op itself says where: the end of its last change, in
+      // post-edit coordinates. Restore both the label and the caret from it,
+      // so a lost cursor frame can't leave a peer marked "editing" with no
+      // caret rendered.
       if (frame.type === "op" && frame.author !== null) {
         const author = frame.author;
         setParticipants((prev) =>
@@ -328,6 +336,30 @@ export function useCoeditSession(opts: {
               : p,
           ),
         );
+        const display =
+          myUserId !== null && author === myUserId
+            ? undefined // never render self as a peer
+            : participantsRef.current.find((p) => p.user_id === author)
+                ?.user_display;
+        if (display !== undefined && frame.changes.length > 0) {
+          let delta = 0;
+          let caret = 0;
+          for (const c of frame.changes) {
+            caret = c.from + delta + c.insert.length;
+            delta += c.insert.length - (c.to - c.from);
+          }
+          frameSeq.current += 1;
+          setPeers((prev) => [
+            ...prev.filter((p) => p.user_id !== author),
+            {
+              user_id: author,
+              user_display: display,
+              anchor: caret,
+              head: caret,
+              seq: frameSeq.current,
+            },
+          ]);
+        }
       }
       // op / resync → the editor's collab layer applies + rebases.
       serverFrame.current?.(frame);
@@ -396,6 +428,7 @@ export function useCoeditSession(opts: {
       if (cancelled) return;
       sessionId.current = snap.session_id;
       setBuffer(snap.buffer);
+      participantsRef.current = snap.participants;
       setParticipants(snap.participants);
       setSession({
         id: snap.session_id,
