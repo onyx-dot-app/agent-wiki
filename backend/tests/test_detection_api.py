@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.tasks.queues import detection_queue
+from app.tasks.queues import automanage_queue
 from tests._auth import login_fastapi
 from tests._seed import seed_user
 
@@ -34,7 +34,7 @@ def test_admin_sweep_records_a_run(client):
     uid = seed_user(uid="admin_1", email="a@x.com", is_admin=True)
     login_fastapi(client, uid)
 
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         resp = client.post("/api/automanage/sweep")
     assert resp.status_code == 202
     assert resp.json()["status"] == "queued"

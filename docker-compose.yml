@@ -161,10 +161,10 @@ services:
       opensearch:
         condition: service_healthy
 
-  worker-detection:
+  worker-automanage:
     profiles: ["app"]
     build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "detection"]
+    command: ["python", "-m", "app.tasks.run_worker", "automanage"]
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki

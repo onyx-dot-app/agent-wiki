@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from app.auth.users import AI_USER_ID
-from app.tasks.queues import detection_queue
+from app.tasks.queues import automanage_queue
 from app.wiki import git as wiki_git
 from app.wiki.automanage import review
 from app.wiki.change_proposals import (
@@ -47,7 +47,7 @@ def test_human_approve_executes_and_binds_reviewer(repo):
     uid = seed_user(uid="u1", email="u@x.com")
     wiki_git.commit_file("stale/.gitkeep", "", "create", author=None)
     pid = _mk("stale")
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         assert review.approve(pid, user_id=uid)
     p = _get(pid)
     assert p["status"] == "applied"
@@ -59,7 +59,7 @@ def test_auto_approve_executes_without_a_reviewer(repo):
     # The AI system user is seeded by migration; use it as the acting principal.
     wiki_git.commit_file("ai-managed/.gitkeep", "", "create", author=None)
     pid = _mk("ai-managed")
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         assert review.auto_approve(pid, acting_user_id=AI_USER_ID)
     p = _get(pid)
     assert p["status"] == "applied"  # same execution path as human approval
@@ -82,7 +82,7 @@ def test_approve_non_pending_returns_false(repo):
     uid = seed_user(uid="u1", email="u@x.com")
     wiki_git.commit_file("x/.gitkeep", "", "create", author=None)
     pid = _mk("x")
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         assert review.approve(pid, user_id=uid)
         assert review.approve(pid, user_id=uid) is False  # already applied
 
@@ -99,6 +99,6 @@ def test_approve_recovers_stuck_approved(repo):
     assert cp_approve(pid, user_id=uid)  # pending -> approved, no dispatch
     assert _get(pid)["status"] == "approved"
 
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         assert review.approve(pid, user_id=uid) is True  # re-dispatches
     assert _get(pid)["status"] == "applied"

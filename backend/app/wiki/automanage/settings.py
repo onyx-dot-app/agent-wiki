@@ -3,7 +3,7 @@
 
 ``enabled`` is the master kill switch; ``schedule`` drives the recurring
 detection sweep (``off`` / ``daily`` / ``weekly``, read each fire by the
-periodic tasks in ``app/tasks/detection.py``). Free functions over the row
+periodic tasks in ``app/tasks/automanage.py``). Free functions over the row
 returning a frozen pydantic model, mirroring ``app/ingest/settings.py``. The
 switch is a feature gate only — it never touches per-page
 ``ai_management_allowed`` policy, so disabling then re-enabling resumes exactly

@@ -251,11 +251,12 @@ working dir, identity, and commit-on-write. Path validation goes through
 ### Background work — Redis Streams queues, not threads
 
 If something might take more than ~100ms, queue it. Tasks live under
-`app/tasks/` and bind to one of four `TaskQueue` instances in
+`app/tasks/` and bind to one of five `TaskQueue` instances in
 `app/tasks/queues.py` — `documents_queue` (LLM doc-reconciliation),
 `triggers_queue` (NL trigger eval, delta + scheduled), `coedit_queue`
 (co-edit session checkpoints — commits a live buffer, AI-merges on a
-concurrent commit), or `lightweight_maintenance_queue` (sub-second
+concurrent commit), `automanage_queue` (Wiki Auto Management — whole-space
+sweeps + proposal execution), or `lightweight_maintenance_queue` (sub-second
 upkeep — BM25 reindex, agent-activity expiration cleanup). Each queue is
 a Redis Stream (`queue:<name>`), so each queue's backlog is isolated; the
 abstraction itself is in `app/tasks/queue.py`. Each queue has its own worker

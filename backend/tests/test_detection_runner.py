@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from app.auth.users import AI_USER_ID
-from app.tasks.queues import detection_queue
+from app.tasks.queues import automanage_queue
 from app.wiki import git as wiki_git
 from app.wiki import update_policy
 from app.wiki.automanage import runner, runs
@@ -93,7 +93,7 @@ def test_ai_managed_scope_auto_applies(repo):
     # archive opts into AI management → auto-approved + executed as the AI user,
     # no human queue. old is unset → stays pending.
     update_policy.set_policy("archive", ai_management_allowed=True)
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         runner.run_sweep(triggered_by_user_id=None)
 
     applied = {p["source_paths"][0]: p for p in list_by_status(ProposalStatus.APPLIED)}
@@ -109,7 +109,7 @@ def test_ai_managed_scope_auto_applies(repo):
 
 def test_unset_scope_stays_pending(repo):
     # No policy anywhere → both empties wait for human review, nothing executes.
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         runner.run_sweep(triggered_by_user_id=None)
     assert list_by_status(ProposalStatus.APPLIED) == []
     pending = {p["source_paths"][0] for p in list_by_status(ProposalStatus.PENDING)}

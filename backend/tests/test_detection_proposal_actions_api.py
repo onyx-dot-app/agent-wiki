@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.tasks.queues import detection_queue
+from app.tasks.queues import automanage_queue
 from app.wiki import acl
 from app.wiki import git as wiki_git
 from app.wiki.change_proposals import (
@@ -53,7 +53,7 @@ def test_approve_executes_and_applies(client):
     wiki_git.commit_file("stale/.gitkeep", "", "create", author=None)
     pid = _mk("stale")
 
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         r = client.post(f"/api/automanage/proposals/{pid}/approve")
     assert r.status_code == 200 and r.json()["status"] == "approved"
     assert _status(pid) == "applied"
@@ -90,7 +90,7 @@ def test_approve_twice_conflicts(client):
     wiki_git.commit_file("dup/.gitkeep", "", "create", author=None)
     pid = _mk("dup")
 
-    with detection_queue.immediate_mode():
+    with automanage_queue.immediate_mode():
         assert client.post(f"/api/automanage/proposals/{pid}/approve").status_code == 200
         # already applied → no longer pending → 409
         assert client.post(f"/api/automanage/proposals/{pid}/approve").status_code == 409

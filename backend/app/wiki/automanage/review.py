@@ -20,11 +20,11 @@ from app.wiki.change_proposals import ProposalStatus
 
 
 def _dispatch_execution(proposal_id: int) -> None:
-    """Enqueue execution of an approved proposal on the detection queue — the
+    """Enqueue execution of an approved proposal on the automanage queue — the
     shared step every approval path calls. Imported lazily so this domain
     module doesn't hard-depend on the tasks layer at import time (tasks import
     automanage, not the reverse)."""
-    from app.tasks.detection import execute_proposal
+    from app.tasks.automanage import execute_proposal
 
     execute_proposal(proposal_id)
 

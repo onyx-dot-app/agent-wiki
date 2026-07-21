@@ -46,7 +46,7 @@ Queues:
   a Postgres advisory lock (``coedit.checkpoint_lock_key``), not single-threading
   — different sessions checkpoint in parallel; the same session is serialized.
 
-* ``detection_queue`` — **Wiki Auto Management detection + execution.** A
+* ``automanage_queue`` — **Wiki Auto Management detection + execution.** A
   whole-space sweep walks the wiki, runs the detectors, and emits
   ``change_proposals`` (mechanical today; fuzzy-dup/misplacement will add LLM
   calls), and on approval the executor commits structural changes to git. That
@@ -87,8 +87,8 @@ from app.tasks.queue import QueueFullError, TaskQueue
 __all__ = [
     "QueueFullError",
     "QUEUES",
+    "automanage_queue",
     "coedit_queue",
-    "detection_queue",
     "documents_queue",
     "lightweight_maintenance_queue",
     "triggers_queue",
@@ -102,7 +102,7 @@ def _make(name: str) -> TaskQueue:
 documents_queue = _make("documents")
 triggers_queue = _make("triggers")
 coedit_queue = _make("coedit")
-detection_queue = _make("detection")
+automanage_queue = _make("automanage")
 lightweight_maintenance_queue = _make("lightweight_maintenance")
 
 # Map queue-name → instance, used by run_worker.py to launch the right
@@ -111,6 +111,6 @@ QUEUES = {
     "documents": documents_queue,
     "triggers": triggers_queue,
     "coedit": coedit_queue,
-    "detection": detection_queue,
+    "automanage": automanage_queue,
     "lightweight_maintenance": lightweight_maintenance_queue,
 }

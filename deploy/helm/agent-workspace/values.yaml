@@ -137,7 +137,7 @@ worker:
     - documents
     - triggers
     - coedit
-    - detection
+    - automanage
     - lightweight_maintenance
   resources:
     requests:
