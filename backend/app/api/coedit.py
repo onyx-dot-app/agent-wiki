@@ -52,6 +52,7 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
             last_seen_at=p.last_seen_at,
             last_edited_at=p.last_edited_at,
             caret_active=p.caret_active,
+            caret_seq=p.caret_seq,
         )
         for p in coedit.list_participants(session_id)
     ]
@@ -136,8 +137,21 @@ def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
     if out is None:
         raise HTTPException(status_code=409, detail="stale base_version; re-sync and retry")
     coedit.touch(req.session_id, user.id, edited=True)
+    # An edit asserts caret placement at the sender's current epoch — guarded
+    # like any caret write, so an op that overlaps a later blur clear can't
+    # resurrect the caret. No caret_seq (cleared caret / legacy client) means
+    # the op leaves caret state alone.
+    if req.caret_seq is not None:
+        coedit.set_caret_active(
+            req.session_id, user.id, active=True, seq=req.caret_seq
+        )
     coedit_channel.broadcast_op(
-        req.session_id, out.version, req.changes, user.id, client_id=req.client_id
+        req.session_id,
+        out.version,
+        req.changes,
+        user.id,
+        client_id=req.client_id,
+        caret_seq=req.caret_seq,
     )
     return OpResponse(version=out.version)
 
@@ -150,12 +164,15 @@ def cursor(req: CursorRequest, user: User = Depends(require_user)) -> dict[str, 
     hidden) — peers drop it and presence flips the sender to "viewing".
     High-frequency + throttled client-side; positions stay ephemeral (no
     last_seen write — the SSE heartbeat covers liveness), only the on/off
-    caret state lands in the DB, and only on a transition, so the roster is
-    right for late joiners.
+    caret state lands in the DB, and only when ``seq`` (the client caret
+    epoch) advances — which both keeps the ping path write-free and stops a
+    reordered older request from overwriting the latest caret state.
     """
     _require_active(req.session_id, user, "write")
     cleared = req.anchor is None or req.head is None
-    coedit.set_caret_active(req.session_id, user.id, active=not cleared)
+    coedit.set_caret_active(
+        req.session_id, user.id, active=not cleared, seq=req.seq
+    )
     coedit_channel.broadcast_cursor(
         req.session_id,
         user_id=user.id,
@@ -165,6 +182,7 @@ def cursor(req: CursorRequest, user: User = Depends(require_user)) -> dict[str, 
         anchor=None if cleared else req.anchor,
         head=None if cleared else req.head,
         typing=req.typing and not cleared,
+        seq=req.seq,
     )
     return {"ok": True}
 

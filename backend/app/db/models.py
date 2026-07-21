@@ -1016,6 +1016,13 @@ class CoeditParticipant(Base):
     caret_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("FALSE")
     )
+    # Client-assigned caret epoch: the editor bumps it on every place/clear
+    # transition and echoes it on movement pings and edit ops. Caret writes
+    # are guarded with ``caret_seq < :seq`` (see coedit.set_caret_active), so
+    # a reordered older request can't overwrite the latest caret state.
+    caret_seq: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
 
     __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
 

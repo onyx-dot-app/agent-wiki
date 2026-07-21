@@ -35,6 +35,13 @@ class OpRequest(BaseModel):
     # omit it. Bounded: it's a UUID/tab id, and it's persisted + echoed to every
     # participant, so cap it to keep a client from bloating the log / bus.
     client_id: str | None = Field(default=None, max_length=256)
+    # The sender's current caret epoch while their caret is placed — an edit
+    # asserts caret placement at that epoch (guarded like a cursor write, so a
+    # reordered op can't resurrect a later-cleared caret). Omitted when the
+    # sender's caret is cleared (e.g. a teardown flush after blur) or by
+    # clients predating the epoch protocol; the op then leaves caret state
+    # untouched.
+    caret_seq: int | None = Field(default=None, ge=0)
 
 
 class OpResponse(BaseModel):
@@ -54,6 +61,11 @@ class CursorRequest(BaseModel):
     anchor: int | None = Field(default=None, ge=0)
     head: int | None = Field(default=None, ge=0)
     typing: bool = False
+    # Client caret epoch: bumped on every place/clear transition, echoed
+    # unchanged by movement pings. Orders concurrent caret writes server-side
+    # (older epochs lose) and lets peers drop stale frames. None = a client
+    # predating the epoch protocol (state changes apply last-writer-wins).
+    seq: int | None = Field(default=None, ge=0)
 
 
 class ParticipantOut(BaseModel):
@@ -64,8 +76,11 @@ class ParticipantOut(BaseModel):
     # None until the participant applies an edit op.
     last_edited_at: str | None = None
     # True while the participant has a caret placed in the text — presence
-    # renders them "editing" rather than "viewing".
+    # renders them "editing" rather than "viewing". ``caret_seq`` is the caret
+    # epoch that ordered the last applied caret write; clients seed their
+    # stale-frame guard (and a rejoining editor its own epoch counter) from it.
     caret_active: bool = False
+    caret_seq: int = 0
 
 
 class JoinResponse(BaseModel):

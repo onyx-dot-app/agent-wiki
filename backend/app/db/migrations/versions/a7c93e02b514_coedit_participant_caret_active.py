@@ -1,10 +1,12 @@
 """coedit_participant_caret_active
 
 Adds ``coedit_participants.caret_active`` — whether the participant currently
-has a caret placed in the text. Presence renders roster members "editing"
-(positioned to edit) vs "viewing" from it; the cursor endpoint sets/clears it
-on state transitions. Guarded with the inspector because ``0001_initial``
-builds fresh databases from the current models.
+has a caret placed in the text — and ``caret_seq``, the client-assigned caret
+epoch that orders concurrent caret writes (guard: ``caret_seq < :seq``).
+Presence renders roster members "editing" (positioned to edit) vs "viewing"
+from the flag; the cursor endpoint sets/clears it on state transitions.
+Guarded with the inspector because ``0001_initial`` builds fresh databases
+from the current models.
 
 Revision ID: a7c93e02b514
 Revises: 5c4a9e1b7d38
@@ -39,8 +41,20 @@ def upgrade() -> None:
                 server_default=sa.text("FALSE"),
             ),
         )
+    if not _has_column("coedit_participants", "caret_seq"):
+        op.add_column(
+            "coedit_participants",
+            sa.Column(
+                "caret_seq",
+                sa.BigInteger(),
+                nullable=False,
+                server_default=sa.text("0"),
+            ),
+        )
 
 
 def downgrade() -> None:
+    if _has_column("coedit_participants", "caret_seq"):
+        op.drop_column("coedit_participants", "caret_seq")
     if _has_column("coedit_participants", "caret_active"):
         op.drop_column("coedit_participants", "caret_active")
