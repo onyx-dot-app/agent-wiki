@@ -41,6 +41,29 @@ def _can_see(user: User, proposal: dict[str, Any]) -> bool:
     return all(acl.can(user.id, user.is_admin, "read", p) for p in paths)
 
 
+def _can_act(user: User, proposal: dict[str, Any]) -> bool:
+    """A proposal is actionable — and so listed — only if the caller can *write*
+    every path it touches. This is the same envelope approve/reject enforce
+    (``_require_writable``), so the listing is exactly the set the caller could
+    approve. It also implies read, so it never leaks a restricted scope."""
+    paths = list(proposal["source_paths"]) + list(proposal["target_paths"])
+    return all(acl.can(user.id, user.is_admin, "write", p) for p in paths)
+
+
+def _paths_overlap(a: str, b: str) -> bool:
+    """True if two wiki paths are the same or one is an ancestor of the other."""
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+
+def _touches(proposal: dict[str, Any], scope: str) -> bool:
+    """True if the proposal acts within ``scope`` — any of its paths equals
+    ``scope`` or is an ancestor/descendant of it. So a page surfaces proposals on
+    itself (or an enclosing folder), and a folder surfaces proposals anywhere in
+    its subtree."""
+    paths = list(proposal["source_paths"]) + list(proposal["target_paths"])
+    return any(_paths_overlap(p, scope) for p in paths)
+
+
 @router.get("/settings", response_model=DetectionSettingsView)
 def get_settings(user: User = Depends(require_admin)) -> DetectionSettingsView:
     """The org-wide Auto Organize settings (kill switch + sweep schedule)."""
@@ -83,17 +106,33 @@ def list_runs(user: User = Depends(require_admin)) -> RunsResponse:
 
 
 @router.get("/proposals", response_model=ProposalsResponse)
-def list_proposals(user: User = Depends(require_user)) -> ProposalsResponse:
-    """Pending cleanup proposals the caller may review — filtered to those whose
-    every path the caller can read (an unreadable path would leak its scope).
+def list_proposals(
+    path: str | None = None, user: User = Depends(require_user)
+) -> ProposalsResponse:
+    """Pending cleanup proposals the caller can act on — those whose every path
+    the caller can **write** (the same envelope approve/reject enforce, so the
+    list is exactly what the caller could approve; edit access, not read, per the
+    Path-2 review model).
 
-    Fetches all pending (``limit=None``) before ACL-filtering: the pending queue
-    is a bounded working set (drained by review + TTL expiry, capped per sweep),
-    and a hard row cap *before* the filter would silently hide a caller's
-    readable proposals sitting past it. If the pending set ever grows large,
-    push the visibility check into SQL and paginate."""
+    Pass ``path`` to scope to the proposals touching a page or folder subtree —
+    this backs the Path-2 review banner shown on the page/folder itself. Without
+    it, the full actionable pending set (the admin queue; admins bypass ACL).
+
+    Fetches all pending (``limit=None``) before filtering: the pending queue is a
+    bounded working set (drained by review + TTL expiry, capped per sweep), and a
+    hard row cap *before* the filter would silently hide a caller's proposals
+    sitting past it. If the pending set ever grows large, push the checks into
+    SQL and paginate."""
+    # Proposal paths are stored canonical (no surrounding slashes), so normalize
+    # the query the same way — `/docs`, `docs/`, `docs` all match, and the root
+    # (`""` / `"/"`) normalizes to empty → no scope filter (the whole wiki).
+    scope = path.strip().strip("/") if path else ""
     pending = list_by_status(ProposalStatus.PENDING, limit=None)
-    visible = [p for p in pending if _can_see(user, p)]
+    visible = [
+        p
+        for p in pending
+        if (not scope or _touches(p, scope)) and _can_act(user, p)
+    ]
     return ProposalsResponse(proposals=[ProposalView(**p) for p in visible])
 
 
