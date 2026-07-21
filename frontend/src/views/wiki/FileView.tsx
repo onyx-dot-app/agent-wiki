@@ -913,6 +913,7 @@ export function FileView({ path }: FileViewProps) {
                   peers={coedit.peers}
                   onSelectionChange={coedit.reportSelection}
                   onCaretCleared={coedit.reportCaretCleared}
+                  getCaretSeq={coedit.getCaretSeq}
                   onServerFrame={coedit.onServerFrame}
                   reportDoc={coedit.reportDoc}
                   registerFlush={coedit.registerFlush}

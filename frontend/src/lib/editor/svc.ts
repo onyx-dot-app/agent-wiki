@@ -56,6 +56,7 @@ export function sendOp(
   baseVersion: number,
   changes: CoeditChange[],
   clientId?: string,
+  caretSeq?: number | null,
 ): Promise<{ version: number }> {
   return apiFetch("/coedit/op", {
     method: "POST",
@@ -64,25 +65,33 @@ export function sendOp(
       base_version: baseVersion,
       changes,
       ...(clientId ? { client_id: clientId } : {}),
+      // An edit asserts caret placement at the sender's current epoch; omit
+      // when the caret is cleared so a late-flushed op can't resurrect it.
+      ...(caretSeq !== null && caretSeq !== undefined
+        ? { caret_seq: caretSeq }
+        : {}),
     }),
   });
 }
 
 /** Report the local caret/selection to the server so peers see live presence.
  * Null anchor/head clears the caret (editor blur / hidden tab) — peers drop it
- * and presence flips the sender to "viewing". `init` lets the hidden-tab clear
- * pass `{ keepalive: true }` so it survives the page backgrounding. */
+ * and presence flips the sender to "viewing". `seq` is the caret epoch that
+ * orders concurrent place/clear writes server-side. `init` lets the
+ * hidden-tab clear pass `{ keepalive: true }` so it survives the page
+ * backgrounding. */
 export function sendCursor(
   sessionId: number,
   anchor: number | null,
   head: number | null,
   typing: boolean,
+  seq: number,
   init?: RequestInit,
 ): Promise<void> {
   return apiFetch("/coedit/cursor", {
     ...init,
     method: "POST",
-    body: JSON.stringify({ session_id: sessionId, anchor, head, typing }),
+    body: JSON.stringify({ session_id: sessionId, anchor, head, typing, seq }),
   });
 }
 

@@ -290,6 +290,10 @@ interface CoeditorProps {
   /** Fires when the editor loses focus — the local caret is no longer placed,
    * so peers drop it and presence flips us to "viewing". */
   onCaretCleared: () => void;
+  /** The current caret epoch while our caret is placed, else null — attached
+   * to every op so an edit asserts caret placement with the same ordering as
+   * cursor writes (see useCoeditSession.getCaretSeq). */
+  getCaretSeq: () => number | null;
   onServerFrame: (handler: ((frame: CoeditFrame) => void) | null) => void;
   reportDoc: (doc: string) => void;
   registerFlush: (fn: (() => Promise<void>) | null) => void;
@@ -338,6 +342,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       peers,
       onSelectionChange,
       onCaretCleared,
+      getCaretSeq,
       onServerFrame,
       reportDoc,
       registerFlush,
@@ -356,10 +361,12 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     // Latest callbacks without re-creating the editor.
     const onSelRef = useRef(onSelectionChange);
     const onCaretClearedRef = useRef(onCaretCleared);
+    const getCaretSeqRef = useRef(getCaretSeq);
     const reportDocRef = useRef(reportDoc);
     const onSelectionForCommentRef = useRef(onSelectionForComment);
     onSelRef.current = onSelectionChange;
     onCaretClearedRef.current = onCaretCleared;
+    getCaretSeqRef.current = getCaretSeq;
     reportDocRef.current = reportDoc;
     onSelectionForCommentRef.current = onSelectionForComment;
 
@@ -423,6 +430,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
             version,
             changeSetToChanges(updates[0]!.changes),
             session.clientId,
+            getCaretSeqRef.current(),
           );
           sentAtVersion.current = version;
         } catch (e) {
@@ -606,6 +614,9 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
                 version,
                 changeSetToChanges(updates[i]!.changes),
                 session.clientId,
+                // Null after a blur/teardown clear — the flushed tail then
+                // makes no caret assertion, so it can't resurrect the caret.
+                getCaretSeqRef.current(),
               );
               sentAtVersion.current = version;
               version += 1;

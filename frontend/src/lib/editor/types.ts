@@ -19,6 +19,9 @@ export interface CoeditParticipant {
   last_seen_at: string;
   last_edited_at: string | null;
   caret_active: boolean;
+  /** Caret epoch that ordered the last applied caret write — seeds the
+   * stale-frame guard, and a rejoining editor's own epoch counter. */
+  caret_seq: number;
 }
 
 /** A peer's live caret/selection, from their latest `cursor` frame. Offsets are
@@ -54,6 +57,9 @@ export type CoeditFrame =
       changes: CoeditChange[];
       author: string | null;
       client_id: string | null;
+      // The author's caret epoch when placed — an edit asserts caret
+      // placement at that epoch. Null = no caret assertion.
+      caret_seq: number | null;
     }
   | {
       type: "cursor";
@@ -65,6 +71,9 @@ export type CoeditFrame =
       anchor: number | null;
       head: number | null;
       typing: boolean;
+      // Sender's caret epoch: frames older than the latest epoch seen for
+      // this user are dropped, so reordered place/clear can't apply stale.
+      seq: number | null;
     }
   | { type: "resync"; session_id: number; version: number };
 
@@ -137,4 +146,8 @@ export interface UseCoeditSession {
    * rare), dropping any queued position so a throttled send can't resurrect
    * the caret. */
   reportCaretCleared: () => void;
+  /** The current caret epoch while our caret is placed, else null. Ops carry
+   * it so an edit asserts caret placement with the same ordering guarantees
+   * as cursor writes (null = the op makes no caret assertion). */
+  getCaretSeq: () => number | null;
 }
