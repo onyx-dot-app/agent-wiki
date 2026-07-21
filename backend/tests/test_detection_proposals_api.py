@@ -134,3 +134,8 @@ def test_path_filter_scopes_to_subtree(client):
     assert folders("docs/old") == {"docs/old"}  # exact
     assert folders("archive") == {"archive"}
     assert folders("nope") == set()  # no overlap
+    # Query path is normalized like other wiki paths (surrounding slashes /
+    # root are tolerated), so a banner request isn't silently empty.
+    assert folders("/docs") == {"docs/old"}
+    assert folders("docs/") == {"docs/old"}
+    assert folders("/") == {"docs/old", "archive"}  # root → no filter

@@ -123,11 +123,15 @@ def list_proposals(
     hard row cap *before* the filter would silently hide a caller's proposals
     sitting past it. If the pending set ever grows large, push the checks into
     SQL and paginate."""
+    # Proposal paths are stored canonical (no surrounding slashes), so normalize
+    # the query the same way — `/docs`, `docs/`, `docs` all match, and the root
+    # (`""` / `"/"`) normalizes to empty → no scope filter (the whole wiki).
+    scope = path.strip().strip("/") if path else ""
     pending = list_by_status(ProposalStatus.PENDING, limit=None)
     visible = [
         p
         for p in pending
-        if (path is None or _touches(p, path)) and _can_act(user, p)
+        if (not scope or _touches(p, scope)) and _can_act(user, p)
     ]
     return ProposalsResponse(proposals=[ProposalView(**p) for p in visible])
 
