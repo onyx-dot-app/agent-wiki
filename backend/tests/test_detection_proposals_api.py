@@ -1,7 +1,10 @@
-"""Pending-cleanups read API — list/get proposals, visibility-scoped.
+"""Pending-cleanups read API — list/get proposals.
 
-A proposal is visible only to a caller who can read every path it touches, so
-its existence never leaks a restricted scope.
+The **listing** is write-scoped (Path-2 review): a proposal is listed only to a
+caller who can *write* every path it touches — the same envelope approve/reject
+enforce, so the list is exactly what the caller could act on. A single-proposal
+fetch stays read-scoped (viewing). ``?path=`` scopes the listing to proposals
+touching a page/folder subtree — the on-page review banner.
 """
 from __future__ import annotations
 
@@ -87,3 +90,47 @@ def test_restricted_proposal_hidden_from_non_reader(client):
     # And an admin sees it via bypass.
     login_fastapi(client, admin)
     assert client.get(f"/api/automanage/proposals/{pid}").status_code == 200
+
+
+def test_read_only_user_excluded_from_list_but_can_view(client):
+    # The listing is write-scoped: a reader (read but not write) can *view* a
+    # proposal but it's not in their actionable list; the writer/owner sees it.
+    seed_user(uid="admin_1", email="a@x.com", is_admin=True)  # first = admin
+    owner = seed_user(uid="owner_1", email="o@x.com", is_admin=False)
+    reader = seed_user(uid="reader_1", email="r@x.com", is_admin=False)
+    pid = _mk("ro")
+    acl.set_owner("ro", owner)  # manage the path (owner + admin write)
+    acl.grant(
+        resource_kind="folder",
+        resource_path="ro",
+        principal_kind="user",
+        principal_id=reader,
+        permission="read",
+        granted_by_user_id=owner,
+    )
+
+    login_fastapi(client, reader)
+    listed = {p["source_paths"][0] for p in client.get("/api/automanage/proposals").json()["proposals"]}
+    assert "ro" not in listed  # read-only → not actionable, not listed
+    assert client.get(f"/api/automanage/proposals/{pid}").status_code == 200  # but viewable
+
+    login_fastapi(client, owner)
+    listed = {p["source_paths"][0] for p in client.get("/api/automanage/proposals").json()["proposals"]}
+    assert "ro" in listed  # writer sees it
+
+
+def test_path_filter_scopes_to_subtree(client):
+    uid = seed_user(uid="admin_1", email="a@x.com", is_admin=True)
+    login_fastapi(client, uid)
+    _mk("docs/old")
+    _mk("archive")
+
+    def folders(path=None):
+        q = f"/api/automanage/proposals?path={path}" if path else "/api/automanage/proposals"
+        return {p["source_paths"][0] for p in client.get(q).json()["proposals"]}
+
+    assert folders() == {"docs/old", "archive"}  # no filter → all
+    assert folders("docs") == {"docs/old"}  # ancestor folder → subtree match
+    assert folders("docs/old") == {"docs/old"}  # exact
+    assert folders("archive") == {"archive"}
+    assert folders("nope") == set()  # no overlap
