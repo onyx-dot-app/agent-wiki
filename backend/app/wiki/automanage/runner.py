@@ -29,7 +29,7 @@ from typing import Any
 from app.auth.users import AI_USER_ID
 from app.wiki import git
 from app.wiki import update_policy
-from app.wiki.automanage import review, runs
+from app.wiki.automanage import review, runs, settings
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
@@ -94,6 +94,16 @@ def run_detection(
     created_via = _CREATED_VIA.get(trigger)
     if created_via is None:
         raise ValueError(f"no change-proposal entry point for trigger {trigger.value!r}")
+
+    # Master kill switch, re-checked at the one chokepoint every sweep/detection
+    # flow passes through — so a disable that lands after a caller's own check
+    # (e.g. a scheduled sweep between reading settings and starting) still keeps
+    # this run from emitting any proposals. The action layer (auto_approve /
+    # approve / executor) re-checks too, so nothing emitted in the residual race
+    # window can be applied while disabled.
+    if not settings.is_enabled():
+        log.info("detection: Auto Organize disabled — %s run skipped", trigger.value)
+        return {"run_id": None, "paths_scanned": 0, "proposals_emitted": 0}
 
     run_id = runs.start(trigger=trigger, triggered_by_user_id=triggered_by_user_id)
     try:
