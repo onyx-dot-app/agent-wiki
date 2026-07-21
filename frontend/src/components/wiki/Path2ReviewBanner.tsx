@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { Button, MessageCard } from "@onyx-ai/opal/components";
+import { Button, MessageCard, Text } from "@onyx-ai/opal/components";
+import { ContentAction, Section } from "@onyx-ai/opal/layouts";
 
 import { ApiError } from "@/lib/api";
 import {
@@ -42,11 +43,11 @@ export function Path2ReviewBanner({ path, canWrite = true }: Props) {
         title={`Auto Organize suggests ${n} cleanup${n === 1 ? "" : "s"} here`}
         description="Approve a change to apply it, or reject to dismiss it (rejection is durable — it won't be suggested again)."
         bottomChildren={
-          <ul className="m-0 flex list-none flex-col gap-2 pl-0">
+          <Section flexDirection="column" gap={0.25} width="full">
             {proposals.map((p) => (
               <ProposalRow key={p.id} proposal={p} onActioned={refresh} />
             ))}
-          </ul>
+          </Section>
         }
       />
     </div>
@@ -63,6 +64,13 @@ type Outcome =
   | "error";
 
 const TERMINAL: Outcome[] = ["applied", "rejected", "stale", "applying"];
+
+const STATUS_LABEL: Record<string, string> = {
+  applied: "Applied ✓",
+  rejected: "Rejected",
+  stale: "Skipped — the page changed since this was proposed",
+  applying: "Applying…",
+};
 
 function ProposalRow({
   proposal,
@@ -135,43 +143,43 @@ function ProposalRow({
     }
   }
 
-  const statusLabel: Record<string, string> = {
-    applied: "Applied ✓",
-    rejected: "Rejected",
-    stale: "Skipped — the page changed since this was proposed",
-    applying: "Applying…",
-  };
-
   return (
-    <li className="flex items-center justify-between gap-3 text-[13px] text-(--text-04)">
-      <span className="min-w-0 truncate">{proposal.summary}</span>
-      {TERMINAL.includes(outcome) ? (
-        <span className="shrink-0 text-(--text-03)">
-          {statusLabel[outcome]}
-        </span>
-      ) : (
-        <span className="flex shrink-0 items-center gap-2">
-          {outcome === "error" && error && (
-            <span className="text-(--status-danger-05)">{error}</span>
-          )}
-          <Button
-            size="sm"
-            prominence="secondary"
-            disabled={outcome === "working"}
-            onClick={() => void act("reject")}
+    <ContentAction
+      sizePreset="main-ui"
+      variant="section"
+      title={proposal.summary}
+      titleMaxLines={1}
+      auxIcon={outcome === "error" ? "error" : undefined}
+      description={outcome === "error" ? (error ?? undefined) : undefined}
+      rightChildren={
+        TERMINAL.includes(outcome) ? (
+          <Text
+            font="secondary-body"
+            color={outcome === "applied" ? "status-success-05" : "text-03"}
           >
-            Reject
-          </Button>
-          <Button
-            size="sm"
-            prominence="primary"
-            disabled={outcome === "working"}
-            onClick={() => void act("approve")}
-          >
-            {outcome === "working" ? "…" : "Approve"}
-          </Button>
-        </span>
-      )}
-    </li>
+            {STATUS_LABEL[outcome]}
+          </Text>
+        ) : (
+          <Section flexDirection="row" gap={0.5} alignItems="center">
+            <Button
+              size="sm"
+              prominence="secondary"
+              disabled={outcome === "working"}
+              onClick={() => void act("reject")}
+            >
+              Reject
+            </Button>
+            <Button
+              size="sm"
+              prominence="primary"
+              disabled={outcome === "working"}
+              onClick={() => void act("approve")}
+            >
+              {outcome === "working" ? "…" : "Approve"}
+            </Button>
+          </Section>
+        )
+      }
+    />
   );
 }
