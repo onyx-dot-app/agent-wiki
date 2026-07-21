@@ -19,7 +19,7 @@ import {
   SvgSparkle,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -49,7 +49,7 @@ interface Props {
   historyOpen?: boolean;
   /** The version list itself, rendered inside the history card while
    * `historyOpen` (mock 1855:273363 expands the card in place). */
-  historyList?: React.ReactNode;
+  historyList?: ReactNode;
   /** All-time commit count for the "Total Edits" summary column. Null while
    * the host hasn't loaded history yet, which hides the column. */
   totalEdits?: number | null;
@@ -61,9 +61,13 @@ function capNote(health: UpdateHealth): string {
       ? `Daily auto-edit limit reached. Updates will resume at ${absoluteTime(health.cap_resets_at)}.`
       : "Daily auto-edit limit reached. Updates will resume within 24 hours.";
   }
-  return health.cap_24h > 0
-    ? "Approaching daily auto-edit limit. Updates will pause when the limit is reached."
-    : "Auto-updating frequently.";
+  if (health.cap_24h > 0) {
+    return "Approaching daily auto-edit limit. Updates will pause when the limit is reached.";
+  }
+  if (health.threshold_24h > 0 && health.count_24h >= health.threshold_24h) {
+    return `Reached the alert threshold of ${health.threshold_24h} auto-edits in 24 hours.`;
+  }
+  return "Auto-updating frequently.";
 }
 
 function errorMessage(e: unknown): string {
@@ -183,7 +187,7 @@ export function UpdatePolicyPanel({
     onChange: (on: boolean) => void,
     setHere: boolean,
     reset: () => void,
-  ): React.ReactNode {
+  ): ReactNode {
     const origin = setHere
       ? `Set on this ${kind}`
       : checked

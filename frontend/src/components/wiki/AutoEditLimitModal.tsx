@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Button,
   Divider,
@@ -145,7 +145,7 @@ function Stepper({
 
 /** 20px leading status glyph overlaid on an InputTypeIn, which exposes no
  *  leading-icon prop. Pairs with the `.limit-input` padding override. */
-function InputLeadIcon({ children }: { children: React.ReactNode }) {
+function InputLeadIcon({ children }: { children: ReactNode }) {
   return (
     <span className="pointer-events-none absolute top-1/2 left-[7px] z-[1] flex size-5 -translate-y-1/2 items-center justify-center p-[2px] text-(--text-04)">
       {children}
@@ -412,14 +412,20 @@ export function AutoEditLimitModal({
                   // will persist (the threshold cannot go over the limit).
                   onChange={(e) => {
                     const d = digits(e.target.value);
-                    setDraft(d === "" ? "" : String(Math.min(Number(d), cap)));
+                    // The threshold cannot exceed the limit, but with no cap
+                    // configured there is no ceiling to clamp against.
+                    setDraft(
+                      d === "" || cap <= 0
+                        ? d
+                        : String(Math.min(Number(d), cap)),
+                    );
                   }}
                   rightChildren={
                     <div className="flex items-center">
                       <Stepper
                         value={draft}
                         onChange={setDraft}
-                        max={cap}
+                        max={cap > 0 ? cap : undefined}
                         disabled={busy}
                       />
                       <div className={draft === "" ? "invisible" : undefined}>

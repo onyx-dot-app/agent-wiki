@@ -29,6 +29,7 @@ import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { Section } from "@onyx-ai/opal/layouts";
 
 import { PanelSearchField } from "@/components/wiki/PanelSearch";
+import { toast } from "@/hooks/useToast";
 import { pageTitle } from "@/lib/wiki/utils";
 import { relativeTime } from "@/lib/time";
 import {
@@ -161,6 +162,10 @@ export function WatchingPanel({ path, onNew, onEdit }: Props) {
         }),
         { revalidate: true },
       );
+    } catch {
+      // The switch snaps back on its own (state never changed server-side),
+      // but the user needs to know why.
+      toast.error("Couldn't update the watcher.");
     } finally {
       setBusyId(null);
     }

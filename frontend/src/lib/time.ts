@@ -7,7 +7,7 @@ export type RelativeTimeStyle = "short" | "long";
 
 /** Backend text timestamps ("2026-07-21 00:52:39") are UTC without a zone
  * marker, which browsers parse as local time. Normalize to ISO UTC. */
-function parseTs(iso: string): Date {
+export function parseTs(iso: string): Date {
   const naive = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(iso);
   return new Date(naive ? `${iso.replace(" ", "T")}Z` : iso);
 }

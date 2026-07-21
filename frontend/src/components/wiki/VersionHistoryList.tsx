@@ -3,11 +3,11 @@ import { Content, Section } from "@onyx-ai/opal/layouts";
 import { SvgArrowUpRight, SvgHistory } from "@onyx-ai/opal/icons";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import type { IconProps } from "@onyx-ai/opal/types";
-import { useMemo, useState, type ComponentType } from "react";
+import { useMemo, useState, type ComponentType, type ReactNode } from "react";
 
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { PanelSearchField } from "@/components/wiki/PanelSearch";
-import { relativeTime } from "@/lib/time";
+import { parseTs, relativeTime } from "@/lib/time";
 import type { CommitAgent, CommitInfo } from "@/lib/wiki/types";
 import { parseCommitAuthor, parseCommitSource } from "@/lib/wiki/utils";
 
@@ -71,7 +71,7 @@ export function VersionHistoryList({
     const recent: CommitInfo[] = [];
     const older: CommitInfo[] = [];
     for (const c of filtered ?? []) {
-      (new Date(c.ts).getTime() >= cutoff ? recent : older).push(c);
+      (parseTs(c.ts).getTime() >= cutoff ? recent : older).push(c);
     }
     return { recent, older };
   }, [filtered]);
@@ -154,7 +154,7 @@ export interface UpdateHistoryRailProps extends VersionHistoryListProps {
   /** Back to Current / Restore This Version / Exit Update History cluster,
    * rendered in the rail's own 48px header row. Mock Side Section
    * 1912:355400 keeps these out of the app header. */
-  headerActions: React.ReactNode;
+  headerActions: ReactNode;
 }
 
 /**
