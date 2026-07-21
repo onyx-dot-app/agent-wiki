@@ -261,11 +261,15 @@ whole-space sweeps + AI auto-apply executes), `automanage_nearline_queue`
 `lightweight_maintenance_queue` (sub-second upkeep — BM25 reindex,
 agent-activity expiration cleanup). Each queue is
 a Redis Stream (`queue:<name>`), so each queue's backlog is isolated; the
-abstraction itself is in `app/tasks/queue.py`. Each queue has its own worker
-process (`python -m app.tasks.run_worker <queue>`); make sure new
-task modules are imported by `run_worker.py` so they register on
-boot. The variable names and the `queues.py` filename are kept
-from the TaskQueue era so call sites didn't have to change.
+abstraction itself is in `app/tasks/queue.py`. Queues are the isolation unit,
+but a worker **process** hosts several — `run_worker` takes one or more queue
+names and runs each as its own consumer/thread pool, so a group shares one
+process's import-graph memory floor while backlogs stay isolated. Deployment
+runs two pods split by blast risk: `worker-heavy` (`documents`, `triggers`,
+`automanage_offline` — LLM-bound, quarantined) and `worker-light` (`coedit`,
+`automanage_nearline`, `lightweight_maintenance`) — see `docker-compose.yml`
+and the helm `worker.groups` values. Make sure new task modules are imported by
+`run_worker.py` so they register on boot; see the "Queues and Workers" design doc.
 
 The placement rule for `lightweight_maintenance_queue`: handlers must
 be sub-second, no LLM, no external HTTP, no wiki commits. Anything

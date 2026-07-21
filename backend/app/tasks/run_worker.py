@@ -1,15 +1,25 @@
 """Entry point for a worker container.
 
-Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is
-one of ``documents``, ``triggers``, ``coedit``, ``automanage``, or
-``lightweight_maintenance``. Each queue gets its own worker process — see
-``app/tasks/queues.py`` for the queue rationale.
+Run with: ``python -m app.tasks.run_worker <queue> [<queue> ...]`` where each
+``<queue>`` is one of ``documents``, ``triggers``, ``coedit``,
+``automanage_offline``, ``automanage_nearline``, or ``lightweight_maintenance``.
 
-We import every task module up front (regardless of which queue we're
-serving) so all ``@<queue>.task()`` decorators run and the per-queue
-handler registry is populated. The consumer then only pulls from the
-queue it was launched with; tasks bound to other queues are inert in
-this process.
+**Queues vs pods.** A queue is a Redis stream + its own consumer (a thread
+pool) — the *isolation* unit, and cheap. A worker **process/pod** is the
+*memory* unit: it pays a ~185 MiB import-graph floor regardless of how many
+queues it serves. So a single process can host several queues, each as its own
+consumer: backlogs stay isolated (separate streams) and run concurrently (the
+work is I/O-bound, so the GIL is released during LLM/HTTP/DB/git) while the
+memory floor is paid once. Pass several queue names to group them into one
+process; pass one to give a queue its own process. Deployment (see
+``docker-compose.yml`` / helm ``worker.groups``) runs two pods split by blast
+risk: ``heavy`` (documents, triggers, automanage_offline — LLM-bound) and
+``light`` (coedit, automanage_nearline, lightweight_maintenance).
+
+We import every task module up front (regardless of which queues we're serving)
+so all ``@<queue>.task()`` decorators run and the handler registry is populated.
+Each consumer only pulls from its own queue; tasks bound to unserved queues are
+inert in this process.
 """
 
 from __future__ import annotations
@@ -17,6 +27,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import logging
+import threading
 import time
 
 from prometheus_client import start_http_server
@@ -24,7 +35,7 @@ from sqlalchemy import text
 
 from app.config import verify_secret_key
 from app.tasks.queues import QUEUES
-from app.tasks.queue import run_consumer
+from app.tasks.queue import install_signal_handlers, request_shutdown, run_consumer
 from app.utils.logging import setup_logging
 
 _TASK_MODULES = (
@@ -99,10 +110,12 @@ _CONCURRENCY = {
     "lightweight_maintenance": 4,
 }
 
-# Per-queue Prometheus port. Distinct ports so all three workers can run on
-# the same host (local dev / launch.json compound) without binding the same
-# socket. In k8s each pod has its own IP, but we keep the mapping consistent
-# so the helm chart's named ``metrics`` containerPort matches the queue.
+# Per-queue Prometheus port. Distinct ports so multiple worker processes can run
+# on the same host (local dev / launch.json compound) without binding the same
+# socket. A process serving several queues binds one server (the lowest port of
+# its queues); the collector reports depth for every queue regardless, so one
+# server per process is enough. The helm chart derives each group's containerPort
+# the same way.
 _METRICS_PORT = {
     "documents": 9091,
     "triggers": 9092,
@@ -113,25 +126,64 @@ _METRICS_PORT = {
 }
 
 
+def _run_consumer_until_exit(queue_name: str, failed: threading.Event) -> None:
+    """Run one queue's consumer; on ANY exit trip a process-wide shutdown.
+
+    A consumer normally returns only after a shutdown signal drained its pool.
+    If it raises (startup / polling failure) or returns early, we set the shared
+    stop event so sibling consumers also drain and the process can exit — and
+    flag ``failed`` so ``main`` exits non-zero and k8s restarts the pod. Without
+    this, one dead consumer would leave the pod "healthy" while its queue's
+    backlog grows unconsumed."""
+    try:
+        run_consumer(QUEUES[queue_name], concurrency=_CONCURRENCY[queue_name])
+    except BaseException:
+        log.exception("consumer %s crashed", queue_name)
+        failed.set()
+    finally:
+        request_shutdown()
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run a task-queue consumer for one queue.")
-    parser.add_argument("queue", choices=sorted(QUEUES.keys()))
+    parser = argparse.ArgumentParser(
+        description="Run task-queue consumers for one or more queues in this process."
+    )
+    parser.add_argument("queues", nargs="+", choices=sorted(QUEUES.keys()))
     args = parser.parse_args()
 
     setup_logging()
     verify_secret_key()
+    # Install signal handlers once on the main thread; consumers run in threads
+    # (where install is a no-op) and all observe the same stop event, so one
+    # SIGTERM drains every consumer in this process.
+    install_signal_handlers()
     # Metrics are observability, not a hard dependency: a taken port (e.g.
     # another local stack on the same host) must not stop the worker consuming.
-    port = _METRICS_PORT[args.queue]
+    port = min(_METRICS_PORT[q] for q in args.queues)
     try:
         start_http_server(port)
     except OSError as e:
         log.warning("metrics server not started on :%d (%s)", port, e)
     _wait_for_db()
-    queue = QUEUES[args.queue]
-    concurrency = _CONCURRENCY[args.queue]
 
-    run_consumer(queue, concurrency=concurrency)
+    # One consumer (thread pool) per queue, each in its own thread; a crash in
+    # any trips shutdown for all so the process exits and restarts.
+    failed = threading.Event()
+    threads = [
+        threading.Thread(
+            target=_run_consumer_until_exit,
+            args=(q, failed),
+            name=f"consumer-{q}",
+        )
+        for q in args.queues
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    if failed.is_set():
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

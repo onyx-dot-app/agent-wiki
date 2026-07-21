@@ -82,11 +82,15 @@ the result (see the "Queues and Workers" design doc):
       (``prune_ingest_eval_samples``) — a daily, per-run-bounded indexed
       ``DELETE`` of rows past ``INGEST_EVAL_RETENTION_DAYS``.
 
-Each consumer runs as a separate worker container — see
-``docker-compose.yml`` (``worker-documents``, ``worker-triggers``,
-``worker-coedit``, ``worker-automanage-offline``, ``worker-automanage-nearline``,
-``worker-lightweight-maintenance``) and ``app/tasks/run_worker.py``. (Grouping
-these into fewer pods is a follow-up.)
+Queues are the *isolation* unit (each its own Redis stream + consumer/thread
+pool); worker **processes** are the *memory* unit and host several queues each.
+Deployment groups them into two pods by blast risk — ``worker-heavy``
+(``documents``, ``triggers``, ``automanage_offline`` — the LLM-bound work,
+quarantined so an OOM can't take down the rest) and ``worker-light``
+(``coedit``, ``automanage_nearline``, ``lightweight_maintenance`` — real-time +
+interactive + fast). See ``docker-compose.yml``, the ``worker.groups`` values in
+the helm chart, ``app/tasks/run_worker.py``, and the "Queues and Workers" design
+doc.
 """
 from __future__ import annotations
 
