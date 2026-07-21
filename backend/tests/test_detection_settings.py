@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.wiki import git as wiki_git
-from app.wiki.automanage import executor, review, settings
+from app.wiki.automanage import executor, review, runner, settings
 from app.wiki.change_proposals import (
     ProposalCreatedVia,
     ProposalOp,
@@ -75,6 +75,15 @@ def test_approve_and_reject_frozen_when_disabled(repo):
     assert review.reject(pid, user_id=uid) is False
     p = get_proposal(pid)
     assert p is not None and p["status"] == "pending"  # frozen, untouched
+
+
+def test_runner_emits_nothing_when_disabled(repo):
+    # A disable that lands before the runner starts (or after a caller's own
+    # check) freezes emission at the chokepoint: no run row, no proposals.
+    settings.update(enabled=False)
+    result = runner.run_sweep(triggered_by_user_id=None)
+    assert result["run_id"] is None
+    assert result["proposals_emitted"] == 0
 
 
 def test_executor_skips_when_disabled(repo):
