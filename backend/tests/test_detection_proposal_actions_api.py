@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.tasks.queues import detection_queue
+from app.tasks.queues import automanage_execute_queue
 from app.wiki import acl
 from app.wiki import git as wiki_git
 from app.wiki.change_proposals import (
@@ -53,8 +53,8 @@ def test_approve_executes_and_applies(client):
     wiki_git.commit_file("stale/.gitkeep", "", "create", author=None)
     pid = _mk("stale")
 
-    with detection_queue.immediate_mode():
-        r = client.post(f"/api/detection/proposals/{pid}/approve")
+    with automanage_execute_queue.immediate_mode():
+        r = client.post(f"/api/automanage/proposals/{pid}/approve")
     assert r.status_code == 200 and r.json()["status"] == "approved"
     assert _status(pid) == "applied"
     assert "stale/.gitkeep" not in wiki_git.list_paths()  # trashed
@@ -68,7 +68,7 @@ def test_approve_requires_write(client):
     acl.set_owner("restricted", owner)  # owner + admins only
 
     login_fastapi(client, other)
-    assert client.post(f"/api/detection/proposals/{pid}/approve").status_code == 403
+    assert client.post(f"/api/automanage/proposals/{pid}/approve").status_code == 403
     assert _status(pid) == "pending"  # untouched
 
 
@@ -78,7 +78,7 @@ def test_reject_marks_rejected_and_leaves_folder(client):
     wiki_git.commit_file("junk/.gitkeep", "", "create", author=None)
     pid = _mk("junk")
 
-    r = client.post(f"/api/detection/proposals/{pid}/reject")
+    r = client.post(f"/api/automanage/proposals/{pid}/reject")
     assert r.status_code == 200 and r.json()["status"] == "rejected"
     assert _status(pid) == "rejected"
     assert "junk/.gitkeep" in wiki_git.list_paths()  # untouched
@@ -90,7 +90,7 @@ def test_approve_twice_conflicts(client):
     wiki_git.commit_file("dup/.gitkeep", "", "create", author=None)
     pid = _mk("dup")
 
-    with detection_queue.immediate_mode():
-        assert client.post(f"/api/detection/proposals/{pid}/approve").status_code == 200
+    with automanage_execute_queue.immediate_mode():
+        assert client.post(f"/api/automanage/proposals/{pid}/approve").status_code == 200
         # already applied → no longer pending → 409
-        assert client.post(f"/api/detection/proposals/{pid}/approve").status_code == 409
+        assert client.post(f"/api/automanage/proposals/{pid}/approve").status_code == 409

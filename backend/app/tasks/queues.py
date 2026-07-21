@@ -1,12 +1,12 @@
-"""Five task queues backed by Redis Streams.
+"""Six task queues backed by Redis Streams.
 
-We deliberately split background work into **five independent queues**, each
+We deliberately split background work into **six independent queues**, each
 with its own ``TaskQueue`` instance and its own consumer process. Each queue
 is a Redis Stream (``queue:{name}``) so each queue's backlog is isolated from
 the others. A slow LLM doc-rewrite can't delay a reindex; a flood of
 trigger evaluations can't backpressure connector ingest; a co-edit checkpoint
-can't sit behind an hour of connector ingest; a whole-space detection sweep
-can't starve any of them.
+can't sit behind an hour of connector ingest; a whole-space Auto Organize sweep
+can't starve any of them — nor can it delay a human-approved cleanup.
 
 Each constant below is the canonical entry point for tasks that belong on
 that queue. Keep this a small, fixed set — the value of the split comes from
@@ -46,17 +46,24 @@ Queues:
   a Postgres advisory lock (``coedit.checkpoint_lock_key``), not single-threading
   — different sessions checkpoint in parallel; the same session is serialized.
 
-* ``detection_queue`` — **Wiki Auto Management detection + execution.** A
+* ``automanage_queue`` — **Wiki Auto Management autonomous work.** The
   whole-space sweep walks the wiki, runs the detectors, and emits
   ``change_proposals`` (mechanical today; fuzzy-dup/misplacement will add LLM
-  calls), and on approval the executor commits structural changes to git. That
-  profile — long, bursty, eventually LLM-bound, and committing — conflicts with
-  every other queue's contract: it would starve connector ingest on
-  ``documents`` (concurrency 1), delay latency-sensitive fan-out on
-  ``triggers``, sit in front of user-visible checkpoints on ``coedit``, and
-  break ``lightweight_maintenance``'s no-LLM/no-commit rule. So it gets its own
-  queue. Safety on concurrent executes comes from the git commit lock, like
-  ``coedit`` — not single-threading.
+  calls), plus the **AI-managed auto-apply** executes it fans out (scopes with
+  ``ai_management_allowed`` need no human, so the runner auto-approves and
+  applies them). All of it is unattended and batch: long, bursty, eventually
+  LLM-bound, and (for auto-applies) committing — a profile that conflicts with
+  every other queue's contract, so it gets its own queue. Sweeps serialize at
+  concurrency 1 (two concurrent sweeps just duplicate work); auto-apply
+  executes are safe under the git commit lock, like ``coedit``.
+
+* ``automanage_execute_queue`` — **human-approved Auto Organize executes.**
+  When a human approves a pending proposal, its execution rides here, *not* on
+  ``automanage_queue`` — so an approval applies promptly on a dedicated worker
+  instead of head-of-line-blocking behind an in-flight sweep or a batch of
+  AI auto-applies. Still async (a future execution op may be LLM-bound, and we
+  won't hang the approve request on it). Concurrency 1 — the git commit lock is
+  the real serializer.
 
 * ``lightweight_maintenance_queue`` — **fast upkeep tasks.** Sub-second,
   no LLM, no external HTTP, no wiki commits. Anything that fits that
@@ -76,8 +83,8 @@ Queues:
 
 Each consumer runs as a separate worker container — see
 ``docker-compose.yml`` (``worker-documents``, ``worker-triggers``,
-``worker-coedit``, ``worker-lightweight-maintenance``) and
-``app/tasks/run_worker.py``.
+``worker-coedit``, ``worker-automanage``, ``worker-automanage-execute``,
+``worker-lightweight-maintenance``) and ``app/tasks/run_worker.py``.
 """
 from __future__ import annotations
 
@@ -87,8 +94,9 @@ from app.tasks.queue import QueueFullError, TaskQueue
 __all__ = [
     "QueueFullError",
     "QUEUES",
+    "automanage_queue",
+    "automanage_execute_queue",
     "coedit_queue",
-    "detection_queue",
     "documents_queue",
     "lightweight_maintenance_queue",
     "triggers_queue",
@@ -102,7 +110,8 @@ def _make(name: str) -> TaskQueue:
 documents_queue = _make("documents")
 triggers_queue = _make("triggers")
 coedit_queue = _make("coedit")
-detection_queue = _make("detection")
+automanage_queue = _make("automanage")
+automanage_execute_queue = _make("automanage_execute")
 lightweight_maintenance_queue = _make("lightweight_maintenance")
 
 # Map queue-name → instance, used by run_worker.py to launch the right
@@ -111,6 +120,7 @@ QUEUES = {
     "documents": documents_queue,
     "triggers": triggers_queue,
     "coedit": coedit_queue,
-    "detection": detection_queue,
+    "automanage": automanage_queue,
+    "automanage_execute": automanage_execute_queue,
     "lightweight_maintenance": lightweight_maintenance_queue,
 }

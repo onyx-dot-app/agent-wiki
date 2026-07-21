@@ -113,31 +113,31 @@ def test_settings_api_get_put_and_sweep_gate(client):
     uid = seed_user(uid="admin_1", email="a@x.com", is_admin=True)
     login_fastapi(client, uid)
 
-    assert client.get("/api/detection/settings").json() == {
+    assert client.get("/api/automanage/settings").json() == {
         "enabled": True,
         "schedule": "off",
         "updated_at": None,
     }
-    put = client.put("/api/detection/settings", json={"enabled": False})
+    put = client.put("/api/automanage/settings", json={"enabled": False})
     assert put.status_code == 200 and put.json()["enabled"] is False
 
     # disabled → sweep 409
-    assert client.post("/api/detection/sweep").status_code == 409
+    assert client.post("/api/automanage/sweep").status_code == 409
     # re-enable → sweep allowed
-    client.put("/api/detection/settings", json={"enabled": True})
-    assert client.post("/api/detection/sweep").status_code == 202
+    client.put("/api/automanage/settings", json={"enabled": True})
+    assert client.post("/api/automanage/sweep").status_code == 202
 
 
 def test_settings_api_requires_admin_and_validates(client):
     seed_user(uid="admin_1", email="a@x.com", is_admin=True)  # first = admin
     uid = seed_user(uid="usr_2", email="u2@x.com", is_admin=False)
     login_fastapi(client, uid)
-    assert client.get("/api/detection/settings").status_code == 403
-    assert client.put("/api/detection/settings", json={"enabled": False}).status_code == 403
+    assert client.get("/api/automanage/settings").status_code == 403
+    assert client.put("/api/automanage/settings", json={"enabled": False}).status_code == 403
 
     login_fastapi(client, "admin_1")
     # The app translates request-validation errors to 400 (main.py handler).
     assert (
-        client.put("/api/detection/settings", json={"schedule": "hourly"}).status_code
+        client.put("/api/automanage/settings", json={"schedule": "hourly"}).status_code
         == 400
     )

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import User, require_can
 from app.auth.deps import require_admin, require_user
-from app.models.detection import (
+from app.models.automanage import (
     DetectionRunView,
     DetectionSettingsUpdate,
     DetectionSettingsView,
@@ -22,7 +22,7 @@ from app.models.detection import (
     RunsResponse,
     SweepTriggerResponse,
 )
-from app.tasks.detection import run_detection_sweep
+from app.tasks.automanage import run_detection_sweep
 from app.wiki import acl
 from app.wiki.automanage import review, runs, settings
 from app.wiki.change_proposals import (

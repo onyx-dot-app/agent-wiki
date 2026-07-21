@@ -27,11 +27,11 @@ from app.api import (
     admin,
     agent_sessions,
     auth,
+    automanage,
     chat,
     coedit,
     comments,
     craft,
-    detection,
     documents,
     wiki,
     email_verify,
@@ -241,7 +241,7 @@ def create_app() -> FastAPI:
     app.include_router(installer.router, prefix="/api")
     app.include_router(agent_sessions.router, prefix="/api/agent-sessions")
     app.include_router(triggers.router, prefix="/api/triggers")
-    app.include_router(detection.router, prefix="/api/detection")
+    app.include_router(automanage.router, prefix="/api/automanage")
     app.include_router(wiki.router, prefix="/api/wiki")
     app.include_router(coedit.router, prefix="/api/coedit")
     app.include_router(comments.router, prefix="/api/comments")

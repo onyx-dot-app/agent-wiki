@@ -1,9 +1,9 @@
 """Entry point for a worker container.
 
 Run with: ``python -m app.tasks.run_worker <queue>`` where ``<queue>`` is
-one of ``documents``, ``triggers``, ``coedit``, or ``lightweight_maintenance``.
-Each queue gets its own worker process — see ``app/tasks/queues.py`` for the
-queue rationale.
+one of ``documents``, ``triggers``, ``coedit``, ``automanage``,
+``automanage_execute``, or ``lightweight_maintenance``. Each queue gets its own
+worker process — see ``app/tasks/queues.py`` for the queue rationale.
 
 We import every task module up front (regardless of which queue we're
 serving) so all ``@<queue>.task()`` decorators run and the per-queue
@@ -30,10 +30,10 @@ from app.utils.logging import setup_logging
 _TASK_MODULES = (
     "app.tasks.agent_activity",
     "app.tasks.chat_title",
+    "app.tasks.automanage",
     "app.tasks.coedit_checkpoint",
     "app.tasks.coedit_rebase",
     "app.tasks.craft",
-    "app.tasks.detection",
     "app.tasks.wiki_update",
     "app.tasks.expire_launch_artifacts",
     "app.tasks.ingest_eval_retention",
@@ -91,12 +91,14 @@ _CONCURRENCY = {
     "documents": 1,
     "triggers": 4,
     "coedit": 4,
-    # Detection: only the admin whole-space sweep runs here today, and two
-    # concurrent sweeps would just duplicate work — so serialize at 1. Bump
-    # when a second task type lands (single-page checks / proposal executes)
-    # that should slip past a running sweep; git safety then comes from the
-    # commit lock, not single-threading.
-    "detection": 1,
+    # Automanage (sweeps + AI auto-apply): two concurrent sweeps would just
+    # duplicate work, so serialize at 1. Human-approved executes live on their
+    # own queue precisely so they don't wait behind a sweep here.
+    "automanage": 1,
+    # Human-approved executes: git commit lock is the real serializer, so 1 is
+    # enough; the point of the separate queue is isolation from the sweep, not
+    # wider parallelism.
+    "automanage_execute": 1,
     "lightweight_maintenance": 4,
 }
 
@@ -109,7 +111,8 @@ _METRICS_PORT = {
     "triggers": 9092,
     "lightweight_maintenance": 9093,
     "coedit": 9094,
-    "detection": 9095,
+    "automanage": 9095,
+    "automanage_execute": 9096,
 }
 
 

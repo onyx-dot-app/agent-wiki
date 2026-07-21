@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.tasks.queues import detection_queue
+from app.tasks.queues import automanage_queue
 from tests._auth import login_fastapi
 from tests._seed import seed_user
 
@@ -27,19 +27,19 @@ def client(tmp_repo, tmp_config):
 def test_sweep_requires_admin(client):
     uid = seed_user(uid="usr_x", email="x@x.com", is_admin=False)
     login_fastapi(client, uid)
-    assert client.post("/api/detection/sweep").status_code == 403
+    assert client.post("/api/automanage/sweep").status_code == 403
 
 
 def test_admin_sweep_records_a_run(client):
     uid = seed_user(uid="admin_1", email="a@x.com", is_admin=True)
     login_fastapi(client, uid)
 
-    with detection_queue.immediate_mode():
-        resp = client.post("/api/detection/sweep")
+    with automanage_queue.immediate_mode():
+        resp = client.post("/api/automanage/sweep")
     assert resp.status_code == 202
     assert resp.json()["status"] == "queued"
 
-    runs = client.get("/api/detection/runs").json()["runs"]
+    runs = client.get("/api/automanage/runs").json()["runs"]
     assert len(runs) == 1
     assert runs[0]["status"] == "completed"
     assert runs[0]["trigger"] == "sweep"
@@ -50,4 +50,4 @@ def test_admin_sweep_records_a_run(client):
 def test_runs_list_requires_admin(client):
     uid = seed_user(uid="usr_y", email="y@x.com", is_admin=False)
     login_fastapi(client, uid)
-    assert client.get("/api/detection/runs").status_code == 403
+    assert client.get("/api/automanage/runs").status_code == 403

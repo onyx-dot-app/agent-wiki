@@ -40,7 +40,7 @@ def test_admin_lists_all_pending(client):
     login_fastapi(client, uid)
     _mk("old")
     _mk("archive")
-    resp = client.get("/api/detection/proposals")
+    resp = client.get("/api/automanage/proposals")
     assert resp.status_code == 200
     folders = {p["source_paths"][0] for p in resp.json()["proposals"]}
     assert folders == {"old", "archive"}
@@ -50,10 +50,10 @@ def test_get_one_and_404(client):
     uid = seed_user(uid="admin_1", email="a@x.com", is_admin=True)
     login_fastapi(client, uid)
     pid = _mk("old")
-    got = client.get(f"/api/detection/proposals/{pid}")
+    got = client.get(f"/api/automanage/proposals/{pid}")
     assert got.status_code == 200
     assert got.json()["op"] == "delete_empty_folder"
-    assert client.get("/api/detection/proposals/999999").status_code == 404
+    assert client.get("/api/automanage/proposals/999999").status_code == 404
 
 
 def test_public_proposal_visible_to_any_user(client):
@@ -61,7 +61,7 @@ def test_public_proposal_visible_to_any_user(client):
     uid = seed_user(uid="usr_2", email="u2@x.com", is_admin=False)
     login_fastapi(client, uid)
     _mk("public-folder")  # no owner/ACL → implicit-public
-    folders = {p["source_paths"][0] for p in client.get("/api/detection/proposals").json()["proposals"]}
+    folders = {p["source_paths"][0] for p in client.get("/api/automanage/proposals").json()["proposals"]}
     assert "public-folder" in folders
 
 
@@ -76,14 +76,14 @@ def test_restricted_proposal_hidden_from_non_reader(client):
 
     # The non-reader can't see it in the list, and gets 403 on direct fetch.
     login_fastapi(client, other)
-    listed = {p["source_paths"][0] for p in client.get("/api/detection/proposals").json()["proposals"]}
+    listed = {p["source_paths"][0] for p in client.get("/api/automanage/proposals").json()["proposals"]}
     assert "restricted" not in listed
-    assert client.get(f"/api/detection/proposals/{pid}").status_code == 403
+    assert client.get(f"/api/automanage/proposals/{pid}").status_code == 403
 
     # The non-admin owner sees it via ownership.
     login_fastapi(client, owner)
-    assert client.get(f"/api/detection/proposals/{pid}").status_code == 200
+    assert client.get(f"/api/automanage/proposals/{pid}").status_code == 200
 
     # And an admin sees it via bypass.
     login_fastapi(client, admin)
-    assert client.get(f"/api/detection/proposals/{pid}").status_code == 200
+    assert client.get(f"/api/automanage/proposals/{pid}").status_code == 200

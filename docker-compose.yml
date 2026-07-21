@@ -161,10 +161,33 @@ services:
       opensearch:
         condition: service_healthy
 
-  worker-detection:
+  worker-automanage:
     profiles: ["app"]
     build: ./backend
-    command: ["python", "-m", "app.tasks.run_worker", "detection"]
+    command: ["python", "-m", "app.tasks.run_worker", "automanage"]
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
+      - REDIS_URL=redis://redis:6379/0
+      - OPENSEARCH_URL=http://opensearch:9200
+      - WIKI_DIR=/data/wiki
+      - DEV_MODE=true
+    volumes:
+      - ./local_data:/data
+    depends_on:
+      backend:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+
+  worker-automanage-execute:
+    profiles: ["app"]
+    build: ./backend
+    command: ["python", "-m", "app.tasks.run_worker", "automanage_execute"]
     env_file: .env
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agent_wiki
