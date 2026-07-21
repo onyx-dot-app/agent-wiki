@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from app.auth.users import AI_USER_ID
+from app.wiki import acl
 from app.wiki import git as wiki_git
 from app.wiki.automanage import executor
 from app.wiki.change_proposals import (
@@ -70,12 +71,30 @@ def test_auto_applied_delete_records_activity_event(repo):
     assert len(events) == 1
     ev = events[0]
     assert ev["actor"] == AI_USER_ID
-    # Targets the surviving *parent* folder (the deleted folder's own owner row
-    # was re-pointed to trash), so the parent-area owner can see it.
-    assert ev["target"] == "area"
+    # Targets the folder itself: trashing a folder doesn't re-point its owner
+    # row (unlike a page), so the folder's owner still resolves here.
+    assert ev["target"] == "area/gone"
     assert ev["payload"]["op"] == ProposalOp.DELETE_EMPTY_FOLDER.value
     assert ev["payload"]["source_paths"] == ["area/gone"]
     assert ev["payload"]["applied_sha"]
+
+
+def test_trashed_folder_owner_still_resolves_at_original_path(repo):
+    """Pins the behavior the auto-apply event target depends on: trashing a
+    folder does NOT re-point its ``wiki_owners`` row (only a page's row moves),
+    so the folder's owner still resolves at the original path and can see the
+    ``automanage.applied`` event keyed there. If this ever changes, the event
+    visibility silently regresses — so guard it here."""
+    uid = seed_user(uid="owner1", email="owner@x.com")
+    wiki_git.commit_file("keep/gone/.gitkeep", "", "create", author=None)
+    acl.set_owner("keep/gone", uid)
+    pid = _proposal_for("keep/gone")
+    assert auto_approve(pid, acting_user_id=AI_USER_ID)
+
+    executor.execute(pid)
+
+    assert "keep/gone/.gitkeep" not in wiki_git.list_paths()  # trashed
+    assert acl.get_owner("keep/gone") == uid  # owner row stayed → event reaches them
 
 
 def test_human_approved_delete_records_no_event(repo):
