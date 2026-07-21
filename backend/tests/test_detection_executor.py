@@ -59,8 +59,8 @@ def test_auto_applied_delete_records_activity_event(repo):
     """An AI auto-applied cleanup (no human reviewer) emits an
     ``automanage.applied`` event so admins/owners get an audit trail."""
     # The AI system user (AI_USER_ID) is seeded by migration, so no seed here.
-    wiki_git.commit_file("gone/.gitkeep", "", "create gone folder", author=None)
-    pid = _proposal_for("gone")
+    wiki_git.commit_file("area/gone/.gitkeep", "", "create gone folder", author=None)
+    pid = _proposal_for("area/gone")
     assert auto_approve(pid, acting_user_id=AI_USER_ID)  # pending -> approved, no reviewer
 
     executor.execute(pid)
@@ -70,9 +70,11 @@ def test_auto_applied_delete_records_activity_event(repo):
     assert len(events) == 1
     ev = events[0]
     assert ev["actor"] == AI_USER_ID
-    assert ev["target"] == "gone"
+    # Targets the surviving *parent* folder (the deleted folder's own owner row
+    # was re-pointed to trash), so the parent-area owner can see it.
+    assert ev["target"] == "area"
     assert ev["payload"]["op"] == ProposalOp.DELETE_EMPTY_FOLDER.value
-    assert ev["payload"]["source_paths"] == ["gone"]
+    assert ev["payload"]["source_paths"] == ["area/gone"]
     assert ev["payload"]["applied_sha"]
 
 

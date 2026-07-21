@@ -100,7 +100,12 @@ def _execute_delete_empty_folder(p: dict[str, Any]) -> None:
     notify.after_doc_trashed(
         moves, sha, author, root_move=PathMove(old=folder, new=dest)
     )
-    _finalize_applied(p, applied_sha=sha)
+    # Notify the owner of the *parent* folder: the deleted folder's own owner
+    # row was just re-pointed to the trash path by `after_doc_trashed`, so
+    # targeting `folder` would match no owner — and the parent-area owner is the
+    # stakeholder who cares that a subfolder was cleaned up.
+    parent = folder.rsplit("/", 1)[0] if "/" in folder else ""
+    _finalize_applied(p, applied_sha=sha, event_target=parent)
     log.info(
         "execute: proposal %s applied — trashed empty folder %s (sha=%s)",
         proposal_id,
@@ -109,27 +114,33 @@ def _execute_delete_empty_folder(p: dict[str, Any]) -> None:
     )
 
 
-def _finalize_applied(p: dict[str, Any], *, applied_sha: str) -> None:
+def _finalize_applied(
+    p: dict[str, Any], *, applied_sha: str, event_target: str
+) -> None:
     """Mark the proposal ``applied`` and, when it was auto-applied (no human
     reviewer), record an activity event. A human-approved apply is already
     visible to the approver (they watched the outcome in the review banner), so
-    only the silent AI-managed path needs the audit trail."""
+    only the silent AI-managed path needs the audit trail. ``event_target`` is
+    the surviving path whose owner should be notified (the op decides it — a
+    deleted path can't be its own target)."""
     change_proposals.mark_applied(p["id"], applied_sha=applied_sha)
     if p["reviewed_by_user_id"] is None:
-        _record_applied_event(p, applied_sha)
+        _record_applied_event(p, applied_sha, event_target)
 
 
-def _record_applied_event(p: dict[str, Any], applied_sha: str) -> None:
+def _record_applied_event(
+    p: dict[str, Any], applied_sha: str, target: str
+) -> None:
     """Best-effort: the change already happened, so a feed write that fails must
-    not fail the apply. ``target`` is the primary affected path (so its owner
-    sees it); admins see every ``automanage.*`` event regardless of ownership."""
+    not fail the apply. ``target`` is a surviving path whose owner should see
+    the event; admins see every ``automanage.*`` event regardless of ownership."""
     try:
         with session() as s:
             s.add(
                 Event(
                     kind=EVENT_AUTOMANAGE_APPLIED,
                     actor=p["acting_user_id"],
-                    target=p["source_paths"][0],
+                    target=target,
                     payload_json=json.dumps(
                         {
                             "op": p["op"],

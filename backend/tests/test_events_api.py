@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.wiki import acl
 
 from tests._auth import login_fastapi
 from tests._seed import insert_event, seed_trigger, seed_user
@@ -135,6 +136,19 @@ def test_non_admin_does_not_see_automanage_event_on_unowned_path(client):
 
     login_fastapi(client, user)
     assert client.get("/api/events").json()["events"] == []
+
+
+def test_path_owner_sees_automanage_event_on_their_path(client):
+    """A non-admin who owns the event's (surviving) target path sees it — this
+    is why the auto-apply event targets the surviving parent folder rather than
+    the deleted path, whose owner row was re-pointed to trash."""
+    user = seed_user("usr", "usr@x.com")
+    acl.set_owner("area", user)  # owns the parent folder the event targets
+    insert_event("automanage.applied", "area", {"op": "delete_empty_folder"})
+
+    login_fastapi(client, user)
+    targets = [e["target"] for e in client.get("/api/events").json()["events"]]
+    assert targets == ["area"]
 
 
 def test_admin_can_fetch_automanage_event_detail(client):
