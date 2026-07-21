@@ -3,7 +3,7 @@
 
 Both approval sources funnel through here so they share one execution path:
 
-- **human review** — the approve/reject endpoints (`app/api/detection.py`);
+- **human review** — the approve/reject endpoints (`app/api/automanage.py`);
 - **AI-managed auto-approval** — `ai_management_allowed` scopes need no human
   approval, so the runner can `auto_approve` and execute directly (wired in a
   follow-up).

@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.auth import User, require_can
 from app.auth.deps import require_admin, require_user
-from app.models.detection import (
+from app.models.automanage import (
     DetectionRunView,
     DetectionSettingsUpdate,
     DetectionSettingsView,
