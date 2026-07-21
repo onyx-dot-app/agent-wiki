@@ -24,3 +24,14 @@ export const AUTOSAVE_IDLE_MS = 2000;
 
 /** Hard cap: force a checkpoint at least this often even under continuous typing. */
 export const AUTOSAVE_MAX_INTERVAL_MS = 30000;
+
+/** Ms of no local activity (edits, caret moves) before the editor auto-blurs.
+ * Blurring routes through the normal focus-loss path, so the idle user's
+ * caret clears for peers and their presence label drops to "viewing" —
+ * an untouched tab can't hold an "editing" caret forever. Generous enough
+ * that nobody actively working gets interrupted: a false blur costs the
+ * user a click back in, a stale "editing" label only costs peers confusion. */
+export const IDLE_UNFOCUS_MS = 10 * 60 * 1000;
+
+/** Ms to wait before re-opening a dropped co-edit SSE stream. */
+export const STREAM_RECONNECT_MS = 3000;

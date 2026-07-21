@@ -39,6 +39,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ApiError } from "@/lib/api";
+
 import type {
   CoeditFrame,
   CoeditParticipant,
@@ -57,6 +59,7 @@ import {
   AUTOSAVE_IDLE_MS,
   AUTOSAVE_MAX_INTERVAL_MS,
   CURSOR_THROTTLE_MS,
+  STREAM_RECONNECT_MS,
   TYPING_EXPIRY_MS,
   TYPING_IDLE_MS,
 } from "@/lib/editor/constants";
@@ -121,6 +124,15 @@ export function useCoeditSession(opts: {
   const serverFrame = useRef<((frame: CoeditFrame) => void) | null>(null);
   const flushFn = useRef<(() => Promise<void>) | null>(null);
   const setDocFn = useRef<((text: string) => void) | null>(null);
+  const catchUpFn = useRef<(() => void) | null>(null);
+  // Ref mirror of `buffer` (the editor doc) for non-render reads.
+  const bufferRef = useRef("");
+  // Local doc carried across a forced re-join: when the session closed under
+  // us and the tail couldn't be delivered, the edits exist only in this tab —
+  // re-applied onto the fresh session instead of being silently replaced by
+  // the checkpointed version. Path-tagged so it can never leak onto another
+  // page.
+  const recoverDoc = useRef<{ path: string; doc: string } | null>(null);
   // Outbound cursor/typing throttle state.
   const cursorThrottle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCursor = useRef<{
@@ -162,6 +174,9 @@ export function useCoeditSession(opts: {
   }, []);
   const registerSetDoc = useCallback((fn: ((text: string) => void) | null) => {
     setDocFn.current = fn;
+  }, []);
+  const registerCatchUp = useCallback((fn: (() => void) | null) => {
+    catchUpFn.current = fn;
   }, []);
   const setDoc = useCallback((text: string) => setDocFn.current?.(text), []);
 
@@ -208,6 +223,7 @@ export function useCoeditSession(opts: {
 
   const reportDoc = useCallback(
     (doc: string) => {
+      bufferRef.current = doc;
       setBuffer(doc);
       armAutosave();
     },
@@ -450,6 +466,7 @@ export function useCoeditSession(opts: {
     clientId.current = newClientId();
     let cancelled = false;
     // Mirror shows the committed body until the join resolves.
+    bufferRef.current = committedBody;
     setBuffer(committedBody);
     setJoinError(null);
 
@@ -472,6 +489,7 @@ export function useCoeditSession(opts: {
       }
       if (cancelled) return;
       sessionId.current = snap.session_id;
+      bufferRef.current = snap.buffer;
       setBuffer(snap.buffer);
       participantsRef.current = snap.participants;
       setParticipants(snap.participants);
@@ -483,22 +501,49 @@ export function useCoeditSession(opts: {
         startDoc: snap.buffer,
       });
       setActive(true);
-      try {
-        // Gate on `cancelled`: the stream outlives the effect during teardown
-        // (it's aborted only after the final flush/checkpoint/leave below), and
-        // a late frame from the old session must not leak into state a new
-        // session now owns.
-        await streamSession(
-          snap.session_id,
-          (frame) => {
-            if (!cancelled) onFrame(frame);
-          },
-          ctrl.signal,
-        );
-      } catch {
-        // Stream ended/dropped after a successful join (including our own
-        // cleanup's abort) — the session/doc are already usable, so this
-        // isn't a join failure and doesn't need to surface as one.
+      // The stream loop: reconnect when the connection drops (network blip,
+      // laptop sleep) instead of leaving a silently-stale editable doc — the
+      // server never pushes again on a dead stream, and without this loop the
+      // client would only heal on a full page reload. Re-opening the stream
+      // re-joins us as a participant; the catch-up pull replays ops missed
+      // while disconnected (anything landing in the crack re-pulls via the
+      // op-frame gap detection).
+      while (!cancelled) {
+        try {
+          // Gate on `cancelled`: the stream outlives the effect during
+          // teardown (it's aborted only after the final flush/checkpoint/
+          // leave below), and a late frame from the old session must not
+          // leak into state a new session now owns.
+          await streamSession(
+            snap.session_id,
+            (frame) => {
+              if (!cancelled) onFrame(frame);
+            },
+            ctrl.signal,
+          );
+        } catch (e) {
+          if (cancelled || ctrl.signal.aborted) break;
+          if (e instanceof ApiError && e.status === 404) {
+            // The session closed while we were gone (last participant left →
+            // checkpoint + close). Streaming can't resurrect it — re-run the
+            // whole join to mint/adopt a fresh session. First try to deliver
+            // any local tail; if that fails too (ops bounce off the closed
+            // session), those edits exist only in this tab — carry the doc
+            // across the re-join so the fresh session's checkpointed buffer
+            // doesn't silently replace them (see the recovery effect below).
+            try {
+              await flushFn.current?.();
+            } catch {
+              recoverDoc.current = { path, doc: bufferRef.current };
+            }
+            retryJoin();
+            break;
+          }
+        }
+        if (cancelled || ctrl.signal.aborted) break;
+        await new Promise((r) => setTimeout(r, STREAM_RECONNECT_MS));
+        if (cancelled || ctrl.signal.aborted) break;
+        catchUpFn.current?.();
       }
     })();
 
@@ -552,6 +597,20 @@ export function useCoeditSession(opts: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, path, retryToken]);
 
+  // Re-apply a doc carried across a forced re-join (see the stream loop's
+  // 404 branch): once the fresh session's editor has mounted (child effects
+  // run before this one, so `setDoc` is registered), replace the buffer with
+  // the saved local doc as a normal local edit — it lands as an op on the
+  // new session instead of being lost to the checkpointed version.
+  useEffect(() => {
+    if (session === null || recoverDoc.current === null) return;
+    const saved = recoverDoc.current;
+    recoverDoc.current = null;
+    if (saved.path === path && saved.doc !== session.startDoc) {
+      setDoc(saved.doc);
+    }
+  }, [session, path, setDoc]);
+
   // Best-effort checkpoint when the tab is backgrounded/closed — `keepalive`
   // lets the request survive the page tearing down. Covers the gap between
   // the last edit and the idle-autosave timer firing. A hidden tab also
@@ -568,6 +627,11 @@ export function useCoeditSession(opts: {
       if (document.visibilityState === "hidden") {
         checkpointNow();
         reportCaretCleared();
+      } else {
+        // Coming back to the tab: pull anything missed while backgrounded —
+        // a slept machine's stream may be dead or healing, and the user must
+        // not resume on a stale doc (the reconnect loop is the other half).
+        catchUpFn.current?.();
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -592,6 +656,7 @@ export function useCoeditSession(opts: {
     reportDoc,
     registerFlush,
     registerSetDoc,
+    registerCatchUp,
     setDoc,
     reportSelection,
     reportCaretCleared,

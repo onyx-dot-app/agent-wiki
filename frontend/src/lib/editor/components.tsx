@@ -33,6 +33,7 @@ import type {
   CoeditSessionHandle,
 } from "@/lib/editor/types";
 import { getOps, sendOp } from "@/lib/editor/svc";
+import { IDLE_UNFOCUS_MS } from "@/lib/editor/constants";
 import {
   changeSetToChanges,
   colorFor,
@@ -298,6 +299,10 @@ interface CoeditorProps {
   reportDoc: (doc: string) => void;
   registerFlush: (fn: (() => Promise<void>) | null) => void;
   registerSetDoc: (fn: ((text: string) => void) | null) => void;
+  /** Register the editor's "pull missed ops" fn — the hook calls it after an
+   * SSE reconnect and when the tab becomes visible again, so a returning user
+   * catches up instead of interacting with a stale doc. */
+  registerCatchUp: (fn: (() => void) | null) => void;
   placeholder?: string;
   /** Render the doc without accepting edits — for participants whose
    * `can_write` is false. They stay in the live session (presence + real-time
@@ -347,6 +352,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       reportDoc,
       registerFlush,
       registerSetDoc,
+      registerCatchUp,
       placeholder,
       readOnly,
       commentHighlights,
@@ -398,6 +404,26 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       // The synced version we last sent an op at — so we don't re-send the same
       // op while awaiting its echo (which advances synced past this).
       const sentAtVersion = { current: -1 };
+
+      // Idle auto-unfocus: N minutes without local activity blurs the editor.
+      // The blur runs the normal focus-loss path (caret clear broadcast,
+      // presence flips to "viewing", reveal-on-focus collapses to preview),
+      // so an untouched tab can't hold an "editing" caret indefinitely. The
+      // timer is armed only while focused and re-armed on every local edit /
+      // caret move; suspended timers fire on wake, so a slept laptop unfocuses
+      // right when the user returns.
+      const idleUnfocus = {
+        current: null as ReturnType<typeof setTimeout> | null,
+      };
+      const armIdleUnfocus = () => {
+        if (idleUnfocus.current) clearTimeout(idleUnfocus.current);
+        idleUnfocus.current = null;
+        if (!v.hasFocus) return;
+        idleUnfocus.current = setTimeout(() => {
+          idleUnfocus.current = null;
+          if (v.hasFocus) v.contentDOM.blur();
+        }, IDLE_UNFOCUS_MS);
+      };
 
       const dispatchRemote = (spec: Parameters<EditorView["dispatch"]>[0]) => {
         applyingRemote.current = true;
@@ -536,6 +562,12 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         }
         if (u.docChanged) onSelRef.current(sel.anchor, sel.head, true);
         else if (u.selectionSet) onSelRef.current(sel.anchor, sel.head, false);
+        // Any local activity (or a focus flip) restarts the idle-unfocus
+        // clock. Remote-applied ops can't reach this line: CM update
+        // listeners run synchronously inside dispatchRemote's
+        // applyingRemote bracket, so they exit at the early-return above —
+        // a busy peer can't keep an idle user's caret alive.
+        if (u.focusChanged || u.docChanged || u.selectionSet) armIdleUnfocus();
         if (u.selectionSet && onSelectionForCommentRef.current) {
           const draft = selectionToDraft(u.state);
           const coords = draft ? u.view.coordsAtPos(sel.head) : null;
@@ -643,6 +675,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           changes: { from: 0, to: v.state.doc.length, insert: text },
         });
       });
+      registerCatchUp(() => void pull());
 
       return () => {
         onServerFrame(null);
@@ -652,6 +685,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         // only reads `v.state` and POSTs — both safe after `v.destroy()` —
         // and the hook clears it once it has taken ownership.
         registerSetDoc(null);
+        registerCatchUp(null);
+        if (idleUnfocus.current) clearTimeout(idleUnfocus.current);
         // A focused editor unmounting (in-app navigation, session
         // replacement) never gets a focusChanged update — clear our caret
         // for peers explicitly instead of leaving it parked until the
