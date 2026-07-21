@@ -380,7 +380,7 @@ export function WikiTree() {
   }, [creatingIn]);
 
   return (
-    <div className={styles.panel}>
+    <div className={`left-panel-card ${styles.panel}`}>
       <div className={styles.header}>
         <span className={styles.headerTitle}>
           <SvgListTree size={16} />
@@ -420,7 +420,7 @@ export function WikiTree() {
       </div>
       <Divider />
 
-      <div className={styles.list}>
+      <div className={`${styles.list} scroll-fade-bottom scroll-y-hidden`}>
         {creatingIn === "" && (
           <NewFolderRow
             dir=""

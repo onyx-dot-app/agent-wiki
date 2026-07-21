@@ -21,7 +21,23 @@ body {
 
 :root {
   /* agent-wiki layout tokens — not part of Opal */
-  --activities-view: 22rem;
+  --left-panel-view: 22rem;
+}
+
+/* One card envelope for every left-panel occupant (wiki tree, activities):
+   the shared width, 4px inset, tinted card chrome. Occupants only add
+   their own internal gap and content. */
+.left-panel-card {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: var(--left-panel-view);
+  height: calc(100% - 8px);
+  margin: 4px;
+  background: var(--background-tint-01);
+  border: 1px solid var(--border-01);
+  border-radius: var(--radius-12);
+  padding: 4px;
 }
 
 /* ── Shadow tokens ────────────────────────────────────────────────────────
