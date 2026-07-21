@@ -130,14 +130,15 @@ worker:
   # co-schedule, AND the per-queue periodic-task scheduler runs in-process
   # (running multiple replicas would double-fire the cron tasks).
   replicaCount: 1
-  # Five Redis Stream queues, one consumer process each. Match
+  # Six Redis Stream queues, one consumer process each. Match
   # `backend/app/tasks/queues.py:QUEUES` (and the $metricsPorts dict in
   # worker-deployment.yaml). Adding one requires corresponding code.
   queues:
     - documents
     - triggers
     - coedit
-    - detection
+    - automanage_offline
+    - automanage_nearline
     - lightweight_maintenance
   resources:
     requests:

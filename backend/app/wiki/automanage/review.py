@@ -1,16 +1,20 @@
 """Proposal review coordination — the seam between an approval *decision* and
 *execution*.
 
-Both approval sources funnel through here so they share one execution path:
+Both approval sources funnel through here, but their executions ride
+**different queues** by latency tier so a human decision never waits on batch
+work:
 
 - **human review** — the approve/reject endpoints (`app/api/automanage.py`);
-- **AI-managed auto-approval** — `ai_management_allowed` scopes need no human
-  approval, so the runner can `auto_approve` and execute directly (wired in a
-  follow-up).
+  execution goes on the *nearline* queue (a human is waiting).
+- **AI-managed auto-approval** — `ai_management_allowed` scopes need no human,
+  so the runner `auto_approve`s and executes on the *offline* queue, alongside
+  the sweeps that produced the proposal.
 
-The only thing that differs between them is the status transition; **enqueuing
-execution is the common piece** (`_dispatch_execution`), factored out here so
-neither path re-implements it and the API router stays thin.
+The status transition and the queue differ per source; both are factored out
+here so neither path re-implements them and the API router stays thin. Tasks are
+imported lazily so this domain module doesn't hard-depend on the tasks layer at
+import time (tasks import automanage, not the reverse).
 """
 from __future__ import annotations
 
@@ -19,14 +23,20 @@ from app.wiki.automanage import settings
 from app.wiki.change_proposals import ProposalStatus
 
 
-def _dispatch_execution(proposal_id: int) -> None:
-    """Enqueue execution of an approved proposal on the detection queue — the
-    shared step every approval path calls. Imported lazily so this domain
-    module doesn't hard-depend on the tasks layer at import time (tasks import
-    automanage, not the reverse)."""
-    from app.tasks.detection import execute_proposal
+def _dispatch_human_execution(proposal_id: int) -> None:
+    """Enqueue a human-approved execution on the *nearline* queue — it applies
+    promptly, never behind an in-flight sweep or AI auto-apply batch."""
+    from app.tasks.automanage import execute_approved_proposal
 
-    execute_proposal(proposal_id)
+    execute_approved_proposal(proposal_id)
+
+
+def _dispatch_ai_execution(proposal_id: int) -> None:
+    """Enqueue an AI-auto-approved execution on the *offline* queue, alongside
+    the sweeps — batch, nobody waits."""
+    from app.tasks.automanage import execute_auto_approved_proposal
+
+    execute_auto_approved_proposal(proposal_id)
 
 
 def _actionable_after(proposal_id: int, transitioned: bool) -> bool:
@@ -53,7 +63,7 @@ def approve(proposal_id: int, *, user_id: str) -> bool:
     transitioned = change_proposals.approve(proposal_id, user_id=user_id)
     if not _actionable_after(proposal_id, transitioned):
         return False
-    _dispatch_execution(proposal_id)
+    _dispatch_human_execution(proposal_id)
     return True
 
 
@@ -70,7 +80,7 @@ def auto_approve(proposal_id: int, *, acting_user_id: str) -> bool:
     )
     if not _actionable_after(proposal_id, transitioned):
         return False
-    _dispatch_execution(proposal_id)
+    _dispatch_ai_execution(proposal_id)
     return True
 
 

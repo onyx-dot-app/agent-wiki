@@ -1463,7 +1463,7 @@ class AIManagementSettings(Base):
     per-page ``ai_management_allowed`` policies are untouched, so re-enabling
     resumes exactly where they left off. ``schedule`` drives the recurring
     detection sweep (``off`` / ``daily`` / ``weekly``); the periodic tasks in
-    ``app/tasks/detection.py`` read it each fire. Named generically (not
+    ``app/tasks/automanage.py`` read it each fire. Named generically (not
     detection-specific) so it can hold future AI-management-wide settings.
     """
 

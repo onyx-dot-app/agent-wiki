@@ -22,7 +22,7 @@ from app.models.automanage import (
     RunsResponse,
     SweepTriggerResponse,
 )
-from app.tasks.detection import run_detection_sweep
+from app.tasks.automanage import run_detection_sweep
 from app.wiki import acl
 from app.wiki.automanage import review, runs, settings
 from app.wiki.change_proposals import (
