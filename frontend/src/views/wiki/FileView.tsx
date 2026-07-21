@@ -869,18 +869,22 @@ export function FileView({ path }: FileViewProps) {
         );
       case "comments":
         return (
-          <CommentsPanel
-            path={path}
-            headSha={headSha}
-            draft={commentDraft}
-            threads={commentThreads}
-            onChanged={refreshComments}
-            activeId={activeCommentId}
-            onActivate={activateComment}
-            onDraftConsumed={() => setCommentDraft(null)}
-            onClose={closePanel}
-            fullHeight
-          />
+          // Same card-stack host as the other tabs. The panel scrolls inside
+          // its bordered shell.
+          <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
+            <CommentsPanel
+              path={path}
+              headSha={headSha}
+              draft={commentDraft}
+              threads={commentThreads}
+              onChanged={refreshComments}
+              activeId={activeCommentId}
+              onActivate={activateComment}
+              onDraftConsumed={() => setCommentDraft(null)}
+              onClose={closePanel}
+              fullHeight
+            />
+          </div>
         );
       case "sources":
         return (

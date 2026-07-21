@@ -1,20 +1,8 @@
 "use client";
 
-import {
-  Button,
-  LineItemButton,
-  Popover,
-  Text,
-} from "@onyx-ai/opal/components";
-import {
-  SvgCheck,
-  SvgEdit,
-  SvgLink,
-  SvgMoreHorizontal,
-  SvgTrash,
-  SvgX,
-} from "@onyx-ai/opal/icons";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Divider, EndOfList, Text } from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
 
 import { useAuth } from "@/lib/auth";
 import { shareableWikiUrl } from "@/lib/wikiHref";
@@ -27,16 +15,16 @@ import {
   resolveThread,
 } from "@/lib/comments";
 import type { CommentDraft } from "@/lib/editor/comments";
-import {
-  detokenizeMentions,
-  parseBody,
-  tokenizeMentions,
-} from "@/lib/commentMentions";
-import { absoluteTime, relativeTime } from "@/lib/time";
+import { tokenizeMentions } from "@/lib/commentMentions";
 import type { CommentThreadView, CommentView } from "@/types";
 
-import { MentionTextarea } from "./MentionTextarea";
-import styles from "./CommentsPanel.module.css";
+import { PanelSearchField } from "./PanelSearch";
+import {
+  CommentInput,
+  CommentMessage,
+  NewCommentComposer,
+  isNewComment,
+} from "./commentCards";
 
 export type { CommentDraft };
 
@@ -65,12 +53,6 @@ function authorLabel(
   return authorDisplay ?? "User";
 }
 
-/** Backend timestamps are "YYYY-MM-DD HH:MM:SS" in UTC (not ISO). Normalize so
- * Date parses them as UTC, not local. */
-function toIso(ts: string): string {
-  return ts.includes("T") ? ts : `${ts.replace(" ", "T")}Z`;
-}
-
 /** Deep-link to a specific thread: the page route reads `?comment=<id>`, opens
  * the panel, and scrolls to the thread's anchored span. Uses the durable
  * id-based URL so the link survives a page rename/move. */
@@ -78,6 +60,21 @@ function commentLink(path: string, rootId: string): Promise<string> {
   return shareableWikiUrl(path, `comment=${rootId}`);
 }
 
+// Searchable text for a thread across every message.
+function threadHaystack(t: CommentThreadView): string {
+  return [t.root, ...t.replies]
+    .flatMap((c) => [c.author_display, c.body, c.quoted_text])
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+/**
+ * Comments tab (mock 1856:285030, list mode): a bordered panel holding the
+ * sticky search bar, thread cards ordered by document position, a Resolved
+ * section, and the end-of-list count. Threads expand in place (mock
+ * 778:262971) with a reply input under the expanded card.
+ */
 export function CommentsPanel({
   path,
   headSha,
@@ -87,12 +84,13 @@ export function CommentsPanel({
   activeId,
   onActivate,
   onDraftConsumed,
-  onClose,
-  fullHeight,
+  onClose: _onClose,
+  fullHeight: _fullHeight,
 }: Props) {
   const { user } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
 
   // Returns true on success so callers can clear/close their input only when
   // the action actually went through.
@@ -113,12 +111,15 @@ export function CommentsPanel({
     [onChanged],
   );
 
-  const [showResolved, setShowResolved] = useState(false);
+  const q = query.trim().toLowerCase();
+  const searched = q
+    ? threads.filter((t) => threadHaystack(t).includes(q))
+    : threads;
 
   // Order threads to match the doc: by their referenced position (start_offset)
   // top-to-bottom. Orphaned threads ("Original content deleted") have no live
   // anchor, so they sink to the bottom, ordered among themselves by creation.
-  const orderedThreads = [...threads].sort((a, b) => {
+  const orderedThreads = [...searched].sort((a, b) => {
     const ao = a.root.status === "orphaned" ? null : a.root.start_offset;
     const bo = b.root.status === "orphaned" ? null : b.root.start_offset;
     if (ao === null && bo === null)
@@ -128,9 +129,6 @@ export function CommentsPanel({
     return ao - bo;
   });
 
-  // Resolved threads drop out of the main list (Google-Docs style) — they're
-  // "done", so they shouldn't clutter the doc. They stay reachable (to reopen)
-  // behind a toggle.
   const openThreads = orderedThreads.filter(
     (t) => t.root.status !== "resolved",
   );
@@ -138,16 +136,17 @@ export function CommentsPanel({
     (t) => t.root.status === "resolved",
   );
 
-  // If the active thread (clicked, or arrived via a `?comment=` deep-link) is
-  // resolved, expand the resolved section so it's actually visible — otherwise
-  // activating it would silently do nothing.
-  const activeIsResolved = resolvedThreads.some((t) => t.root.id === activeId);
+  // A `?comment=` deep-link can land on a resolved thread; scroll it into
+  // view once threads have loaded so activation is visible.
   useEffect(() => {
-    if (activeIsResolved) setShowResolved(true);
-  }, [activeIsResolved]);
+    if (!activeId) return;
+    document
+      .querySelector(`[data-thread-id="${activeId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeId, threads.length]);
 
   const renderThread = (t: CommentThreadView) => (
-    <Thread
+    <ThreadCard
       key={t.root.id}
       thread={t}
       path={path}
@@ -156,42 +155,56 @@ export function CommentsPanel({
       busy={busy}
       active={t.root.id === activeId}
       onActivate={() => onActivate(t.root.id)}
-      onReply={(body) => run(() => replyToComment(t.root.id, body))}
-      onResolve={() => run(() => resolveThread(t.root.id))}
-      onReopen={() => run(() => reopenThread(t.root.id))}
-      onEdit={(id, body) => run(() => editComment(id, body))}
-      onDelete={(id) => run(() => deleteComment(id))}
+      run={run}
     />
   );
 
   return (
-    <div className={`${styles.panel} ${fullHeight ? styles.fullHeight : ""}`}>
-      <div className={styles.headerRow}>
-        <div className={styles.headerTitle}>
-          <Text font="main-ui-action" color="text-04">
-            Comments
-          </Text>
-        </div>
-        <Button
-          icon={SvgX}
-          prominence="tertiary"
-          size="sm"
-          tooltip="Close comments"
-          onClick={onClose}
+    <Section
+      justifyContent="start"
+      alignItems="stretch"
+      height="auto"
+      gap={0}
+      padding={0.25}
+      className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01)"
+    >
+      <Section
+        flexDirection="row"
+        justifyContent="start"
+        alignItems="center"
+        height="fit"
+        gap={0.25}
+        className="shrink-0"
+      >
+        <PanelSearchField
+          value={query}
+          onChange={setQuery}
+          placeholder="Search comments…"
         />
-      </div>
-
-      <div className={`${styles.scroll} scroll-y-hidden`}>
-        {error && <div className={styles.error}>{error}</div>}
+      </Section>
+      <Divider />
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        height="auto"
+        gap={0.25}
+        className="scroll-fade-bottom scroll-y-hidden min-h-0 flex-1 overflow-y-auto"
+      >
+        {error && (
+          <div className="px-2 py-1 text-xs text-(--status-text-error-05)">
+            {error}
+          </div>
+        )}
 
         {draft && (
-          <DraftComposer
-            draft={draft}
+          <NewCommentComposer
+            selfName={user?.name || user?.email || "You"}
+            quotedText={draft.quotedText}
             disabled={busy || !headSha}
             onCancel={onDraftConsumed}
             onSubmit={async (body) => {
               if (!headSha) {
-                setError("page version unknown — reload and retry");
+                setError("page version unknown, reload and retry");
                 return;
               }
               const ok = await run(() =>
@@ -209,84 +222,50 @@ export function CommentsPanel({
           />
         )}
 
-        {openThreads.length === 0 && resolvedThreads.length === 0 && !draft ? (
-          <Text font="secondary-body" color="text-03">
-            No comments yet. Select text in the page to add one.
-          </Text>
-        ) : (
-          <>
-            {openThreads.map(renderThread)}
+        {threads.length === 0 && !draft && (
+          <div className="p-3">
+            <Text font="secondary-body" color="text-03">
+              No comments yet. Select text in the page to add one.
+            </Text>
+          </div>
+        )}
 
-            {resolvedThreads.length > 0 && (
-              <>
-                <div className={styles.resolvedToggle}>
-                  <Button
-                    prominence="tertiary"
-                    size="sm"
-                    onClick={() => setShowResolved((v) => !v)}
-                  >
-                    {showResolved
-                      ? `Hide resolved (${resolvedThreads.length})`
-                      : `Show resolved (${resolvedThreads.length})`}
-                  </Button>
-                </div>
-                {showResolved && resolvedThreads.map(renderThread)}
-              </>
-            )}
+        {threads.length > 0 && searched.length === 0 && (
+          <div className="p-3">
+            <Text font="secondary-body" color="text-03">
+              No comments match.
+            </Text>
+          </div>
+        )}
+
+        {openThreads.map(renderThread)}
+
+        {resolvedThreads.length > 0 && (
+          <>
+            <div className="pt-1">
+              <Divider title="Resolved" />
+            </div>
+            {resolvedThreads.map(renderThread)}
           </>
         )}
-      </div>
-    </div>
+
+        {searched.length > 0 && (
+          <div className="px-4 py-2">
+            <EndOfList
+              title={`${searched.length} Comment${searched.length === 1 ? "" : "s"}`}
+            />
+          </div>
+        )}
+      </Section>
+    </Section>
   );
 }
 
-function DraftComposer({
-  draft,
-  disabled,
-  onSubmit,
-  onCancel,
-}: {
-  draft: CommentDraft;
-  disabled: boolean;
-  onSubmit: (body: string) => void;
-  onCancel: () => void;
-}) {
-  const [body, setBody] = useState("");
-  // "@Name" → userId for every mention picked this session; used to tokenize
-  // the body on submit.
-  const mentions = useRef<Record<string, string>>({});
-  return (
-    <div className={styles.draft}>
-      <div className={styles.quote}>{draft.quotedText}</div>
-      <MentionTextarea
-        placeholder="Add a comment…"
-        value={body}
-        autoFocus
-        onChange={setBody}
-        onPickMention={(d, id) => {
-          mentions.current[d] = id;
-        }}
-      />
-      <div className={styles.composeRow}>
-        <Button prominence="tertiary" size="sm" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button
-          variant="action"
-          size="sm"
-          disabled={disabled || !body.trim()}
-          onClick={() =>
-            onSubmit(tokenizeMentions(body.trim(), mentions.current))
-          }
-        >
-          Comment
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function Thread({
+/** One thread card (mock 1856 list rows): collapsed shows the root message,
+ *  active/expanded shows the whole conversation with a reply input below
+ *  (mock 778:262971). Unread = white card with the blue marker, read blends
+ *  into the panel tint, resolved sits on tint-02. */
+function ThreadCard({
   thread,
   path,
   selfId,
@@ -294,11 +273,7 @@ function Thread({
   busy,
   active,
   onActivate,
-  onReply,
-  onResolve,
-  onReopen,
-  onEdit,
-  onDelete,
+  run,
 }: {
   thread: CommentThreadView;
   path: string;
@@ -307,301 +282,107 @@ function Thread({
   busy: boolean;
   active: boolean;
   onActivate: () => void;
-  onReply: (body: string) => Promise<boolean>;
-  onResolve: () => void;
-  onReopen: () => void;
-  onEdit: (id: string, body: string) => Promise<boolean>;
-  onDelete: (id: string) => void;
+  run: (fn: () => Promise<unknown>) => Promise<boolean>;
 }) {
   const { root } = thread;
-  const [replyOpen, setReplyOpen] = useState(false);
-  const [replyBody, setReplyBody] = useState("");
-  const replyMentions = useRef<Record<string, string>>({});
   const resolved = root.status === "resolved";
-
-  // One flat conversation (Google-Docs style): the root and every reply render
-  // uniformly, appended in order — no nesting/indentation.
   const conversation = [root, ...thread.replies];
+  const latest = conversation[conversation.length - 1]!;
+  const unread = !resolved && isNewComment(latest.created_at);
+
+  const [replyBody, setReplyBody] = useState("");
+  const [replyMentions] = useState<Record<string, string>>({});
+
+  // Active threads expand to the full conversation, collapsed cards show
+  // only the root message (mock 1856 stacks both forms).
+  const expanded = active;
+  const shown = expanded ? conversation : [root];
+
+  const bg = resolved
+    ? "bg-(--background-tint-02)"
+    : unread || expanded
+      ? "bg-(--background-tint-00)"
+      : "bg-(--background-tint-01)";
+  const shadow = expanded
+    ? "shadow-(--shadow-box-01)"
+    : "shadow-(--shadow-box-00) hover:shadow-(--shadow-box-01) hover:bg-(--background-tint-00)";
+
+  const messageActions = (c: CommentView) => ({
+    onResolve: () => void run(() => resolveThread(root.id)),
+    onReopen: () => void run(() => reopenThread(root.id)),
+    onCopyLink: async () => {
+      // Durable id-based deep-link (survives rename/move). A transient
+      // id-resolve failure skips the copy rather than handing over a
+      // fragile path link.
+      try {
+        const url = await commentLink(path, root.id);
+        await navigator.clipboard.writeText(url);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    onEdit: (body: string) => run(() => editComment(c.id, body)),
+    onDelete: () => void run(() => deleteComment(c.id)),
+  });
 
   return (
-    // Clicking the thread selects it (its span gets the orange highlight). The
-    // commented text itself lives as a highlight in the doc, so no quote box.
-    <div
-      className={`${styles.thread} ${resolved ? styles.threadResolved : ""} ${active ? styles.threadActive : ""}`}
-      onClick={onActivate}
-    >
-      {root.status === "orphaned" && (
-        <div className={styles.orphanedNote}>Original content deleted</div>
-      )}
-
-      <div className={styles.threadBody}>
-        {conversation.map((c) => (
-          <Comment
+    <div className="flex w-full shrink-0 flex-col" data-thread-id={root.id}>
+      {/* raw-ok: the card is a selectable region hosting nested buttons and inputs, which a native button cannot contain */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onActivate}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && e.target === e.currentTarget) {
+            e.preventDefault();
+            onActivate();
+          }
+        }}
+        className={`flex w-full cursor-pointer flex-col overflow-clip rounded-(--radius-08) text-left ${bg} ${shadow}`}
+      >
+        {root.status === "orphaned" && (
+          <div className="px-2 pt-1 text-[12px] leading-4 text-(--text-03)">
+            Original content deleted
+          </div>
+        )}
+        {shown.map((c) => (
+          <CommentMessage
             key={c.id}
             comment={c}
-            path={path}
+            authorName={authorLabel(c.author_user_id, c.author_display, selfId)}
+            isRoot={c.id === root.id}
+            resolved={resolved}
+            unread={unread && !expanded}
+            emphasized={expanded}
             canModify={isAdmin || c.author_user_id === selfId}
-            selfId={selfId}
             busy={busy}
-            onEdit={onEdit}
-            onDelete={onDelete}
+            actions={messageActions(c)}
           />
         ))}
       </div>
-
-      {replyOpen ? (
-        <div className={styles.replyBox}>
-          <MentionTextarea
+      {expanded && !resolved && (
+        <div className="pt-1 pb-3">
+          <CommentInput
             placeholder="Reply…"
             value={replyBody}
-            autoFocus
             onChange={setReplyBody}
             onPickMention={(d, id) => {
-              replyMentions.current[d] = id;
+              replyMentions[d] = id;
             }}
-          />
-          <div className={styles.composeRow}>
-            <Button
-              prominence="tertiary"
-              size="sm"
-              onClick={() => setReplyOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="action"
-              size="sm"
-              disabled={busy || !replyBody.trim()}
-              onClick={async () => {
-                // Clear/close only on success so a failed reply isn't lost.
-                const ok = await onReply(
-                  tokenizeMentions(replyBody.trim(), replyMentions.current),
-                );
-                if (ok) {
-                  setReplyBody("");
-                  replyMentions.current = {};
-                  setReplyOpen(false);
-                }
-              }}
-            >
-              Reply
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className={styles.actions}>
-          <Button
-            prominence="tertiary"
-            size="sm"
             disabled={busy}
-            onClick={() => setReplyOpen(true)}
-          >
-            Reply
-          </Button>
-          {resolved ? (
-            <Button
-              prominence="tertiary"
-              size="sm"
-              disabled={busy}
-              onClick={onReopen}
-            >
-              Reopen
-            </Button>
-          ) : (
-            <Button
-              prominence="tertiary"
-              size="sm"
-              disabled={busy}
-              onClick={onResolve}
-            >
-              Resolve
-            </Button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Comment({
-  comment,
-  path,
-  canModify,
-  selfId,
-  busy,
-  onEdit,
-  onDelete,
-}: {
-  comment: CommentView;
-  path: string;
-  canModify: boolean;
-  selfId: string | undefined;
-  busy: boolean;
-  onEdit: (id: string, body: string) => Promise<boolean>;
-  onDelete: (id: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const editMentions = useRef<Record<string, string>>({});
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  // Edit in the readable display form; (de)tokenize at the boundary so the
-  // textarea shows "@Name" while storage keeps the mention's user id. Re-seed
-  // from the current stored body each time edit opens, so a re-edit after an
-  // external change starts from fresh content.
-  const openEdit = () => {
-    const d = detokenizeMentions(comment.body);
-    setDraft(d.text);
-    editMentions.current = d.map;
-    setEditing(true);
-  };
-
-  // Copy a deep-link to this comment's thread (anchors live on the root, so all
-  // comments in a thread share its link). Doesn't close the menu — the swapped
-  // title/icon is the "done" feedback.
-  const copyLink = async () => {
-    // Durable id-based deep-link (survives rename/move); the ?comment= anchor
-    // rides along. A transient id-resolve failure skips the copy rather than
-    // handing over a fragile path link.
-    let url: string;
-    try {
-      url = await commentLink(path, comment.thread_root_id);
-    } catch {
-      return;
-    }
-    void navigator.clipboard
-      .writeText(url)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => {
-        /* clipboard blocked — no-op */
-      });
-  };
-
-  return (
-    <div className={styles.comment}>
-      <div className={styles.metaRow}>
-        <Text font="main-ui-action" color="text-04">
-          {authorLabel(comment.author_user_id, comment.author_display, selfId)}
-        </Text>
-        <span
-          className={styles.time}
-          title={absoluteTime(toIso(comment.created_at))}
-        >
-          <Text font="secondary-body" color="text-03">
-            {relativeTime(toIso(comment.created_at), "short")}
-          </Text>
-        </span>
-        <span className={styles.metaRight}>
-          {!editing && (
-            // Overflow menu (Google-Docs style) keeps actions off the card until
-            // hovered, so comments stay compact. Forced visible while open.
-            // "Copy link" is available to everyone (read access); Edit/Delete
-            // only to the author/admin.
-            <span
-              className={`${styles.kebab} ${menuOpen ? styles.kebabOpen : ""}`}
-            >
-              <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-                {/* Radix renders its own <button> here (no asChild) so the
-                    trigger's onClick/ref/data-state are guaranteed to wire up —
-                    OPAL's Button isn't a Radix Slot and drops them. */}
-                <Popover.Trigger
-                  className={styles.kebabBtn}
-                  aria-label="Comment actions"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <SvgMoreHorizontal />
-                </Popover.Trigger>
-                <Popover.Content width="fit" align="end">
-                  <Popover.Menu>
-                    <LineItemButton
-                      title={copied ? "Link copied" : "Copy link"}
-                      icon={copied ? SvgCheck : SvgLink}
-                      sizePreset="main-ui"
-                      variant="section"
-                      onClick={copyLink}
-                    />
-                    {canModify && (
-                      <>
-                        <LineItemButton
-                          title="Edit"
-                          icon={SvgEdit}
-                          sizePreset="main-ui"
-                          variant="section"
-                          onClick={() => {
-                            setMenuOpen(false);
-                            openEdit();
-                          }}
-                        />
-                        <LineItemButton
-                          title="Delete"
-                          color="danger"
-                          icon={SvgTrash}
-                          sizePreset="main-ui"
-                          variant="section"
-                          onClick={() => {
-                            setMenuOpen(false);
-                            onDelete(comment.id);
-                          }}
-                        />
-                      </>
-                    )}
-                  </Popover.Menu>
-                </Popover.Content>
-              </Popover>
-            </span>
-          )}
-        </span>
-      </div>
-
-      {editing ? (
-        <div>
-          <MentionTextarea
-            value={draft}
-            autoFocus
-            onChange={setDraft}
-            onPickMention={(d, id) => {
-              editMentions.current[d] = id;
+            submitTooltip="Send reply"
+            onSubmit={async () => {
+              // Clear only on success so a failed reply isn't lost.
+              const ok = await run(() =>
+                replyToComment(
+                  root.id,
+                  tokenizeMentions(replyBody.trim(), replyMentions),
+                ),
+              );
+              if (ok) setReplyBody("");
             }}
           />
-          <div className={styles.composeRow}>
-            <Button
-              prominence="tertiary"
-              size="sm"
-              onClick={() => setEditing(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="action"
-              size="sm"
-              disabled={busy || !draft.trim()}
-              onClick={async () => {
-                const next = tokenizeMentions(
-                  draft.trim(),
-                  editMentions.current,
-                );
-                if (await onEdit(comment.id, next)) setEditing(false);
-              }}
-            >
-              Save
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className={styles.body}>
-          {parseBody(comment.body).map((seg, i) =>
-            seg.kind === "mention" ? (
-              <span key={i} className={styles.mention}>
-                @{seg.name}
-              </span>
-            ) : (
-              <span key={i}>{seg.text}</span>
-            ),
-          )}
         </div>
       )}
     </div>

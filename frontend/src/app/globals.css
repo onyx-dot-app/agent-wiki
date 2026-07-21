@@ -403,6 +403,25 @@ body {
   color: var(--text-04);
 }
 
+/* Comment inputs wrap MentionTextarea inside the mock's bordered field
+   (566:19918), so the textarea itself goes chromeless. The wrapper owns
+   the border, focus ring, and padding. */
+.comment-input textarea {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  padding: 2px;
+  min-height: 24px;
+  width: 100%;
+  font-size: 14px;
+  line-height: 20px;
+  resize: none;
+}
+.comment-input textarea::placeholder {
+  color: var(--text-02);
+}
+
 /* Auto-edit limit inputs: the mock shows a 20px leading status glyph and a
    DM Mono value. InputTypeIn has no leading-icon prop (the glyph overlays
    via .limit-input's relative wrapper) and inherits the body font. */
