@@ -117,8 +117,8 @@ body {
   display: none;
 }
 
-/* Side-panel scroll columns: the scrollbar is hidden so the rail's content
-   width never shifts between overflowing and fitting content. */
+/* Panel and drawer scroll columns: the scrollbar is hidden so the column's
+   content width never shifts between overflowing and fitting content. */
 .scroll-y-hidden {
   scrollbar-width: none;
   -ms-overflow-style: none;
