@@ -90,8 +90,8 @@ def test_stream_requires_read(client):
 
 def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
     # Joining is page-open presence (read-gated); the write boundary is /op
-    # and /cursor. A read-only user lands in the roster with caret_active
-    # false — presence renders them "viewing".
+    # and /cursor. A read-only user lands in the roster; they never broadcast
+    # a caret, so presence renders them "viewing" client-side.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     reader = users_repo.create(email="reader@x.com", password="hunter2-x", name="Reader")
     _seed_page()
@@ -110,7 +110,7 @@ def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
     assert resp.status_code == 200
     sid = resp.json()["session_id"]
     me = [p for p in resp.json()["participants"] if p["user_id"] == reader]
-    assert me and me[0]["caret_active"] is False
+    assert me and me[0]["last_edited_at"] is None
 
     op = client.post(
         "/api/coedit/op",
@@ -136,10 +136,7 @@ def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
     assert client.get(f"/api/wiki/file?path={_PATH}").json()["can_write"] is True
 
 
-def test_op_stamps_last_edited_at_and_caret(client):
-    # An op carrying the sender's caret epoch marks the caret active even if
-    # the cursor ping was dropped; an op without one (cleared caret / legacy
-    # client) leaves caret state alone.
+def test_op_stamps_last_edited_at(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page()
@@ -147,18 +144,11 @@ def test_op_stamps_last_edited_at_and_caret(client):
     joined = client.post("/api/coedit/join", json={"path": _PATH}).json()
     sid = joined["session_id"]
     assert joined["participants"][0]["last_edited_at"] is None
-    assert joined["participants"][0]["caret_active"] is False
 
     _apply_op(client, sid, 0, [{"from": 0, "to": 0, "insert": "x"}])
     after = client.get(f"/api/coedit/session?session_id={sid}").json()
     me = [p for p in after["participants"] if p["user_id"] == uid]
     assert me and me[0]["last_edited_at"] is not None
-    assert me[0]["caret_active"] is False  # no caret_seq → untouched
-
-    _apply_op(client, sid, 1, [{"from": 0, "to": 0, "insert": "y"}], caret_seq=1)
-    after = client.get(f"/api/coedit/session?session_id={sid}").json()
-    me = [p for p in after["participants"] if p["user_id"] == uid]
-    assert me and me[0]["caret_active"] is True
 
 
 def test_leave_removes_participant(client):
@@ -284,20 +274,11 @@ def test_cursor_broadcasts_and_returns_ok(client):
     assert resp.json() == {"ok": True}
 
 
-def test_cursor_sets_and_clears_caret_active(client):
-    # Placing a caret flips the participant to "editing" (caret_active true);
-    # a null-position cursor (editor blur / tab hidden) clears it back — the
-    # roster carries the state so late joiners label presence correctly.
+def test_cursor_clear_returns_ok(client):
+    # A null-position cursor (editor blur / tab hidden) is a caret clear —
+    # broadcast to the session so peers drop the caret; nothing persisted.
     sid = _login_and_join(client)
-
-    client.post(
-        "/api/coedit/cursor",
-        json={"session_id": sid, "anchor": 3, "head": 3, "typing": False, "seq": 1},
-    )
-    roster = client.get(f"/api/coedit/session?session_id={sid}").json()["participants"]
-    assert [(p["caret_active"], p["caret_seq"]) for p in roster] == [(True, 1)]
-
-    cleared = client.post(
+    resp = client.post(
         "/api/coedit/cursor",
         json={
             "session_id": sid,
@@ -307,42 +288,8 @@ def test_cursor_sets_and_clears_caret_active(client):
             "seq": 2,
         },
     )
-    assert cleared.status_code == 200
-    roster = client.get(f"/api/coedit/session?session_id={sid}").json()["participants"]
-    assert [(p["caret_active"], p["caret_seq"]) for p in roster] == [(False, 2)]
-
-
-def test_stale_caret_requests_cannot_resurrect_a_clear(client):
-    # Requests carry a client caret epoch; a write applies only when the epoch
-    # advances, so a place or op that was sent before a clear but commits after
-    # it (HTTP reordering) is a no-op instead of resurrecting the caret.
-    sid = _login_and_join(client)
-
-    client.post(
-        "/api/coedit/cursor",
-        json={"session_id": sid, "anchor": None, "head": None, "typing": False, "seq": 4},
-    )
-
-    # A cursor place from the older epoch loses.
-    client.post(
-        "/api/coedit/cursor",
-        json={"session_id": sid, "anchor": 3, "head": 3, "typing": False, "seq": 3},
-    )
-    roster = client.get(f"/api/coedit/session?session_id={sid}").json()["participants"]
-    assert [(p["caret_active"], p["caret_seq"]) for p in roster] == [(False, 4)]
-
-    # An op asserting the older epoch loses too (its edit still applies).
-    _apply_op(client, sid, 0, [{"from": 0, "to": 0, "insert": "x"}], caret_seq=3)
-    roster = client.get(f"/api/coedit/session?session_id={sid}").json()["participants"]
-    assert [(p["caret_active"], p["caret_seq"]) for p in roster] == [(False, 4)]
-
-    # A genuinely newer place (refocus) wins again.
-    client.post(
-        "/api/coedit/cursor",
-        json={"session_id": sid, "anchor": 0, "head": 0, "typing": False, "seq": 5},
-    )
-    roster = client.get(f"/api/coedit/session?session_id={sid}").json()["participants"]
-    assert [(p["caret_active"], p["caret_seq"]) for p in roster] == [(True, 5)]
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
 
 
 def test_cursor_requires_write(client):
@@ -376,17 +323,11 @@ def test_op_requires_write(client):
     assert resp.status_code == 403
 
 
-def _apply_op(
-    client,
-    sid: int,
-    base_version: int,
-    changes: list[dict],
-    caret_seq: int | None = None,
-) -> int:
-    body: dict = {"session_id": sid, "base_version": base_version, "changes": changes}
-    if caret_seq is not None:
-        body["caret_seq"] = caret_seq
-    resp = client.post("/api/coedit/op", json=body)
+def _apply_op(client, sid: int, base_version: int, changes: list[dict]) -> int:
+    resp = client.post(
+        "/api/coedit/op",
+        json={"session_id": sid, "base_version": base_version, "changes": changes},
+    )
     assert resp.status_code == 200, resp.text
     return resp.json()["version"]
 

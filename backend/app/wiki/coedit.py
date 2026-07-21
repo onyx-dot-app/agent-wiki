@@ -2,9 +2,10 @@
 
 The DB is the source of truth for an in-progress *live* edit. There is **one
 active session per page** (path-keyed); everyone viewing the page joins it
-(the session is the page's live channel — participants include pure viewers,
-distinguished from editors by ``caret_active``), and its editors converge on
-a single server-authoritative ``buffer_text`` + monotonic ``version``.
+(the session is the page's live channel — participants include pure viewers;
+presence labels editors client-side from their live caret frames, which never
+touch this store), and its editors converge on a single server-authoritative
+``buffer_text`` + monotonic ``version``.
 
 This module is the *storage* seam only: get-or-create a session, join/leave/
 touch participants, and compare-and-swap the buffer. The op/patch channel and
@@ -104,12 +105,6 @@ class ParticipantRow(BaseModel):
     last_seen_at: str
     # NULL until the participant applies an edit op.
     last_edited_at: str | None = None
-    # True while the participant has a caret placed in the text — presence
-    # renders them "editing", else "viewing" (joining a session is page-open,
-    # not edit intent). ``caret_seq`` is the client caret epoch that ordered
-    # the last applied caret write (see set_caret_active).
-    caret_active: bool = False
-    caret_seq: int = 0
 
 
 def _session_row(s: CoeditSession) -> SessionRow:
@@ -135,8 +130,6 @@ def _participant_row(p: CoeditParticipant, user_display: str) -> ParticipantRow:
         joined_at=p.joined_at,
         last_seen_at=p.last_seen_at,
         last_edited_at=p.last_edited_at,
-        caret_active=p.caret_active,
-        caret_seq=p.caret_seq,
     )
 
 
@@ -782,10 +775,7 @@ def join(session_id: int, user_id: str) -> None:
 def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
     """Refresh a participant's ``last_seen_at`` (presence heartbeat).
 
-    ``edited=True`` (the ``/op`` path) also stamps ``last_edited_at``. Caret
-    state is NOT written here — this is an ORM read-modify-write, and caret
-    writes must stay on set_caret_active's atomic guarded UPDATE to keep their
-    epoch ordering."""
+    ``edited=True`` (the ``/op`` path) also stamps ``last_edited_at``."""
     with session() as s:
         existing = s.get(CoeditParticipant, (session_id, user_id))
         if existing is not None:
@@ -793,45 +783,6 @@ def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
             existing.last_seen_at = now
             if edited:
                 existing.last_edited_at = now
-
-
-def set_caret_active(
-    session_id: int, user_id: str, *, active: bool, seq: int | None
-) -> None:
-    """Record whether the participant has a caret placed in the text.
-
-    This is what presence renders as "editing" vs "viewing". Live flips reach
-    connected clients through the cursor frames themselves; this row only
-    seeds the roster (join responses, presence broadcasts) so late joiners see
-    the right label.
-
-    ``seq`` is the client-assigned caret epoch: bumped by the editor on every
-    place/clear transition, echoed unchanged by movement pings and edit ops.
-    The write applies only when the epoch advances (``caret_seq < seq``), so
-    concurrent requests can't reorder — an edit or cursor ping that overlaps a
-    later blur/hidden-tab clear commits as a no-op instead of resurrecting the
-    caret — and the high-frequency ping path stays write-free (same epoch →
-    row untouched). ``seq=None`` (a client predating the epoch protocol)
-    falls back to applying state changes last-writer-wins."""
-    guard = (
-        CoeditParticipant.caret_seq < seq
-        if seq is not None
-        else CoeditParticipant.caret_active != active
-    )
-    values: dict[str, Any] = {"caret_active": active}
-    if seq is not None:
-        values["caret_seq"] = seq
-    with session() as s:
-        s.execute(
-            update(CoeditParticipant)
-            .where(
-                CoeditParticipant.session_id == session_id,
-                CoeditParticipant.user_id == user_id,
-                guard,
-            )
-            .values(**values)
-            .execution_options(synchronize_session=False)
-        )
 
 
 def leave(session_id: int, user_id: str) -> None:

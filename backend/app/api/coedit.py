@@ -2,8 +2,9 @@
 
 A "co-edit session" is the page's *live session*: everyone viewing the page
 joins it (read-gated — presence + real-time updates), and editing is a
-capability inside it (`/op`/`/cursor` are write-gated; `caret_active` — whether
-a caret is placed in the text — separates editors from viewers in presence).
+capability inside it (`/op`/`/cursor` are write-gated). Presence labels
+editors vs viewers client-side from the live caret frames — a rendered caret
+IS the "editing" state; the server stores nothing for it.
 
 Thin HTTP layer: gate by page permission, drive the ``app/wiki/coedit.py`` store
 and the ``app/wiki/coedit_channel.py`` broadcast layer. The SSE stream is a
@@ -51,8 +52,6 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
             joined_at=p.joined_at,
             last_seen_at=p.last_seen_at,
             last_edited_at=p.last_edited_at,
-            caret_active=p.caret_active,
-            caret_seq=p.caret_seq,
         )
         for p in coedit.list_participants(session_id)
     ]
@@ -65,9 +64,9 @@ def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResponse:
     Joining is opening the page — presence + the live op stream — so it
     requires only read; *writing* is gated at ``/op``/``/cursor``. A
     participant who never places a caret shows as "viewing" in presence
-    (``caret_active`` stays false). A fresh session is seeded from the
-    page's current HEAD; an already-open session is adopted as-is (its live
-    buffer wins).
+    (the label derives client-side from live caret frames). A fresh session
+    is seeded from the page's current HEAD; an already-open session is
+    adopted as-is (its live buffer wins).
     """
     require_can("read", req.path, user)
     head = git.head_sha_for_path(req.path)
@@ -137,14 +136,8 @@ def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
     if out is None:
         raise HTTPException(status_code=409, detail="stale base_version; re-sync and retry")
     coedit.touch(req.session_id, user.id, edited=True)
-    # An edit asserts caret placement at the sender's current epoch — guarded
-    # like any caret write, so an op that overlaps a later blur clear can't
-    # resurrect the caret. No caret_seq (cleared caret / legacy client) means
-    # the op leaves caret state alone.
-    if req.caret_seq is not None:
-        coedit.set_caret_active(
-            req.session_id, user.id, active=True, seq=req.caret_seq
-        )
+    # caret_seq rides the frame so peers render the author's caret at the
+    # edit; None (cleared caret / legacy client) = no caret assertion.
     coedit_channel.broadcast_op(
         req.session_id,
         out.version,
@@ -162,17 +155,14 @@ def cursor(req: CursorRequest, user: User = Depends(require_user)) -> dict[str, 
 
     A null anchor/head clears the caret (the editor lost focus / the tab went
     hidden) — peers drop it and presence flips the sender to "viewing".
-    High-frequency + throttled client-side; positions stay ephemeral (no
-    last_seen write — the SSE heartbeat covers liveness), only the on/off
-    caret state lands in the DB, and only when ``seq`` (the client caret
-    epoch) advances — which both keeps the ping path write-free and stops a
-    reordered older request from overwriting the latest caret state.
+    High-frequency + throttled client-side; deliberately does not touch the DB
+    (no last_seen write — the SSE heartbeat covers liveness; no caret state —
+    a rendered caret IS the editing state, so nothing needs persisting).
+    ``seq`` (the client caret epoch) rides the frame so peers drop reordered
+    stale frames.
     """
     _require_active(req.session_id, user, "write")
     cleared = req.anchor is None or req.head is None
-    coedit.set_caret_active(
-        req.session_id, user.id, active=not cleared, seq=req.seq
-    )
     coedit_channel.broadcast_cursor(
         req.session_id,
         user_id=user.id,

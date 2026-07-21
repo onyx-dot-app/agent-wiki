@@ -1006,23 +1006,10 @@ class CoeditParticipant(Base):
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
     # When this participant last applied an edit op, ISO 8601 UTC. NULL for a
-    # participant who has only viewed.
+    # participant who has only viewed. Presence does NOT read this — the
+    # "editing"/"viewing" label derives client-side from the live caret
+    # frames (a rendered caret IS the editing state; nothing is persisted).
     last_edited_at: Mapped[str | None] = mapped_column(Text)
-    # Whether the participant currently has a caret placed in the text —
-    # presence renders them "editing" (positioned to edit), else "viewing".
-    # Event-driven, no decay: set on cursor placement / edit, cleared when the
-    # editor loses focus or the tab is hidden; the row (and with it the flag)
-    # goes away on leave / SSE disconnect.
-    caret_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("FALSE")
-    )
-    # Client-assigned caret epoch: the editor bumps it on every place/clear
-    # transition and echoes it on movement pings and edit ops. Caret writes
-    # are guarded with ``caret_seq < :seq`` (see coedit.set_caret_active), so
-    # a reordered older request can't overwrite the latest caret state.
-    caret_seq: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("0")
-    )
 
     __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
 
