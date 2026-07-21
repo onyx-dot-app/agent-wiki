@@ -31,10 +31,6 @@ export interface VersionHistoryListProps {
   viewingSha: string | null;
   /** Current user's display name, for the "(you)" suffix on their rows. */
   selfName: string | null;
-  /** Fade the list's bottom edge (the mocks' bottom mask). Set only when
-   * this list is the clipping element. Hosts where an ancestor clips fade
-   * that ancestor. */
-  fadeBottom?: boolean;
   onPick: (sha: string) => void;
 }
 
@@ -50,7 +46,6 @@ export function VersionHistoryList({
   headSha,
   viewingSha,
   selfName,
-  fadeBottom,
   onPick,
 }: VersionHistoryListProps) {
   const [query, setQuery] = useState("");
@@ -100,11 +95,7 @@ export function VersionHistoryList({
           placeholder="Search update history…"
         />
       </div>
-      <div
-        className={`scroll-y-hidden flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto ${
-          fadeBottom ? "scroll-fade-bottom" : ""
-        }`}
-      >
+      <div className="scroll-fade-bottom scroll-y-hidden flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {error && <ListMessage>{error}</ListMessage>}
         {!error && filtered === null && (
           <div className="p-3">
@@ -166,7 +157,7 @@ export function UpdateHistoryRail({
           </Text>
         </div>
         <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-        <VersionHistoryList {...listProps} fadeBottom />
+        <VersionHistoryList {...listProps} />
       </div>
     </div>
   );

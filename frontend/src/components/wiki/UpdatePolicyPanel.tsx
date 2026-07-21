@@ -45,7 +45,7 @@ interface Props {
   /** When set, the history card's expander toggles the host's version list.
    * Omit on surfaces with no history view (e.g. the folder drawer). */
   onShowHistory?: () => void;
-  /** Whether the host's version list is showing (swaps the expander icon). */
+  /** Whether the host's version list is showing. */
   historyOpen?: boolean;
   /** The version list itself, rendered inside the history card while
    * `historyOpen` (mock 1855:273363 expands the card in place). */
@@ -248,11 +248,7 @@ export function UpdatePolicyPanel({
         </div>
       )}
 
-      <div
-        className={`scroll-y-hidden flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto ${
-          historyOpen ? "scroll-fade-bottom" : ""
-        }`}
-      >
+      <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
         {loading ? (
           <div className="p-2 text-[13px] text-(--text-03)">Loading…</div>
         ) : !loaded ? (
@@ -384,9 +380,11 @@ export function UpdatePolicyPanel({
 
             {health !== null && (
               <div
-                className={`flex flex-col gap-1 rounded-(--radius-12) border p-2 ${historyCardChrome}`}
+                className={`flex flex-col gap-1 rounded-(--radius-12) border p-2 ${
+                  historyOpen ? "min-h-0 flex-1" : ""
+                } ${historyCardChrome}`}
               >
-                <div className="flex items-start gap-3">
+                <div className="flex shrink-0 items-start gap-3">
                   <div className="flex min-w-0 flex-1 items-start gap-4 p-1">
                     <div className="flex min-w-0 flex-1 gap-1">
                       <span className="flex size-5 shrink-0 items-center justify-center text-(--text-04)">
@@ -431,7 +429,7 @@ export function UpdatePolicyPanel({
                     />
                   )}
                 </div>
-                <div className="px-1 pb-1">
+                <div className="shrink-0 px-1 pb-1">
                   {kind === "page" &&
                   health.can_manage &&
                   health.cap_24h > 0 ? (
@@ -457,7 +455,7 @@ export function UpdatePolicyPanel({
                   )}
                 </div>
                 {(overCap || nearCap) && (
-                  <div className="flex items-start gap-1 px-1 pb-1">
+                  <div className="flex shrink-0 items-start gap-1 px-1 pb-1">
                     {overCap ? (
                       <SvgPauseCircle
                         size={12}
