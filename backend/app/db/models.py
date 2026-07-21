@@ -1006,9 +1006,16 @@ class CoeditParticipant(Base):
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
     # When this participant last applied an edit op, ISO 8601 UTC. NULL for a
-    # participant who has only viewed — presence renders them "viewing", not
-    # "editing" (joining a session is page-open, not edit intent).
+    # participant who has only viewed.
     last_edited_at: Mapped[str | None] = mapped_column(Text)
+    # Whether the participant currently has a caret placed in the text —
+    # presence renders them "editing" (positioned to edit), else "viewing".
+    # Event-driven, no decay: set on cursor placement / edit, cleared when the
+    # editor loses focus or the tab is hidden; the row (and with it the flag)
+    # goes away on leave / SSE disconnect.
+    caret_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )
 
     __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
 

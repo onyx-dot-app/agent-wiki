@@ -139,13 +139,14 @@ def broadcast_cursor(
     *,
     user_id: str,
     user_display: str,
-    anchor: int,
-    head: int,
+    anchor: int | None,
+    head: int | None,
     typing: bool,
 ) -> None:
     """Broadcast a participant's live cursor/selection — an ephemeral frame,
     never persisted. A collapsed selection (anchor == head) is a caret; a range
-    is a selection highlight. Peers shift these offsets client-side as ops land."""
+    is a selection highlight; null anchor/head means the sender cleared their
+    caret (peers drop it). Peers shift held offsets client-side as ops land."""
     publish(
         coedit_session_id,
         {

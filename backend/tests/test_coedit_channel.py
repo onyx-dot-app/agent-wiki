@@ -101,6 +101,25 @@ def test_broadcast_cursor_delivers_selection_frame_to_peers():
     assert coedit_channel.drain(a.queue, 0.5) == expected
 
 
+def test_broadcast_cursor_cleared_delivers_null_positions():
+    # A cleared caret (editor blur / tab hidden) rides the same frame with
+    # null anchor/head — peers drop the caret on it.
+    coedit_channel.reset_for_tests()
+    conn = coedit_channel.connect(6, "usr_b")
+    coedit_channel.broadcast_cursor(
+        6, user_id="usr_a", user_display="Ada", anchor=None, head=None, typing=False
+    )
+    assert coedit_channel.drain(conn.queue, 0.5) == {
+        "type": "cursor",
+        "session_id": 6,
+        "user_id": "usr_a",
+        "user_display": "Ada",
+        "anchor": None,
+        "head": None,
+        "typing": False,
+    }
+
+
 def test_handle_remote_delivers_locally():
     coedit_channel.reset_for_tests()
     conn = coedit_channel.connect(9, "usr_a")

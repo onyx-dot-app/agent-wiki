@@ -90,8 +90,8 @@ def test_stream_requires_read(client):
 
 def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
     # Joining is page-open presence (read-gated); the write boundary is /op
-    # and /cursor. A read-only user lands in the roster with no
-    # last_edited_at — presence renders them "viewing".
+    # and /cursor. A read-only user lands in the roster with caret_active
+    # false — presence renders them "viewing".
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     reader = users_repo.create(email="reader@x.com", password="hunter2-x", name="Reader")
     _seed_page()
@@ -110,7 +110,7 @@ def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
     assert resp.status_code == 200
     sid = resp.json()["session_id"]
     me = [p for p in resp.json()["participants"] if p["user_id"] == reader]
-    assert me and me[0]["last_edited_at"] is None
+    assert me and me[0]["caret_active"] is False
 
     op = client.post(
         "/api/coedit/op",
@@ -136,7 +136,8 @@ def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
     assert client.get(f"/api/wiki/file?path={_PATH}").json()["can_write"] is True
 
 
-def test_op_stamps_last_edited_at(client):
+def test_op_stamps_last_edited_at_and_caret(client):
+    # An applied edit marks the caret active even without a cursor ping.
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page()
@@ -144,11 +145,13 @@ def test_op_stamps_last_edited_at(client):
     joined = client.post("/api/coedit/join", json={"path": _PATH}).json()
     sid = joined["session_id"]
     assert joined["participants"][0]["last_edited_at"] is None
+    assert joined["participants"][0]["caret_active"] is False
 
     _apply_op(client, sid, 0, [{"from": 0, "to": 0, "insert": "x"}])
     after = client.get(f"/api/coedit/session?session_id={sid}").json()
     me = [p for p in after["participants"] if p["user_id"] == uid]
     assert me and me[0]["last_edited_at"] is not None
+    assert me[0]["caret_active"] is True
 
 
 def test_leave_removes_participant(client):
@@ -272,6 +275,28 @@ def test_cursor_broadcasts_and_returns_ok(client):
     )
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
+
+
+def test_cursor_sets_and_clears_caret_active(client):
+    # Placing a caret flips the participant to "editing" (caret_active true);
+    # a null-position cursor (editor blur / tab hidden) clears it back — the
+    # roster carries the state so late joiners label presence correctly.
+    sid = _login_and_join(client)
+
+    client.post(
+        "/api/coedit/cursor",
+        json={"session_id": sid, "anchor": 3, "head": 3, "typing": False},
+    )
+    roster = client.get(f"/api/coedit/session?session_id={sid}").json()["participants"]
+    assert [p["caret_active"] for p in roster] == [True]
+
+    cleared = client.post(
+        "/api/coedit/cursor",
+        json={"session_id": sid, "anchor": None, "head": None, "typing": False},
+    )
+    assert cleared.status_code == 200
+    roster = client.get(f"/api/coedit/session?session_id={sid}").json()["participants"]
+    assert [p["caret_active"] for p in roster] == [False]
 
 
 def test_cursor_requires_write(client):

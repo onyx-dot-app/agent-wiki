@@ -2,8 +2,8 @@
 
 A "co-edit session" is the page's *live session*: everyone viewing the page
 joins it (read-gated — presence + real-time updates), and editing is a
-capability inside it (`/op`/`/cursor` are write-gated; `last_edited_at`
-separates editors from viewers in presence).
+capability inside it (`/op`/`/cursor` are write-gated; `caret_active` — whether
+a caret is placed in the text — separates editors from viewers in presence).
 
 Thin HTTP layer: gate by page permission, drive the ``app/wiki/coedit.py`` store
 and the ``app/wiki/coedit_channel.py`` broadcast layer. The SSE stream is a
@@ -51,6 +51,7 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
             joined_at=p.joined_at,
             last_seen_at=p.last_seen_at,
             last_edited_at=p.last_edited_at,
+            caret_active=p.caret_active,
         )
         for p in coedit.list_participants(session_id)
     ]
@@ -62,8 +63,8 @@ def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResponse:
 
     Joining is opening the page — presence + the live op stream — so it
     requires only read; *writing* is gated at ``/op``/``/cursor``. A
-    participant who never sends an op shows as "viewing" in presence
-    (``last_edited_at`` stays NULL). A fresh session is seeded from the
+    participant who never places a caret shows as "viewing" in presence
+    (``caret_active`` stays false). A fresh session is seeded from the
     page's current HEAD; an already-open session is adopted as-is (its live
     buffer wins).
     """
@@ -143,21 +144,27 @@ def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
 
 @router.post("/cursor")
 def cursor(req: CursorRequest, user: User = Depends(require_user)) -> dict[str, bool]:
-    """Broadcast the caller's live cursor/selection to the session (ephemeral).
+    """Broadcast the caller's live cursor/selection to the session.
 
-    High-frequency + throttled client-side; deliberately does not touch the DB
-    (no last_seen write) — the SSE heartbeat covers liveness.
+    A null anchor/head clears the caret (the editor lost focus / the tab went
+    hidden) — peers drop it and presence flips the sender to "viewing".
+    High-frequency + throttled client-side; positions stay ephemeral (no
+    last_seen write — the SSE heartbeat covers liveness), only the on/off
+    caret state lands in the DB, and only on a transition, so the roster is
+    right for late joiners.
     """
     _require_active(req.session_id, user, "write")
+    cleared = req.anchor is None or req.head is None
+    coedit.set_caret_active(req.session_id, user.id, active=not cleared)
     coedit_channel.broadcast_cursor(
         req.session_id,
         user_id=user.id,
         # Match list_participants' SQL COALESCE(name, email) exactly — substitute
         # only on NULL, not on "" — so a peer's caret label and roster name agree.
         user_display=user.name if user.name is not None else user.email,
-        anchor=req.anchor,
-        head=req.head,
-        typing=req.typing,
+        anchor=None if cleared else req.anchor,
+        head=None if cleared else req.head,
+        typing=req.typing and not cleared,
     )
     return {"ok": True}
 

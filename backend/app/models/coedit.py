@@ -44,11 +44,15 @@ class OpResponse(BaseModel):
 class CursorRequest(BaseModel):
     """A participant's live cursor/selection. ``anchor``/``head`` are UTF-16
     offsets (like Change); a collapsed selection (anchor == head) is a caret,
-    otherwise it's a highlighted range. Ephemeral — never persisted."""
+    otherwise it's a highlighted range. ``None`` (either offset omitted) means
+    the caller *cleared* their caret — the editor lost focus or the tab was
+    hidden — so peers drop the caret and presence flips them to "viewing".
+    Positions are ephemeral (broadcast, never persisted); only the on/off
+    caret state is stamped on the participant row."""
 
     session_id: int
-    anchor: int = Field(ge=0)
-    head: int = Field(ge=0)
+    anchor: int | None = Field(default=None, ge=0)
+    head: int | None = Field(default=None, ge=0)
     typing: bool = False
 
 
@@ -57,9 +61,11 @@ class ParticipantOut(BaseModel):
     user_display: str
     joined_at: str
     last_seen_at: str
-    # None until the participant applies an edit op — presence renders such
-    # members "viewing" rather than "editing".
+    # None until the participant applies an edit op.
     last_edited_at: str | None = None
+    # True while the participant has a caret placed in the text — presence
+    # renders them "editing" rather than "viewing".
+    caret_active: bool = False
 
 
 class JoinResponse(BaseModel):

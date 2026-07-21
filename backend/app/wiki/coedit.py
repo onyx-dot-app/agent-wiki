@@ -3,7 +3,7 @@
 The DB is the source of truth for an in-progress *live* edit. There is **one
 active session per page** (path-keyed); everyone viewing the page joins it
 (the session is the page's live channel — participants include pure viewers,
-distinguished from editors by ``last_edited_at``), and its editors converge on
+distinguished from editors by ``caret_active``), and its editors converge on
 a single server-authoritative ``buffer_text`` + monotonic ``version``.
 
 This module is the *storage* seam only: get-or-create a session, join/leave/
@@ -102,9 +102,12 @@ class ParticipantRow(BaseModel):
     user_display: str
     joined_at: str
     last_seen_at: str
-    # NULL until the participant applies an edit op — presence renders such
-    # members "viewing" (joining a session is page-open, not edit intent).
+    # NULL until the participant applies an edit op.
     last_edited_at: str | None = None
+    # True while the participant has a caret placed in the text — presence
+    # renders them "editing", else "viewing" (joining a session is page-open,
+    # not edit intent).
+    caret_active: bool = False
 
 
 def _session_row(s: CoeditSession) -> SessionRow:
@@ -130,6 +133,7 @@ def _participant_row(p: CoeditParticipant, user_display: str) -> ParticipantRow:
         joined_at=p.joined_at,
         last_seen_at=p.last_seen_at,
         last_edited_at=p.last_edited_at,
+        caret_active=p.caret_active,
     )
 
 
@@ -775,8 +779,9 @@ def join(session_id: int, user_id: str) -> None:
 def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
     """Refresh a participant's ``last_seen_at`` (presence heartbeat).
 
-    ``edited=True`` (the ``/op`` path) also stamps ``last_edited_at``, which is
-    what flips their presence label from "viewing" to "editing"."""
+    ``edited=True`` (the ``/op`` path) also stamps ``last_edited_at`` and marks
+    the caret active — applying an edit is caret placement even if the editor's
+    cursor ping got dropped."""
     with session() as s:
         existing = s.get(CoeditParticipant, (session_id, user_id))
         if existing is not None:
@@ -784,6 +789,28 @@ def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
             existing.last_seen_at = now
             if edited:
                 existing.last_edited_at = now
+                existing.caret_active = True
+
+
+def set_caret_active(session_id: int, user_id: str, *, active: bool) -> None:
+    """Record whether the participant has a caret placed in the text.
+
+    This is what presence renders as "editing" vs "viewing". Live flips reach
+    connected clients through the cursor frames themselves; this row only
+    seeds the roster (join responses, presence broadcasts) so late joiners see
+    the right label. Written as a guarded UPDATE so the high-frequency cursor
+    path is a no-op except on an actual state transition."""
+    with session() as s:
+        s.execute(
+            update(CoeditParticipant)
+            .where(
+                CoeditParticipant.session_id == session_id,
+                CoeditParticipant.user_id == user_id,
+                CoeditParticipant.caret_active != active,
+            )
+            .values(caret_active=active)
+            .execution_options(synchronize_session=False)
+        )
 
 
 def leave(session_id: int, user_id: str) -> None:
