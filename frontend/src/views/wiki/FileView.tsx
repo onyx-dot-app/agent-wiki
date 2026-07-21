@@ -919,6 +919,7 @@ export function FileView({ path }: FileViewProps) {
                   reportDoc={coedit.reportDoc}
                   registerFlush={coedit.registerFlush}
                   registerSetDoc={coedit.registerSetDoc}
+                  registerCatchUp={coedit.registerCatchUp}
                   readOnly={!canWrite}
                   commentHighlights={commentHighlights}
                   onSelectionForComment={handleSelectionForComment}

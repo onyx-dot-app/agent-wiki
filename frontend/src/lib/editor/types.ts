@@ -129,6 +129,10 @@ export interface UseCoeditSession {
   registerFlush: (fn: (() => Promise<void>) | null) => void;
   /** Register the editor's "replace whole doc" fn (template pick / blank). */
   registerSetDoc: (fn: ((text: string) => void) | null) => void;
+  /** Register the editor's "pull missed ops" fn — called after an SSE
+   * reconnect and when the tab becomes visible, so a returning user catches
+   * up instead of resuming on a stale doc. */
+  registerCatchUp: (fn: (() => void) | null) => void;
   /** Replace the document (goes through the editor as an edit). No-op until
    * the editor has mounted. */
   setDoc: (text: string) => void;

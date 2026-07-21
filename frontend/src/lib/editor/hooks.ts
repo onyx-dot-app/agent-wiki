@@ -39,6 +39,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ApiError } from "@/lib/api";
+
 import type {
   CoeditFrame,
   CoeditParticipant,
@@ -57,6 +59,7 @@ import {
   AUTOSAVE_IDLE_MS,
   AUTOSAVE_MAX_INTERVAL_MS,
   CURSOR_THROTTLE_MS,
+  STREAM_RECONNECT_MS,
   TYPING_EXPIRY_MS,
   TYPING_IDLE_MS,
 } from "@/lib/editor/constants";
@@ -121,6 +124,7 @@ export function useCoeditSession(opts: {
   const serverFrame = useRef<((frame: CoeditFrame) => void) | null>(null);
   const flushFn = useRef<(() => Promise<void>) | null>(null);
   const setDocFn = useRef<((text: string) => void) | null>(null);
+  const catchUpFn = useRef<(() => void) | null>(null);
   // Outbound cursor/typing throttle state.
   const cursorThrottle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCursor = useRef<{
@@ -162,6 +166,9 @@ export function useCoeditSession(opts: {
   }, []);
   const registerSetDoc = useCallback((fn: ((text: string) => void) | null) => {
     setDocFn.current = fn;
+  }, []);
+  const registerCatchUp = useCallback((fn: (() => void) | null) => {
+    catchUpFn.current = fn;
   }, []);
   const setDoc = useCallback((text: string) => setDocFn.current?.(text), []);
 
@@ -483,22 +490,40 @@ export function useCoeditSession(opts: {
         startDoc: snap.buffer,
       });
       setActive(true);
-      try {
-        // Gate on `cancelled`: the stream outlives the effect during teardown
-        // (it's aborted only after the final flush/checkpoint/leave below), and
-        // a late frame from the old session must not leak into state a new
-        // session now owns.
-        await streamSession(
-          snap.session_id,
-          (frame) => {
-            if (!cancelled) onFrame(frame);
-          },
-          ctrl.signal,
-        );
-      } catch {
-        // Stream ended/dropped after a successful join (including our own
-        // cleanup's abort) — the session/doc are already usable, so this
-        // isn't a join failure and doesn't need to surface as one.
+      // The stream loop: reconnect when the connection drops (network blip,
+      // laptop sleep) instead of leaving a silently-stale editable doc — the
+      // server never pushes again on a dead stream, and without this loop the
+      // client would only heal on a full page reload. Re-opening the stream
+      // re-joins us as a participant; the catch-up pull replays ops missed
+      // while disconnected (anything landing in the crack re-pulls via the
+      // op-frame gap detection).
+      while (!cancelled) {
+        try {
+          // Gate on `cancelled`: the stream outlives the effect during
+          // teardown (it's aborted only after the final flush/checkpoint/
+          // leave below), and a late frame from the old session must not
+          // leak into state a new session now owns.
+          await streamSession(
+            snap.session_id,
+            (frame) => {
+              if (!cancelled) onFrame(frame);
+            },
+            ctrl.signal,
+          );
+        } catch (e) {
+          if (cancelled || ctrl.signal.aborted) break;
+          if (e instanceof ApiError && e.status === 404) {
+            // The session closed while we were gone (last participant left →
+            // checkpoint + close). Streaming can't resurrect it — re-run the
+            // whole join to mint/adopt a fresh session.
+            retryJoin();
+            break;
+          }
+        }
+        if (cancelled || ctrl.signal.aborted) break;
+        await new Promise((r) => setTimeout(r, STREAM_RECONNECT_MS));
+        if (cancelled || ctrl.signal.aborted) break;
+        catchUpFn.current?.();
       }
     })();
 
@@ -568,6 +593,11 @@ export function useCoeditSession(opts: {
       if (document.visibilityState === "hidden") {
         checkpointNow();
         reportCaretCleared();
+      } else {
+        // Coming back to the tab: pull anything missed while backgrounded —
+        // a slept machine's stream may be dead or healing, and the user must
+        // not resume on a stale doc (the reconnect loop is the other half).
+        catchUpFn.current?.();
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
@@ -592,6 +622,7 @@ export function useCoeditSession(opts: {
     reportDoc,
     registerFlush,
     registerSetDoc,
+    registerCatchUp,
     setDoc,
     reportSelection,
     reportCaretCleared,
