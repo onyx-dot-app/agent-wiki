@@ -8,23 +8,31 @@ export interface CoeditChange {
 }
 
 /** A session participant as returned by join / presence frames. The live
- * session is joined by everyone on the page; `last_edited_at` (null until the
- * participant applies an edit op) is what separates editors from viewers. */
+ * session is joined by everyone on the page; `caret_active` (true while they
+ * have a caret placed in the text) is what separates editors from viewers —
+ * event-driven, no decay: set by cursor placement / edits, cleared on editor
+ * blur / hidden tab, gone with the row on leave. */
 export interface CoeditParticipant {
   user_id: string;
   user_display: string;
   joined_at: string;
   last_seen_at: string;
   last_edited_at: string | null;
+  caret_active: boolean;
 }
 
 /** A peer's live caret/selection, from their latest `cursor` frame. Offsets are
- * UTF-16 code units (JS-native), collapsed (anchor === head) = caret. */
+ * UTF-16 code units (JS-native), collapsed (anchor === head) = caret. `seq` is
+ * a client-local counter bumped per received frame — it lets the editor tell a
+ * fresh frame (adopt its raw offsets) from an entry merely re-sent when the
+ * peer array was rebuilt (keep the position it has mapped through doc
+ * changes). */
 export interface CoeditPeer {
   user_id: string;
   user_display: string;
   anchor: number;
   head: number;
+  seq: number;
 }
 
 /** Snapshot returned by join / session (the live buffer + roster). */
@@ -52,8 +60,10 @@ export type CoeditFrame =
       session_id: number;
       user_id: string;
       user_display: string;
-      anchor: number;
-      head: number;
+      // Null anchor/head = the sender cleared their caret (editor blur /
+      // hidden tab) — drop it and flip their presence label to "viewing".
+      anchor: number | null;
+      head: number | null;
       typing: boolean;
     }
   | { type: "resync"; session_id: number; version: number };
@@ -122,4 +132,9 @@ export interface UseCoeditSession {
    * marks "typing…" + arms its auto-clear; `isEdit=false` (a caret move) reports
    * position without changing the typing state. Throttled + coalesced. */
   reportSelection: (anchor: number, head: number, isEdit: boolean) => void;
+  /** Report that the local caret is gone (editor blur / hidden tab) — peers
+   * drop it and presence flips us to "viewing". Sent immediately (clears are
+   * rare), dropping any queued position so a throttled send can't resurrect
+   * the caret. */
+  reportCaretCleared: () => void;
 }

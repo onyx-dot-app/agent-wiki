@@ -24,13 +24,7 @@ import {
   placeholder as placeholderExt,
   WidgetType,
 } from "@codemirror/view";
-import {
-  forwardRef,
-  useEffect,
-  useImperativeHandle,
-  useRef,
-  useState,
-} from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { ApiError } from "@/lib/api";
 import type {
   CoeditFrame,
@@ -115,18 +109,37 @@ function buildPeerDecorations(
   return Decoration.set(ranges, true);
 }
 
-/** Holds the peer list + its decorations. Rebuilds when peers change or the doc
- * changes (keeps offsets in range as text is edited); provides decorations to
- * the view via `EditorView.decorations`. */
+/** Holds the peer list + its decorations; provides decorations to the view via
+ * `EditorView.decorations`. A parked caret must keep pointing at the text its
+ * owner left it in, so held positions are mapped through every doc change.
+ * When a new peer array arrives, raw offsets are adopted only for entries with
+ * a fresh cursor frame (`seq` advanced) — an entry re-sent unchanged (the
+ * array was rebuilt by some other peer's frame) keeps its mapped position,
+ * since the raw offsets it carries are relative to an older doc. */
 const peersField = StateField.define<{
   peers: CoeditPeer[];
   deco: DecorationSet;
 }>({
   create: () => ({ peers: [], deco: Decoration.none }),
   update(value, tr) {
+    let incoming: CoeditPeer[] | null = null;
+    for (const e of tr.effects) if (e.is(setPeersEffect)) incoming = e.value;
+    if (incoming === null && !tr.docChanged) return value;
     let peers = value.peers;
-    for (const e of tr.effects) if (e.is(setPeersEffect)) peers = e.value;
-    if (peers === value.peers && !tr.docChanged) return value;
+    if (tr.docChanged) {
+      peers = peers.map((p) => ({
+        ...p,
+        anchor: tr.changes.mapPos(p.anchor),
+        head: tr.changes.mapPos(p.head),
+      }));
+    }
+    if (incoming !== null) {
+      const held = new Map(peers.map((p) => [p.user_id, p]));
+      peers = incoming.map((p) => {
+        const h = held.get(p.user_id);
+        return h && h.seq === p.seq ? h : p;
+      });
+    }
     return { peers, deco: buildPeerDecorations(peers, tr.state.doc.length) };
   },
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
@@ -274,6 +287,9 @@ interface CoeditorProps {
   session: CoeditSessionHandle;
   peers: CoeditPeer[];
   onSelectionChange: (anchor: number, head: number, isEdit: boolean) => void;
+  /** Fires when the editor loses focus — the local caret is no longer placed,
+   * so peers drop it and presence flips us to "viewing". */
+  onCaretCleared: () => void;
   onServerFrame: (handler: ((frame: CoeditFrame) => void) | null) => void;
   reportDoc: (doc: string) => void;
   registerFlush: (fn: (() => Promise<void>) | null) => void;
@@ -321,6 +337,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       session,
       peers,
       onSelectionChange,
+      onCaretCleared,
       onServerFrame,
       reportDoc,
       registerFlush,
@@ -338,9 +355,11 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const readOnlyCompartment = useRef(new Compartment());
     // Latest callbacks without re-creating the editor.
     const onSelRef = useRef(onSelectionChange);
+    const onCaretClearedRef = useRef(onCaretCleared);
     const reportDocRef = useRef(reportDoc);
     const onSelectionForCommentRef = useRef(onSelectionForComment);
     onSelRef.current = onSelectionChange;
+    onCaretClearedRef.current = onCaretCleared;
     reportDocRef.current = reportDoc;
     onSelectionForCommentRef.current = onSelectionForComment;
 
@@ -501,6 +520,12 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         // our caret/typing.
         if (applyingRemote.current) return;
         const sel = u.state.selection.main;
+        // Focus is caret presence: losing it clears our caret for peers;
+        // regaining it re-reports the position the clear removed.
+        if (u.focusChanged) {
+          if (u.view.hasFocus) onSelRef.current(sel.anchor, sel.head, false);
+          else onCaretClearedRef.current();
+        }
         if (u.docChanged) onSelRef.current(sel.anchor, sel.head, true);
         else if (u.selectionSet) onSelRef.current(sel.anchor, sel.head, false);
         if (u.selectionSet && onSelectionForCommentRef.current) {
@@ -669,39 +694,25 @@ interface CoeditPresenceBarProps {
   selfUserId: string | null;
 }
 
-// How recently a participant must have edited to be labeled "editing" rather
-// than "viewing". Everyone on the page is in the live session; the label — not
-// membership — is what distinguishes editors from readers. Generous on
-// purpose: a long think-pause mid-edit shouldn't demote the label, and every
-// op refreshes the timestamp, so only a genuinely idle editor decays.
-const EDITING_LABEL_WINDOW_MS = 30 * 60 * 1000;
-
-function presenceLabel(p: CoeditParticipant, now: number): string {
-  if (
-    p.last_edited_at !== null &&
-    now - Date.parse(p.last_edited_at) < EDITING_LABEL_WINDOW_MS
-  ) {
-    return "editing";
-  }
-  return "viewing";
+// "editing" means positioned to edit — a caret placed in the text — not
+// "has recently applied an op". Everyone on the page is in the live session;
+// the label — not membership — is what distinguishes editors from readers.
+// Event-driven, no timers: the state flips on caret placement and on the
+// blur / hidden-tab clear, so it can never disagree with the caret rendered
+// in the doc (the same signal drives both).
+function presenceLabel(p: CoeditParticipant): string {
+  return p.caret_active ? "editing" : "viewing";
 }
 
-// Live-session presence: who else is on the page — labeled "editing" when
-// they've applied an edit recently, "viewing" otherwise — and who's typing
+// Live-session presence: who else is on the page — labeled "editing" while
+// their caret is placed in the text, "viewing" otherwise — and who's typing
 // right now. Complements the in-editor peer carets (CaretWidget/peersField
 // above) rather than duplicating them. Renders nothing when you're alone.
-// The minute tick re-renders so an idle editor's label decays to "viewing"
-// even when no new presence frames arrive.
 export function CoeditPresenceBar({
   participants,
   typing,
   selfUserId,
 }: CoeditPresenceBarProps) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 60_000);
-    return () => clearInterval(t);
-  }, []);
   const others = participants.filter((p) => p.user_id !== selfUserId);
   if (others.length === 0) return null;
   const typingSet = new Set(typing);
@@ -715,7 +726,7 @@ export function CoeditPresenceBar({
         <span key={p.user_id} className="inline-flex items-center gap-1">
           <span className="font-medium text-(--text-04)">{p.user_display}</span>
           <span className="text-(--text-03) italic">
-            {typingSet.has(p.user_id) ? "typing…" : presenceLabel(p, now)}
+            {typingSet.has(p.user_id) ? "typing…" : presenceLabel(p)}
           </span>
         </span>
       ))}

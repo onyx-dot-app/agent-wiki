@@ -68,14 +68,19 @@ export function sendOp(
   });
 }
 
-/** Report the local caret/selection to the server so peers see live presence. */
+/** Report the local caret/selection to the server so peers see live presence.
+ * Null anchor/head clears the caret (editor blur / hidden tab) — peers drop it
+ * and presence flips the sender to "viewing". `init` lets the hidden-tab clear
+ * pass `{ keepalive: true }` so it survives the page backgrounding. */
 export function sendCursor(
   sessionId: number,
-  anchor: number,
-  head: number,
+  anchor: number | null,
+  head: number | null,
   typing: boolean,
+  init?: RequestInit,
 ): Promise<void> {
   return apiFetch("/coedit/cursor", {
+    ...init,
     method: "POST",
     body: JSON.stringify({ session_id: sessionId, anchor, head, typing }),
   });

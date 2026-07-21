@@ -5,7 +5,9 @@
  * The "co-edit session" is the page's *live session*: everyone viewing the
  * page joins it (presence + real-time updates); editing is a capability
  * inside it (`canWrite`), and presence labels participants "viewing" vs
- * "editing" by whether they've actually edited.
+ * "editing" by whether they currently have a caret placed in the text
+ * (`caret_active` — position/intent, not edit facts; cleared on editor blur
+ * or a hidden tab, never by a timer).
  *
  * On `enabled` it joins the session for `path`, streams inbound frames, and
  * exposes presence (`participants`/`typing`/`peers`) and autosave
@@ -127,6 +129,9 @@ export function useCoeditSession(opts: {
   } | null>(null);
   const lastCursor = useRef<{ anchor: number; head: number } | null>(null);
   const typingIdle = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Client-local frame counter stamped onto peer entries (CoeditPeer.seq) so
+  // the editor can tell fresh cursor frames from re-sent array entries.
+  const frameSeq = useRef(0);
   // Inbound: per-peer expiry timers so a silent "typing" peer clears.
   const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map(),
@@ -238,6 +243,23 @@ export function useCoeditSession(opts: {
     [canWrite],
   );
 
+  const reportCaretCleared = useCallback(() => {
+    if (sessionId.current === null || !canWrite) return;
+    // Drop any queued position first — a throttled send landing after the
+    // clear would resurrect the caret.
+    pendingCursor.current = null;
+    lastCursor.current = null;
+    if (typingIdle.current) {
+      clearTimeout(typingIdle.current);
+      typingIdle.current = null;
+    }
+    // Immediate (clears are rare) + keepalive so the hidden-tab clear
+    // survives the page backgrounding.
+    void sendCursor(sessionId.current, null, null, false, {
+      keepalive: true,
+    }).catch(() => {});
+  }, [canWrite]);
+
   const onFrame = useCallback(
     (frame: CoeditFrame) => {
       if (frame.type === "presence") {
@@ -250,15 +272,34 @@ export function useCoeditSession(opts: {
       if (frame.type === "cursor") {
         if (myUserId !== null && frame.user_id === myUserId) return;
         const uid = frame.user_id;
-        setPeers((prev) => [
-          ...prev.filter((p) => p.user_id !== uid),
-          {
-            user_id: uid,
-            user_display: frame.user_display,
-            anchor: frame.anchor,
-            head: frame.head,
-          },
-        ]);
+        const anchor = frame.anchor;
+        const head = frame.head;
+        if (anchor === null || head === null) {
+          // The peer cleared their caret (editor blur / hidden tab).
+          setPeers((prev) => prev.filter((p) => p.user_id !== uid));
+        } else {
+          frameSeq.current += 1;
+          setPeers((prev) => [
+            ...prev.filter((p) => p.user_id !== uid),
+            {
+              user_id: uid,
+              user_display: frame.user_display,
+              anchor,
+              head,
+              seq: frameSeq.current,
+            },
+          ]);
+        }
+        // Roster broadcasts only arrive on join/leave, so the "editing" /
+        // "viewing" label rides the cursor frames themselves.
+        const caretActive = anchor !== null && head !== null;
+        setParticipants((prev) =>
+          prev.map((p) =>
+            p.user_id === uid && p.caret_active !== caretActive
+              ? { ...p, caret_active: caretActive }
+              : p,
+          ),
+        );
         const existing = typingTimers.current.get(uid);
         if (existing) clearTimeout(existing);
         typingTimers.current.delete(uid);
@@ -276,15 +317,15 @@ export function useCoeditSession(opts: {
         }
         return;
       }
-      // The roster's last_edited_at only refreshes on join/leave presence
-      // frames, so bump the author's locally from each op — their "editing"
-      // label flips in real time instead of waiting for a roster broadcast.
+      // An applied edit implies caret placement (mirrors the server's /op
+      // stamp) — flip the author's label even if their cursor ping was lost.
       if (frame.type === "op" && frame.author !== null) {
         const author = frame.author;
-        const nowIso = new Date().toISOString();
         setParticipants((prev) =>
           prev.map((p) =>
-            p.user_id === author ? { ...p, last_edited_at: nowIso } : p,
+            p.user_id === author && !p.caret_active
+              ? { ...p, caret_active: true }
+              : p,
           ),
         );
       }
@@ -312,6 +353,7 @@ export function useCoeditSession(opts: {
     for (const t of typingTimers.current.values()) clearTimeout(t);
     typingTimers.current.clear();
     pendingCursor.current = null;
+    lastCursor.current = null;
     setTyping([]);
     setPeers([]);
     sessionId.current = null;
@@ -433,7 +475,9 @@ export function useCoeditSession(opts: {
 
   // Best-effort checkpoint when the tab is backgrounded/closed — `keepalive`
   // lets the request survive the page tearing down. Covers the gap between
-  // the last edit and the idle-autosave timer firing.
+  // the last edit and the idle-autosave timer firing. A hidden tab also
+  // clears our caret: the user isn't positioned to edit anymore, and CM blur
+  // doesn't fire reliably on tab switches.
   useEffect(() => {
     if (!active) return;
     const checkpointNow = () => {
@@ -442,7 +486,10 @@ export function useCoeditSession(opts: {
       void checkpointSession(sid, { keepalive: true }).catch(() => {});
     };
     const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") checkpointNow();
+      if (document.visibilityState === "hidden") {
+        checkpointNow();
+        reportCaretCleared();
+      }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("pagehide", checkpointNow);
@@ -450,7 +497,7 @@ export function useCoeditSession(opts: {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pagehide", checkpointNow);
     };
-  }, [active, canWrite]);
+  }, [active, canWrite, reportCaretCleared]);
 
   return {
     active,
@@ -468,5 +515,6 @@ export function useCoeditSession(opts: {
     registerSetDoc,
     setDoc,
     reportSelection,
+    reportCaretCleared,
   };
 }
