@@ -1461,9 +1461,10 @@ class AIManagementSettings(Base):
     ``enabled`` is the master kill switch: when false the whole feature is inert
     (no detection, no proposals, no auto-apply, human approve/reject frozen);
     per-page ``ai_management_allowed`` policies are untouched, so re-enabling
-    resumes exactly where they left off. Named generically (not
-    detection-specific) so it can hold future AI-management-wide settings (e.g.
-    the sweep schedule).
+    resumes exactly where they left off. ``schedule`` drives the recurring
+    detection sweep (``off`` / ``daily`` / ``weekly``); the periodic tasks in
+    ``app/tasks/detection.py`` read it each fire. Named generically (not
+    detection-specific) so it can hold future AI-management-wide settings.
     """
 
     __tablename__ = "ai_management_settings"
@@ -1471,6 +1472,9 @@ class AIManagementSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
+    )
+    schedule: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'off'")
     )
     updated_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
@@ -1481,6 +1485,10 @@ class AIManagementSettings(Base):
 
     __table_args__ = (
         CheckConstraint("id = 1", name="ai_management_settings_singleton"),
+        CheckConstraint(
+            "schedule IN ('off', 'daily', 'weekly')",
+            name="ai_management_settings_schedule_check",
+        ),
     )
 
 

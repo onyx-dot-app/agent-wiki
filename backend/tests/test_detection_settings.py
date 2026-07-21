@@ -27,17 +27,21 @@ from tests._seed import seed_user
 # --------------------------------------------------------------------------- #
 
 
-def test_default_is_enabled(tmp_db):
+def test_default_is_enabled_off_schedule(tmp_db):
     s = settings.get()
     assert s.enabled is True
+    assert s.schedule == "off"
     assert settings.is_enabled() is True
 
 
-def test_update_toggles(tmp_db):
+def test_update_toggles_and_validates(tmp_db):
     assert settings.update(enabled=False).enabled is False
     assert settings.is_enabled() is False
-    assert settings.update(enabled=True).enabled is True
-    assert settings.is_enabled() is True
+    assert settings.update(schedule="daily").schedule == "daily"
+    # enabled untouched by a schedule-only patch
+    assert settings.get().enabled is False
+    with pytest.raises(ValueError):
+        settings.update(schedule="hourly")
 
 
 # --------------------------------------------------------------------------- #
@@ -102,6 +106,7 @@ def test_settings_api_get_put_and_sweep_gate(client):
 
     assert client.get("/api/detection/settings").json() == {
         "enabled": True,
+        "schedule": "off",
         "updated_at": None,
     }
     put = client.put("/api/detection/settings", json={"enabled": False})
@@ -114,9 +119,16 @@ def test_settings_api_get_put_and_sweep_gate(client):
     assert client.post("/api/detection/sweep").status_code == 202
 
 
-def test_settings_api_requires_admin(client):
+def test_settings_api_requires_admin_and_validates(client):
     seed_user(uid="admin_1", email="a@x.com", is_admin=True)  # first = admin
     uid = seed_user(uid="usr_2", email="u2@x.com", is_admin=False)
     login_fastapi(client, uid)
     assert client.get("/api/detection/settings").status_code == 403
     assert client.put("/api/detection/settings", json={"enabled": False}).status_code == 403
+
+    login_fastapi(client, "admin_1")
+    # The app translates request-validation errors to 400 (main.py handler).
+    assert (
+        client.put("/api/detection/settings", json={"schedule": "hourly"}).status_code
+        == 400
+    )
