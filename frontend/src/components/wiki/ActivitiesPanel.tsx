@@ -152,7 +152,7 @@ function eventTexts(event: AppEvent): {
   };
 }
 
-export function ActivityRow({
+function ActivityRow({
   event,
   ownerName,
 }: {

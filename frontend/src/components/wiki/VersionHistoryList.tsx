@@ -1,16 +1,11 @@
-import {
-  Button,
-  Divider,
-  EndOfList,
-  InputTypeIn,
-  Text,
-} from "@onyx-ai/opal/components";
+import { Button, Divider, EndOfList, Text } from "@onyx-ai/opal/components";
 import { SvgArrowUpRight, SvgHistory } from "@onyx-ai/opal/icons";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 import type { IconProps } from "@onyx-ai/opal/types";
 import { useMemo, useState, type ComponentType } from "react";
 
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
+import { PanelSearchField } from "@/components/wiki/PanelSearch";
 import { relativeTime } from "@/lib/time";
 import type { CommitAgent, CommitInfo } from "@/lib/wiki/types";
 import { parseCommitAuthor, parseCommitSource } from "@/lib/wiki/utils";
@@ -93,7 +88,13 @@ export function VersionHistoryList({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <SearchField value={query} onChange={setQuery} />
+      <div className="flex shrink-0 items-center">
+        <PanelSearchField
+          value={query}
+          onChange={setQuery}
+          placeholder="Search update history…"
+        />
+      </div>
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {error && <ListMessage>{error}</ListMessage>}
         {!error && filtered === null && (
@@ -158,30 +159,6 @@ export function UpdateHistoryRail({
         <Divider paddingParallel="fit" paddingPerpendicular="fit" />
         <VersionHistoryList {...listProps} />
       </div>
-    </div>
-  );
-}
-
-/** Borderless search field over the card tint (mock 1912:355461),
- *  InputTypeIn's chromeless internal variant. */
-function SearchField({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    // The 14px override lives in globals.css (.version-history-search).
-    <div className="version-history-search shrink-0 p-[1px]">
-      <InputTypeIn
-        variant="internal"
-        searchIcon
-        placeholder="Search update history…"
-        spellCheck={false}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
     </div>
   );
 }

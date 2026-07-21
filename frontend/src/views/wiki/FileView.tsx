@@ -30,7 +30,8 @@ import {
 } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
-import { TriggersSidePanel } from "@/components/wiki/TriggersSidePanel";
+import { TriggerPanel } from "@/components/triggers/TriggerPanel";
+import { WatchingPanel } from "@/components/wiki/WatchingPanel";
 import { DocPanel, type DocPanelTab } from "@/components/wiki/DocPanel";
 import { DiffView } from "@/components/wiki/DiffView";
 import {
@@ -51,6 +52,7 @@ import {
   type AgentSessionSummary,
 } from "@/lib/launchers";
 import { apiFetch } from "@/lib/api";
+import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
 import { listComments } from "@/lib/comments";
 import type {
@@ -151,11 +153,16 @@ export function FileView({ path }: FileViewProps) {
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
+  // Watching tab editor: null = the watcher list, otherwise the editor is
+  // showing (trigger null = creating a new watcher on this page).
+  const [watcherEditor, setWatcherEditor] = useState<{
+    trigger: Trigger | null;
+  } | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const confirmDialog = useConfirm();
+  const { refresh: refreshTriggers } = useTriggers();
   // History state. `viewingSha` is null when looking at the working-tree
   // (latest) version, otherwise it's the version whose diff fills the doc
   // column. `historyOpen` is version mode: the rail becomes the Update
@@ -423,6 +430,7 @@ export function FileView({ path }: FileViewProps) {
     loadLatest();
     setHistoryOpen(false);
     setHistoryListOpen(false);
+    setWatcherEditor(null);
     setCommits(null);
   }, [loadLatest]);
 
@@ -879,8 +887,44 @@ export function FileView({ path }: FileViewProps) {
         );
       case "watching":
         return (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-2">
-            <TriggersSidePanel path={path} onStatus={setTriggerStatus} />
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
+            {watcherEditor ? (
+              <TriggerPanel
+                open
+                docked
+                initial={watcherEditor.trigger ?? { scope_path: path }}
+                lockScope={!watcherEditor.trigger}
+                onClose={() => setWatcherEditor(null)}
+                onSaved={() => {
+                  setWatcherEditor(null);
+                  void refreshTriggers();
+                }}
+                onDelete={
+                  watcherEditor.trigger
+                    ? async () => {
+                        const t = watcherEditor.trigger!;
+                        if (
+                          !(await confirmDialog({
+                            title: "Delete this watcher?",
+                            body: `"${t.nl_description}"`,
+                            confirmLabel: "Delete",
+                          }))
+                        )
+                          return;
+                        await deleteTrigger(t.id);
+                        await refreshTriggers();
+                        setWatcherEditor(null);
+                      }
+                    : undefined
+                }
+              />
+            ) : (
+              <WatchingPanel
+                path={path}
+                onNew={() => setWatcherEditor({ trigger: null })}
+                onEdit={(t) => setWatcherEditor({ trigger: t })}
+              />
+            )}
           </div>
         );
       default:
@@ -918,10 +962,6 @@ export function FileView({ path }: FileViewProps) {
         path={path}
         onRename={viewingVersion ? undefined : handleRename}
       />
-
-      {triggerStatus && (
-        <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
-      )}
 
       <ShareDialog
         path={path}
