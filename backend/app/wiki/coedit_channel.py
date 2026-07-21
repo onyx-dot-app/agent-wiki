@@ -139,13 +139,18 @@ def broadcast_cursor(
     *,
     user_id: str,
     user_display: str,
-    anchor: int,
-    head: int,
+    anchor: int | None,
+    head: int | None,
     typing: bool,
+    seq: int | None,
 ) -> None:
     """Broadcast a participant's live cursor/selection — an ephemeral frame,
     never persisted. A collapsed selection (anchor == head) is a caret; a range
-    is a selection highlight. Peers shift these offsets client-side as ops land."""
+    is a selection highlight; null anchor/head means the sender cleared their
+    caret (peers drop it). ``seq`` is the sender's caret epoch — peers drop
+    frames older than the latest epoch they've seen, so concurrently delivered
+    place/clear frames can't apply out of order. Peers shift held offsets
+    client-side as ops land."""
     publish(
         coedit_session_id,
         {
@@ -156,6 +161,7 @@ def broadcast_cursor(
             "anchor": anchor,
             "head": head,
             "typing": typing,
+            "seq": seq,
         },
     )
 
@@ -177,6 +183,7 @@ def broadcast_op(
     changes: list[Change],
     author_user_id: str,
     client_id: str | None = None,
+    caret_seq: int | None = None,
 ) -> None:
     """Broadcast an applied edit op to the session's other connections.
 
@@ -186,7 +193,9 @@ def broadcast_op(
     ``GET /coedit/session`` instead of us dropping the update.
 
     ``client_id`` (the originating connection) rides along so a collaborative
-    client can tell its own echoed op from a peer's.
+    client can tell its own echoed op from a peer's. ``caret_seq`` is the
+    author's caret epoch when placed (an edit asserts caret placement); None
+    means the op carries no caret assertion.
     """
     frame: Frame = {
         "type": "op",
@@ -195,6 +204,7 @@ def broadcast_op(
         "changes": [c.model_dump(by_alias=True) for c in changes],
         "author": author_user_id,
         "client_id": client_id,
+        "caret_seq": caret_seq,
     }
     if not bus.payload_fits(_bus_payload(coedit_session_id, frame)):
         frame = {"type": "resync", "session_id": coedit_session_id, "version": version}

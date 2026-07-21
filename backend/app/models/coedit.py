@@ -35,6 +35,12 @@ class OpRequest(BaseModel):
     # omit it. Bounded: it's a UUID/tab id, and it's persisted + echoed to every
     # participant, so cap it to keep a client from bloating the log / bus.
     client_id: str | None = Field(default=None, max_length=256)
+    # The sender's caret epoch while their caret is placed — echoed into the
+    # op frame so peers render the author's caret at the edit (and drop it if
+    # a newer clear was already seen). Omitted when the sender's caret is
+    # cleared (e.g. a teardown flush after blur); the frame then carries no
+    # caret assertion. Never persisted.
+    caret_seq: int | None = Field(default=None, ge=0)
 
 
 class OpResponse(BaseModel):
@@ -44,12 +50,20 @@ class OpResponse(BaseModel):
 class CursorRequest(BaseModel):
     """A participant's live cursor/selection. ``anchor``/``head`` are UTF-16
     offsets (like Change); a collapsed selection (anchor == head) is a caret,
-    otherwise it's a highlighted range. Ephemeral — never persisted."""
+    otherwise it's a highlighted range. ``None`` (either offset omitted) means
+    the caller *cleared* their caret — the editor lost focus or the tab was
+    hidden — so peers drop the caret and presence flips them to "viewing".
+    Ephemeral end to end: broadcast to the session, never persisted."""
 
     session_id: int
-    anchor: int = Field(ge=0)
-    head: int = Field(ge=0)
+    anchor: int | None = Field(default=None, ge=0)
+    head: int | None = Field(default=None, ge=0)
     typing: bool = False
+    # Client caret epoch: bumped on every place/clear transition, echoed
+    # unchanged by movement pings. Rides the frame so peers drop reordered
+    # stale frames (a place broadcast landing after a newer clear must not
+    # resurrect the caret). None = a client predating the epoch protocol.
+    seq: int | None = Field(default=None, ge=0)
 
 
 class ParticipantOut(BaseModel):
@@ -57,8 +71,9 @@ class ParticipantOut(BaseModel):
     user_display: str
     joined_at: str
     last_seen_at: str
-    # None until the participant applies an edit op — presence renders such
-    # members "viewing" rather than "editing".
+    # None until the participant applies an edit op. Presence does not read
+    # this — the "editing"/"viewing" label derives client-side from the live
+    # caret frames.
     last_edited_at: str | None = None
 
 

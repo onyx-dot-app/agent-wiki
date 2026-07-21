@@ -68,6 +68,7 @@ def test_broadcast_op_delivers_op_frame():
         "changes": [{"from": 0, "to": 1, "insert": "x"}],
         "author": "usr_a",
         "client_id": "cli_1",
+        "caret_seq": None,
     }
 
 
@@ -85,7 +86,7 @@ def test_broadcast_cursor_delivers_selection_frame_to_peers():
     a = coedit_channel.connect(6, "usr_a")
     b = coedit_channel.connect(6, "usr_b")  # a peer in the same session
     coedit_channel.broadcast_cursor(
-        6, user_id="usr_a", user_display="Ada", anchor=3, head=10, typing=True
+        6, user_id="usr_a", user_display="Ada", anchor=3, head=10, typing=True, seq=7
     )
     expected = {
         "type": "cursor",
@@ -95,10 +96,37 @@ def test_broadcast_cursor_delivers_selection_frame_to_peers():
         "anchor": 3,
         "head": 10,
         "typing": True,
+        "seq": 7,
     }
     # The peer receives it — not just the sender's own connection.
     assert coedit_channel.drain(b.queue, 0.5) == expected
     assert coedit_channel.drain(a.queue, 0.5) == expected
+
+
+def test_broadcast_cursor_cleared_delivers_null_positions():
+    # A cleared caret (editor blur / tab hidden) rides the same frame with
+    # null anchor/head — peers drop the caret on it.
+    coedit_channel.reset_for_tests()
+    conn = coedit_channel.connect(6, "usr_b")
+    coedit_channel.broadcast_cursor(
+        6,
+        user_id="usr_a",
+        user_display="Ada",
+        anchor=None,
+        head=None,
+        typing=False,
+        seq=8,
+    )
+    assert coedit_channel.drain(conn.queue, 0.5) == {
+        "type": "cursor",
+        "session_id": 6,
+        "user_id": "usr_a",
+        "user_display": "Ada",
+        "anchor": None,
+        "head": None,
+        "typing": False,
+        "seq": 8,
+    }
 
 
 def test_handle_remote_delivers_locally():

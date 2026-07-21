@@ -90,8 +90,8 @@ def test_stream_requires_read(client):
 
 def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
     # Joining is page-open presence (read-gated); the write boundary is /op
-    # and /cursor. A read-only user lands in the roster with no
-    # last_edited_at — presence renders them "viewing".
+    # and /cursor. A read-only user lands in the roster; they never broadcast
+    # a caret, so presence renders them "viewing" client-side.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     reader = users_repo.create(email="reader@x.com", password="hunter2-x", name="Reader")
     _seed_page()
@@ -269,6 +269,24 @@ def test_cursor_broadcasts_and_returns_ok(client):
     resp = client.post(
         "/api/coedit/cursor",
         json={"session_id": sid, "anchor": 0, "head": 5, "typing": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
+def test_cursor_clear_returns_ok(client):
+    # A null-position cursor (editor blur / tab hidden) is a caret clear —
+    # broadcast to the session so peers drop the caret; nothing persisted.
+    sid = _login_and_join(client)
+    resp = client.post(
+        "/api/coedit/cursor",
+        json={
+            "session_id": sid,
+            "anchor": None,
+            "head": None,
+            "typing": False,
+            "seq": 2,
+        },
     )
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}

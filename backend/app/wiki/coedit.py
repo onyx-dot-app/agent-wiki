@@ -2,9 +2,10 @@
 
 The DB is the source of truth for an in-progress *live* edit. There is **one
 active session per page** (path-keyed); everyone viewing the page joins it
-(the session is the page's live channel — participants include pure viewers,
-distinguished from editors by ``last_edited_at``), and its editors converge on
-a single server-authoritative ``buffer_text`` + monotonic ``version``.
+(the session is the page's live channel — participants include pure viewers;
+presence labels editors client-side from their live caret frames, which never
+touch this store), and its editors converge on a single server-authoritative
+``buffer_text`` + monotonic ``version``.
 
 This module is the *storage* seam only: get-or-create a session, join/leave/
 touch participants, and compare-and-swap the buffer. The op/patch channel and
@@ -102,8 +103,7 @@ class ParticipantRow(BaseModel):
     user_display: str
     joined_at: str
     last_seen_at: str
-    # NULL until the participant applies an edit op — presence renders such
-    # members "viewing" (joining a session is page-open, not edit intent).
+    # NULL until the participant applies an edit op.
     last_edited_at: str | None = None
 
 
@@ -775,8 +775,7 @@ def join(session_id: int, user_id: str) -> None:
 def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
     """Refresh a participant's ``last_seen_at`` (presence heartbeat).
 
-    ``edited=True`` (the ``/op`` path) also stamps ``last_edited_at``, which is
-    what flips their presence label from "viewing" to "editing"."""
+    ``edited=True`` (the ``/op`` path) also stamps ``last_edited_at``."""
     with session() as s:
         existing = s.get(CoeditParticipant, (session_id, user_id))
         if existing is not None:

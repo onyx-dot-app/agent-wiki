@@ -1006,8 +1006,9 @@ class CoeditParticipant(Base):
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
     # When this participant last applied an edit op, ISO 8601 UTC. NULL for a
-    # participant who has only viewed — presence renders them "viewing", not
-    # "editing" (joining a session is page-open, not edit intent).
+    # participant who has only viewed. Presence does NOT read this — the
+    # "editing"/"viewing" label derives client-side from the live caret
+    # frames (a rendered caret IS the editing state; nothing is persisted).
     last_edited_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
