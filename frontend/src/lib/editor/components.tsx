@@ -412,7 +412,9 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       // timer is armed only while focused and re-armed on every local edit /
       // caret move; suspended timers fire on wake, so a slept laptop unfocuses
       // right when the user returns.
-      const idleUnfocus = { current: null as ReturnType<typeof setTimeout> | null };
+      const idleUnfocus = {
+        current: null as ReturnType<typeof setTimeout> | null,
+      };
       const armIdleUnfocus = () => {
         if (idleUnfocus.current) clearTimeout(idleUnfocus.current);
         idleUnfocus.current = null;
@@ -560,7 +562,11 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         }
         if (u.docChanged) onSelRef.current(sel.anchor, sel.head, true);
         else if (u.selectionSet) onSelRef.current(sel.anchor, sel.head, false);
-        // Any local activity (or a focus flip) restarts the idle-unfocus clock.
+        // Any local activity (or a focus flip) restarts the idle-unfocus
+        // clock. Remote-applied ops can't reach this line: CM update
+        // listeners run synchronously inside dispatchRemote's
+        // applyingRemote bracket, so they exit at the early-return above —
+        // a busy peer can't keep an idle user's caret alive.
         if (u.focusChanged || u.docChanged || u.selectionSet) armIdleUnfocus();
         if (u.selectionSet && onSelectionForCommentRef.current) {
           const draft = selectionToDraft(u.state);

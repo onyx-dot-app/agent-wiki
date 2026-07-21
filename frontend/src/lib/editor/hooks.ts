@@ -125,6 +125,14 @@ export function useCoeditSession(opts: {
   const flushFn = useRef<(() => Promise<void>) | null>(null);
   const setDocFn = useRef<((text: string) => void) | null>(null);
   const catchUpFn = useRef<(() => void) | null>(null);
+  // Ref mirror of `buffer` (the editor doc) for non-render reads.
+  const bufferRef = useRef("");
+  // Local doc carried across a forced re-join: when the session closed under
+  // us and the tail couldn't be delivered, the edits exist only in this tab —
+  // re-applied onto the fresh session instead of being silently replaced by
+  // the checkpointed version. Path-tagged so it can never leak onto another
+  // page.
+  const recoverDoc = useRef<{ path: string; doc: string } | null>(null);
   // Outbound cursor/typing throttle state.
   const cursorThrottle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingCursor = useRef<{
@@ -215,6 +223,7 @@ export function useCoeditSession(opts: {
 
   const reportDoc = useCallback(
     (doc: string) => {
+      bufferRef.current = doc;
       setBuffer(doc);
       armAutosave();
     },
@@ -457,6 +466,7 @@ export function useCoeditSession(opts: {
     clientId.current = newClientId();
     let cancelled = false;
     // Mirror shows the committed body until the join resolves.
+    bufferRef.current = committedBody;
     setBuffer(committedBody);
     setJoinError(null);
 
@@ -479,6 +489,7 @@ export function useCoeditSession(opts: {
       }
       if (cancelled) return;
       sessionId.current = snap.session_id;
+      bufferRef.current = snap.buffer;
       setBuffer(snap.buffer);
       participantsRef.current = snap.participants;
       setParticipants(snap.participants);
@@ -515,7 +526,16 @@ export function useCoeditSession(opts: {
           if (e instanceof ApiError && e.status === 404) {
             // The session closed while we were gone (last participant left →
             // checkpoint + close). Streaming can't resurrect it — re-run the
-            // whole join to mint/adopt a fresh session.
+            // whole join to mint/adopt a fresh session. First try to deliver
+            // any local tail; if that fails too (ops bounce off the closed
+            // session), those edits exist only in this tab — carry the doc
+            // across the re-join so the fresh session's checkpointed buffer
+            // doesn't silently replace them (see the recovery effect below).
+            try {
+              await flushFn.current?.();
+            } catch {
+              recoverDoc.current = { path, doc: bufferRef.current };
+            }
             retryJoin();
             break;
           }
@@ -576,6 +596,20 @@ export function useCoeditSession(opts: {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, path, retryToken]);
+
+  // Re-apply a doc carried across a forced re-join (see the stream loop's
+  // 404 branch): once the fresh session's editor has mounted (child effects
+  // run before this one, so `setDoc` is registered), replace the buffer with
+  // the saved local doc as a normal local edit — it lands as an op on the
+  // new session instead of being lost to the checkpointed version.
+  useEffect(() => {
+    if (session === null || recoverDoc.current === null) return;
+    const saved = recoverDoc.current;
+    recoverDoc.current = null;
+    if (saved.path === path && saved.doc !== session.startDoc) {
+      setDoc(saved.doc);
+    }
+  }, [session, path, setDoc]);
 
   // Best-effort checkpoint when the tab is backgrounded/closed — `keepalive`
   // lets the request survive the page tearing down. Covers the gap between
