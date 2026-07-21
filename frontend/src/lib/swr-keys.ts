@@ -40,7 +40,7 @@ export const SWR_KEYS = {
   llmStatus: "/llm/status",
 
   // ── Auto Organize ─────────────────────────────────────────────────────
-  autoOrganizeSettings: "/detection/settings",
+  autoOrganizeSettings: "/automanage/settings",
 
   // ── Agents / MCP ──────────────────────────────────────────────────────
   mcpTokens: "/mcp/tokens",

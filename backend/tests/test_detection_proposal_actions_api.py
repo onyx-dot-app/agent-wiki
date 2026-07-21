@@ -54,7 +54,7 @@ def test_approve_executes_and_applies(client):
     pid = _mk("stale")
 
     with detection_queue.immediate_mode():
-        r = client.post(f"/api/detection/proposals/{pid}/approve")
+        r = client.post(f"/api/automanage/proposals/{pid}/approve")
     assert r.status_code == 200 and r.json()["status"] == "approved"
     assert _status(pid) == "applied"
     assert "stale/.gitkeep" not in wiki_git.list_paths()  # trashed
@@ -68,7 +68,7 @@ def test_approve_requires_write(client):
     acl.set_owner("restricted", owner)  # owner + admins only
 
     login_fastapi(client, other)
-    assert client.post(f"/api/detection/proposals/{pid}/approve").status_code == 403
+    assert client.post(f"/api/automanage/proposals/{pid}/approve").status_code == 403
     assert _status(pid) == "pending"  # untouched
 
 
@@ -78,7 +78,7 @@ def test_reject_marks_rejected_and_leaves_folder(client):
     wiki_git.commit_file("junk/.gitkeep", "", "create", author=None)
     pid = _mk("junk")
 
-    r = client.post(f"/api/detection/proposals/{pid}/reject")
+    r = client.post(f"/api/automanage/proposals/{pid}/reject")
     assert r.status_code == 200 and r.json()["status"] == "rejected"
     assert _status(pid) == "rejected"
     assert "junk/.gitkeep" in wiki_git.list_paths()  # untouched
@@ -91,6 +91,6 @@ def test_approve_twice_conflicts(client):
     pid = _mk("dup")
 
     with detection_queue.immediate_mode():
-        assert client.post(f"/api/detection/proposals/{pid}/approve").status_code == 200
+        assert client.post(f"/api/automanage/proposals/{pid}/approve").status_code == 200
         # already applied → no longer pending → 409
-        assert client.post(f"/api/detection/proposals/{pid}/approve").status_code == 409
+        assert client.post(f"/api/automanage/proposals/{pid}/approve").status_code == 409
