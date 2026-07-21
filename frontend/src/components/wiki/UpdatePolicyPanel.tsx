@@ -248,7 +248,11 @@ export function UpdatePolicyPanel({
         </div>
       )}
 
-      <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+      <div
+        className={`scroll-y-hidden flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto ${
+          historyOpen ? "scroll-fade-bottom" : ""
+        }`}
+      >
         {loading ? (
           <div className="p-2 text-[13px] text-(--text-03)">Loading…</div>
         ) : !loaded ? (

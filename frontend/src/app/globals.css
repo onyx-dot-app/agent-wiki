@@ -127,6 +127,12 @@ body {
   display: none;
 }
 
+/* Scroll-edge fade from the mocks' full-size Mask layer (opaque until
+   95.17% of the 844px card, transparent at the bottom edge, ~40px). */
+.scroll-fade-bottom {
+  mask-image: linear-gradient(to bottom, black calc(100% - 40px), transparent);
+}
+
 /* ── Radix popovers ───────────────────────────────────────────────────────
    Opal's Popover/SelectButton menus must float above modal scrims
    (--z-modal). Radix sets `z-index: auto` inline on the wrapper and Opal
