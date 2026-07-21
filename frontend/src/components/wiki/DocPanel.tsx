@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Tabs } from "@onyx-ai/opal/components";
 
 export type DocPanelTab = "updates" | "comments" | "sources" | "watching";
@@ -11,6 +11,8 @@ const TABS: Array<{ value: DocPanelTab; label: string }> = [
   { value: "sources", label: "Sources" },
   { value: "watching", label: "Watching" },
 ];
+
+const tabIndex = (tab: DocPanelTab) => TABS.findIndex((t) => t.value === tab);
 
 interface DocPanelProps {
   tab: DocPanelTab;
@@ -25,6 +27,17 @@ interface DocPanelProps {
  * occupant at a time, so the tabbed surfaces render inside this panel
  * rather than as their own rail columns. */
 export function DocPanel({ tab, onTabChange, children }: DocPanelProps) {
+  // The incoming surface slides from the side the underline travels toward,
+  // so the strip's built-in indicator motion and the body read as one
+  // gesture. Adjust-during-render keeps the derived direction bound to the
+  // committed tree, which stays correct under StrictMode double renders and
+  // abandoned concurrent renders.
+  const [lastTab, setLastTab] = useState(tab);
+  const [fromLeft, setFromLeft] = useState(false);
+  if (lastTab !== tab) {
+    setFromLeft(tabIndex(tab) < tabIndex(lastTab));
+    setLastTab(tab);
+  }
   return (
     <div className="flex h-full w-[360px] max-w-[100vw] flex-col">
       {/* Strip metrics from the mock's panel Header (1790:52552): 12px
@@ -46,7 +59,17 @@ export function DocPanel({ tab, onTabChange, children }: DocPanelProps) {
           </Tabs.List>
         </Tabs>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      {/* Keyed by tab so the enter animation re-runs per switch (bodies
+          already remount per tab, and state lives above the panel). The
+          clip keeps the offset start inside the rail. */}
+      <div
+        key={tab}
+        className={`flex min-h-0 flex-1 flex-col overflow-x-clip ${
+          fromLeft ? "panel-tab-in-left" : "panel-tab-in-right"
+        }`}
+      >
+        {children}
+      </div>
     </div>
   );
 }

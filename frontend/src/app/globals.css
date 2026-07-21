@@ -2,14 +2,14 @@
 @import "./css/z-index.css";
 @config "../../tailwind.config.cjs";
 
-/* Reserve the scrollbar gutter on the root scroll container so layout
-   width stays constant whether content fits or overflows. Without this,
-   pages that toggle between short and tall content cause a horizontal
-   shift as the scrollbar appears/disappears. */
+/* The app shell is height-capped and scrolls inside its own columns, so
+   the root never scrolls. No scrollbar-gutter here: reserving one paints
+   a permanent dead margin down the page's right edge. A route whose own
+   container toggles between fitting and overflowing sets the gutter on
+   that scroll container. */
 html,
 body {
   height: 100%;
-  scrollbar-gutter: stable;
 }
 
 @layer base {
@@ -132,6 +132,45 @@ body {
 }
 .scroll-y-hidden::-webkit-scrollbar {
   display: none;
+}
+
+/* ── Doc panel tab transitions ────────────────────────────────────────────
+   Enter-only fade + directional slide for the incoming tab surface, matched
+   to the underline indicator's travel (DocPanel keys the body by tab). No
+   fill mode: a retained transform would become a containing block for any
+   future fixed-position descendant. Compositor properties only.
+   ───────────────────────────────────────────────────────────────────── */
+@keyframes panel-tab-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes panel-tab-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.panel-tab-in-right {
+  animation: panel-tab-in-right 180ms ease-out;
+}
+.panel-tab-in-left {
+  animation: panel-tab-in-left 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-tab-in-right,
+  .panel-tab-in-left {
+    animation: none;
+  }
 }
 
 /* Scroll-edge fade from the mocks' full-size Mask layer: an SVG gradient
