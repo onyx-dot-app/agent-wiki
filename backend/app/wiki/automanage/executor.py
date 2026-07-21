@@ -26,7 +26,7 @@ from app.auth import users
 from app.db.models import Event
 from app.db.session import session
 from app.models.wiki import PathMove
-from app.wiki import change_proposals, git, notify, trash
+from app.wiki import change_proposals, doc_ids, git, notify, trash
 from app.wiki.automanage import settings
 from app.wiki.change_proposals import ProposalOp, ProposalStatus
 
@@ -92,6 +92,11 @@ def _execute_delete_empty_folder(p: dict[str, Any]) -> None:
         log.info("execute: proposal %s stale — %s not empty", proposal_id, folder)
         return
 
+    # Capture the folder's stable id *before* the trash-move tombstones it, so
+    # the activity event carries a durable handle (the id keeps resolving to the
+    # tombstone via `doc_ids.get`, even though the path is now gone).
+    path_ids = {folder: doc_ids.get_or_mint(folder)}
+
     author = _git_author(p["acting_user_id"])
     dest = trash.trash_location(trash.new_trash_id(), folder)
     sha, moves = git.move_path(
@@ -100,7 +105,7 @@ def _execute_delete_empty_folder(p: dict[str, Any]) -> None:
     notify.after_doc_trashed(
         moves, sha, author, root_move=PathMove(old=folder, new=dest)
     )
-    _finalize_applied(p, applied_sha=sha)
+    _finalize_applied(p, applied_sha=sha, path_ids=path_ids)
     log.info(
         "execute: proposal %s applied — trashed empty folder %s (sha=%s)",
         proposal_id,
@@ -109,22 +114,29 @@ def _execute_delete_empty_folder(p: dict[str, Any]) -> None:
     )
 
 
-def _finalize_applied(p: dict[str, Any], *, applied_sha: str) -> None:
+def _finalize_applied(
+    p: dict[str, Any], *, applied_sha: str, path_ids: dict[str, str]
+) -> None:
     """Mark the proposal ``applied`` and, when it was auto-applied (no human
     reviewer), record an activity event. A human-approved apply is already
     visible to the approver (they watched the outcome in the review banner), so
-    only the silent AI-managed path needs the audit trail."""
+    only the silent AI-managed path needs the audit trail. ``path_ids`` maps the
+    affected paths to their stable doc ids (captured before mutation)."""
     change_proposals.mark_applied(p["id"], applied_sha=applied_sha)
     if p["reviewed_by_user_id"] is None:
-        _record_applied_event(p, applied_sha)
+        _record_applied_event(p, applied_sha, path_ids)
 
 
-def _record_applied_event(p: dict[str, Any], applied_sha: str) -> None:
+def _record_applied_event(
+    p: dict[str, Any], applied_sha: str, path_ids: dict[str, str]
+) -> None:
     """Best-effort: the change already happened, so a feed write that fails must
     not fail the apply. ``target`` is the affected folder itself — trashing a
     folder does *not* re-point its owner row (unlike a page; see
     ``acl.on_path_moved``), so the folder's owner still resolves at this path
-    and sees the event. Admins see every ``automanage.*`` event regardless."""
+    and sees the event. Admins see every ``automanage.*`` event regardless.
+    ``path_ids`` gives the UI a durable handle for linking (paths churn; the id
+    resolves even after the item is trashed)."""
     try:
         with session() as s:
             s.add(
@@ -137,6 +149,7 @@ def _record_applied_event(p: dict[str, Any], applied_sha: str) -> None:
                             "op": p["op"],
                             "source_paths": p["source_paths"],
                             "target_paths": p["target_paths"],
+                            "path_ids": path_ids,
                             "applied_sha": applied_sha,
                         }
                     ),

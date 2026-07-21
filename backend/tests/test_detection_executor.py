@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from app.auth.users import AI_USER_ID
-from app.wiki import acl
+from app.wiki import acl, doc_ids
 from app.wiki import git as wiki_git
 from app.wiki.automanage import executor
 from app.wiki.change_proposals import (
@@ -77,6 +77,10 @@ def test_auto_applied_delete_records_activity_event(repo):
     assert ev["payload"]["op"] == ProposalOp.DELETE_EMPTY_FOLDER.value
     assert ev["payload"]["source_paths"] == ["area/gone"]
     assert ev["payload"]["applied_sha"]
+    # A stable doc id captured before the trash-move; it still resolves (to the
+    # tombstone) after the folder is gone, so the UI can link to it.
+    folder_id = ev["payload"]["path_ids"]["area/gone"]
+    assert doc_ids.get(folder_id) is not None
 
 
 def test_trashed_folder_owner_still_resolves_at_original_path(repo):
