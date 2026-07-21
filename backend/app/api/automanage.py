@@ -50,18 +50,20 @@ def _can_act(user: User, proposal: dict[str, Any]) -> bool:
     return all(acl.can(user.id, user.is_admin, "write", p) for p in paths)
 
 
-def _paths_overlap(a: str, b: str) -> bool:
-    """True if two wiki paths are the same or one is an ancestor of the other."""
-    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+def _within_scope(path: str, scope: str) -> bool:
+    """True if ``path`` sits at or below ``scope`` — equal to it, or nested inside
+    it. Directional: an ancestor ``path`` is *not* within a descendant ``scope``."""
+    return path == scope or path.startswith(scope + "/")
 
 
 def _touches(proposal: dict[str, Any], scope: str) -> bool:
-    """True if the proposal acts within ``scope`` — any of its paths equals
-    ``scope`` or is an ancestor/descendant of it. So a page surfaces proposals on
-    itself (or an enclosing folder), and a folder surfaces proposals anywhere in
-    its subtree."""
+    """True if the proposal acts at or below ``scope`` — any of its paths equals
+    ``scope`` or is nested inside it. So a folder surfaces every proposal in its
+    subtree, and a page surfaces only proposals scoped to that page — an enclosing
+    folder's proposal (e.g. delete-this-folder) does *not* leak onto the pages
+    inside it, which would otherwise nag on every descendant page."""
     paths = list(proposal["source_paths"]) + list(proposal["target_paths"])
-    return any(_paths_overlap(p, scope) for p in paths)
+    return any(_within_scope(p, scope) for p in paths)
 
 
 @router.get("/settings", response_model=DetectionSettingsView)

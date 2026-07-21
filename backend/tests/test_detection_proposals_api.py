@@ -134,8 +134,18 @@ def test_path_filter_scopes_to_subtree(client):
     assert folders("docs/old") == {"docs/old"}  # exact
     assert folders("archive") == {"archive"}
     assert folders("nope") == set()  # no overlap
+    # Downward-only: a page inside a folder does NOT surface that folder's
+    # proposal — otherwise a delete-this-folder suggestion would nag on every
+    # descendant page. Scoping matches proposals at or below the viewed path.
+    assert folders("docs/old/page.md") == set()
     # Query path is normalized like other wiki paths (surrounding slashes /
     # root are tolerated), so a banner request isn't silently empty.
     assert folders("/docs") == {"docs/old"}
     assert folders("docs/") == {"docs/old"}
     assert folders("/") == {"docs/old", "archive"}  # root → no filter
+
+    # A page-scoped proposal still surfaces on that page itself and on any
+    # enclosing folder (the folder view sees everything in its subtree).
+    _mk("docs/notes.md")
+    assert folders("docs/notes.md") == {"docs/notes.md"}  # the page itself
+    assert folders("docs") == {"docs/old", "docs/notes.md"}  # ancestor folder
