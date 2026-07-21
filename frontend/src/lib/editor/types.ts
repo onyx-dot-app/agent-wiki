@@ -8,20 +8,15 @@ export interface CoeditChange {
 }
 
 /** A session participant as returned by join / presence frames. The live
- * session is joined by everyone on the page; `caret_active` (true while they
- * have a caret placed in the text) is what separates editors from viewers —
- * event-driven, no decay: set by cursor placement / edits, cleared on editor
- * blur / hidden tab, gone with the row on leave. */
+ * session is joined by everyone on the page. The "editing"/"viewing" label
+ * is NOT carried here — it derives from `CoeditPeer` (a rendered caret IS
+ * the editing state), so the roster is membership + display names only. */
 export interface CoeditParticipant {
   user_id: string;
   user_display: string;
   joined_at: string;
   last_seen_at: string;
   last_edited_at: string | null;
-  caret_active: boolean;
-  /** Caret epoch that ordered the last applied caret write — seeds the
-   * stale-frame guard, and a rejoining editor's own epoch counter. */
-  caret_seq: number;
 }
 
 /** A peer's live caret/selection, from their latest `cursor` frame. Offsets are

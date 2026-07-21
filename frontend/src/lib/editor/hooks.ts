@@ -4,10 +4,11 @@
  *
  * The "co-edit session" is the page's *live session*: everyone viewing the
  * page joins it (presence + real-time updates); editing is a capability
- * inside it (`canWrite`), and presence labels participants "viewing" vs
- * "editing" by whether they currently have a caret placed in the text
- * (`caret_active` — position/intent, not edit facts; cleared on editor blur
- * or a hidden tab, never by a timer).
+ * inside it (`canWrite`), and presence labels a participant "editing" when
+ * their caret is rendered in the content, "viewing" otherwise — the label is
+ * derived from `peers`, so it can never disagree with the carets on screen.
+ * Nothing is persisted: carets appear from live cursor/op frames and go away
+ * on a clear (editor blur / hidden tab) or when the peer leaves.
  *
  * On `enabled` it joins the session for `path`, streams inbound frames, and
  * exposes presence (`participants`/`typing`/`peers`) and autosave
@@ -137,10 +138,10 @@ export function useCoeditSession(opts: {
   // `onFrame` needs the author's display to restore their caret). Synced on
   // join and on presence frames — the only points membership changes.
   const participantsRef = useRef<CoeditParticipant[]>([]);
-  // Our caret epoch: bumped on every place/clear transition, echoed on
-  // movement pings and ops. The server applies caret writes only when the
-  // epoch advances, so reordered requests can't resurrect stale state.
-  // Seeded from our own roster row on join (the row outlives connections).
+  // Our caret epoch: stamped fresh on every place/clear transition and
+  // echoed on movement pings and ops, so peers can drop reordered stale
+  // frames. Wall-clock based (monotonicized) — stays ordered across
+  // reconnects and tabs without any server-side state.
   const caretEpoch = useRef(0);
   const caretPlaced = useRef(false);
   // Latest caret epoch seen per peer — frames from older epochs are dropped.
@@ -221,7 +222,7 @@ export function useCoeditSession(opts: {
       // Reporting a position places the caret — a transition (first placement
       // or a refocus after a clear) opens a new epoch.
       if (!caretPlaced.current) {
-        caretEpoch.current += 1;
+        caretEpoch.current = Math.max(Date.now(), caretEpoch.current + 1);
         caretPlaced.current = true;
       }
       lastCursor.current = { anchor, head };
@@ -278,9 +279,9 @@ export function useCoeditSession(opts: {
   const reportCaretCleared = useCallback(() => {
     if (sessionId.current === null || !canWrite) return;
     // Clearing a placed caret opens a new epoch, so any still-in-flight
-    // place/op from the old epoch loses server-side too.
+    // place/op frame from the old epoch is dropped by peers.
     if (caretPlaced.current) {
-      caretEpoch.current += 1;
+      caretEpoch.current = Math.max(Date.now(), caretEpoch.current + 1);
       caretPlaced.current = false;
     }
     // Drop any queued position first — a throttled send landing after the
@@ -311,12 +312,7 @@ export function useCoeditSession(opts: {
         const ids = new Set(frame.participants.map((p) => p.user_id));
         setPeers((prev) => prev.filter((p) => ids.has(p.user_id)));
         setTyping((prev) => prev.filter((u) => ids.has(u)));
-        // Seed/prune the per-peer epoch guard from the roster.
-        for (const p of frame.participants) {
-          const known = peerCaretSeq.current.get(p.user_id) ?? 0;
-          if (p.caret_seq > known)
-            peerCaretSeq.current.set(p.user_id, p.caret_seq);
-        }
+        // Prune departed users from the per-peer epoch guard.
         for (const uid of peerCaretSeq.current.keys()) {
           if (!ids.has(uid)) peerCaretSeq.current.delete(uid);
         }
@@ -350,16 +346,6 @@ export function useCoeditSession(opts: {
             },
           ]);
         }
-        // Roster broadcasts only arrive on join/leave, so the "editing" /
-        // "viewing" label rides the cursor frames themselves.
-        const caretActive = anchor !== null && head !== null;
-        setParticipants((prev) =>
-          prev.map((p) =>
-            p.user_id === uid && p.caret_active !== caretActive
-              ? { ...p, caret_active: caretActive }
-              : p,
-          ),
-        );
         const existing = typingTimers.current.get(uid);
         if (existing) clearTimeout(existing);
         typingTimers.current.delete(uid);
@@ -377,13 +363,14 @@ export function useCoeditSession(opts: {
         }
         return;
       }
-      // An op carrying a caret epoch asserts caret placement (mirrors the
-      // server's stamp), and the op itself says where: the end of its last
-      // change, in post-edit coordinates. Restore both the label and the
-      // caret from it, so a lost cursor frame can't leave a peer marked
-      // "editing" with no caret rendered. Gated on the epoch like cursor
-      // frames — a stale op must not resurrect a cleared caret — and skipped
-      // entirely when the op makes no caret assertion (caret_seq null).
+      // An op carrying a caret epoch asserts caret placement, and the op
+      // itself says where: the end of its last change, in post-edit
+      // coordinates. Rendering the author's caret from it is what flips their
+      // label too (the label IS the rendered caret), so a lost cursor frame
+      // can't leave an active editor unlabeled. Gated on the epoch like
+      // cursor frames — a stale op must not resurrect a cleared caret — and
+      // skipped when the op makes no caret assertion (caret_seq null, e.g. a
+      // teardown flush after blur).
       if (
         frame.type === "op" &&
         frame.author !== null &&
@@ -392,13 +379,6 @@ export function useCoeditSession(opts: {
       ) {
         const author = frame.author;
         peerCaretSeq.current.set(author, frame.caret_seq);
-        setParticipants((prev) =>
-          prev.map((p) =>
-            p.user_id === author && !p.caret_active
-              ? { ...p, caret_active: true }
-              : p,
-          ),
-        );
         const display =
           myUserId !== null && author === myUserId
             ? undefined // never render self as a peer
@@ -495,18 +475,6 @@ export function useCoeditSession(opts: {
       setBuffer(snap.buffer);
       participantsRef.current = snap.participants;
       setParticipants(snap.participants);
-      // Resume our caret epoch from our own roster row — the row (and its
-      // caret_seq) outlives connections, and a rejoin restarting at 0 would
-      // lose every caret write to the epoch guard. Peers' rows seed the
-      // stale-frame guard the same way.
-      peerCaretSeq.current = new Map(
-        snap.participants.map((p) => [p.user_id, p.caret_seq]),
-      );
-      const mine =
-        myUserId !== null
-          ? snap.participants.find((p) => p.user_id === myUserId)
-          : undefined;
-      caretEpoch.current = Math.max(caretEpoch.current, mine?.caret_seq ?? 0);
       caretPlaced.current = false;
       setSession({
         id: snap.session_id,

@@ -876,6 +876,7 @@ export function FileView({ path }: FileViewProps) {
                 />
                 <CoeditPresenceBar
                   participants={coedit.participants}
+                  peers={coedit.peers}
                   typing={coedit.typing}
                   selfUserId={user?.id ?? null}
                 />

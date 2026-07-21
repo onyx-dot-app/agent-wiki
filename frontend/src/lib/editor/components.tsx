@@ -706,32 +706,29 @@ function readOnlyExtensions(readOnly: boolean) {
 
 interface CoeditPresenceBarProps {
   participants: CoeditParticipant[];
+  /** Peers with a live caret (from `useCoeditSession`) — a participant with
+   * an entry here is "editing", the rest are "viewing". */
+  peers: CoeditPeer[];
   typing: string[];
   selfUserId: string | null;
 }
 
-// "editing" means positioned to edit — a caret placed in the text — not
-// "has recently applied an op". Everyone on the page is in the live session;
-// the label — not membership — is what distinguishes editors from readers.
-// Event-driven, no timers: the state flips on caret placement and on the
-// blur / hidden-tab clear, so it can never disagree with the caret rendered
-// in the doc (the same signal drives both).
-function presenceLabel(p: CoeditParticipant): string {
-  return p.caret_active ? "editing" : "viewing";
-}
-
 // Live-session presence: who else is on the page — labeled "editing" while
-// their caret is placed in the text, "viewing" otherwise — and who's typing
-// right now. Complements the in-editor peer carets (CaretWidget/peersField
-// above) rather than duplicating them. Renders nothing when you're alone.
+// their caret is rendered in the content, "viewing" otherwise — and who's
+// typing right now. The label is DERIVED from the same peers list that
+// renders the carets (CaretWidget/peersField above), so bar and doc can
+// never disagree: if a person's cursor is in the content they're editing,
+// otherwise they're viewing. Renders nothing when you're alone.
 export function CoeditPresenceBar({
   participants,
+  peers,
   typing,
   selfUserId,
 }: CoeditPresenceBarProps) {
   const others = participants.filter((p) => p.user_id !== selfUserId);
   if (others.length === 0) return null;
   const typingSet = new Set(typing);
+  const caretSet = new Set(peers.map((p) => p.user_id));
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-(--text-03)">
       <span
@@ -742,7 +739,11 @@ export function CoeditPresenceBar({
         <span key={p.user_id} className="inline-flex items-center gap-1">
           <span className="font-medium text-(--text-04)">{p.user_display}</span>
           <span className="text-(--text-03) italic">
-            {typingSet.has(p.user_id) ? "typing…" : presenceLabel(p)}
+            {typingSet.has(p.user_id)
+              ? "typing…"
+              : caretSet.has(p.user_id)
+                ? "editing"
+                : "viewing"}
           </span>
         </span>
       ))}
