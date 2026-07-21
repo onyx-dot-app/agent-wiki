@@ -10,9 +10,7 @@ import {
   Text,
 } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
-import { SvgChevronRight, SvgPlus, SvgSquare } from "@onyx-ai/opal/icons";
-import { cn } from "@onyx-ai/opal/utils";
-import type { IconFunctionComponent } from "@onyx-ai/opal/types";
+import { SvgChevronRight, SvgSquarePlus } from "@onyx-ai/opal/icons";
 import { listTemplateSummaries } from "@/lib/templates";
 import type { DocumentTemplateSummary } from "@/lib/templates";
 import styles from "@/components/wiki/StartNewPage.module.css";
@@ -55,7 +53,7 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
         <div className={styles.templateCell}>
           <TemplateCard
             title="Blank page"
-            glyph={<IconContainer size="main-ui" icon={SquarePlusGlyph} />}
+            glyph={<IconContainer size="main-ui" icon={SvgSquarePlus} />}
             onClick={() => startNewPage(blankTemplate?.id)}
           />
         </div>
@@ -89,17 +87,6 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
     </>
   );
 }
-
-// Square-plus layered from published icons, sized by IconContainer's glyph
-// class. Swap to Opal's SvgSquarePlus when it ships (onyx #13153).
-const SquarePlusGlyph: IconFunctionComponent = ({ className }) => (
-  <span className={cn(styles.glyphStack, className)}>
-    <SvgSquare size={16} />
-    <span className={styles.glyphPlus}>
-      <SvgPlus size={8} />
-    </span>
-  </span>
-);
 
 function TemplateCard({
   title,

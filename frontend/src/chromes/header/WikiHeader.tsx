@@ -8,6 +8,7 @@ import { Button, LineItemButton, Popover } from "@onyx-ai/opal/components";
 import {
   SvgChevronRight,
   SvgFolder,
+  SvgHome,
   SvgListTree,
   SvgMoreHorizontal,
 } from "@onyx-ai/opal/icons";
@@ -23,7 +24,7 @@ function segmentLabel(segment: string): string {
 }
 
 // Trailing crumbs kept visible when the path folds (the current page plus
-// its nearest ancestors). Home always renders separately.
+// its nearest ancestors). Home is not part of the trail.
 const FOLD_TRAIL = 4;
 
 /** Fold-menu row that reveals its full label via tooltip only when the
@@ -130,12 +131,18 @@ export function WikiHeader() {
       {/* min-w-0 + nowrap + overflow-hidden: one line, always. The container
           only clips, the per-crumb truncate classes render the ellipsis. */}
       <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-sm whitespace-nowrap">
-        <Link
-          href={crumbs[0].href}
-          className="shrink-0 text-(--text-03) hover:text-(--text-05)"
-        >
-          {crumbs[0].label}
-        </Link>
+        {/* Home renders as its glyph, not text, and only when there is a
+            path to crumb back from. The entry stays in crumbs so the fold
+            math counts it, and its label becomes the aria-label. */}
+        {segments.length > 0 && (
+          <Link
+            href={crumbs[0].href}
+            aria-label={crumbs[0].label}
+            className="flex shrink-0 items-center text-(--text-03) hover:text-(--text-05)"
+          >
+            <SvgHome size={16} />
+          </Link>
+        )}
         {folded.length > 0 && (
           <span className="flex shrink-0 items-center gap-1.5">
             <SvgChevronRight size={12} className="text-(--text-02)" />
