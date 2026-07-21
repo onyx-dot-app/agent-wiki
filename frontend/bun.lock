@@ -14,7 +14,7 @@
         "@dnd-kit/modifiers": "^7.0.0",
         "@dnd-kit/sortable": "^8.0.0",
         "@dnd-kit/utilities": "^3.2.2",
-        "@onyx-ai/opal": "^0.1.21",
+        "@onyx-ai/opal": "^0.1.22",
         "@radix-ui/react-popover": "^1.1.6",
         "@radix-ui/react-separator": "^1.1.0",
         "@radix-ui/react-slot": "^1.2.4",
@@ -223,7 +223,7 @@
 
     "@nolyfill/is-core-module": ["@nolyfill/is-core-module@1.0.39", "", {}, "sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA=="],
 
-    "@onyx-ai/opal": ["@onyx-ai/opal@0.1.21", "", { "dependencies": { "clsx": "^2.0.0", "copy-to-clipboard": "^3.3.3", "tailwind-merge": "^2.0.0" }, "peerDependencies": { "@dnd-kit/core": "^6.0.0", "@dnd-kit/modifiers": "^7.0.0 || ^8.0.0", "@dnd-kit/sortable": "^8.0.0", "@dnd-kit/utilities": "^3.0.0", "@radix-ui/react-dialog": "^1.0.0", "@radix-ui/react-popover": "^1.0.0", "@radix-ui/react-select": "^2.0.0", "@radix-ui/react-separator": "^1.0.0", "@radix-ui/react-slot": "^1.0.0", "@radix-ui/react-tabs": "^1.0.0", "@radix-ui/react-tooltip": "^1.0.0", "@tanstack/react-table": "^8.0.0", "formik": "^2.0.0", "next": ">=14.0.0", "react": "^18.0.0 || ^19.0.0", "react-day-picker": "^9.0.0", "react-dom": "^18.0.0 || ^19.0.0", "react-markdown": "^9.0.0", "rehype-sanitize": "^6.0.0", "remark-gfm": "^4.0.0" } }, "sha512-AorGTU0a1xYd9W1siUFJb6OtV7NUAGupLfJPc0H3y6A14Oi0L+vUpSsW0HzEXZHaH1DIGXoQclf/fSDzi/J8HA=="],
+    "@onyx-ai/opal": ["@onyx-ai/opal@0.1.22", "", { "dependencies": { "clsx": "^2.0.0", "copy-to-clipboard": "^3.3.3", "tailwind-merge": "^2.0.0" }, "peerDependencies": { "@dnd-kit/core": "^6.0.0", "@dnd-kit/modifiers": "^7.0.0 || ^8.0.0", "@dnd-kit/sortable": "^8.0.0", "@dnd-kit/utilities": "^3.0.0", "@radix-ui/react-dialog": "^1.0.0", "@radix-ui/react-popover": "^1.0.0", "@radix-ui/react-select": "^2.0.0", "@radix-ui/react-separator": "^1.0.0", "@radix-ui/react-slot": "^1.0.0", "@radix-ui/react-tabs": "^1.0.0", "@radix-ui/react-tooltip": "^1.0.0", "@tanstack/react-table": "^8.0.0", "formik": "^2.0.0", "next": ">=14.0.0", "react": "^18.0.0 || ^19.0.0", "react-day-picker": "^9.0.0", "react-dom": "^18.0.0 || ^19.0.0", "react-markdown": "^9.0.0", "rehype-sanitize": "^6.0.0", "remark-gfm": "^4.0.0" } }, "sha512-Pe6OrpIMr4jSVVP5wd7w21v9gqVdOvWGnbVMy83Ey8AYv2JxvtFytgxbZn3PSzURzPcN1aN4wN1amZIGpaVGVQ=="],
 
     "@pkgjs/parseargs": ["@pkgjs/parseargs@0.11.0", "", {}, "sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg=="],
 

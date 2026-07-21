@@ -24,7 +24,7 @@ function segmentLabel(segment: string): string {
 }
 
 // Trailing crumbs kept visible when the path folds (the current page plus
-// its nearest ancestors). Home always renders separately.
+// its nearest ancestors). Home is not part of the trail.
 const FOLD_TRAIL = 4;
 
 /** Fold-menu row that reveals its full label via tooltip only when the
