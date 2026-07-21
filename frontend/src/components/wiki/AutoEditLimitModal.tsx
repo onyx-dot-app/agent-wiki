@@ -35,7 +35,7 @@ export function UsageBar({ count, threshold, cap }: UsageBarProps) {
             style={{ left: `${alertPct}%` }}
           />
         )}
-        <div className="absolute inset-y-0 right-0 w-0.5 bg-(--theme-orange-05)" />
+        <div className="absolute inset-y-0 right-0 w-0.5 bg-(--status-warning-05)" />
       </div>
       <div className="flex items-center justify-end gap-1">
         {threshold > 0 && (

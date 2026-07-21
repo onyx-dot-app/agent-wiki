@@ -95,7 +95,7 @@ export function VersionHistoryList({
           placeholder="Search update history…"
         />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+      <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {error && <ListMessage>{error}</ListMessage>}
         {!error && filtered === null && (
           <div className="p-3">

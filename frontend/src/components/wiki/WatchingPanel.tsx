@@ -212,7 +212,7 @@ export function WatchingPanel({ path, onNew, onEdit }: Props) {
         </div>
       </div>
       <Divider paddingParallel="fit" paddingPerpendicular="fit" />
-      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pt-1">
+      <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pt-1">
         {error && (
           <Text font="secondary-body" color="text-03">
             {error.message}

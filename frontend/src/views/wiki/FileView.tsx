@@ -784,13 +784,12 @@ export function FileView({ path }: FileViewProps) {
   const headerActions =
     !loading && !error && !historyOpen ? (
       <>
-        {!viewingVersion && (
+        {/* Save-in-flight and failure feedback only. The mock's header
+            carries no idle "Saved" label, so the saved state renders
+            nothing. */}
+        {!viewingVersion && coedit.saveStatus !== "saved" && (
           <span className="mr-1 text-[12px] text-(--text-03)">
-            {coedit.saveStatus === "saving"
-              ? "Saving…"
-              : coedit.saveStatus === "error"
-                ? "Couldn't save"
-                : "Saved"}
+            {coedit.saveStatus === "saving" ? "Saving…" : "Couldn't save"}
           </span>
         )}
         <Button
@@ -849,7 +848,7 @@ export function FileView({ path }: FileViewProps) {
       case "updates":
         return (
           // The mock's Panel body (1790:52468) pads the card stack 8px/4px.
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
+          <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
             <UpdatePolicyPanel
               path={path}
               onShowHistory={toggleHistoryList}
@@ -887,7 +886,7 @@ export function FileView({ path }: FileViewProps) {
         );
       case "watching":
         return (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
+          <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
             {watcherEditor ? (
               <TriggerPanel
                 open

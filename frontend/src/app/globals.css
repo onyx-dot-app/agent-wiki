@@ -117,6 +117,16 @@ body {
   display: none;
 }
 
+/* Side-panel scroll columns: the scrollbar is hidden so the rail's content
+   width never shifts between overflowing and fitting content. */
+.scroll-y-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-y-hidden::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Radix popovers ───────────────────────────────────────────────────────
    Opal's Popover/SelectButton menus must float above modal scrims
    (--z-modal). Radix sets `z-index: auto` inline on the wrapper and Opal

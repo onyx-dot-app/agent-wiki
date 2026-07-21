@@ -14,9 +14,9 @@ import {
   SvgAddLines,
   SvgBell,
   SvgExpand,
+  SvgFold,
   SvgHistory,
   SvgPauseCircle,
-  SvgSliders,
   SvgSparkle,
   SvgX,
 } from "@onyx-ai/opal/icons";
@@ -45,7 +45,7 @@ interface Props {
   /** When set, the history card's expander toggles the host's version list.
    * Omit on surfaces with no history view (e.g. the folder drawer). */
   onShowHistory?: () => void;
-  /** Whether the host's version list is showing (tints the expander). */
+  /** Whether the host's version list is showing (swaps the expander icon). */
   historyOpen?: boolean;
   /** The version list itself, rendered inside the history card while
    * `historyOpen` (mock 1855:273363 expands the card in place). */
@@ -382,53 +382,75 @@ export function UpdatePolicyPanel({
               <div
                 className={`flex flex-col gap-1 rounded-(--radius-12) border p-2 ${historyCardChrome}`}
               >
-                <div className="flex items-start gap-3 p-1">
-                  <div className="flex min-w-0 flex-1 gap-1">
-                    <SvgHistory
-                      size={16}
-                      className="mt-0.5 shrink-0 text-(--text-04)"
-                    />
-                    <div className="flex min-w-0 flex-col">
-                      <Text font="main-ui-action" color="text-04">
-                        Update History
-                      </Text>
+                <div className="flex items-start gap-3">
+                  <div className="flex min-w-0 flex-1 items-start gap-4 p-1">
+                    <div className="flex min-w-0 flex-1 gap-1">
+                      <span className="flex size-5 shrink-0 items-center justify-center text-(--text-04)">
+                        <SvgHistory size={16} />
+                      </span>
+                      <div className="flex min-w-0 flex-col">
+                        <Text font="main-ui-action" color="text-04">
+                          Update History
+                        </Text>
+                        <Text font="secondary-body" color="text-03">
+                          Last 24 hours
+                        </Text>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end">
+                      <div className="flex min-h-5 items-center gap-0.5">
+                        <Text font="main-ui-action" color="text-04">
+                          {String(health.count_24h)}
+                        </Text>
+                        {(overCap || nearCap) && (
+                          <span className="flex size-4 items-center justify-center text-(--text-04)">
+                            {overCap ? (
+                              <SvgPauseCircle size={12} />
+                            ) : (
+                              <SvgBell size={12} />
+                            )}
+                          </span>
+                        )}
+                      </div>
                       <Text font="secondary-body" color="text-03">
-                        Last 24 hours
+                        Auto-Edits
                       </Text>
                     </div>
                   </div>
-                  <div className="flex flex-col items-end">
-                    <Text font="main-ui-action" color="text-04">
-                      {String(health.count_24h)}
-                    </Text>
-                    <Text font="secondary-body" color="text-03">
-                      Auto-Edits
-                    </Text>
-                  </div>
-                  {kind === "page" && (
-                    <Button
-                      icon={SvgSliders}
-                      prominence="tertiary"
-                      size="sm"
-                      tooltip="Auto-edit limits"
-                      onClick={() => setLimitOpen(true)}
-                    />
-                  )}
                   {onShowHistory && (
-                    <SelectButton
-                      icon={SvgExpand}
-                      state={historyOpen ? "selected" : "empty"}
+                    <Button
+                      icon={historyOpen ? SvgFold : SvgExpand}
+                      prominence="tertiary"
+                      size="md"
                       tooltip="Version history"
                       onClick={onShowHistory}
                     />
                   )}
                 </div>
                 <div className="px-1 pb-1">
-                  <UsageBar
-                    count={health.count_24h}
-                    threshold={health.threshold_24h}
-                    cap={health.cap_24h}
-                  />
+                  {kind === "page" &&
+                  health.can_manage &&
+                  health.cap_24h > 0 ? (
+                    // raw-ok: the mock's dialog trigger is the usage chart region itself. SelectCard, Opal's clickable card, is a selection-state div with no native button semantics, so a bare button keeps aria and keyboard.
+                    <button
+                      type="button"
+                      aria-label="Auto-edit limits"
+                      onClick={() => setLimitOpen(true)}
+                      className="block w-full cursor-pointer rounded-(--radius-08) border-none bg-transparent p-[2px] text-left hover:bg-(--background-tint-02)"
+                    >
+                      <UsageBar
+                        count={health.count_24h}
+                        threshold={health.threshold_24h}
+                        cap={health.cap_24h}
+                      />
+                    </button>
+                  ) : (
+                    <UsageBar
+                      count={health.count_24h}
+                      threshold={health.threshold_24h}
+                      cap={health.cap_24h}
+                    />
+                  )}
                 </div>
                 {(overCap || nearCap) && (
                   <div className="flex items-start gap-1 px-1 pb-1">

@@ -181,7 +181,7 @@ export function CommentsPanel({
         />
       </div>
 
-      <div className={styles.scroll}>
+      <div className={`${styles.scroll} scroll-y-hidden`}>
         {error && <div className={styles.error}>{error}</div>}
 
         {draft && (
