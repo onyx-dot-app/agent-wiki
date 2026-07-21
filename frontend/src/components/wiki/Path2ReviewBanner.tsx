@@ -39,7 +39,7 @@ export function Path2ReviewBanner({ path, canWrite = true }: Props) {
   return (
     <div className="mb-3">
       <MessageCard
-        variant="warning"
+        variant="info"
         title={`Auto Organize suggests ${n} cleanup${n === 1 ? "" : "s"} here`}
         description="Approve a change to apply it, or reject to dismiss it (rejection is durable — it won't be suggested again)."
         bottomChildren={
