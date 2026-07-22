@@ -14,6 +14,7 @@ import {
   SvgActivity,
   SvgChevronDown,
   SvgChevronUp,
+  SvgSparkle,
   SvgWorkflow,
   SvgX,
 } from "@onyx-ai/opal/icons";
@@ -41,6 +42,11 @@ interface ActivityPayload {
   count?: number;
   threshold?: number;
   cap?: number;
+  // automanage.applied (Auto Organize auto-applied cleanup)
+  op?: string;
+  source_paths?: string[];
+  target_paths?: string[];
+  applied_sha?: string;
 }
 
 // Searchable text for an event regardless of kind.
@@ -51,12 +57,30 @@ function eventHaystack(event: AppEvent): string {
     p.change_kind,
     p.reason,
     p.message,
+    ...(p.source_paths ?? []),
     event.target,
     event.kind,
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+/** Auto Organize events are acted by the AI system user, not the viewer. */
+function isAutoOrganizeEvent(event: AppEvent): boolean {
+  return event.kind.startsWith("automanage.");
+}
+
+/** Chip location for an event. Auto Organize events point the chip at the
+ * *parent* folder: the acted-on path itself no longer exists (it was cleaned
+ * up), and the row's subject already names the item. */
+function eventScope(event: AppEvent): string {
+  const p = event.payload as ActivityPayload;
+  if (isAutoOrganizeEvent(event)) {
+    const path = p.source_paths?.[0] ?? event.target ?? "";
+    return path.split("/").slice(0, -1).join("/");
+  }
+  return p.doc_path ?? event.target ?? "";
 }
 
 function destinationName(type: string | undefined): string {
@@ -99,6 +123,22 @@ function eventTexts(event: AppEvent): {
       body: p.message || p.reason || null,
     };
   }
+  if (event.kind === "automanage.applied") {
+    // One glanceable line: the chip shows where, the Wiki AI avatar shows who,
+    // and the subject is just the item's name (a full path would render the
+    // chip's path twice and wrap). No body — deletes are restorable from
+    // Trash like any other delete.
+    const path = p.source_paths?.[0] ?? event.target ?? "";
+    const name = path.split("/").pop() || "a page";
+    return {
+      prefix:
+        p.op === "delete_empty_folder"
+          ? "Removed empty folder"
+          : "Auto-organized",
+      subject: name,
+      body: null,
+    };
+  }
   // Unknown kinds stay legible instead of masquerading as trigger fires,
   // and their payload stays inspectable when it has no message/reason.
   const payloadKeys = Object.keys(event.payload ?? {});
@@ -134,16 +174,18 @@ export function ActivityRow({
     <div className="flex w-full flex-col px-3 py-1">
       <div className="flex w-full items-center p-[2px]">
         <div className="flex min-w-0 flex-1 items-center gap-1 p-[2px]">
-          <ScopeChip scope={p.doc_path ?? event.target ?? ""} />
+          <ScopeChip scope={eventScope(event)} />
           <span className="flex size-4 items-center justify-center p-[2px]">
             {event.kind === "trigger.fire" ? (
               <SvgWorkflow className="size-3 text-(--text-03)" />
+            ) : isAutoOrganizeEvent(event) ? (
+              <SvgSparkle className="size-3 text-(--text-03)" />
             ) : (
               <SvgActivity className="size-3 text-(--text-03)" />
             )}
           </span>
           <AvatarCluster
-            ownerName={ownerName}
+            ownerName={isAutoOrganizeEvent(event) ? "Wiki AI" : ownerName}
             destinationTypes={destinationTypes}
           />
         </div>
