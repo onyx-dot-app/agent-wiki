@@ -19,6 +19,7 @@ import {
 } from "react";
 import type { ComponentType } from "react";
 import {
+  SvgCheckSquare,
   SvgCode,
   SvgHash,
   SvgQuoteStart,
@@ -82,6 +83,13 @@ const SLASH_COMMANDS: SlashCommandItem[] = [
     icon: SvgTextLines,
     run: (editor, range) =>
       editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
+  },
+  {
+    title: "Checklist",
+    description: "Track tasks with checkboxes",
+    icon: SvgCheckSquare,
+    run: (editor, range) =>
+      editor.chain().focus().deleteRange(range).toggleTaskList().run(),
   },
   {
     title: "Quote",

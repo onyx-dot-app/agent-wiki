@@ -54,6 +54,8 @@ import {
   ListItem,
   OrderedList,
   Paragraph,
+  TaskItem,
+  TaskList,
 } from "@/lib/editor/tiptapSchema";
 import { colorFor } from "@/lib/editor/utils";
 
@@ -140,6 +142,8 @@ function CoeditorInner({
       BulletList,
       OrderedList,
       ListItem,
+      TaskList,
+      TaskItem,
       Blockquote,
       CodeBlock,
       Bold,

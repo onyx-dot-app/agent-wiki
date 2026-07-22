@@ -100,6 +100,53 @@ def test_ordered_list_start_attribute_and_serialization() -> None:
     assert "3. first" in got and "4. second" in got
 
 
+def test_task_list_structure_and_checked_attribute() -> None:
+    doc = seed_doc_from_markdown("- [ ] todo\n- [x] done\n")
+    root = _root(doc)
+    lst = root.children[0]
+    assert lst.tag == "taskList"
+    items = list(lst.children)
+    assert [i.tag for i in items] == ["taskItem", "taskItem"]
+    assert dict(items[0].attributes)["checked"] == "false"
+    assert dict(items[1].attributes)["checked"] == "true"
+    # The checkbox marker itself must not leak into the item's paragraph text.
+    assert items[0].children[0].children[0].to_py() == "todo"
+
+
+def test_mixed_task_and_plain_items_stays_plain_bullet_list() -> None:
+    """Tiptap's taskList schema requires uniformly-taskItem children — a
+    list where only some items carry a checkbox marker can't become one, so
+    it stays a plain bulletList (the marker text is then literal, same as
+    pre-checkbox-support behavior)."""
+    doc = seed_doc_from_markdown("- [ ] marked\n- unmarked\n")
+    root = _root(doc)
+    lst = root.children[0]
+    assert lst.tag == "bulletList"
+    assert [i.tag for i in lst.children] == ["listItem", "listItem"]
+
+
+def test_task_list_reserialization_is_content_correct_and_idempotent() -> None:
+    body = "- [ ] buy milk\n- [x] walk dog\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    twice = reconstruct_body(seed_doc_from_markdown(once))
+    assert once == twice
+    assert "- [ ] buy milk" in once and "- [x] walk dog" in once
+
+
+def test_task_list_nesting_and_inside_blockquote() -> None:
+    body = "- [ ] top\n  - [x] nested\n\n> - [ ] quoted\n"
+    doc = seed_doc_from_markdown(body)
+    root = _root(doc)
+    top_list = root.children[0]
+    assert top_list.tag == "taskList"
+    nested = list(top_list.children[0].children)
+    assert [c.tag for c in nested] == ["paragraph", "taskList"]
+
+    bq = root.children[1]
+    assert bq.tag == "blockquote"
+    assert bq.children[0].tag == "taskList"
+
+
 def test_list_reserialization_is_content_correct_and_idempotent() -> None:
     """The tight->loose list normalization (see markdown_yjs.py) means
     output isn't byte-identical to a tight-list source, but re-parsing the

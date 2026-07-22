@@ -8,10 +8,14 @@ Tiptap-shaped nodes, editable node-by-node, not opaque text) covers:
 link marks — represented directly in a ``pycrdt.XmlText`` via ``.format()``
 runs), ``bulletList``/``orderedList``/``listItem`` (arbitrarily nested —
 CommonMark's own grammar is already recursive here, so supporting depth cost
-about the same as supporting one level) and ``blockquote`` (a sequence of
-paragraph/list/blockquote children, so multi-paragraph quotes and quotes
-containing lists work), and ``codeBlock`` (a ``language`` attribute + plain
-text content, fence syntax stripped — not stored as opaque markup). Tables
+about the same as supporting one level), ``taskList``/``taskItem`` (a GFM
+checkbox list — a plain bullet list whose items *all* start with a
+``[ ]``/``[x]`` marker; a mixed list stays a regular ``bulletList`` since
+Tiptap's schema requires a taskList's children to be uniformly taskItems —
+see ``_build_list``), and ``blockquote`` (a sequence of paragraph/list/
+blockquote children, so multi-paragraph quotes and quotes containing lists
+work), and ``codeBlock`` (a ``language`` attribute + plain text content,
+fence syntax stripped — not stored as opaque markup). Tables
 get row-level structure (each row is its own ``XmlElement`` tagged
 ``_rowId``, matching the design doc's requirement that a single-cell edit
 only reflows its own row, not the whole table) but each row's *content* is
@@ -36,6 +40,7 @@ list item containing a table) — unsupported, raises rather than mis-encodes.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pycrdt import Doc, XmlElement, XmlFragment, XmlText
@@ -224,29 +229,83 @@ def _build_block_sequence(tokens: list[Any], start: int, end: int) -> tuple[list
     return children, finishers
 
 
+# GFM task-list marker: "[ ] "/"[x] "/"[X] " at the very start of a list
+# item's first paragraph. No dedicated task-list plugin is enabled on
+# `gfm_parser()` (see markdown_blocks.py), so this is recognized as plain
+# inline text and matched by hand rather than via a token type.
+_TASK_MARKER_RE = re.compile(r"^\[([ xX])\](?:\s+|$)")
+
+
+def _list_item_task_marker(tokens: list[Any], item_start: int, item_end: int) -> re.Match[str] | None:
+    """If a list item's first block is a paragraph beginning with a
+    checkbox marker, the match against that paragraph's leading text run;
+    else ``None``. ``item_start``/``item_end`` bracket the item's own
+    content tokens (i.e. *excluding* its `list_item_open`/`_close`)."""
+    if item_end - item_start < 3 or tokens[item_start].type != "paragraph_open":
+        return None
+    inline = tokens[item_start + 1]
+    if inline.type != "inline" or not inline.children:
+        return None
+    first_child = inline.children[0]
+    if first_child.type != "text":
+        return None
+    return _TASK_MARKER_RE.match(first_child.content)
+
+
 def _build_list(
     tokens: list[Any], start: int, end: int, *, extra_attrs: dict[str, str] | None = None
 ) -> tuple[XmlElement, list[Any]]:
     open_tok = tokens[start]
     ordered = open_tok.type == "ordered_list_open"
-    tag = "orderedList" if ordered else "bulletList"
-    attrs = dict(extra_attrs or {})
-    if ordered:
-        attrs["start"] = str(open_tok.attrs.get("start", 1))
 
-    items: list[XmlElement] = []
-    finishers: list[Any] = []
+    item_ranges: list[tuple[int, int]] = []
     i = start + 1
     while i < end - 1:  # exclude the outer list's own close token
         t = tokens[i]
         if t.type == "list_item_open":
             close_idx = _matching_close(tokens, i, "list_item_close")
-            item_children, item_finishers = _build_block_sequence(tokens, i + 1, close_idx)
-            items.append(XmlElement("listItem", {}, contents=item_children))
-            finishers.extend(item_finishers)
+            item_ranges.append((i + 1, close_idx))
             i = close_idx + 1
             continue
         raise NotImplementedError(f"unexpected token inside list: {t.type!r}")
+
+    # A bullet list becomes a task list only when *every* item carries a
+    # checkbox marker — Tiptap's taskList schema requires uniform taskItem
+    # children, so a mixed list (some items marked, some not) can't become
+    # one; it stays a plain bulletList with the literal "[ ] "/"[x] " text
+    # visible, same as today (non-regression for that edge case).
+    task_matches = (
+        None if ordered else [_list_item_task_marker(tokens, s, e) for s, e in item_ranges]
+    )
+    is_task_list = bool(item_ranges) and task_matches is not None and all(task_matches)
+
+    attrs = dict(extra_attrs or {})
+    if is_task_list:
+        tag = "taskList"
+    else:
+        tag = "orderedList" if ordered else "bulletList"
+        if ordered:
+            attrs["start"] = str(open_tok.attrs.get("start", 1))
+
+    items: list[XmlElement] = []
+    finishers: list[Any] = []
+    for idx, (item_start, item_end) in enumerate(item_ranges):
+        if is_task_list:
+            match = task_matches[idx]  # type: ignore[index]
+            assert match is not None
+            checked = match.group(1).lower() == "x"
+            first_text = tokens[item_start + 1].children[0]
+            first_text.content = first_text.content[match.end() :]
+            item_children, item_finishers = _build_block_sequence(tokens, item_start, item_end)
+            items.append(
+                XmlElement(
+                    "taskItem", {"checked": "true" if checked else "false"}, contents=item_children
+                )
+            )
+        else:
+            item_children, item_finishers = _build_block_sequence(tokens, item_start, item_end)
+            items.append(XmlElement("listItem", {}, contents=item_children))
+        finishers.extend(item_finishers)
 
     return XmlElement(tag, attrs, contents=items), finishers
 
@@ -394,7 +453,7 @@ def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
     for child in children:
         if child.tag == "paragraph":
             parts.append(_serialize_inline(child.children[0]))  # type: ignore[arg-type]
-        elif child.tag in ("bulletList", "orderedList"):
+        elif child.tag in ("bulletList", "orderedList", "taskList"):
             parts.append(_serialize_list(child).rstrip("\n"))
         elif child.tag == "blockquote":
             parts.append(_serialize_blockquote(child).rstrip("\n"))
@@ -418,11 +477,18 @@ def _serialize_list(node: XmlElement) -> str:
     which never calls this serializer at all.
     """
     ordered = node.tag == "orderedList"
+    is_task = node.tag == "taskList"
     attrs = dict(node.attributes)
     start = int(attrs.get("start", "1")) if ordered else 1
     lines: list[str] = []
     for idx, item in enumerate(node.children):
-        marker = f"{start + idx}. " if ordered else "- "
+        if is_task:
+            checked = dict(item.attributes).get("checked") == "true"
+            marker = f"- [{'x' if checked else ' '}] "
+        elif ordered:
+            marker = f"{start + idx}. "
+        else:
+            marker = "- "
         body = _serialize_block_sequence(list(item.children), " " * len(marker))  # type: ignore[arg-type]
         lines.append(marker + body)
     return "\n\n".join(lines) + "\n"
@@ -457,7 +523,7 @@ def serialize_block(node: XmlElement) -> str:
         return "#" * level + " " + _serialize_inline(node.children[0]) + ("\n" if trailing else "")  # type: ignore[arg-type]
     if node.tag == "paragraph":
         return _serialize_inline(node.children[0]) + ("\n" if trailing else "")  # type: ignore[arg-type]
-    if node.tag in ("bulletList", "orderedList"):
+    if node.tag in ("bulletList", "orderedList", "taskList"):
         text = _serialize_list(node)
         return text if trailing else text.rstrip("\n")
     if node.tag == "blockquote":

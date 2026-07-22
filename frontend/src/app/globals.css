@@ -359,6 +359,46 @@ body {
   border-top: 1px solid var(--border-01);
   margin: 1em 0;
 }
+/* Task lists (`toggleTaskList`/the "Checklist" slash command) — rendered by
+   TaskList/TaskItem (tiptapSchema.ts) as `ul[data-type="taskList"]` >
+   `li[data-type="taskItem"]` > `label` (checkbox) + `div` (content), not
+   plain `ul`/`li`, so they need their own rules instead of falling under
+   the `.ProseMirror ul`/`li` rules above (which would otherwise also add a
+   disc marker and list padding). */
+.ProseMirror ul[data-type="taskList"] {
+  margin: 0.6em 0;
+  padding-left: 0;
+  list-style: none;
+}
+.ProseMirror li[data-type="taskItem"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  margin: 0.25em 0;
+}
+.ProseMirror li[data-type="taskItem"] > label {
+  display: flex;
+  align-items: center;
+  margin-top: 0.35em;
+  user-select: none;
+}
+.ProseMirror li[data-type="taskItem"] > label > input[type="checkbox"] {
+  width: 1em;
+  height: 1em;
+  accent-color: var(--accent-01);
+  cursor: pointer;
+}
+.ProseMirror li[data-type="taskItem"] > div {
+  flex: 1;
+  min-width: 0;
+}
+.ProseMirror li[data-type="taskItem"] > div p {
+  margin: 0;
+}
+.ProseMirror li[data-type="taskItem"][data-checked="true"] > div {
+  color: var(--text-03);
+  text-decoration: line-through;
+}
 /* Real placeholder text (@tiptap/extension-placeholder): it stamps
    data-placeholder + is-empty on the specific empty node, not the whole
    editor, so this only ever shows on a genuinely empty doc/line. */
