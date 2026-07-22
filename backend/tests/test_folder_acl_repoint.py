@@ -129,6 +129,62 @@ def test_page_move_between_folders_leaves_folder_owner_untouched(tmp_db):
     assert acl.get_owner("dest") == u2
 
 
+def test_prefix_rewrite_escapes_like_wildcards(tmp_db):
+    # `_` is a LIKE single-char wildcard: moving `my_project` must not drag
+    # rows under the unrelated sibling `myXproject` (which `my_project/%`
+    # would match unescaped) — across owner, folder-ACL, and policy rows.
+    u1 = seed_user(uid="u1", email="u1@x.com")
+    u2 = seed_user(uid="u2", email="u2@x.com")
+    acl.set_owner("my_project/sub", u1)
+    acl.set_owner("myXproject/sub", u2)
+    acl.grant(
+        resource_kind="folder",
+        resource_path="myXproject/sub",
+        principal_kind="everyone",
+        principal_id=None,
+        permission="read",
+        granted_by_user_id=None,
+    )
+    update_policy.set_policy("myXproject/sub", ingestion_auto_update_disabled=True)
+
+    root = PathMove(old="my_project", new="moved_project")
+    acl.on_path_moved(
+        [PathMove(old="my_project/sub/a.md", new="moved_project/sub/a.md")],
+        root_move=root,
+    )
+    update_policy.on_path_moved(
+        [PathMove(old="my_project/sub/a.md", new="moved_project/sub/a.md")],
+        root_move=root,
+    )
+
+    assert acl.get_owner("moved_project/sub") == u1  # moved
+    assert acl.get_owner("myXproject/sub") == u2  # untouched
+    assert "myXproject/sub" in _folder_paths("myXproject/sub/b.md")
+    assert update_policy.get("myXproject/sub") is not None
+
+
+def test_stale_destination_owner_row_loses_to_the_move(tmp_db):
+    # `wiki_owners.path` is the primary key: a stale orphan row already at the
+    # destination must not abort the move — the moving row wins. Covers both
+    # the folder-prefix path and the per-file page path.
+    u_live = seed_user(uid="u_live", email="live@x.com")
+    u_stale = seed_user(uid="u_stale", email="stale@x.com")
+    acl.set_owner("src", u_live)
+    acl.set_owner("src/page.md", u_live)
+    acl.set_owner("dst", u_stale)  # stale orphans at the destination
+    acl.set_owner("dst/page.md", u_stale)
+
+    acl.on_path_moved(
+        [PathMove(old="src/page.md", new="dst/page.md")],
+        root_move=PathMove(old="src", new="dst"),
+    )
+
+    assert acl.get_owner("dst") == u_live
+    assert acl.get_owner("dst/page.md") == u_live
+    assert acl.get_owner("src") is None
+    assert acl.get_owner("src/page.md") is None
+
+
 def test_update_policy_folder_repoints_with_root_move(tmp_db):
     update_policy.set_policy("proj", ingestion_auto_update_disabled=True)
     # A nested-folder row exercises the LIKE "proj/%" branch of the rewrite.
