@@ -334,6 +334,8 @@ export interface CoeditorHandle {
   anchorLine: (offset: number) => { top: number; height: number } | null;
   /** The editor scroller's current scrollTop. */
   scrollTop: () => number;
+  /** The scroller's total scrollHeight, the doc-space lower bound. */
+  scrollHeight: () => number;
   /** Subscribe to scroll and geometry changes. Returns the unsubscriber. */
   subscribeLayout: (cb: () => void) => () => void;
 }
@@ -423,6 +425,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           };
         },
         scrollTop: () => view.current?.scrollDOM.scrollTop ?? 0,
+        scrollHeight: () => view.current?.scrollDOM.scrollHeight ?? 0,
         subscribeLayout: (cb: () => void) => {
           layoutSubs.current.add(cb);
           return () => {

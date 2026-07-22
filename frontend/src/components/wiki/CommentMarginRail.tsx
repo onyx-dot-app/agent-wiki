@@ -96,6 +96,16 @@ export function CommentMarginRail({
       next[key] = top;
       cursor = top + (heights.current[key] ?? DEFAULT_CARD_HEIGHT) + CARD_GAP;
     }
+    // Reverse clamp against the doc's scroll extent: a card stacked past the
+    // last reachable viewport bottom could never be scrolled into view, so
+    // bottom cards shift up (chaining the 4px gap) instead of clipping.
+    let bottom = editor.scrollHeight() - CARD_GAP;
+    for (let i = wanted.length - 1; i >= 0; i--) {
+      const key = wanted[i]!.key;
+      const h = heights.current[key] ?? DEFAULT_CARD_HEIGHT;
+      if (next[key]! + h > bottom) next[key] = Math.max(0, bottom - h);
+      bottom = next[key]! - CARD_GAP;
+    }
     setTops(next);
     setScrollTop(editor.scrollTop());
   }, [threads, draft, editorRef]);
