@@ -1298,6 +1298,10 @@ class WikiDocId(Base):
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
     deleted_at: Mapped[str | None] = mapped_column(Text)
+    # When a page is retired into a surviving page (merge), its tombstone row
+    # points at the survivor's id: the retired id keeps resolving — forwarded
+    # to the surviving document instead of dead-ending at a tombstone.
+    forwarded_to: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         CheckConstraint(

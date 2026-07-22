@@ -49,6 +49,7 @@ def _row_dict(row: WikiDocId) -> dict[str, str | None]:
         "kind": row.kind,
         "created_at": row.created_at,
         "deleted_at": row.deleted_at,
+        "forwarded_to": row.forwarded_to,
     }
 
 
@@ -57,6 +58,53 @@ def get(doc_id: str) -> dict[str, str | None] | None:
     with session() as s:
         row = s.get(WikiDocId, doc_id)
         return _row_dict(row) if row else None
+
+
+# Forward chains are one hop per retire; a long chain means repeated merges.
+# The cap only bounds pathological data (a cycle written by hand) — followers
+# stop and treat the last row reached as terminal.
+_MAX_FORWARD_HOPS = 10
+
+
+def set_forward(source_id: str, target_id: str) -> None:
+    """Point a retired id at the surviving document's id.
+
+    Called by the retire flow after the source page was trash-moved (its row
+    is already a tombstone). The row keeps resolving — via :func:`resolve` —
+    to the survivor instead of dead-ending at the tombstone. No-op if the
+    source row is missing; self-forwarding is refused.
+    """
+    if source_id == target_id:
+        raise ValueError("a document cannot forward to itself")
+    with session() as s:
+        row = s.get(WikiDocId, source_id)
+        if row is None:
+            log.warning("set_forward: unknown source id %s", source_id)
+            return
+        row.forwarded_to = target_id
+
+
+def resolve(doc_id: str) -> dict[str, str | None] | None:
+    """The row for ``doc_id`` with forwards followed to the terminal document.
+
+    A retired id resolves to the survivor it was merged into (transitively —
+    A retired into B then B into C resolves to C). Unknown id → ``None``; a
+    dangling or cyclic forward stops at the last reachable row.
+    """
+    row = get(doc_id)
+    if row is None:
+        return None
+    seen = {doc_id}
+    for _ in range(_MAX_FORWARD_HOPS):
+        fwd = row["forwarded_to"]
+        if fwd is None or fwd in seen:
+            return row
+        nxt = get(fwd)
+        if nxt is None:
+            return row  # dangling forward — the tombstone is the best answer
+        seen.add(fwd)
+        row = nxt
+    return row
 
 
 def id_for_path(path: str) -> str | None:
@@ -243,3 +291,5 @@ def on_restored(paths: list[str]) -> None:
             ).scalar_one_or_none()
             if row is not None:
                 row.deleted_at = None
+                # A restored document is live again; it no longer forwards.
+                row.forwarded_to = None
