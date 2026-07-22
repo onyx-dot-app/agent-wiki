@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import pytest
 
+from app.auth.users import AI_USER_ID
+from app.wiki import acl, doc_ids
 from app.wiki import git as wiki_git
 from app.wiki.automanage import executor
 from app.wiki.change_proposals import (
     ProposalCreatedVia,
     ProposalOp,
     approve,
+    auto_approve,
     create,
     get,
 )
-from tests._seed import seed_user
+from tests._seed import list_events, seed_user
 
 
 @pytest.fixture
@@ -51,6 +54,83 @@ def test_execute_trashes_empty_folder(repo):
     assert p is not None
     assert p["status"] == "applied"
     assert p["applied_sha"]
+
+
+def test_auto_applied_delete_records_activity_event(repo):
+    """An AI auto-applied cleanup (no human reviewer) emits an
+    ``automanage.applied`` event so admins/owners get an audit trail."""
+    # The AI system user (AI_USER_ID) is seeded by migration, so no seed here.
+    wiki_git.commit_file("area/gone/.gitkeep", "", "create gone folder", author=None)
+    pid = _proposal_for("area/gone")
+    assert auto_approve(pid, acting_user_id=AI_USER_ID)  # pending -> approved, no reviewer
+
+    executor.execute(pid)
+
+    assert get(pid)["status"] == "applied"  # type: ignore[index]
+    events = list_events(kind=executor.EVENT_AUTOMANAGE_APPLIED)
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["actor"] == AI_USER_ID
+    # Targets the folder itself: trashing a folder doesn't re-point its owner
+    # row (unlike a page), so the folder's owner still resolves here.
+    assert ev["target"] == "area/gone"
+    assert ev["payload"]["op"] == ProposalOp.DELETE_EMPTY_FOLDER.value
+    assert ev["payload"]["source_paths"] == ["area/gone"]
+    assert ev["payload"]["applied_sha"]
+    # A stable doc id captured before the trash-move; it still resolves (to the
+    # tombstone) after the folder is gone, so the UI can link to it.
+    folder_id = ev["payload"]["path_ids"]["area/gone"]
+    assert doc_ids.get(folder_id) is not None
+
+
+def test_trashed_folder_owner_still_resolves_at_original_path(repo):
+    """Pins the behavior the auto-apply event target depends on: trashing a
+    folder does NOT re-point its ``wiki_owners`` row (only a page's row moves),
+    so the folder's owner still resolves at the original path and can see the
+    ``automanage.applied`` event keyed there. If this ever changes, the event
+    visibility silently regresses — so guard it here."""
+    uid = seed_user(uid="owner1", email="owner@x.com")
+    wiki_git.commit_file("keep/gone/.gitkeep", "", "create", author=None)
+    acl.set_owner("keep/gone", uid)
+    pid = _proposal_for("keep/gone")
+    assert auto_approve(pid, acting_user_id=AI_USER_ID)
+
+    executor.execute(pid)
+
+    assert "keep/gone/.gitkeep" not in wiki_git.list_paths()  # trashed
+    assert acl.get_owner("keep/gone") == uid  # owner row stayed → event reaches them
+
+
+def test_no_event_when_apply_transition_loses_race(repo):
+    """If the approved→applied transition loses to a concurrent change (the
+    proposal was rejected/expired/stale meanwhile), `mark_applied` returns
+    False — and we must NOT emit `automanage.applied`, or the audit feed would
+    disagree with the persisted status. Drive `_finalize_applied` on a proposal
+    that isn't `approved` so the transition fails."""
+    wiki_git.commit_file("racy/.gitkeep", "", "c", author=None)
+    pid = _proposal_for("racy")  # still pending — never approved
+    p = get(pid)
+    assert p is not None
+    p["reviewed_by_user_id"] = None  # auto-apply shape
+
+    executor._finalize_applied(p, applied_sha="deadbeef", path_ids={"racy": "x"})
+
+    assert get(pid)["status"] == "pending"  # type: ignore[index] # transition didn't happen
+    assert list_events(kind=executor.EVENT_AUTOMANAGE_APPLIED) == []
+
+
+def test_human_approved_delete_records_no_event(repo):
+    """A human-approved apply is already visible to the approver (they watched
+    the review banner), so it must NOT emit the auto-applied audit event."""
+    uid = seed_user(uid="u1", email="u@x.com")
+    wiki_git.commit_file("byhand/.gitkeep", "", "create", author=None)
+    pid = _proposal_for("byhand")
+    assert approve(pid, user_id=uid)  # human reviewer set
+
+    executor.execute(pid)
+
+    assert get(pid)["status"] == "applied"  # type: ignore[index]
+    assert list_events(kind=executor.EVENT_AUTOMANAGE_APPLIED) == []
 
 
 def test_execute_skips_folder_that_is_no_longer_empty(repo):
