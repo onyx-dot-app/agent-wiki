@@ -407,6 +407,9 @@ body {
    (566:19918), so the textarea itself goes chromeless. The wrapper owns
    the border, focus ring, and padding. */
 .comment-input textarea {
+  /* block, not inline: the inline baseline gap would grow the field past
+     the mock's 36px total height */
+  display: block;
   border: none;
   background: transparent;
   box-shadow: none;

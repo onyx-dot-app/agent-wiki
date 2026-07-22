@@ -65,12 +65,14 @@ export function MentionTextarea({
 
   return (
     <div className={styles.wrap}>
+      {/* raw-ok: Opal has no multiline text entry (InputTypeIn is single-line) and the mention typeahead needs direct caret access */}
       <textarea
         ref={ref}
         className={styles.textarea}
         placeholder={placeholder}
         value={value}
         autoFocus={autoFocus}
+        rows={1}
         onChange={(e) => {
           onChange(e.target.value);
           sync(e.target.value, e.target.selectionStart);

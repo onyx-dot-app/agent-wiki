@@ -307,6 +307,7 @@ export function CommentInput({
   disabled,
   autoFocus,
   submitTooltip,
+  prominentSend,
 }: {
   placeholder: string;
   value: string;
@@ -316,10 +317,15 @@ export function CommentInput({
   disabled: boolean;
   autoFocus?: boolean;
   submitTooltip: string;
+  /** Composer sends are the filled 28px button (mock 566:19918). Replies
+   *  and edits get the 24px transparent arrow (mocks 778:262971, 670:266803). */
+  prominentSend?: boolean;
 }) {
   const canSend = !disabled && value.trim().length > 0;
   return (
-    <div className="comment-input relative w-full rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[6px] pr-9 focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]">
+    <div
+      className={`comment-input relative w-full rounded-(--radius-08) border border-(--border-02) bg-(--background-neutral-00) p-[5px] ${prominentSend ? "pr-9" : "pr-8"} focus-within:border-(--border-05) focus-within:shadow-[0_0_0_2px_var(--background-tint-04)]`}
+    >
       <MentionTextarea
         placeholder={placeholder}
         value={value}
@@ -328,14 +334,25 @@ export function CommentInput({
         onPickMention={onPickMention}
       />
       <span className="absolute right-1 bottom-1">
-        <Button
-          icon={SvgArrowUp}
-          variant="action"
-          size="md"
-          tooltip={submitTooltip}
-          disabled={!canSend}
-          onClick={() => void onSubmit()}
-        />
+        {prominentSend ? (
+          <Button
+            icon={SvgArrowUp}
+            variant="action"
+            size="md"
+            tooltip={submitTooltip}
+            disabled={!canSend}
+            onClick={() => void onSubmit()}
+          />
+        ) : (
+          <Button
+            icon={SvgArrowUp}
+            size="sm"
+            prominence="tertiary"
+            tooltip={submitTooltip}
+            disabled={!canSend}
+            onClick={() => void onSubmit()}
+          />
+        )}
       </span>
     </div>
   );
@@ -405,6 +422,7 @@ export function NewCommentComposer({
           disabled={disabled}
           autoFocus
           submitTooltip="Add comment"
+          prominentSend
           onSubmit={() =>
             onSubmit(tokenizeMentions(body.trim(), mentions.current))
           }
