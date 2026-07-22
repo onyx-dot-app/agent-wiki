@@ -719,11 +719,8 @@ export function FileView({ path }: FileViewProps) {
     if (next && commits === null) void refreshHistory();
   }
 
-  // Write the viewed version's body back as a new commit, then return to
-  // the live editor on it. `base_sha` is the server's merge base: passing
-  // HEAD makes the revert a diff applied onto the latest version, so a
-  // concurrent edit merges instead of being clobbered (a true conflict 409s
-  // into the error slot).
+  // Restore = new commit of the viewed body. base_sha HEAD makes it a diff
+  // onto the latest version, so concurrent edits merge (true conflicts 409).
   async function restoreVersion() {
     const sha = viewingSha;
     if (!sha || restoring) return;
@@ -1292,10 +1289,8 @@ export function FileView({ path }: FileViewProps) {
             size="sm"
             onClick={() => {
               setCommentDraft(selTool.draft);
-              // The margin composer exists only where the lane can show:
-              // desktop with the doc row wider than the lane's container
-              // query (920px). Everything else routes the draft into the
-              // panel so it can never strand invisibly.
+              // Match the lane's 920px container query at click time:
+              // anywhere the lane can't show, the draft routes to the panel.
               const rowWide = (docRowRef.current?.clientWidth ?? 0) >= 920;
               if (panelTab !== null || isMobile || !rowWide) openComments();
               setSelTool(null);

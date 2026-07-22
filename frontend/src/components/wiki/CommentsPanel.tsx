@@ -58,14 +58,10 @@ function threadHaystack(t: CommentThreadView): string {
 }
 
 /**
- * Comments tab with the mock's two modes. Anchored, the default (mock
- * 1855:281270): a transparent body where cards track their doc positions
- * beside the text, only the search row carries chrome. List (mock
- * 1856:285030): a bordered panel holding the search bar, thread cards
- * ordered by document position, a Resolved section, and the end-of-list
- * count. Threads expand in place (mock 778:262971) with a reply input
- * under the expanded card. Orphaned and resolved threads only appear in
- * list mode, which anchored users reach through the search-row toggle.
+ * Comments tab with the mock's two modes: anchored (default, mock 1855,
+ * cards track doc positions, only the search row is chromed) and list
+ * (mock 1856, bordered shell with a Resolved section), toggled from the
+ * search row. Orphaned and resolved threads appear only in list mode.
  * Mobile always lists, the sheet covers the doc the cards would track.
  */
 export function CommentsPanel({
@@ -206,10 +202,8 @@ export function CommentsPanel({
   );
 
   if (!listMode) {
-    // Anchored mode (mock 1855): transparent body, chromed search row, cards
-    // positioned inline with the doc through the shared anchor engine. The
-    // doc's scrollbar renders at the viewport edge here since the page hides
-    // the editor's native one (comments-anchored, globals.css).
+    // Anchored mode (mock 1855). The doc's scrollbar renders at the
+    // viewport edge, the page hides the native one (comments-anchored).
     return (
       <Section
         justifyContent="start"

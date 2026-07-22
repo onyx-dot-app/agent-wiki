@@ -366,10 +366,8 @@ export function UpdatePolicyPanel({
                 )}
 
                 {editing && (
-                  // Implicit save (the mock has no Save/Cancel controls):
-                  // blurring the editor persists a changed draft, collapsing
-                  // just hides it. A failed save reopens the editor with the
-                  // draft intact so the text can't be lost to a collapse.
+                  // Implicit save per the mock: blur persists, collapse only
+                  // hides. A failed save reopens with the draft intact.
                   <div className="instructions-editor">
                     <InputTextArea
                       rows={5}

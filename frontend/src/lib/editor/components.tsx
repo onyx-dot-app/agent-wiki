@@ -418,12 +418,9 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           const v = view.current;
           if (!v) return null;
           const pos = Math.max(0, Math.min(offset, v.state.doc.length));
-          // Line-block geometry is defined for the whole document, unlike
-          // coordsAtPos, which returns null outside the rendered viewport.
-          // documentTop folds the scroller's content padding into the
-          // scroller-space result. A block spans the whole wrapped
-          // paragraph, so the anchor is its FIRST visual line, approximated
-          // by the default line height.
+          // Line blocks are defined document-wide, unlike coordsAtPos.
+          // documentTop folds in the content padding. A block spans the
+          // wrapped paragraph, so clamp to its first visual line.
           const contentOffset =
             v.documentTop -
             v.scrollDOM.getBoundingClientRect().top +

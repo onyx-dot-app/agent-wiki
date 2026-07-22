@@ -5,11 +5,9 @@ import { useCallback, useEffect, useRef, type RefObject } from "react";
 import type { CoeditorHandle } from "@/lib/editor/components";
 
 /**
- * Doc scrollbar rendered at the viewport's right edge for the panel's
- * anchored mode, where the editor's native bar (hidden there) would sit at
- * the doc/panel boundary instead of the screen edge. Thumb syncs through
- * direct style writes on the editor's scroll notifications and drags with
- * pointer capture.
+ * Doc scrollbar at the viewport's right edge for the panel's anchored mode,
+ * whose hidden native bar would sit at the doc/panel boundary. Direct style
+ * writes on scroll notifications, pointer-capture drag.
  */
 export function EditorEdgeScrollbar({
   editorRef,

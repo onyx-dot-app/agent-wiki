@@ -176,11 +176,9 @@ export function CommentMessage({
     });
   };
 
-  // Hover swaps the timestamp+badge for the action cluster. Both live in the
-  // same grid cell (sized by the larger) and toggle visibility, never display,
-  // so the card's geometry is identical in both states and hover cannot shift
-  // the cards below. An open menu pins the cluster so it can't vanish under
-  // the popover.
+  // Timestamp+badge and the action cluster share one grid cell and toggle
+  // visibility, never display, so hover cannot change card geometry. An
+  // open menu pins the cluster visible under the popover.
   const actionCluster = (
     <span
       className={`col-start-1 row-start-1 flex items-center justify-self-end ${menuOpen ? "" : "invisible group-hover/comment:visible"}`}
@@ -466,11 +464,9 @@ function commentLink(path: string, rootId: string): Promise<string> {
   return shareableWikiUrl(path, `comment=${rootId}`);
 }
 
-/** One thread card (mock 1856 list rows, mock 669 anchored): collapsed
- *  shows the root message, active/expanded shows the whole conversation with
- *  a reply input below (mock 778:262971). Unread = white card with the blue
- *  marker, read sits on tint-01, resolved on tint-02. Anchored cards round
- *  at 12 instead of the list's 8. */
+/** One thread card (mocks 1856 list, 669 anchored): collapsed shows the
+ *  root, expanded the whole conversation with a reply input (mock 778).
+ *  State is fill + badge, anchored cards round at 12, list at 8. */
 export function ThreadCard({
   thread,
   path,

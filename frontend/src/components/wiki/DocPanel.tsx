@@ -27,11 +27,9 @@ interface DocPanelProps {
  * occupant at a time, so the tabbed surfaces render inside this panel
  * rather than as their own rail columns. */
 export function DocPanel({ tab, onTabChange, children }: DocPanelProps) {
-  // The incoming surface slides from the side the underline travels toward,
-  // so the strip's built-in indicator motion and the body read as one
-  // gesture. Adjust-during-render keeps the derived direction bound to the
-  // committed tree, which stays correct under StrictMode double renders and
-  // abandoned concurrent renders.
+  // The incoming surface slides from the side the underline travels toward.
+  // Adjust-during-render binds the direction to the committed tree, safe
+  // under StrictMode double renders and abandoned concurrent renders.
   const [lastTab, setLastTab] = useState(tab);
   const [fromLeft, setFromLeft] = useState(false);
   if (lastTab !== tab) {

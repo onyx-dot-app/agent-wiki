@@ -24,17 +24,11 @@ const DRAFT_KEY = "__draft__";
 const TITLE_ROW_CENTER = 18;
 
 /**
- * Anchored comment cards that track the doc text. Two hosts share it: the
- * floating margin lane (mocks 566:19918 / 669:264296 / 778:262971 /
- * 670:266803), a 360px overlay on the doc area's right edge whose width the
- * centered content reserves (.rail-reserved, globals.css), and the side
- * panel's anchored mode (mock 1855:281270) via `inPanel`, where the layer
- * fills the panel body instead. Cards are 336 wide. Each card anchors its
- * title-row center to its highlight line's center and is pushed down when
- * the card above collides, minimum 4px apart (mock 778 measures the
- * collision gap). The layer translates against the editor's internal
- * scroll so cards track the text. Resolved and orphaned threads never
- * anchor here, the list mode owns them.
+ * Anchored comment cards that track the doc text, hosted by the floating
+ * margin lane (mocks 566/669/778/670, content reserves its width via
+ * .rail-reserved) or the panel's anchored mode (mock 1855, `inPanel`).
+ * Cards center their title row on the highlight line and push down on
+ * collision. Resolved and orphaned threads belong to list mode.
  */
 export function CommentMarginRail({
   threads,
@@ -73,9 +67,8 @@ export function CommentMarginRail({
 }) {
   const [tops, setTops] = useState<Record<string, number>>({});
   const rootRef = useRef<HTMLDivElement | null>(null);
-  // The card layer translates against the editor scroll with a direct style
-  // write inside the scroll event, so cards repaint in the same frame as
-  // the text instead of a React render later. originStatic is the editor
+  // The layer translates via a direct style write inside the scroll event
+  // so cards repaint in the same frame as the text. originStatic is the
   // scroller's top relative to the rail, scroll-invariant.
   const layerRef = useRef<HTMLDivElement | null>(null);
   const originStatic = useRef(0);

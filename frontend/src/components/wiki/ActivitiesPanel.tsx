@@ -199,14 +199,10 @@ function UnreadBadge({ unread }: { unread: boolean }) {
   );
 }
 
-/** One feed row (mock Activity 37:131140 expanded / 37:133188 collapsed):
- *  scope tag + workflow glyph + avatars + time + badge over a body line
- *  that expands from a bold one-liner to the full detail paragraph.
- *
- *  Mounting an unread notification reads it (the panel being open is the
- *  seen signal, like the bell dropdown it replaces). The visible unread
- *  state stays put until the panel's close-time refresh so rows never
- *  jump sections mid-read. Clicking a linked notification navigates. */
+/** One feed row (mocks 37:131140 / 37:133188): meta line over a body that
+ *  expands from a one-liner to the detail paragraph. Mounting an unread
+ *  notification reads it (an open panel is the seen signal), but the row
+ *  keeps its section until the close-time refresh. Linked rows navigate. */
 function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
   const router = useRouter();
   const { chipScope, prefix, subject, body, destinationTypes } =
@@ -229,10 +225,8 @@ function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
   }, []);
 
   const toggle = () => setOverride(!open);
-  // The body line's primary action: follow the notification's link when it
-  // has one, otherwise expand or collapse in place. Craft notifications
-  // carry absolute external URLs, which the app router cannot navigate,
-  // so those open in a new tab.
+  // Follow the link when present, else expand in place. Absolute external
+  // URLs (craft notifications) open in a new tab, the router can't navigate them.
   const activate = () => {
     if (link) {
       if (/^https?:\/\//i.test(link)) window.open(link, "_blank", "noopener");
