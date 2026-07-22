@@ -1,17 +1,16 @@
 """Retire a page into a survivor — trash-move + identity forwarding.
 
 The retire keeps the standard trash lifecycle (restorable, drops from
-search/live) but redirects the page's *references* at the survivor: the doc
-id forwards and comment threads re-anchor.
+search/live, comments ride to trash with the page) and adds one delta: the
+doc id forwards to the survivor.
 """
 from __future__ import annotations
 
 import pytest
 
 from app.models.wiki import PathMove
-from app.wiki import comments, doc_ids, notify, retire, trash
+from app.wiki import doc_ids, notify, retire, trash
 from app.wiki import git as wiki_git
-from tests._seed import seed_user
 
 
 @pytest.fixture
@@ -74,27 +73,6 @@ def test_forward_cycle_stops_instead_of_looping(repo):
     resolved = doc_ids.resolve(a)
     assert resolved is not None
     assert resolved["id"] in {a, b}
-
-
-def test_comments_reanchor_to_the_survivor(repo):
-    uid = seed_user(uid="u1", email="u@x.com")
-    comments.create_thread(
-        doc_path="docs/dup.md",
-        body="does this apply to v2?",
-        author_user_id=uid,
-        anchor_sha=None,
-        start_offset=None,
-        end_offset=None,
-        quoted_text=None,
-        scope="page",
-    )
-
-    retire.retire_page("docs/dup.md", "docs/kept.md")
-
-    assert comments.list_for_doc("docs/dup.md") == []
-    moved = comments.list_for_doc("docs/kept.md")
-    assert len(moved) == 1
-    assert moved[0]["body"] == "does this apply to v2?"
 
 
 def test_restore_from_trash_clears_the_forward(repo):
