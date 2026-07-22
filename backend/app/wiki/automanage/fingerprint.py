@@ -1,7 +1,6 @@
 """Permission fingerprints — the audience identity detection partitions on.
 
-Detection never pairs pages across a visibility boundary (see ``design/Wiki
-Auto Management — Detection.md`` § Permission boundary): the *proposal alone*
+Detection never pairs pages across a visibility boundary: the *proposal alone*
 would leak a restricted page's existence and title to whoever can see the
 review surface. The mechanism is a **fingerprint** — a hash of a path's full
 permission profile — computed here and used two ways:
