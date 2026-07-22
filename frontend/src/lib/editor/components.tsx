@@ -156,6 +156,10 @@ const peersField = StateField.define<{
  * `--cm-gutter` custom property that the surrounding column sets (so the text
  * gutter tracks the page's responsive padding at every breakpoint), and it
  * uses a slim scrollbar with a transparent track. */
+// Either comment-highlight mark class, for selectors that must match both.
+const COMMENT_HIGHLIGHT =
+  ":is(.cm-comment-highlight, .cm-comment-highlight-active)";
+
 const baseTheme = EditorView.theme({
   "&": {
     height: "100%",
@@ -261,9 +265,9 @@ const baseTheme = EditorView.theme({
   ".cm-comment-highlight-active": {
     backgroundColor: "var(--highlight-active)",
   },
-  // Code marks nest inside highlight marks, and the block-display code span
-  // leaves the wrapping inline no fragments of its own to paint. The code
-  // mark paints the highlight color itself (layered over its tint).
+  // Code marks nest inside highlight marks with an opaque tint that would
+  // occlude the wrapping span's amber, so they repaint the highlight color
+  // over their own background.
   ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline":
     {
       backgroundImage:
@@ -274,6 +278,14 @@ const baseTheme = EditorView.theme({
       backgroundImage:
         "linear-gradient(var(--highlight-active), var(--highlight-active))",
     },
+  // A highlight mark splits the line's block-display code span, and each
+  // piece being a block would break the line at the comment's boundaries.
+  // Inline pieces keep the line whole and the amber hugging the text, the
+  // same as highlights on plain content.
+  [`.cm-line:has(${COMMENT_HIGHLIGHT}) .cm-md-code-block`]: {
+    display: "inline",
+    borderRadius: "0",
+  },
   ".cm-coedit-caret": {
     display: "inline-block",
     width: "0",
