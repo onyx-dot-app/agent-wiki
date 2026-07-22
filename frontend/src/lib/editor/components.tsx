@@ -253,15 +253,27 @@ const baseTheme = EditorView.theme({
     borderTop: "1px solid var(--border-02)",
     verticalAlign: "middle",
   },
-  // Mock highlight tints (670:266803): idle threads at 20% amber, the
-  // hovered/selected thread at Highlight/Active (60%). Opal has no 20%
-  // amber token, so it is mixed from the base neon-amber.
+  // Idle threads at 30% amber (the mock's 20% reads as unhighlighted on
+  // real content), the hovered/selected thread at Highlight/Active (60%).
   ".cm-comment-highlight": {
-    backgroundColor: "color-mix(in srgb, var(--neon-amber) 20%, transparent)",
+    backgroundColor: "var(--neon-amber-a30)",
   },
   ".cm-comment-highlight-active": {
     backgroundColor: "var(--highlight-active)",
   },
+  // Code marks nest inside highlight marks, and the block-display code span
+  // leaves the wrapping inline no fragments of its own to paint. The code
+  // mark paints the highlight color itself (layered over its tint).
+  ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline":
+    {
+      backgroundImage:
+        "linear-gradient(var(--neon-amber-a30), var(--neon-amber-a30))",
+    },
+  ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline":
+    {
+      backgroundImage:
+        "linear-gradient(var(--highlight-active), var(--highlight-active))",
+    },
   ".cm-coedit-caret": {
     display: "inline-block",
     width: "0",
@@ -395,11 +407,15 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const getCaretSeqRef = useRef(getCaretSeq);
     const reportDocRef = useRef(reportDoc);
     const onSelectionForCommentRef = useRef(onSelectionForComment);
+    const peersRef = useRef(peers);
+    const commentHighlightsRef = useRef(commentHighlights);
     onSelRef.current = onSelectionChange;
     onCaretClearedRef.current = onCaretCleared;
     getCaretSeqRef.current = getCaretSeq;
     reportDocRef.current = reportDoc;
     onSelectionForCommentRef.current = onSelectionForComment;
+    peersRef.current = peers;
+    commentHighlightsRef.current = commentHighlights;
 
     useImperativeHandle(
       ref,
@@ -668,6 +684,14 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       });
       v = new EditorView({ state, parent: host.current });
       view.current = v;
+      // A fresh state starts with empty peer/highlight fields, and the
+      // prop-tracking effects below only fire on identity change. Seed both.
+      v.dispatch({
+        effects: [
+          setPeersEffect.of(peersRef.current),
+          setCommentHighlightsEffect.of(commentHighlightsRef.current ?? []),
+        ],
+      });
       const onScroll = () => notifyLayout("scroll");
       v.scrollDOM.addEventListener("scroll", onScroll, { passive: true });
       onServerFrame(applyFrame);
