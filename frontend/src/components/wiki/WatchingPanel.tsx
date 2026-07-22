@@ -109,8 +109,9 @@ interface Props {
 export function WatchingPanel({ path, onNew, onEdit }: Props) {
   const { triggers, error, refresh } = useTriggers();
   const { configs } = useDestinationConfigs();
-  const { data: firesData } = useSWR("/triggers/fires?per_trigger=1", () =>
-    getTriggerFires({ perTrigger: 1 }),
+  const { data: firesData, error: firesError } = useSWR(
+    "/triggers/fires?per_trigger=1",
+    () => getTriggerFires({ perTrigger: 1 }),
   );
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -178,6 +179,7 @@ export function WatchingPanel({ path, onNew, onEdit }: Props) {
       configs={configs}
       muted={muted}
       fire={latestFire.get(t.id) ?? null}
+      firesUnavailable={!firesData && !!firesError}
       busy={busyId === t.id}
       detailsOpen={openIds.has(t.id)}
       onToggleDetails={() =>
@@ -268,6 +270,8 @@ interface WatcherCardProps {
   /** Inactive cards sit flush on the panel tint instead of raised white. */
   muted: boolean;
   fire: TriggerFire | null;
+  /** The fires fetch failed, so a missing fire is unknown, not "none". */
+  firesUnavailable: boolean;
   busy: boolean;
   detailsOpen: boolean;
   onToggleDetails: () => void;
@@ -281,6 +285,7 @@ function WatcherCard({
   configs,
   muted,
   fire,
+  firesUnavailable,
   busy,
   detailsOpen,
   onToggleDetails,
@@ -383,7 +388,7 @@ function WatcherCard({
           {!fire && (
             <span className="flex items-center gap-[2px] p-[2px]">
               <span className="px-[2px] text-[12px] leading-4 whitespace-nowrap text-(--text-03)">
-                No runs yet
+                {firesUnavailable ? "Run history unavailable" : "No runs yet"}
               </span>
               <span className="flex size-5 items-center justify-center">
                 <span className="size-2 rounded-full border border-(--border-02)" />
