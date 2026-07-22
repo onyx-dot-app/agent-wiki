@@ -1,8 +1,8 @@
 """The detector seam — the *technique* axis of Wiki Auto Management detection.
 
-Detection varies on two orthogonal axes (see the design page ``design/Wiki
-Auto Management — Detection.md``): a **trigger** decides *when* detection runs
-and over *what scope*; a **technique** decides *what pattern* to look for.
+Detection varies on two orthogonal axes: a **trigger** decides *when*
+detection runs and over *what scope*; a **technique** decides *what pattern*
+to look for.
 This module is the technique axis: a ``Detector`` is a pure function
 ``scope → proposals`` that a trigger-built ``Scope`` is fed through.
 

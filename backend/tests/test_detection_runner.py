@@ -13,7 +13,7 @@ from app.auth.users import AI_USER_ID
 from app.tasks.queues import automanage_offline_queue
 from app.wiki import git as wiki_git
 from app.wiki import update_policy
-from app.wiki.automanage import runner, runs
+from app.wiki.automanage import fingerprint, runner, runs
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.automanage.detectors.empty_folder import _EmptyFolderDetector
 from app.wiki.change_proposals import (
@@ -178,3 +178,15 @@ def test_non_auto_approvable_draft_stays_pending_in_ai_scope(repo, monkeypatch):
     pending = list_by_status(ProposalStatus.PENDING)
     assert [p["source_paths"][0] for p in pending] == ["archive"]
     assert "archive/.gitkeep" in wiki_git.list_paths()  # untouched
+
+
+def test_emitted_proposal_carries_acl_fingerprint(repo):
+    """The runner stamps the audience snapshot at emit time, so staleness
+    re-checks can notice a permission change before execution."""
+    runner.run_sweep(triggered_by_user_id=None)
+
+    for p in list_by_status(ProposalStatus.PENDING):
+        expected = fingerprint.combined_fingerprint(
+            p["source_paths"] + p["target_paths"]
+        )
+        assert p["acl_fingerprint_before"] == expected

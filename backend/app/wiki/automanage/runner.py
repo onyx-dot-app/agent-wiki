@@ -29,7 +29,7 @@ from typing import Any
 from app.auth.users import AI_USER_ID
 from app.wiki import git
 from app.wiki import update_policy
-from app.wiki.automanage import executor, review, runs, settings
+from app.wiki.automanage import executor, fingerprint, review, runs, settings
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
@@ -160,6 +160,12 @@ def run_detection(
                     created_via=created_via,
                     proposed_bodies=draft.proposed_bodies,
                     run_id=run_id,
+                    # Audience snapshot at emit time — staleness re-checks can
+                    # notice a permission change (e.g. group-membership drift)
+                    # between proposal and execution.
+                    acl_fingerprint_before=fingerprint.combined_fingerprint(
+                        draft_paths
+                    ),
                 )
                 taken.add(draft.dedupe_key)
                 emitted += 1
