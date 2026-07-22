@@ -21,6 +21,7 @@ import {
 import { Section } from "@onyx-ai/opal/layouts";
 
 import { MentionTextarea } from "@/components/wiki/MentionTextarea";
+import { toast } from "@/hooks/useToast";
 import {
   detokenizeMentions,
   parseBody,
@@ -83,7 +84,9 @@ function CommentBody({
   return (
     <p
       className={`text-sm leading-5 font-medium ${
-        emphasized ? "text-(--text-04)" : "text-(--text-03)"
+        emphasized
+          ? "text-(--text-04)"
+          : "text-(--text-03) group-hover/comment:text-(--text-04)"
       }`}
     >
       {parseBody(body).map((seg, i) =>
@@ -154,7 +157,12 @@ export function CommentMessage({
 
   const copyLink = () => {
     void actions.onCopyLink().then((ok) => {
-      if (!ok) return;
+      // A silent failure reads as success (the user pastes stale clipboard),
+      // so the miss must surface.
+      if (!ok) {
+        toast.error("Couldn't copy the link.");
+        return;
+      }
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     });
@@ -191,7 +199,9 @@ export function CommentMessage({
               />
             </span>
           </Popover.Trigger>
-          <Popover.Content width="fit" align="end">
+          {/* The mock opens the menu above the card, right-aligned
+              (670:266803 measures it at top -144 / right -4). */}
+          <Popover.Content width="fit" side="top" align="end" sideOffset={4}>
             <Popover.Menu>
               <LineItemButton
                 title={copied ? "Link copied" : "Copy Link"}
@@ -235,7 +245,7 @@ export function CommentMessage({
   );
 
   return (
-    <div className="group/comment flex w-full flex-col">
+    <div className="flex w-full flex-col">
       <Section
         flexDirection="row"
         justifyContent="start"
@@ -363,13 +373,11 @@ export function CommentInput({
  *  mock (no card fill or shadow). */
 export function NewCommentComposer({
   selfName,
-  quotedText,
   disabled,
   onSubmit,
   onCancel,
 }: {
   selfName: string;
-  quotedText: string;
   disabled: boolean;
   onSubmit: (body: string) => void;
   onCancel: () => void;
@@ -406,11 +414,6 @@ export function NewCommentComposer({
           onClick={onCancel}
         />
       </Section>
-      {/* The selected text the comment anchors to. The doc highlight is the
-          primary cue, this echoes it inside the composer. */}
-      <div className="truncate px-2 text-[12px] leading-4 text-(--text-03)">
-        {quotedText}
-      </div>
       <div className="px-1 pb-1">
         <CommentInput
           placeholder="Add a comment…"

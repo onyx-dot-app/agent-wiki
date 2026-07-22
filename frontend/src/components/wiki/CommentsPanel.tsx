@@ -39,6 +39,8 @@ interface Props {
   /** Selected thread (its span gets the orange highlight in the doc). */
   activeId: string | null;
   onActivate: (id: string | null) => void;
+  /** Hovered thread, so the page can light its doc highlight (mock 1855). */
+  onHoverThread?: (id: string | null) => void;
   onDraftConsumed: () => void;
   onClose: () => void;
   fullHeight?: boolean;
@@ -83,6 +85,7 @@ export function CommentsPanel({
   onChanged,
   activeId,
   onActivate,
+  onHoverThread,
   onDraftConsumed,
   onClose: _onClose,
   fullHeight: _fullHeight,
@@ -155,6 +158,7 @@ export function CommentsPanel({
       busy={busy}
       active={t.root.id === activeId}
       onActivate={() => onActivate(t.root.id)}
+      onHoverChange={(h) => onHoverThread?.(h ? t.root.id : null)}
       run={run}
     />
   );
@@ -166,7 +170,7 @@ export function CommentsPanel({
       height="auto"
       gap={0}
       padding={0.25}
-      className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-00)"
+      className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01)"
     >
       <Section
         flexDirection="row"
@@ -182,7 +186,6 @@ export function CommentsPanel({
           placeholder="Search comments…"
         />
       </Section>
-      <Divider />
       <Section
         justifyContent="start"
         alignItems="stretch"
@@ -199,7 +202,6 @@ export function CommentsPanel({
         {draft && (
           <NewCommentComposer
             selfName={user?.name || user?.email || "You"}
-            quotedText={draft.quotedText}
             disabled={busy || !headSha}
             onCancel={onDraftConsumed}
             onSubmit={async (body) => {
@@ -275,6 +277,7 @@ export function ThreadCard({
   active,
   anchored,
   onActivate,
+  onHoverChange,
   run,
 }: {
   thread: CommentThreadView;
@@ -285,6 +288,7 @@ export function ThreadCard({
   active: boolean;
   anchored?: boolean;
   onActivate: () => void;
+  onHoverChange?: (hovering: boolean) => void;
   run: (fn: () => Promise<unknown>) => Promise<boolean>;
 }) {
   const { root } = thread;
@@ -336,13 +340,15 @@ export function ThreadCard({
         role="button"
         tabIndex={0}
         onClick={onActivate}
+        onMouseEnter={() => onHoverChange?.(true)}
+        onMouseLeave={() => onHoverChange?.(false)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && e.target === e.currentTarget) {
             e.preventDefault();
             onActivate();
           }
         }}
-        className={`flex w-full cursor-pointer flex-col overflow-clip text-left ${anchored ? "rounded-(--radius-12)" : "rounded-(--radius-08)"} ${bg} ${shadow}`}
+        className={`group/comment flex w-full cursor-pointer flex-col overflow-clip text-left ${anchored ? "rounded-(--radius-12)" : "rounded-(--radius-08)"} ${bg} ${shadow}`}
       >
         {root.status === "orphaned" && (
           <div className="px-2 pt-1 text-[12px] leading-4 text-(--text-03)">

@@ -15,17 +15,21 @@ import type { CommentThreadView } from "@/types";
 import { ThreadCard } from "./CommentsPanel";
 import { NewCommentComposer } from "./commentCards";
 
-const CARD_GAP = 8;
+const CARD_GAP = 4;
 const DEFAULT_CARD_HEIGHT = 64;
 const DRAFT_KEY = "__draft__";
+// Card top such that the 32px title row's center sits on the anchor line's
+// center (mocks 566:19918 / 669:264296 measure the two centers equal).
+const TITLE_ROW_CENTER = 20;
 
 /**
- * Floating margin comments (mocks 566:19918 / 669:264296 / 778:262971 /
- * 670:266803): cards sit in the doc's right whitespace, tops aligned to
- * their anchors' line blocks and pushed down when they would overlap. The
- * layer translates against the editor's internal scroll so cards track the
- * text. Anchor-collision stacking is unspecified in the mocks, so the rule
- * here is the Google-Docs one: document order, minimum 8px apart.
+ * Margin comments column (mocks 566:19918 / 669:264296 / 778:262971 /
+ * 670:266803): a real 360px lane beside the doc, cards 336 wide with 12px
+ * side insets. Each card anchors its title-row center to its highlight
+ * line's center and is pushed down when the card above collides, minimum
+ * 4px apart (mock 778 measures the collision gap). The layer translates
+ * against the editor's internal scroll so cards track the text. Resolved
+ * threads never float here, the panel owns them.
  */
 export function CommentMarginRail({
   threads,
@@ -33,6 +37,7 @@ export function CommentMarginRail({
   editorRef,
   activeId,
   onActivate,
+  onHoverThread,
   selfName,
   path,
   selfId,
@@ -47,6 +52,7 @@ export function CommentMarginRail({
   editorRef: RefObject<CoeditorHandle | null>;
   activeId: string | null;
   onActivate: (id: string | null) => void;
+  onHoverThread?: (id: string | null) => void;
   selfName: string;
   path: string;
   selfId: string | undefined;
@@ -66,14 +72,21 @@ export function CommentMarginRail({
     if (!editor) return;
     const wanted: Array<{ key: string; want: number }> = [];
     for (const t of threads) {
-      if (t.root.status === "orphaned" || t.root.start_offset === null)
-        continue;
-      const want = editor.anchorTop(t.root.start_offset);
-      if (want !== null) wanted.push({ key: t.root.id, want });
+      if (t.root.status !== "open" || t.root.start_offset === null) continue;
+      const line = editor.anchorLine(t.root.start_offset);
+      if (line)
+        wanted.push({
+          key: t.root.id,
+          want: line.top + line.height / 2 - TITLE_ROW_CENTER,
+        });
     }
     if (draft) {
-      const want = editor.anchorTop(draft.startOffset);
-      if (want !== null) wanted.push({ key: DRAFT_KEY, want });
+      const line = editor.anchorLine(draft.startOffset);
+      if (line)
+        wanted.push({
+          key: DRAFT_KEY,
+          want: line.top + line.height / 2 - TITLE_ROW_CENTER,
+        });
     }
     wanted.sort((a, b) => a.want - b.want);
     let cursor = 0;
@@ -95,7 +108,9 @@ export function CommentMarginRail({
       cancelAnimationFrame(rafId.current);
       rafId.current = requestAnimationFrame(relayout);
     };
-    scheduled();
+    // Synchronous first pass: rAF is throttled in occluded tabs, and the
+    // initial card layout must not wait for a frame.
+    relayout();
     const unsub = editor.subscribeLayout(scheduled);
     return () => {
       unsub();
@@ -104,28 +119,38 @@ export function CommentMarginRail({
   }, [relayout, editorRef]);
 
   // Card sizes feed the stacking pass (expanding a thread pushes the rest
-  // down). One observer per mounted card.
+  // down). One observer per mounted card, ref callbacks cached per key so
+  // per-frame re-renders don't detach and reattach observers.
   const observers = useRef<Map<string, ResizeObserver>>(new Map());
-  const measureRef = useCallback(
-    (key: string) => (el: HTMLDivElement | null) => {
-      const prev = observers.current.get(key);
-      if (prev) {
-        prev.disconnect();
-        observers.current.delete(key);
-      }
-      if (!el) return;
-      const ro = new ResizeObserver(() => {
-        const h = el.getBoundingClientRect().height;
-        if (Math.abs((heights.current[key] ?? 0) - h) > 1) {
-          heights.current[key] = h;
-          relayout();
-        }
-      });
-      ro.observe(el);
-      observers.current.set(key, ro);
-    },
-    [relayout],
+  const refCallbacks = useRef<Map<string, (el: HTMLDivElement | null) => void>>(
+    new Map(),
   );
+  const relayoutRef = useRef(relayout);
+  relayoutRef.current = relayout;
+  const measureRef = useCallback((key: string) => {
+    let cb = refCallbacks.current.get(key);
+    if (!cb) {
+      cb = (el: HTMLDivElement | null) => {
+        const prev = observers.current.get(key);
+        if (prev) {
+          prev.disconnect();
+          observers.current.delete(key);
+        }
+        if (!el) return;
+        const ro = new ResizeObserver(() => {
+          const h = el.getBoundingClientRect().height;
+          if (Math.abs((heights.current[key] ?? 0) - h) > 1) {
+            heights.current[key] = h;
+            relayoutRef.current();
+          }
+        });
+        ro.observe(el);
+        observers.current.set(key, ro);
+      };
+      refCallbacks.current.set(key, cb);
+    }
+    return cb;
+  }, []);
   useEffect(() => {
     const map = observers.current;
     return () => {
@@ -137,18 +162,17 @@ export function CommentMarginRail({
   const anchoredThreads = threads.filter((t) => tops[t.root.id] !== undefined);
 
   return (
-    <div className="pointer-events-none absolute inset-y-0 right-3 z-[5] w-[336px] overflow-hidden">
+    <div className="relative w-[360px] shrink-0 overflow-clip @max-[920px]:hidden">
       {draft && tops[DRAFT_KEY] !== undefined && (
         <div
           ref={measureRef(DRAFT_KEY)}
-          className="pointer-events-auto absolute inset-x-0 top-0"
+          className="absolute inset-x-3 top-0"
           style={{
             transform: `translateY(${tops[DRAFT_KEY]! - scrollTop}px)`,
           }}
         >
           <NewCommentComposer
             selfName={selfName}
-            quotedText={draft.quotedText}
             disabled={busy}
             onSubmit={onSubmitDraft}
             onCancel={onCancelDraft}
@@ -159,7 +183,7 @@ export function CommentMarginRail({
         <div
           key={t.root.id}
           ref={measureRef(t.root.id)}
-          className="pointer-events-auto absolute inset-x-0 top-0"
+          className="absolute inset-x-3 top-0"
           style={{
             transform: `translateY(${tops[t.root.id]! - scrollTop}px)`,
           }}
@@ -173,6 +197,7 @@ export function CommentMarginRail({
             active={t.root.id === activeId}
             anchored
             onActivate={() => onActivate(t.root.id)}
+            onHoverChange={(h) => onHoverThread?.(h ? t.root.id : null)}
             run={run}
           />
         </div>

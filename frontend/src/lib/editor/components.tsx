@@ -253,11 +253,14 @@ const baseTheme = EditorView.theme({
     borderTop: "1px solid var(--border-02)",
     verticalAlign: "middle",
   },
+  // Mock highlight tints (670:266803): idle threads at 20% amber, the
+  // hovered/selected thread at Highlight/Active (60%). Opal has no 20%
+  // amber token, so it is mixed from the base neon-amber.
   ".cm-comment-highlight": {
-    backgroundColor: "var(--status-warning-01)",
+    backgroundColor: "color-mix(in srgb, var(--neon-amber) 20%, transparent)",
   },
   ".cm-comment-highlight-active": {
-    backgroundColor: "var(--status-warning-02)",
+    backgroundColor: "var(--highlight-active)",
   },
   ".cm-coedit-caret": {
     display: "inline-block",
@@ -325,10 +328,10 @@ interface CoeditorProps {
  * links). */
 export interface CoeditorHandle {
   scrollToOffset: (offset: number) => void;
-  /** Doc-space top (px from the document's start) of the line holding a
-   * character offset. Stable for off-screen positions (line-block geometry,
-   * not rendered coordinates). */
-  anchorTop: (offset: number) => number | null;
+  /** Doc-space top and height (px from the document's start) of the line
+   * block holding a character offset. Stable for off-screen positions
+   * (line-block geometry, not rendered coordinates). */
+  anchorLine: (offset: number) => { top: number; height: number } | null;
   /** The editor scroller's current scrollTop. */
   scrollTop: () => number;
   /** Subscribe to scroll and geometry changes. Returns the unsubscriber. */
@@ -399,19 +402,25 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
             ),
           });
         },
-        anchorTop: (offset: number) => {
+        anchorLine: (offset: number) => {
           const v = view.current;
           if (!v) return null;
           const pos = Math.max(0, Math.min(offset, v.state.doc.length));
           // Line-block geometry is defined for the whole document, unlike
           // coordsAtPos, which returns null outside the rendered viewport.
           // documentTop folds the scroller's content padding into the
-          // scroller-space result.
+          // scroller-space result. A block spans the whole wrapped
+          // paragraph, so the anchor is its FIRST visual line, approximated
+          // by the default line height.
           const contentOffset =
             v.documentTop -
             v.scrollDOM.getBoundingClientRect().top +
             v.scrollDOM.scrollTop;
-          return v.lineBlockAt(pos).top + contentOffset;
+          const block = v.lineBlockAt(pos);
+          return {
+            top: block.top + contentOffset,
+            height: Math.min(block.height, v.defaultLineHeight),
+          };
         },
         scrollTop: () => view.current?.scrollDOM.scrollTop ?? 0,
         subscribeLayout: (cb: () => void) => {

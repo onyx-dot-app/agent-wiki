@@ -259,6 +259,9 @@ export function FileView({ path }: FileViewProps) {
   // (unlike the old DOM/react-markdown approach) update synchronously with
   // state — no retry loop or MutationObserver needed. Cleared while viewing
   // an old commit (DiffView, no live editor).
+  // Hovering a card lights its doc highlight like selection does (mock
+  // 1855 annotation: "Hover highlight - match the hovered comment").
+  const [hoveredCommentId, setHoveredCommentId] = useState<string | null>(null);
   const commentHighlights = useMemo<CommentHighlightTarget[]>(() => {
     if (viewingVersion) return [];
     return commentThreads
@@ -275,9 +278,18 @@ export function FileView({ path }: FileViewProps) {
       .map((r) => ({
         startOffset: r.start_offset as number,
         endOffset: r.end_offset as number,
-        active: r.id === activeCommentId,
+        active: r.id === activeCommentId || r.id === hoveredCommentId,
       }));
-  }, [commentThreads, viewingVersion, activeCommentId]);
+  }, [commentThreads, viewingVersion, activeCommentId, hoveredCommentId]);
+
+  // Only open threads with a live anchor can float in the margin.
+  const marginThreadCount = useMemo(
+    () =>
+      commentThreads.filter(
+        (t) => t.root.status === "open" && t.root.start_offset !== null,
+      ).length,
+    [commentThreads],
+  );
 
   // Renaming is its own action now (Opal's `Content editable` on DocTitle),
   // decoupled from the coedit session/checkpointing — no more "rename at
@@ -925,6 +937,7 @@ export function FileView({ path }: FileViewProps) {
               onChanged={refreshComments}
               activeId={activeCommentId}
               onActivate={activateComment}
+              onHoverThread={setHoveredCommentId}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={closePanel}
               fullHeight
@@ -1117,37 +1130,41 @@ export function FileView({ path }: FileViewProps) {
                 })()}
               </div>
               {coedit.session ? (
-                <div className="relative flex min-h-0 flex-1 flex-col">
-                  <Coeditor
-                    key={coedit.session.id}
-                    ref={coeditorRef}
-                    session={coedit.session}
-                    peers={coedit.peers}
-                    onSelectionChange={coedit.reportSelection}
-                    onCaretCleared={coedit.reportCaretCleared}
-                    getCaretSeq={coedit.getCaretSeq}
-                    onServerFrame={coedit.onServerFrame}
-                    reportDoc={coedit.reportDoc}
-                    registerFlush={coedit.registerFlush}
-                    registerSetDoc={coedit.registerSetDoc}
-                    registerCatchUp={coedit.registerCatchUp}
-                    readOnly={!canWrite}
-                    commentHighlights={commentHighlights}
-                    onSelectionForComment={handleSelectionForComment}
-                    placeholder="Start typing, or pick a template above…"
-                  />
-                  {/* Floating margin comments while no side panel is open
-                    (mocks 566/669): cards track their anchors in the doc's
-                    right whitespace. */}
+                <div className="@container flex min-h-0 flex-1 flex-row">
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <Coeditor
+                      key={coedit.session.id}
+                      ref={coeditorRef}
+                      session={coedit.session}
+                      peers={coedit.peers}
+                      onSelectionChange={coedit.reportSelection}
+                      onCaretCleared={coedit.reportCaretCleared}
+                      getCaretSeq={coedit.getCaretSeq}
+                      onServerFrame={coedit.onServerFrame}
+                      reportDoc={coedit.reportDoc}
+                      registerFlush={coedit.registerFlush}
+                      registerSetDoc={coedit.registerSetDoc}
+                      registerCatchUp={coedit.registerCatchUp}
+                      readOnly={!canWrite}
+                      commentHighlights={commentHighlights}
+                      onSelectionForComment={handleSelectionForComment}
+                      placeholder="Start typing, or pick a template above…"
+                    />
+                  </div>
+                  {/* Margin comments while no side panel is open (mocks
+                    566/669): a real 360px column beside the doc, never an
+                    overlay. The container query hides the lane when the row
+                    is too narrow to keep a readable doc column. */}
                   {panelTab === null &&
                     !isMobile &&
-                    (commentThreads.length > 0 || commentDraft) && (
+                    (marginThreadCount > 0 || commentDraft) && (
                       <CommentMarginRail
                         threads={commentThreads}
                         draft={commentDraft}
                         editorRef={coeditorRef}
                         activeId={activeCommentId}
                         onActivate={activateComment}
+                        onHoverThread={setHoveredCommentId}
                         selfName={user?.name || user?.email || "You"}
                         path={path}
                         selfId={user?.id}
@@ -1242,7 +1259,9 @@ export function FileView({ path }: FileViewProps) {
             size="sm"
             onClick={() => {
               setCommentDraft(selTool.draft);
-              if (panelTab !== null) openComments();
+              // The margin composer only exists on desktop, so mobile (and
+              // any open panel) routes the draft into the panel.
+              if (panelTab !== null || isMobile) openComments();
               setSelTool(null);
               window.getSelection()?.removeAllRanges();
             }}
