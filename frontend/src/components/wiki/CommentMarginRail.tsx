@@ -245,6 +245,7 @@ export function CommentMarginRail({
               active={t.root.id === activeId}
               anchored
               onActivate={() => onActivate(t.root.id)}
+              onDeactivate={() => onActivate(null)}
               onHoverChange={(h) => onHoverThread?.(h ? t.root.id : null)}
               run={run}
             />

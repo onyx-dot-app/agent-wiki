@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   Divider,
@@ -479,6 +479,7 @@ export function ThreadCard({
   active,
   anchored,
   onActivate,
+  onDeactivate,
   onHoverChange,
   run,
 }: {
@@ -490,6 +491,8 @@ export function ThreadCard({
   active: boolean;
   anchored?: boolean;
   onActivate: () => void;
+  /** Called when a pointer lands outside the expanded card, collapsing it. */
+  onDeactivate?: () => void;
   onHoverChange?: (hovering: boolean) => void;
   run: (fn: () => Promise<unknown>) => Promise<boolean>;
 }) {
@@ -501,6 +504,24 @@ export function ThreadCard({
 
   const [replyBody, setReplyBody] = useState("");
   const [replyMentions] = useState<Record<string, string>>({});
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Clicking off an expanded card collapses it. Portaled popover content
+  // (the More menu) counts as inside, a menu click must not collapse the
+  // card it acts on.
+  useEffect(() => {
+    if (!active || !onDeactivate) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element | null;
+      if (!t) return;
+      if (rootRef.current?.contains(t)) return;
+      if (t.closest?.("[data-radix-popper-content-wrapper]")) return;
+      onDeactivate();
+    };
+    // Capture phase: the editor stops pointer events from bubbling.
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [active, onDeactivate]);
 
   // Active threads expand to the full conversation, collapsed cards show
   // only the root message (mock 1856 stacks both forms).
@@ -536,7 +557,11 @@ export function ThreadCard({
   });
 
   return (
-    <div className="flex w-full shrink-0 flex-col" data-thread-id={root.id}>
+    <div
+      ref={rootRef}
+      className="flex w-full shrink-0 flex-col"
+      data-thread-id={root.id}
+    >
       {/* raw-ok: the card is a selectable region hosting nested buttons and inputs, which a native button cannot contain */}
       <div
         role="button"
