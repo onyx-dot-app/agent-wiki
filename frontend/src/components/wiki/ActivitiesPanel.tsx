@@ -230,10 +230,14 @@ function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
 
   const toggle = () => setOverride(!open);
   // The body line's primary action: follow the notification's link when it
-  // has one, otherwise expand or collapse in place.
+  // has one, otherwise expand or collapse in place. Craft notifications
+  // carry absolute external URLs, which the app router cannot navigate,
+  // so those open in a new tab.
   const activate = () => {
-    if (link) router.push(link);
-    else if (body) toggle();
+    if (link) {
+      if (/^https?:\/\//i.test(link)) window.open(link, "_blank", "noopener");
+      else router.push(link);
+    } else if (body) toggle();
   };
 
   const oneLiner = prefix ? `${prefix} **${subject}**` : `**${subject}**`;
