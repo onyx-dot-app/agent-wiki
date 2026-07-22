@@ -113,8 +113,8 @@ def fingerprints_for_paths(paths: list[str]) -> dict[str, str]:
 
 def combined_fingerprint(paths: list[str]) -> str:
     """One fingerprint over a proposal's whole path-set — what
-    ``acl_fingerprint_before`` stores. Deterministic in path order; equal iff
-    every path's own profile is equal."""
+    ``acl_fingerprint_before`` stores. Deterministic regardless of path order;
+    equal iff every path's own profile is equal."""
     fps = fingerprints_for_paths(paths)
     payload = "\n".join(f"{p}={fps[p]}" for p in sorted(fps))
     return hashlib.sha256(payload.encode()).hexdigest()
