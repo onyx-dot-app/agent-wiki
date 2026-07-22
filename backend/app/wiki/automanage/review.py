@@ -18,9 +18,31 @@ import time (tasks import automanage, not the reverse).
 """
 from __future__ import annotations
 
+import logging
+
 from app.wiki import change_proposals
-from app.wiki.automanage import settings
+from app.wiki.automanage import executor, settings
 from app.wiki.change_proposals import ProposalStatus
+
+log = logging.getLogger(__name__)
+
+
+def _executable(proposal_id: int) -> bool:
+    """Refuse to approve what the executor can't apply. A detector shipping
+    ahead of its op's executor (or a bad manual insert) must dead-end here —
+    an approved-but-unexecutable proposal would either crash the execute task
+    or, on the AI path, auto-approve something that can never run."""
+    p = change_proposals.get(proposal_id)
+    if p is None:
+        return False
+    if p["op"] not in executor.SUPPORTED_OPS:
+        log.error(
+            "review: proposal %s has op %r with no executor — refusing approval",
+            proposal_id,
+            p["op"],
+        )
+        return False
+    return True
 
 
 def _dispatch_human_execution(proposal_id: int) -> None:
@@ -60,6 +82,8 @@ def approve(proposal_id: int, *, user_id: str) -> bool:
     if Auto Organize is disabled (proposals are frozen while off)."""
     if not settings.is_enabled():
         return False
+    if not _executable(proposal_id):
+        return False
     transitioned = change_proposals.approve(proposal_id, user_id=user_id)
     if not _actionable_after(proposal_id, transitioned):
         return False
@@ -74,6 +98,8 @@ def auto_approve(proposal_id: int, *, acting_user_id: str) -> bool:
     already-approved proposal. Returns False if missing or terminal, or if Auto
     Organize is disabled."""
     if not settings.is_enabled():
+        return False
+    if not _executable(proposal_id):
         return False
     transitioned = change_proposals.auto_approve(
         proposal_id, acting_user_id=acting_user_id

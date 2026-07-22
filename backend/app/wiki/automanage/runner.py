@@ -29,7 +29,7 @@ from typing import Any
 from app.auth.users import AI_USER_ID
 from app.wiki import git
 from app.wiki import update_policy
-from app.wiki.automanage import review, runs, settings
+from app.wiki.automanage import executor, review, runs, settings
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
@@ -121,6 +121,20 @@ def run_detection(
             mgmt = _resolve_management(drafts)
             for draft in drafts:
                 draft_paths = draft.source_paths + draft.target_paths
+                # Emit safety: never persist a draft the executor can't apply —
+                # a detector landing ahead of its op's executor degrades to this
+                # loud skip instead of filling the queue with proposals that
+                # dead-end at approval (review re-checks the same set).
+                if draft.op.value not in executor.SUPPORTED_OPS:
+                    log.error(
+                        "detection run %s: detector %s emitted op %r with no "
+                        "executor — draft skipped (%s)",
+                        run_id,
+                        detector.name,
+                        draft.op.value,
+                        draft.dedupe_key,
+                    )
+                    continue
                 if draft.dedupe_key in taken:
                     continue
                 if any(mgmt.get(p) is False for p in draft_paths):
@@ -151,8 +165,15 @@ def run_detection(
                 emitted += 1
                 # Whole operation inside an AI-managed scope → auto-apply as the
                 # AI system user (no human queue). Otherwise it waits for a
-                # human in the pending-cleanups queue.
-                if draft_paths and all(mgmt.get(p) is True for p in draft_paths):
+                # human in the pending-cleanups queue. The detector must also
+                # consent (`auto_approvable`) — probabilistic detectors emit
+                # False so their proposals always get a human even in
+                # AI-managed scopes.
+                if (
+                    draft.auto_approvable
+                    and draft_paths
+                    and all(mgmt.get(p) is True for p in draft_paths)
+                ):
                     if not review.auto_approve(
                         proposal["id"], acting_user_id=AI_USER_ID
                     ):

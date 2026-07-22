@@ -37,6 +37,13 @@ log = logging.getLogger(__name__)
 # admins the space-wide audit trail — keep new automanage kinds under it.
 EVENT_AUTOMANAGE_APPLIED = "automanage.applied"
 
+# The ops this executor can actually apply. The emit/approve layers gate on
+# this set (runner refuses to persist a draft, review refuses to approve), so
+# a detector landing ahead of its executor degrades to a loud skip instead of
+# an approved-but-unexecutable proposal. Grow it in the same PR as each new
+# `_execute_*` branch.
+SUPPORTED_OPS: frozenset[str] = frozenset({ProposalOp.DELETE_EMPTY_FOLDER.value})
+
 
 def _git_author(user_id: str | None) -> str | None:
     """`name <email>` for commit attribution, or None for the default identity."""

@@ -14,8 +14,14 @@ from app.tasks.queues import automanage_offline_queue
 from app.wiki import git as wiki_git
 from app.wiki import update_policy
 from app.wiki.automanage import runner, runs
+from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.automanage.detectors.empty_folder import _EmptyFolderDetector
-from app.wiki.change_proposals import ProposalStatus, list_by_status, reject
+from app.wiki.change_proposals import (
+    ProposalOp,
+    ProposalStatus,
+    list_by_status,
+    reject,
+)
 from tests._seed import seed_user
 
 
@@ -114,3 +120,61 @@ def test_unset_scope_stays_pending(repo):
     assert list_by_status(ProposalStatus.APPLIED) == []
     pending = {p["source_paths"][0] for p in list_by_status(ProposalStatus.PENDING)}
     assert pending == {"archive", "old"}
+
+
+class _StubDetector:
+    """Emits fixed drafts — for exercising runner gates without a real detector."""
+
+    name = "stub"
+
+    def __init__(self, drafts: list[ProposalDraft]) -> None:
+        self._drafts = drafts
+
+    def applicable(self, trigger: TriggerKind) -> bool:
+        return True
+
+    def detect(self, scope: Scope) -> list[ProposalDraft]:
+        return list(self._drafts)
+
+
+def test_unsupported_op_draft_is_skipped_not_persisted(repo, monkeypatch):
+    """Emit safety: a detector landing ahead of its op's executor degrades to a
+    loud skip — the draft never becomes a proposal row."""
+    draft = ProposalDraft(
+        op=ProposalOp.MERGE,  # valid ledger op, but no executor yet
+        source_paths=["team/plan.md"],
+        target_paths=["old/notes.md"],
+        summary="Merge plan into notes",
+    )
+    monkeypatch.setattr(runner, "DETECTORS", [_StubDetector([draft])])
+
+    result = runner.run_sweep(triggered_by_user_id=None)
+
+    assert result["proposals_emitted"] == 0
+    assert list_by_status(ProposalStatus.PENDING) == []
+    run = runs.get(result["run_id"])
+    assert run is not None
+    assert run["status"] == "completed"  # skip, not a run failure
+
+
+def test_non_auto_approvable_draft_stays_pending_in_ai_scope(repo, monkeypatch):
+    """A detector that hasn't earned auto-apply (auto_approvable=False) gets a
+    human even when the whole scope is AI-managed."""
+    update_policy.set_policy("archive", ai_management_allowed=True)
+    draft = ProposalDraft(
+        op=ProposalOp.DELETE_EMPTY_FOLDER,
+        source_paths=["archive"],
+        target_paths=[],
+        summary="Delete empty folder “archive”",
+        auto_approvable=False,
+    )
+    monkeypatch.setattr(runner, "DETECTORS", [_StubDetector([draft])])
+
+    with automanage_offline_queue.immediate_mode():
+        result = runner.run_sweep(triggered_by_user_id=None)
+
+    assert result["proposals_emitted"] == 1
+    assert list_by_status(ProposalStatus.APPLIED) == []  # no auto-apply
+    pending = list_by_status(ProposalStatus.PENDING)
+    assert [p["source_paths"][0] for p in pending] == ["archive"]
+    assert "archive/.gitkeep" in wiki_git.list_paths()  # untouched
