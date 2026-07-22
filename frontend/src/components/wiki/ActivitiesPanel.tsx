@@ -74,6 +74,18 @@ function isAutoOrganizeEvent(event: AppEvent): boolean {
   return event.kind.startsWith("automanage.");
 }
 
+/** Whose avatar a row wears: the AI for Auto Organize, the commenter for
+ * comments, otherwise the viewer whose feed this is. */
+function rowActor(item: FeedItem, viewerName: string): string {
+  if (item.kind !== "event") return viewerName;
+  if (isAutoOrganizeEvent(item.event)) return "Wiki AI";
+  if (item.event.kind === "page.comment") {
+    const p = item.event.payload as ActivityPayload;
+    return p.author_display ?? item.event.actor_display ?? viewerName;
+  }
+  return viewerName;
+}
+
 /** Chip location for an event. Auto Organize events point the chip at the
  * *parent* folder: the acted-on path itself no longer exists (it was cleaned
  * up), and the row's subject already names the item. */
@@ -134,9 +146,10 @@ function eventTexts(event: AppEvent): RowTexts {
         .split("/")
         .pop()
         ?.replace(/\.md$/, "") || "a page";
+    const who = p.author_display ?? event.actor_display;
     return {
       chipScope,
-      prefix: `${p.author_display ?? "Someone"} commented on`,
+      prefix: who ? `${who} commented on` : "Comment on",
       subject: page,
       body: p.body || null,
       destinationTypes: [],
@@ -301,11 +314,7 @@ function FeedRow({ item, ownerName }: { item: FeedItem; ownerName: string }) {
             )}
           </span>
           <AvatarCluster
-            ownerName={
-              item.kind === "event" && isAutoOrganizeEvent(item.event)
-                ? "Wiki AI"
-                : ownerName
-            }
+            ownerName={rowActor(item, ownerName)}
             destinationTypes={destinationTypes}
           />
         </Section>
