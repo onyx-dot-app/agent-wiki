@@ -72,11 +72,15 @@ def set_forward(source_id: str, target_id: str) -> None:
     Called by the retire flow after the source page was trash-moved (its row
     is already a tombstone). The row keeps resolving — via :func:`resolve` —
     to the survivor instead of dead-ending at the tombstone. No-op if the
-    source row is missing; self-forwarding is refused.
+    source row is missing; self-forwarding and an unknown target are refused
+    (a dangling forward would silently defeat the retirement — the id would
+    resolve to the tombstone instead of the survivor).
     """
     if source_id == target_id:
         raise ValueError("a document cannot forward to itself")
     with session() as s:
+        if s.get(WikiDocId, target_id) is None:
+            raise ValueError(f"unknown forward target id: {target_id!r}")
         row = s.get(WikiDocId, source_id)
         if row is None:
             log.warning("set_forward: unknown source id %s", source_id)
@@ -91,20 +95,24 @@ def resolve(doc_id: str) -> dict[str, str | None] | None:
     A retired into B then B into C resolves to C). Unknown id → ``None``; a
     dangling or cyclic forward stops at the last reachable row.
     """
-    row = get(doc_id)
-    if row is None:
-        return None
-    seen = {doc_id}
-    for _ in range(_MAX_FORWARD_HOPS):
-        fwd = row["forwarded_to"]
-        if fwd is None or fwd in seen:
-            return row
-        nxt = get(fwd)
-        if nxt is None:
-            return row  # dangling forward — the tombstone is the best answer
-        seen.add(fwd)
-        row = nxt
-    return row
+    # One session for the whole walk — a chain must not cost a connection
+    # checkout per hop.
+    with session() as s:
+        row = s.get(WikiDocId, doc_id)
+        if row is None:
+            return None
+        seen = {doc_id}
+        for _ in range(_MAX_FORWARD_HOPS):
+            fwd = row.forwarded_to
+            if fwd is None or fwd in seen:
+                return _row_dict(row)
+            nxt = s.get(WikiDocId, fwd)
+            if nxt is None:
+                # Dangling forward — the tombstone is the best answer.
+                return _row_dict(row)
+            seen.add(fwd)
+            row = nxt
+        return _row_dict(row)
 
 
 def id_for_path(path: str) -> str | None:

@@ -35,6 +35,13 @@ def retire_page(source: str, target: str, *, author: str | None = None) -> str:
     id forwards to the target's id — ``doc_ids.resolve`` (and the id-URL
     endpoint) lands on the survivor. Restoring the source from Trash undoes
     the forward (the id re-binds to the restored page).
+
+    Not transactional across the git commit and the two DB effects: a crash
+    after the trash-move but before ``set_forward`` leaves an ordinary
+    tombstone (old links get the tombstone instead of the survivor — degraded,
+    not corrupt), restorable from Trash like any delete. A retry of the whole
+    retire fails validation (the source is no longer tracked); recovery is
+    restore-then-retire or a manual ``set_forward``.
     """
     src = safe_rel_path(source)
     tgt = safe_rel_path(target)

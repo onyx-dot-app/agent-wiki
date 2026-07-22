@@ -104,6 +104,14 @@ def test_restore_from_trash_clears_the_forward(repo):
     assert resolved["forwarded_to"] is None
 
 
+def test_set_forward_refuses_unknown_target(repo):
+    # A dangling forward would silently defeat the retirement (the id would
+    # resolve to the tombstone, not the survivor) — refused up front.
+    a = doc_ids.get_or_mint("docs/dup.md")
+    with pytest.raises(ValueError, match="unknown forward target"):
+        doc_ids.set_forward(a, "no-such-id")
+
+
 def test_retire_validations(repo):
     with pytest.raises(ValueError, match="same page"):
         retire.retire_page("docs/dup.md", "docs/dup.md")
