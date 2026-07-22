@@ -35,11 +35,12 @@
  * only the wire attribute itself is a string.
  */
 
+import { mergeAttributes } from "@tiptap/core";
 import StockBlockquote from "@tiptap/extension-blockquote";
 import StockBold from "@tiptap/extension-bold";
 import StockCode from "@tiptap/extension-code";
 import StockCodeBlock from "@tiptap/extension-code-block";
-import StockHeading from "@tiptap/extension-heading";
+import StockHeading, { type Level } from "@tiptap/extension-heading";
 import StockItalic from "@tiptap/extension-italic";
 import StockLink from "@tiptap/extension-link";
 import {
@@ -68,7 +69,7 @@ export const Heading = StockHeading.extend({
       ...this.parent?.(),
       // Overrides the stock numeric `level` attr — the wire value is
       // always a string (see module docstring), coerced back to a number
-      // at the two boundaries that need it.
+      // at the boundaries that need it.
       level: {
         default: 1,
         parseHTML: (element: HTMLElement) => {
@@ -80,6 +81,69 @@ export const Heading = StockHeading.extend({
         }),
       },
       ...blockAttrs,
+    };
+  },
+  // Stock Heading's own renderHTML does
+  // `this.options.levels.includes(node.attrs.level)` — a strict-equality
+  // array check that's always false once `level` arrives as a string (any
+  // node synced through Yjs, i.e. every heading on a real page — verified
+  // the hard way: every heading rendered as h1 regardless of its actual
+  // level). Re-declared here with an explicit `Number(...)` coercion
+  // before that check; everything else matches the stock implementation.
+  renderHTML({ node, HTMLAttributes }) {
+    const level = (Number(node.attrs.level) || 1) as Level;
+    const validLevel = this.options.levels.includes(level)
+      ? level
+      : this.options.levels[0];
+    return [
+      `h${validLevel}`,
+      mergeAttributes(this.options.HTMLAttributes, HTMLAttributes),
+      0,
+    ];
+  },
+  // Same coercion for the two level-gated commands (setNode(), used by
+  // SlashMenu, already passes a numeric level and isn't affected, but
+  // anything calling toggleHeading/setHeading directly with a
+  // string level — e.g. a future toolbar button reading node.attrs.level
+  // back out — would hit the same bug addCommands()'s stock
+  // `this.options.levels.includes(attributes.level)` has).
+  addCommands() {
+    const parentCommands = this.parent?.();
+    return {
+      ...parentCommands,
+      setHeading:
+        (attributes: { level: number | string }) =>
+        ({
+          commands,
+        }: {
+          commands: {
+            setNode: (name: string, attrs?: Record<string, unknown>) => boolean;
+          };
+        }) => {
+          const level = (Number(attributes.level) || 1) as Level;
+          if (!this.options.levels.includes(level)) return false;
+          return commands.setNode(this.name, { ...attributes, level });
+        },
+      toggleHeading:
+        (attributes: { level: number | string }) =>
+        ({
+          commands,
+        }: {
+          commands: {
+            toggleNode: (
+              name: string,
+              other: string,
+              attrs?: Record<string, unknown>,
+            ) => boolean;
+          };
+        }) => {
+          const level = (Number(attributes.level) || 1) as Level;
+          if (!this.options.levels.includes(level)) return false;
+          return commands.toggleNode(this.name, "paragraph", {
+            ...attributes,
+            level,
+          });
+        },
     };
   },
 });
@@ -110,6 +174,22 @@ export const OrderedList = StockOrderedList.extend({
       },
       ...blockAttrs,
     };
+  },
+  // Same string/number gap as Heading above: stock renderHTML's
+  // `start !== 1` check runs against the string our own attr renderHTML
+  // just produced, so it's always true and every list gets a redundant
+  // (harmless but noisy) `start="1"` HTML attribute. Re-declared with a
+  // Number(...) coercion before the check.
+  renderHTML({ HTMLAttributes }) {
+    const { start, type, ...attributesWithoutType } = HTMLAttributes;
+    const attrs: Record<string, unknown> = mergeAttributes(
+      this.options.HTMLAttributes,
+      attributesWithoutType,
+    );
+    const startNum = Number(start) || 1;
+    if (startNum !== 1) attrs.start = startNum;
+    if (type && type !== "1") attrs.type = type;
+    return ["ol", attrs, 0];
   },
 });
 
