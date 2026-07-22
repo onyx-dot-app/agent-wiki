@@ -355,6 +355,9 @@ export function CommentInput({
         autoFocus={autoFocus}
         onChange={onChange}
         onPickMention={onPickMention}
+        onSubmit={() => {
+          if (canSend) void onSubmit();
+        }}
       />
       <span className="absolute right-1 bottom-1">
         {prominentSend ? (

@@ -7,20 +7,23 @@ import { displayName, initials, useUserSearch } from "@/lib/users";
 
 import styles from "./MentionTextarea.module.css";
 
-/** A comment textarea with a Google-Docs-style `@` people typeahead. The parent
- * owns the (display-text) value; on each pick we report `("@Name", userId)` so
- * the parent can tokenize the body on submit. Submit itself stays with the
- * parent's buttons — we only intercept keys while the menu is open. */
+/** A comment textarea with a Google-Docs-style `@` people typeahead. The
+ * parent owns the (display-text) value. On each pick we report
+ * `("@Name", userId)` so the parent can tokenize the body on submit.
+ * Enter submits (chat semantics), Shift+Enter inserts a newline, and while
+ * the menu is open Enter picks the highlighted mention instead. */
 export function MentionTextarea({
   value,
   onChange,
   onPickMention,
+  onSubmit,
   placeholder,
   autoFocus,
 }: {
   value: string;
   onChange: (v: string) => void;
   onPickMention: (display: string, userId: string) => void;
+  onSubmit: () => void;
   placeholder?: string;
   autoFocus?: boolean;
 }) {
@@ -83,7 +86,13 @@ export function MentionTextarea({
           if (!open) sync(value, e.currentTarget.selectionStart);
         }}
         onKeyDown={(e) => {
-          if (!open) return;
+          if (!open) {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              onSubmit();
+            }
+            return;
+          }
           if (e.key === "ArrowDown") {
             e.preventDefault();
             setSel((s) => (s + 1) % users.length);
