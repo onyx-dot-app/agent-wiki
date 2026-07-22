@@ -14,6 +14,7 @@ import {
   SvgActivity,
   SvgChevronDown,
   SvgChevronUp,
+  SvgSparkle,
   SvgWorkflow,
   SvgX,
 } from "@onyx-ai/opal/icons";
@@ -41,6 +42,11 @@ interface ActivityPayload {
   count?: number;
   threshold?: number;
   cap?: number;
+  // automanage.applied (Auto Organize auto-applied cleanup)
+  op?: string;
+  source_paths?: string[];
+  target_paths?: string[];
+  applied_sha?: string;
 }
 
 // Searchable text for an event regardless of kind.
@@ -51,12 +57,18 @@ function eventHaystack(event: AppEvent): string {
     p.change_kind,
     p.reason,
     p.message,
+    ...(p.source_paths ?? []),
     event.target,
     event.kind,
   ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
+}
+
+/** Auto Organize events are acted by the AI system user, not the viewer. */
+function isAutoOrganizeEvent(event: AppEvent): boolean {
+  return event.kind.startsWith("automanage.");
 }
 
 function destinationName(type: string | undefined): string {
@@ -99,6 +111,22 @@ function eventTexts(event: AppEvent): {
       body: p.message || p.reason || null,
     };
   }
+  if (event.kind === "automanage.applied") {
+    const path = p.source_paths?.[0] ?? event.target ?? "a page";
+    if (p.op === "delete_empty_folder") {
+      return {
+        prefix: "Auto Organize removed empty folder",
+        subject: path,
+        body: "Applied automatically in an AI-managed scope. The folder was moved to Trash and can be restored.",
+      };
+    }
+    // Future ops (merge, move, …) render legibly before this list learns them.
+    return {
+      prefix: "Auto Organize applied a cleanup on",
+      subject: path,
+      body: "Applied automatically in an AI-managed scope.",
+    };
+  }
   // Unknown kinds stay legible instead of masquerading as trigger fires,
   // and their payload stays inspectable when it has no message/reason.
   const payloadKeys = Object.keys(event.payload ?? {});
@@ -138,12 +166,14 @@ export function ActivityRow({
           <span className="flex size-4 items-center justify-center p-[2px]">
             {event.kind === "trigger.fire" ? (
               <SvgWorkflow className="size-3 text-(--text-03)" />
+            ) : isAutoOrganizeEvent(event) ? (
+              <SvgSparkle className="size-3 text-(--text-03)" />
             ) : (
               <SvgActivity className="size-3 text-(--text-03)" />
             )}
           </span>
           <AvatarCluster
-            ownerName={ownerName}
+            ownerName={isAutoOrganizeEvent(event) ? "Wiki AI" : ownerName}
             destinationTypes={destinationTypes}
           />
         </div>
