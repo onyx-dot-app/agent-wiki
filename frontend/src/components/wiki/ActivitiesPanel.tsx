@@ -71,6 +71,18 @@ function isAutoOrganizeEvent(event: AppEvent): boolean {
   return event.kind.startsWith("automanage.");
 }
 
+/** Chip location for an event. Auto Organize events point the chip at the
+ * *parent* folder: the acted-on path itself no longer exists (it was cleaned
+ * up), and the row's subject already names the item. */
+function eventScope(event: AppEvent): string {
+  const p = event.payload as ActivityPayload;
+  if (isAutoOrganizeEvent(event)) {
+    const path = p.source_paths?.[0] ?? event.target ?? "";
+    return path.split("/").slice(0, -1).join("/");
+  }
+  return p.doc_path ?? event.target ?? "";
+}
+
 function destinationName(type: string | undefined): string {
   if (type === "slack") return "Slack";
   if (type === "email") return "Email";
@@ -112,19 +124,19 @@ function eventTexts(event: AppEvent): {
     };
   }
   if (event.kind === "automanage.applied") {
-    const path = p.source_paths?.[0] ?? event.target ?? "a page";
-    if (p.op === "delete_empty_folder") {
-      return {
-        prefix: "Auto Organize removed empty folder",
-        subject: path,
-        body: "Applied automatically in an AI-managed scope. The folder was moved to Trash and can be restored.",
-      };
-    }
-    // Future ops (merge, move, …) render legibly before this list learns them.
+    // One glanceable line: the chip shows where, the Wiki AI avatar shows who,
+    // and the subject is just the item's name (a full path would render the
+    // chip's path twice and wrap). No body — deletes are restorable from
+    // Trash like any other delete.
+    const path = p.source_paths?.[0] ?? event.target ?? "";
+    const name = path.split("/").pop() || "a page";
     return {
-      prefix: "Auto Organize applied a cleanup on",
-      subject: path,
-      body: "Applied automatically in an AI-managed scope.",
+      prefix:
+        p.op === "delete_empty_folder"
+          ? "Removed empty folder"
+          : "Auto-organized",
+      subject: name,
+      body: null,
     };
   }
   // Unknown kinds stay legible instead of masquerading as trigger fires,
@@ -162,7 +174,7 @@ export function ActivityRow({
     <div className="flex w-full flex-col px-3 py-1">
       <div className="flex w-full items-center p-[2px]">
         <div className="flex min-w-0 flex-1 items-center gap-1 p-[2px]">
-          <ScopeChip scope={p.doc_path ?? event.target ?? ""} />
+          <ScopeChip scope={eventScope(event)} />
           <span className="flex size-4 items-center justify-center p-[2px]">
             {event.kind === "trigger.fire" ? (
               <SvgWorkflow className="size-3 text-(--text-03)" />
