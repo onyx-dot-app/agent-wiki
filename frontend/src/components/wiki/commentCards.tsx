@@ -160,11 +160,14 @@ export function CommentMessage({
     });
   };
 
-  // Hover swaps the timestamp+badge for the action cluster. An open menu
-  // pins the cluster so it can't vanish under the popover.
+  // Hover swaps the timestamp+badge for the action cluster. Both live in the
+  // same grid cell (sized by the larger) and toggle visibility, never display,
+  // so the card's geometry is identical in both states and hover cannot shift
+  // the cards below. An open menu pins the cluster so it can't vanish under
+  // the popover.
   const actionCluster = (
     <span
-      className={`items-center ${menuOpen ? "flex" : "hidden group-hover/comment:flex"}`}
+      className={`col-start-1 row-start-1 flex items-center justify-self-end ${menuOpen ? "" : "invisible group-hover/comment:visible"}`}
     >
       {isRoot && (
         <Button
@@ -247,21 +250,23 @@ export function CommentMessage({
             {authorName}
           </Text>
         </span>
-        <span
-          className={`items-center gap-1 p-[2px] ${menuOpen ? "hidden" : "flex group-hover/comment:hidden"}`}
-        >
+        <span className="grid shrink-0">
           <span
-            className={`px-[2px] text-[12px] leading-4 whitespace-nowrap ${
-              unread && !resolved
-                ? "text-(--status-text-info-05)"
-                : "text-(--text-03)"
-            }`}
+            className={`col-start-1 row-start-1 flex items-center gap-1 justify-self-end p-[2px] ${menuOpen ? "invisible" : "group-hover/comment:invisible"}`}
           >
-            {relativeTime(comment.created_at, "long")}
+            <span
+              className={`px-[2px] text-[12px] leading-4 whitespace-nowrap ${
+                unread && !resolved
+                  ? "text-(--status-text-info-05)"
+                  : "text-(--text-03)"
+              }`}
+            >
+              {relativeTime(comment.created_at, "long")}
+            </span>
+            <CommentBadge unread={unread} resolved={resolved} />
           </span>
-          <CommentBadge unread={unread} resolved={resolved} />
+          {actionCluster}
         </span>
-        {actionCluster}
       </Section>
       <div className="px-2 pt-1 pb-2">
         {editing ? (
