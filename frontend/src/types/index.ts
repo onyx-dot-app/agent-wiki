@@ -85,7 +85,7 @@ export interface SourceRef extends WriteProvenance {
 }
 
 /** A live span of a page mapped to the document it was ingested from.
- * Offsets are character positions into the page's current body. */
+ * Offsets are character positions into the page's body at HEAD. */
 export interface SourceSpan extends WriteProvenance {
   start_offset: number;
   end_offset: number;

@@ -23,14 +23,15 @@ import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
 import { apiFetch } from "@/lib/api";
 import { relativeTime } from "@/lib/time";
-import type { SourceRef, SourceSpan } from "@/types";
+import type { SourceRef, SourceSpan, WriteProvenance } from "@/types";
 
 import { PanelSearchField } from "./PanelSearch";
 
 interface Props {
   path: string;
   headSha: string | null;
-  /** Committed page body, sliced by span offsets for per-source snippets. */
+  /** Page body as served by /wiki/file. It can drift from HEAD (live
+   * co-edit buffer, stale load), so span-offset snippets are best-effort. */
   body: string;
   sources: SourceRef[];
 }
@@ -65,11 +66,7 @@ function sourceTypeLabel(type: string): string {
 
 /** Identity used to join a source to its spans, mirroring the backend's
  * dedupe key (document id, falling back to url or title). */
-function sourceKey(s: {
-  source_document_id: string | null;
-  source_url: string | null;
-  source_title: string | null;
-}): string {
+function sourceKey(s: WriteProvenance): string {
   return s.source_document_id ?? s.source_url ?? s.source_title ?? "";
 }
 
