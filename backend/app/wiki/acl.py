@@ -774,6 +774,25 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
                     )
                 )
             )
+            # Owner rows for the renamed folder and folders nested under it.
+            # Page owner rows were already re-keyed by the per-file loop, so
+            # the prefix match only finds folder rows (a page row still at an
+            # old path would be an orphan the rewrite also heals).
+            s.execute(
+                update(WikiOwner)
+                .where(WikiOwner.path == old_prefix)
+                .values(path=new_prefix)
+            )
+            s.execute(
+                update(WikiOwner)
+                .where(WikiOwner.path.like(old_prefix + "/%"))
+                .values(
+                    path=func.concat(
+                        new_prefix,
+                        func.substr(WikiOwner.path, len(old_prefix) + 1),
+                    )
+                )
+            )
 
 
 # Re-export for type-stability of ``Document`` import — keeps pyright happy

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from app.models.wiki import PathMove
 from app.wiki import acl, update_policy
+from tests._seed import seed_user
 
 
 def _folder_paths(path: str) -> set[str]:
@@ -90,6 +91,42 @@ def test_page_move_between_folders_leaves_policy_rows_untouched(tmp_db):
     )
     assert update_policy.get("scratch") is not None
     assert update_policy.get("dest") is not None
+
+
+def test_folder_owner_repoints_with_root_move(tmp_db):
+    # Owner rows on the folder itself and a nested folder follow the rename,
+    # matching the ACL/policy behavior (previously only *page* owner rows
+    # moved, stranding folder owners at the old path).
+    u1 = seed_user(uid="u1", email="u1@x.com")
+    u2 = seed_user(uid="u2", email="u2@x.com")
+    u3 = seed_user(uid="u3", email="u3@x.com")
+    acl.set_owner("proj", u1)
+    acl.set_owner("proj/sub", u2)
+    acl.set_owner("proj/sub/a.md", u3)
+    acl.on_path_moved(
+        [PathMove(old="proj/sub/a.md", new="proj2/sub/a.md")],
+        root_move=PathMove(old="proj", new="proj2"),
+    )
+    assert acl.get_owner("proj2") == u1
+    assert acl.get_owner("proj") is None
+    assert acl.get_owner("proj2/sub") == u2
+    assert acl.get_owner("proj/sub") is None
+    assert acl.get_owner("proj2/sub/a.md") == u3  # page row, per-file loop
+
+
+def test_page_move_between_folders_leaves_folder_owner_untouched(tmp_db):
+    # A single page move must not drag the source folder's owner row onto the
+    # destination — the page root_move suppresses the folder-prefix swap.
+    u1 = seed_user(uid="u1", email="u1@x.com")
+    u2 = seed_user(uid="u2", email="u2@x.com")
+    acl.set_owner("scratch", u1)
+    acl.set_owner("dest", u2)
+    acl.on_path_moved(
+        [PathMove(old="scratch/xrep.md", new="dest/xrep.md")],
+        root_move=PathMove(old="scratch/xrep.md", new="dest/xrep.md"),
+    )
+    assert acl.get_owner("scratch") == u1
+    assert acl.get_owner("dest") == u2
 
 
 def test_update_policy_folder_repoints_with_root_move(tmp_db):

@@ -71,9 +71,11 @@ def test_auto_applied_delete_records_activity_event(repo):
     assert len(events) == 1
     ev = events[0]
     assert ev["actor"] == AI_USER_ID
-    # Targets the folder itself: trashing a folder doesn't re-point its owner
-    # row (unlike a page), so the folder's owner still resolves here.
-    assert ev["target"] == "area/gone"
+    # Targets the trash destination — where `after_doc_trashed` re-pointed the
+    # folder's owner row — so the feed's exact-path owner match reaches the
+    # deleted folder's owner. Display paths come from the payload, not target.
+    assert ev["target"].startswith(".trash/")
+    assert ev["target"].endswith("/area/gone")
     assert ev["payload"]["op"] == ProposalOp.DELETE_EMPTY_FOLDER.value
     assert ev["payload"]["source_paths"] == ["area/gone"]
     assert ev["payload"]["applied_sha"]
@@ -83,12 +85,12 @@ def test_auto_applied_delete_records_activity_event(repo):
     assert doc_ids.get(folder_id) is not None
 
 
-def test_trashed_folder_owner_still_resolves_at_original_path(repo):
-    """Pins the behavior the auto-apply event target depends on: trashing a
-    folder does NOT re-point its ``wiki_owners`` row (only a page's row moves),
-    so the folder's owner still resolves at the original path and can see the
-    ``automanage.applied`` event keyed there. If this ever changes, the event
-    visibility silently regresses — so guard it here."""
+def test_deleted_folder_owner_matches_event_target(repo):
+    """Pins the chain the event's owner visibility depends on: trashing a
+    folder re-points its ``wiki_owners`` row to the trash destination
+    (``acl.on_path_moved``), and the event targets that same destination — so
+    the deleted folder's owner matches the feed's exact-path owner check. If
+    either side drifts, owner visibility silently regresses — guard it here."""
     uid = seed_user(uid="owner1", email="owner@x.com")
     wiki_git.commit_file("keep/gone/.gitkeep", "", "create", author=None)
     acl.set_owner("keep/gone", uid)
@@ -98,7 +100,9 @@ def test_trashed_folder_owner_still_resolves_at_original_path(repo):
     executor.execute(pid)
 
     assert "keep/gone/.gitkeep" not in wiki_git.list_paths()  # trashed
-    assert acl.get_owner("keep/gone") == uid  # owner row stayed → event reaches them
+    assert acl.get_owner("keep/gone") is None  # owner row followed into trash
+    (ev,) = list_events(kind=executor.EVENT_AUTOMANAGE_APPLIED)
+    assert acl.get_owner(ev["target"]) == uid  # …and the event points at it
 
 
 def test_no_event_when_apply_transition_loses_race(repo):
@@ -113,7 +117,9 @@ def test_no_event_when_apply_transition_loses_race(repo):
     assert p is not None
     p["reviewed_by_user_id"] = None  # auto-apply shape
 
-    executor._finalize_applied(p, applied_sha="deadbeef", path_ids={"racy": "x"})
+    executor._finalize_applied(
+        p, applied_sha="deadbeef", path_ids={"racy": "x"}, event_target="racy"
+    )
 
     assert get(pid)["status"] == "pending"  # type: ignore[index] # transition didn't happen
     assert list_events(kind=executor.EVENT_AUTOMANAGE_APPLIED) == []

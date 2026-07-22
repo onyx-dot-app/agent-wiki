@@ -105,7 +105,11 @@ def _execute_delete_empty_folder(p: dict[str, Any]) -> None:
     notify.after_doc_trashed(
         moves, sha, author, root_move=PathMove(old=folder, new=dest)
     )
-    _finalize_applied(p, applied_sha=sha, path_ids=path_ids)
+    # The event targets the trash destination: `after_doc_trashed` just
+    # re-pointed the folder's owner row there, and `/events` matches owners by
+    # exact target path — so the deleted folder's owner sees the event. The
+    # payload keeps the original path for display.
+    _finalize_applied(p, applied_sha=sha, path_ids=path_ids, event_target=dest)
     log.info(
         "execute: proposal %s applied — trashed empty folder %s (sha=%s)",
         proposal_id,
@@ -115,39 +119,47 @@ def _execute_delete_empty_folder(p: dict[str, Any]) -> None:
 
 
 def _finalize_applied(
-    p: dict[str, Any], *, applied_sha: str, path_ids: dict[str, str]
+    p: dict[str, Any],
+    *,
+    applied_sha: str,
+    path_ids: dict[str, str],
+    event_target: str,
 ) -> None:
     """Mark the proposal ``applied`` and, when it was auto-applied (no human
     reviewer), record an activity event. A human-approved apply is already
     visible to the approver (they watched the outcome in the review banner), so
     only the silent AI-managed path needs the audit trail. ``path_ids`` maps the
-    affected paths to their stable doc ids (captured before mutation)."""
+    affected paths to their stable doc ids (captured before mutation);
+    ``event_target`` is the path whose *current* owner row should match (the op
+    decides — for a trash-move that's the trash destination, where the owner
+    row now lives)."""
     # `mark_applied` is a conditional approved→applied transition: it returns
     # False if a concurrent change (reject/expire/stale) already moved the
     # proposal off `approved`. Only emit the event when the transition actually
     # happened, so the audit feed can't disagree with the persisted status.
     applied = change_proposals.mark_applied(p["id"], applied_sha=applied_sha)
     if applied and p["reviewed_by_user_id"] is None:
-        _record_applied_event(p, applied_sha, path_ids)
+        _record_applied_event(p, applied_sha, path_ids, event_target)
 
 
 def _record_applied_event(
-    p: dict[str, Any], applied_sha: str, path_ids: dict[str, str]
+    p: dict[str, Any], applied_sha: str, path_ids: dict[str, str], target: str
 ) -> None:
     """Best-effort: the change already happened, so a feed write that fails must
-    not fail the apply. ``target`` is the affected folder itself — trashing a
-    folder does *not* re-point its owner row (unlike a page; see
-    ``acl.on_path_moved``), so the folder's owner still resolves at this path
-    and sees the event. Admins see every ``automanage.*`` event regardless.
-    ``path_ids`` gives the UI a durable handle for linking (paths churn; the id
-    resolves even after the item is trashed)."""
+    not fail the apply. ``/events`` matches owners by exact ``target`` path at
+    query time, so ``target`` must be where the affected item's owner row lives
+    *after* the op — the trash destination for a delete. The item's owner sees
+    the event; admins see every ``automanage.*`` event regardless. ``path_ids``
+    gives the UI a durable handle for linking (paths churn; the id resolves
+    even after the item is trashed); display paths come from ``source_paths``,
+    never from ``target``."""
     try:
         with session() as s:
             s.add(
                 Event(
                     kind=EVENT_AUTOMANAGE_APPLIED,
                     actor=p["acting_user_id"],
-                    target=p["source_paths"][0],
+                    target=target,
                     payload_json=json.dumps(
                         {
                             "op": p["op"],
