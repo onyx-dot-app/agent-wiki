@@ -24,13 +24,15 @@ const DRAFT_KEY = "__draft__";
 const TITLE_ROW_CENTER = 18;
 
 /**
- * Margin comments column (mocks 566:19918 / 669:264296 / 778:262971 /
- * 670:266803): a real 360px lane beside the doc, cards 336 wide with 12px
- * side insets. Each card anchors its title-row center to its highlight
- * line's center and is pushed down when the card above collides, minimum
- * 4px apart (mock 778 measures the collision gap). The layer translates
- * against the editor's internal scroll so cards track the text. Resolved
- * threads never float here, the panel owns them.
+ * Margin comments lane (mocks 566:19918 / 669:264296 / 778:262971 /
+ * 670:266803): a 360px overlay on the doc area's right edge whose width the
+ * centered content reserves (.rail-reserved, globals.css), so the editor
+ * keeps its full-width scroller and nothing renders under the cards. Cards
+ * are 336 wide with 12px side insets. Each card anchors its title-row
+ * center to its highlight line's center and is pushed down when the card
+ * above collides, minimum 4px apart (mock 778 measures the collision gap).
+ * The layer translates against the editor's internal scroll so cards track
+ * the text. Resolved threads never float here, the panel owns them.
  */
 export function CommentMarginRail({
   threads,
@@ -188,12 +190,12 @@ export function CommentMarginRail({
   return (
     <div
       ref={rootRef}
-      className="relative w-[360px] shrink-0 overflow-clip @max-[920px]:hidden"
+      className="pointer-events-none absolute inset-y-0 -right-8 w-[360px] overflow-clip @max-[920px]:hidden"
     >
       {draft && tops[DRAFT_KEY] !== undefined && (
         <div
           ref={measureRef(DRAFT_KEY)}
-          className="absolute inset-x-3 top-0"
+          className="pointer-events-auto absolute inset-x-3 top-0"
           style={{
             transform: `translateY(${tops[DRAFT_KEY]! + originY}px)`,
           }}
@@ -210,7 +212,7 @@ export function CommentMarginRail({
         <div
           key={t.root.id}
           ref={measureRef(t.root.id)}
-          className="absolute inset-x-3 top-0"
+          className="pointer-events-auto absolute inset-x-3 top-0"
           style={{
             transform: `translateY(${tops[t.root.id]! + originY}px)`,
           }}

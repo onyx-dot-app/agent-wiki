@@ -123,7 +123,7 @@ interface DocTitleProps {
  * left margin instead of drifting apart. */
 export function DocTitle({ path, onRename }: DocTitleProps) {
   return (
-    <div className="mx-auto flex w-full max-w-[768px] flex-col gap-6 pb-6">
+    <div className="rail-inset mx-auto flex w-full max-w-[768px] flex-col gap-6 pb-6">
       <Content
         icon={SvgDocFile}
         sizePreset="headline"
@@ -282,7 +282,7 @@ export function FileView({ path }: FileViewProps) {
       }));
   }, [commentThreads, viewingVersion, activeCommentId, hoveredCommentId]);
 
-  // The doc row hosting the lane, measured at interaction time so the
+  // The doc area hosting the lane, measured at interaction time so the
   // panel fallback keys off the same width as the lane's container query.
   const docRowRef = useRef<HTMLDivElement | null>(null);
 
@@ -345,6 +345,16 @@ export function FileView({ path }: FileViewProps) {
       void refreshDraftState();
     },
   });
+
+  // The floating margin lane shows on the live desktop doc with the panel
+  // closed and something to anchor. Drives both the overlay and the
+  // .rail-reserved content reservation.
+  const railActive =
+    !!coedit.session &&
+    !viewingVersion &&
+    panelTab === null &&
+    !isMobile &&
+    (marginThreadCount > 0 || commentDraft !== null);
 
   // Select a thread (its span gets the orange highlight) and scroll the
   // editor to bring that span into view. Only an explicit click runs this —
@@ -1038,190 +1048,191 @@ export function FileView({ path }: FileViewProps) {
           agentsBarHost.el,
         )}
 
-      {/* The margin-comments lane flanks the WHOLE doc column (title,
-          banners, editor) like the mock's side section, so everything in
-          the column centers on the same width. */}
-      <div ref={docRowRef} className="@container flex min-h-0 flex-1 flex-row">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <DocTitle
-            path={path}
-            onRename={viewingVersion ? undefined : handleRename}
-          />
+      {/* The margin-comments lane overlays the right 360px of the doc area
+          while every centered block reserves that width via .rail-reserved
+          (globals.css), so the editor keeps its full-width scroller with
+          the scrollbar at the window edge and content never slides under
+          the cards. */}
+      <div
+        ref={docRowRef}
+        className={`@container relative flex min-h-0 min-w-0 flex-1 flex-col ${
+          railActive ? "rail-reserved" : ""
+        }`}
+      >
+        <DocTitle
+          path={path}
+          onRename={viewingVersion ? undefined : handleRename}
+        />
 
-          <ShareDialog
-            path={path}
-            open={shareOpen}
-            onClose={() => setShareOpen(false)}
-          />
+        <ShareDialog
+          path={path}
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+        />
 
-          <RunAgentPanel
-            open={runAgentOpen}
-            onClose={() => setRunAgentOpen(false)}
-            wikiPath={path || null}
-          />
+        <RunAgentPanel
+          open={runAgentOpen}
+          onClose={() => setRunAgentOpen(false)}
+          wikiPath={path || null}
+        />
 
-          {error && (
-            <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
-              {error}
-            </div>
-          )}
+        {error && (
+          <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+            {error}
+          </div>
+        )}
 
-          {loading && <LoadingSpinner />}
+        {loading && <LoadingSpinner />}
 
-          {!loading && !error && (
-            <>
-              {/* The live editor when showing the current version, or DiffView
+        {!loading && !error && (
+          <>
+            {/* The live editor when showing the current version, or DiffView
               when viewing an old commit. The editor pins the viewport (its own
               internal scroll) but spans full width so the scrollbar sits flush
               at the far-right edge; the text is capped + centered. */}
-              {viewingVersion && diffData ? (
-                <div className="flex min-h-0 flex-1 justify-center">
-                  <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
-                    <DiffView data={diffData!} />
-                  </div>
+            {viewingVersion && diffData ? (
+              <div className="flex min-h-0 flex-1 justify-center">
+                <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
+                  <DiffView data={diffData!} />
                 </div>
-              ) : (
-                // Live editor: the full-width editor owns the scroll, so its
-                // scrollbar sits flush at the far-right edge while the text stays
-                // capped + centered by the editor theme. `--cm-gutter` mirrors the
-                // negative margin (which cancels `<main>`'s padding) so the editor
-                // text keeps the same side gutter as the DocTitle at every
-                // breakpoint. The banners stay capped + centered above it, aligned
-                // with the text and DocTitle (`empty:hidden` drops the gap when
-                // none render).
+              </div>
+            ) : (
+              // Live editor: the full-width editor owns the scroll, so its
+              // scrollbar sits flush at the far-right edge while the text stays
+              // capped + centered by the editor theme. `--cm-gutter` mirrors the
+              // negative margin (which cancels `<main>`'s padding) so the editor
+              // text keeps the same side gutter as the DocTitle at every
+              // breakpoint. The banners stay capped + centered above it, aligned
+              // with the text and DocTitle (`empty:hidden` drops the gap when
+              // none render).
+              <div
+                className={`flex min-h-0 flex-1 flex-col gap-3 ${
+                  isMobile
+                    ? "-mx-3 [--cm-gutter:0.75rem]"
+                    : "-mx-8 [--cm-gutter:2rem]"
+                }`}
+              >
                 <div
-                  className={`flex min-h-0 flex-1 flex-col gap-3 ${
-                    isMobile
-                      ? "-mx-3 [--cm-gutter:0.75rem]"
-                      : "-mx-8 [--cm-gutter:2rem]"
+                  className={`rail-inset mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
+                    isMobile ? "px-3" : ""
                   }`}
                 >
-                  <div
-                    className={`mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
-                      isMobile ? "px-3" : ""
-                    }`}
-                  >
-                    <UpdateHealthBanner
-                      path={path}
-                      onOpenPolicy={() => openPanel("updates")}
-                    />
-                    <Path2ReviewBanner path={path} canWrite={canWrite} />
-                    <CoeditPresenceBar
-                      participants={coedit.participants}
-                      peers={coedit.peers}
-                      typing={coedit.typing}
-                      selfUserId={user?.id ?? null}
-                    />
-                    {(() => {
-                      // Cards visible while the body is still "empty enough"
-                      // to discard without losing user work: truly blank, or
-                      // still verbatim equal to the template the user just
-                      // applied (so they can keep swapping templates).
-                      const isBlank = coedit.buffer.trim() === "";
-                      const matchesApplied =
-                        appliedTemplateBody !== null &&
-                        coedit.buffer === appliedTemplateBody;
-                      const showGallery =
-                        (isBlank || matchesApplied) &&
-                        templates !== null &&
-                        templates.length > 0;
-                      if (!showGallery) return null;
-                      return (
-                        <TemplateGallery
-                          templates={templates!}
-                          activeId={matchesApplied ? appliedTemplateId : null}
-                          applyingId={applyingTemplateId}
-                          blankActive={isBlank && appliedTemplateId === null}
-                          onPick={(t) => void onPickTemplate(t)}
-                          onBlank={() => void onPickBlank()}
-                        />
-                      );
-                    })()}
-                  </div>
-                  {coedit.session ? (
-                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                      <Coeditor
-                        key={coedit.session.id}
-                        ref={coeditorRef}
-                        session={coedit.session}
-                        peers={coedit.peers}
-                        onSelectionChange={coedit.reportSelection}
-                        onCaretCleared={coedit.reportCaretCleared}
-                        getCaretSeq={coedit.getCaretSeq}
-                        onServerFrame={coedit.onServerFrame}
-                        reportDoc={coedit.reportDoc}
-                        registerFlush={coedit.registerFlush}
-                        registerSetDoc={coedit.registerSetDoc}
-                        registerCatchUp={coedit.registerCatchUp}
-                        readOnly={!canWrite}
-                        commentHighlights={commentHighlights}
-                        onSelectionForComment={handleSelectionForComment}
-                        placeholder="Start typing, or pick a template above…"
+                  <UpdateHealthBanner
+                    path={path}
+                    onOpenPolicy={() => openPanel("updates")}
+                  />
+                  <Path2ReviewBanner path={path} canWrite={canWrite} />
+                  <CoeditPresenceBar
+                    participants={coedit.participants}
+                    peers={coedit.peers}
+                    typing={coedit.typing}
+                    selfUserId={user?.id ?? null}
+                  />
+                  {(() => {
+                    // Cards visible while the body is still "empty enough"
+                    // to discard without losing user work: truly blank, or
+                    // still verbatim equal to the template the user just
+                    // applied (so they can keep swapping templates).
+                    const isBlank = coedit.buffer.trim() === "";
+                    const matchesApplied =
+                      appliedTemplateBody !== null &&
+                      coedit.buffer === appliedTemplateBody;
+                    const showGallery =
+                      (isBlank || matchesApplied) &&
+                      templates !== null &&
+                      templates.length > 0;
+                    if (!showGallery) return null;
+                    return (
+                      <TemplateGallery
+                        templates={templates!}
+                        activeId={matchesApplied ? appliedTemplateId : null}
+                        applyingId={applyingTemplateId}
+                        blankActive={isBlank && appliedTemplateId === null}
+                        onPick={(t) => void onPickTemplate(t)}
+                        onBlank={() => void onPickBlank()}
                       />
-                    </div>
-                  ) : coedit.joinError ? (
-                    // The join handshake itself failed and there is no read-only
-                    // fallback to fall back to, so this has to be an actionable
-                    // dead end, not a permanent "Connecting…".
-                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
-                      <span>
-                        Couldn't connect to the live session: {coedit.joinError}
-                      </span>
-                      <Button size="sm" onClick={coedit.retryJoin}>
-                        Retry
-                      </Button>
-                    </div>
-                  ) : (
-                    // Joining the session. The editor mounts once we have its
-                    // start version + doc.
-                    <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
-                      Connecting…
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
-              )}
-              {/* Desktop side panels dock at the app's right edge (full height,
+                {coedit.session ? (
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <Coeditor
+                      key={coedit.session.id}
+                      ref={coeditorRef}
+                      session={coedit.session}
+                      peers={coedit.peers}
+                      onSelectionChange={coedit.reportSelection}
+                      onCaretCleared={coedit.reportCaretCleared}
+                      getCaretSeq={coedit.getCaretSeq}
+                      onServerFrame={coedit.onServerFrame}
+                      reportDoc={coedit.reportDoc}
+                      registerFlush={coedit.registerFlush}
+                      registerSetDoc={coedit.registerSetDoc}
+                      registerCatchUp={coedit.registerCatchUp}
+                      readOnly={!canWrite}
+                      commentHighlights={commentHighlights}
+                      onSelectionForComment={handleSelectionForComment}
+                      placeholder="Start typing, or pick a template above…"
+                    />
+                  </div>
+                ) : coedit.joinError ? (
+                  // The join handshake itself failed and there is no read-only
+                  // fallback to fall back to, so this has to be an actionable
+                  // dead end, not a permanent "Connecting…".
+                  <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
+                    <span>
+                      Couldn't connect to the live session: {coedit.joinError}
+                    </span>
+                    <Button size="sm" onClick={coedit.retryJoin}>
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
+                  // Joining the session. The editor mounts once we have its
+                  // start version + doc.
+                  <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
+                    Connecting…
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Desktop side panels dock at the app's right edge (full height,
               beside the header) by portaling into the shell's right-panel host,
               so they never eat into the reading column above. Mobile keeps the
               fixed sheet rendered below. */}
-              {historyOpen &&
-                !isMobile &&
-                rightHost?.el &&
-                createPortal(historyRail, rightHost.el)}
-              {panelTab &&
-                !isMobile &&
-                rightHost?.el &&
-                createPortal(
-                  <DocPanel tab={panelTab} onTabChange={setPanelTab}>
-                    {panelBody}
-                  </DocPanel>,
-                  rightHost.el,
-                )}
-            </>
-          )}
-        </div>
-        {coedit.session &&
-          !viewingVersion &&
-          panelTab === null &&
-          !isMobile &&
-          (marginThreadCount > 0 || commentDraft) && (
-            <CommentMarginRail
-              threads={commentThreads}
-              draft={commentDraft}
-              editorRef={coeditorRef}
-              activeId={activeCommentId}
-              onActivate={activateComment}
-              onHoverThread={setHoveredCommentId}
-              selfName={user?.name || user?.email || "You"}
-              path={path}
-              selfId={user?.id}
-              isAdmin={!!user?.is_admin}
-              busy={marginBusy}
-              run={runMargin}
-              onSubmitDraft={(body) => void submitMarginDraft(body)}
-              onCancelDraft={() => setCommentDraft(null)}
-            />
-          )}
+            {historyOpen &&
+              !isMobile &&
+              rightHost?.el &&
+              createPortal(historyRail, rightHost.el)}
+            {panelTab &&
+              !isMobile &&
+              rightHost?.el &&
+              createPortal(
+                <DocPanel tab={panelTab} onTabChange={setPanelTab}>
+                  {panelBody}
+                </DocPanel>,
+                rightHost.el,
+              )}
+          </>
+        )}
+        {railActive && (
+          <CommentMarginRail
+            threads={commentThreads}
+            draft={commentDraft}
+            editorRef={coeditorRef}
+            activeId={activeCommentId}
+            onActivate={activateComment}
+            onHoverThread={setHoveredCommentId}
+            selfName={user?.name || user?.email || "You"}
+            path={path}
+            selfId={user?.id}
+            isAdmin={!!user?.is_admin}
+            busy={marginBusy}
+            run={runMargin}
+            onSubmitDraft={(body) => void submitMarginDraft(body)}
+            onCancelDraft={() => setCommentDraft(null)}
+          />
+        )}
       </div>
       {historyOpen && isMobile && (
         // Mobile: render the version-mode rail as a fixed slide-in sheet

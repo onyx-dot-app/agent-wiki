@@ -403,6 +403,20 @@ body {
   color: var(--text-04);
 }
 
+/* Margin-comments lane reservation. The editor stays full width so its
+   scrollbar hugs the window edge, and every centered doc block (title,
+   banners, editor text) reserves the 360px lane inside its own box, so
+   content can never slide under the floating cards. Scoped to the same
+   container query that shows the lane. The extra .cm-scroller hop outranks
+   the runtime-injected CodeMirror theme rule. */
+@container (min-width: 920px) {
+  .rail-reserved .cm-scroller .cm-content,
+  .rail-reserved .rail-inset {
+    max-width: calc(768px + 360px);
+    padding-right: 360px;
+  }
+}
+
 /* Comment inputs wrap MentionTextarea inside the mock's bordered field
    (566:19918), so the textarea itself goes chromeless. The wrapper owns
    the border, focus ring, and padding. */
