@@ -5,6 +5,13 @@
 
 export type RelativeTimeStyle = "short" | "long";
 
+/** Backend text timestamps ("2026-07-21 00:52:39") are UTC without a zone
+ * marker, which browsers parse as local time. Normalize to ISO UTC. */
+export function parseTs(iso: string): Date {
+  const naive = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(iso);
+  return new Date(naive ? `${iso.replace(" ", "T")}Z` : iso);
+}
+
 const UNITS: { limit: number; secs: number; short: string; long: string }[] = [
   { limit: 90, secs: 60, short: "m", long: "minute" },
   { limit: 3600, secs: 60, short: "m", long: "minute" },
@@ -28,7 +35,7 @@ export function relativeTime(
   iso: string,
   style: RelativeTimeStyle = "long",
 ): string {
-  const d = new Date(iso);
+  const d = parseTs(iso);
   if (Number.isNaN(d.getTime())) return iso;
 
   const diffMs = d.getTime() - Date.now();
@@ -50,7 +57,25 @@ export function relativeTime(
 
 /** Absolute local timestamp — for tooltips / precise hover detail. */
 export function absoluteTime(iso: string): string {
-  const d = new Date(iso);
+  const d = parseTs(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+/** Spelled-out local timestamp ("July 16, 2026, 3:05 PM"). Date and time
+ * are joined by a comma explicitly because a single `toLocaleString`
+ * inserts "at" between them in current ICU en locales. */
+export function longDateTime(iso: string): string {
+  const d = parseTs(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const date = d.toLocaleDateString(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+  const time = d.toLocaleTimeString(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${date}, ${time}`;
 }

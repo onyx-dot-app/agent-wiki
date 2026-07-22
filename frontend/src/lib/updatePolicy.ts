@@ -18,8 +18,8 @@ export interface ExplicitPolicy {
   ingestion_auto_update_disabled: boolean | null;
   update_instruction: string | null;
   ai_management_allowed: boolean | null;
-  // Owner-set per-page warning threshold (auto-updates/24h); null = inherit
-  // the global default; 0 = warnings off for this page.
+  // Owner-set per-page warning threshold (auto-updates/24h). Null inherits
+  // the global default, 0 alerts on every update.
   warn_update_threshold: number | null;
   updated_by_user_id: string | null;
   created_at: string;

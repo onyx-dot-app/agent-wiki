@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Button,
   Divider,
+  EmptyMessageCard,
   LineItemButton,
   OpenButton,
   Popover,
@@ -15,32 +16,37 @@ import {
 import { Content } from "@onyx-ai/opal/layouts";
 import { cn } from "@onyx-ai/opal/utils";
 import {
-  SvgBubbleText,
   SvgChevronLeft,
   SvgChevronRight,
   SvgExternalLink,
   SvgDocFile,
   SvgFolder,
   SvgHistory,
+  SvgMoreHorizontal,
   SvgShare,
-  SvgShield,
+  SvgSidebar,
   SvgSparkle,
-  SvgWorkflow,
+  SvgX,
 } from "@onyx-ai/opal/icons";
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
-import { TriggersSidePanel } from "@/components/wiki/TriggersSidePanel";
+import { WatchingPanel } from "@/components/wiki/WatchingPanel";
+import { DocPanel, type DocPanelTab } from "@/components/wiki/DocPanel";
 import { DiffView } from "@/components/wiki/DiffView";
-import { HistoryPanel } from "@/components/wiki/HistoryPanel";
+import {
+  UpdateHistoryRail,
+  VersionHistoryList,
+} from "@/components/wiki/VersionHistoryList";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
+import { CommentMarginRail } from "@/components/wiki/CommentMarginRail";
+import { toast } from "@/hooks/useToast";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
-import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { craftFailureMessage } from "@/lib/craft";
 import {
   closeSession,
@@ -48,8 +54,9 @@ import {
   type AgentSessionSummary,
 } from "@/lib/launchers";
 import { apiFetch } from "@/lib/api";
+import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
-import { listComments } from "@/lib/comments";
+import { createComment, listComments } from "@/lib/comments";
 import type {
   CommentDraft,
   CommentHighlightTarget,
@@ -65,6 +72,7 @@ import { useCoeditSession } from "@/lib/editor/hooks";
 import {
   useAgentsBarHost,
   useHeaderActionsHost,
+  useHeaderCrumbHost,
   useRightPanelHost,
 } from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
@@ -75,7 +83,7 @@ import {
   setDraftTemplate,
   type DocumentTemplateSummary,
 } from "@/lib/templates";
-import { absoluteTime, relativeTime } from "@/lib/time";
+import { absoluteTime, longDateTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import { fetchFileDiff, fetchFileHistory } from "@/lib/wiki/svc";
 import type { CommitInfo, FileDiffResponse } from "@/lib/wiki/types";
@@ -115,7 +123,7 @@ interface DocTitleProps {
  * left margin instead of drifting apart. */
 export function DocTitle({ path, onRename }: DocTitleProps) {
   return (
-    <div className="mx-auto flex w-full max-w-[768px] flex-col gap-6 pb-6">
+    <div className="rail-inset mx-auto flex w-full max-w-[768px] flex-col gap-6 pb-6">
       <Content
         icon={SvgDocFile}
         sizePreset="headline"
@@ -138,25 +146,31 @@ export function FileView({ path }: FileViewProps) {
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const crumbHost = useHeaderCrumbHost();
   const agentsBarHost = useAgentsBarHost();
   const rightHost = useRightPanelHost();
   const { isActivitiesOpen, toggleActivities } = useLeftPanel();
-  const { refresh: refreshTriggers } = useTriggers();
   const { setDrafting, requestExpand } = useDrafting();
   const { user } = useAuth();
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [triggerModalOpen, setTriggerModalOpen] = useState(false);
-  const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
-  const [automationsOpen, setAutomationsOpen] = useState(false);
-  const [editingTrigger, setEditingTrigger] = useState<Trigger | null>(null);
+  // Watching tab editor: null = the watcher list, otherwise the editor is
+  // showing (trigger null = creating a new watcher on this page).
+  const [watcherEditor, setWatcherEditor] = useState<{
+    trigger: Trigger | null;
+  } | null>(null);
   const [runAgentOpen, setRunAgentOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const confirmDialog = useConfirm();
+  const { refresh: refreshTriggers } = useTriggers();
   // History state. `viewingSha` is null when looking at the working-tree
-  // (latest) version; otherwise it's the sha being viewed and is what we
-  // pass back as `base_sha` on save so the server records a rollback.
+  // (latest) version, otherwise it's the version whose diff fills the doc
+  // column. `historyOpen` is version mode: the rail becomes the Update
+  // History surface and the header collapses to the version chip.
+  // `historyListOpen` is the milder state: the Updates tab's history card
+  // expanded into its inline version list.
   const [headSha, setHeadSha] = useState<string | null>(null);
   // From the file read's `can_write` — false renders the live session as a
   // pure viewer (read-only editor, no write calls). Optimistic `true` until
@@ -164,14 +178,20 @@ export function FileView({ path }: FileViewProps) {
   const [canWrite, setCanWrite] = useState(true);
   const [viewingSha, setViewingSha] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyListOpen, setHistoryListOpen] = useState(false);
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  // Active tab of the tabbed side panel (null = closed). The rail holds one
+  // occupant at a time: this panel or history mode, never both.
+  const [panelTab, setPanelTab] = useState<DocPanelTab | null>(null);
   // Comments. `commentDraft` is a pending text selection being composed;
   // `selTool` is the floating "Comment" affordance shown on select.
-  const [commentsOpen, setCommentsOpen] = useState(false);
-  const [policyOpen, setPolicyOpen] = useState(false);
+  // `commentsListView` lives here (not in the panel) because anchored mode
+  // also swaps the editor's native scrollbar for the viewport-edge one.
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
+  const [commentsListView, setCommentsListView] = useState(false);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [selTool, setSelTool] = useState<{
@@ -183,8 +203,9 @@ export function FileView({ path }: FileViewProps) {
   // `viewingVersion`: a history version is displayed in the main pane (no
   // live editor — DiffView instead). `viewingOld`: that version is not the
   // newest commit for this file (`headSha` tracks `commits[0]`), so the
-  // warning banner applies. Computed early: the comment effects and the
-  // coedit session below both key off it.
+  // Restore/Back actions replace the Exit action and the chip shows a
+  // relative age. Computed early: the comment effects and the coedit
+  // session below both key off it.
   const viewingVersion = viewingSha !== null;
   const viewingOld = viewingVersion && viewingSha !== headSha;
   const segments = path.split("/");
@@ -192,22 +213,24 @@ export function FileView({ path }: FileViewProps) {
   const currentBasename = segments[segments.length - 1] ?? path;
   const currentBasenameNoExt = currentBasename.replace(/\.md$/i, "");
   // Page owns the comment threads (so highlights render even with the panel
-  // closed). Auto-open the panel once per path when a page has comments.
+  // closed). Auto-open the panel once per path on unresolved comments.
   const autoOpenedPathRef = useRef<string | null>(null);
   // A `?comment=<id>` deep-link is focused once per id (reset on path change).
   const focusedCommentRef = useRef<string | null>(null);
 
-  // The history and comments side panels are mutually exclusive — every
-  // path that opens one closes the other (toolbar toggles, the comments
-  // auto-open, the selection "💬 Comment" tool).
-  const openComments = useCallback(() => {
+  // Opening the panel closes history mode, the other rail occupant. Every
+  // entry point routes through here.
+  const openPanel = useCallback((tab: DocPanelTab) => {
     setHistoryOpen(false);
-    setPolicyOpen(false);
-    setAutomationsOpen(false);
-    setTriggerModalOpen(false);
-    setEditingTrigger(null);
-    setCommentsOpen(true);
+    setPanelTab(tab);
   }, []);
+
+  const closePanel = useCallback(() => {
+    setPanelTab(null);
+    setCommentDraft(null);
+  }, []);
+
+  const openComments = useCallback(() => openPanel("comments"), [openPanel]);
 
   const refreshComments = useCallback(async () => {
     try {
@@ -235,10 +258,13 @@ export function FileView({ path }: FileViewProps) {
     void refreshComments();
   }, [refreshComments]);
 
-  // Comment thread spans to highlight in the editor. CodeMirror decorations
-  // (unlike the old DOM/react-markdown approach) update synchronously with
-  // state — no retry loop or MutationObserver needed. Cleared while viewing
-  // an old commit (DiffView, no live editor).
+  // Comment thread spans to highlight in the editor. Cleared while viewing
+  // an old commit (DiffView, no live editor). The active/hovered ids ride a
+  // separate prop: the editor maps these offsets through local edits, and a
+  // hover or selection flip must not re-send the unmapped ones.
+  // Hovering a card lights its doc highlight like selection does (mock
+  // 1855 annotation: "Hover highlight - match the hovered comment").
+  const [hoveredCommentId, setHoveredCommentId] = useState<string | null>(null);
   const commentHighlights = useMemo<CommentHighlightTarget[]>(() => {
     if (viewingVersion) return [];
     return commentThreads
@@ -253,11 +279,29 @@ export function FileView({ path }: FileViewProps) {
           r.end_offset !== null,
       )
       .map((r) => ({
+        id: r.id,
         startOffset: r.start_offset as number,
         endOffset: r.end_offset as number,
-        active: r.id === activeCommentId,
       }));
-  }, [commentThreads, viewingVersion, activeCommentId]);
+  }, [commentThreads, viewingVersion]);
+  const activeCommentIds = useMemo(
+    () =>
+      [activeCommentId, hoveredCommentId].filter((id): id is string => !!id),
+    [activeCommentId, hoveredCommentId],
+  );
+
+  // The doc area hosting the lane, measured at interaction time so the
+  // panel fallback keys off the same width as the lane's container query.
+  const docRowRef = useRef<HTMLDivElement | null>(null);
+
+  // Only open threads with a live anchor can float in the margin.
+  const marginThreadCount = useMemo(
+    () =>
+      commentThreads.filter(
+        (t) => t.root.status === "open" && t.root.start_offset !== null,
+      ).length,
+    [commentThreads],
+  );
 
   // Renaming is its own action now (Opal's `Content editable` on DocTitle),
   // decoupled from the coedit session/checkpointing — no more "rename at
@@ -291,12 +335,13 @@ export function FileView({ path }: FileViewProps) {
     [path, parentSlug, currentBasenameNoExt, router],
   );
 
-  // The page's live session: everyone viewing the current (non-historical)
-  // version joins it — presence plus real-time updates; editing is just a
-  // capability inside it (`canWrite`, ops write-gated server-side). Left when
-  // the user opens an old commit — see `useCoeditSession`'s `enabled` doc. No
-  // explicit Save; teardown (checkpoint + leave) fires from the hook itself
-  // on that transition/unmount, not from a button here.
+  // The page's live session: everyone viewing the live editor joins it for
+  // presence plus real-time updates, and editing is just a capability inside
+  // it (`canWrite`, ops write-gated server-side). Left whenever a version
+  // diff is showing (including the current version's). See
+  // `useCoeditSession`'s `enabled` doc. No explicit Save. Teardown
+  // (checkpoint + leave) fires from the hook itself on that
+  // transition/unmount, not from a button here.
   const coedit = useCoeditSession({
     path,
     enabled: !viewingVersion,
@@ -308,6 +353,25 @@ export function FileView({ path }: FileViewProps) {
       void refreshDraftState();
     },
   });
+
+  // The floating margin lane shows on the live desktop doc with the panel
+  // closed and something to anchor. Drives both the overlay and the
+  // .rail-reserved content reservation.
+  const railActive =
+    !!coedit.session &&
+    !viewingVersion &&
+    panelTab === null &&
+    !isMobile &&
+    (marginThreadCount > 0 || commentDraft !== null);
+
+  // Anchored panel mode hides the editor's native scrollbar (it would sit
+  // at the doc/panel boundary) in favor of the panel's viewport-edge one.
+  const anchoredPanelActive =
+    !!coedit.session &&
+    !viewingVersion &&
+    panelTab === "comments" &&
+    !commentsListView &&
+    !isMobile;
 
   // Select a thread (its span gets the orange highlight) and scroll the
   // editor to bring that span into view. Only an explicit click runs this —
@@ -362,6 +426,49 @@ export function FileView({ path }: FileViewProps) {
   // Selecting text in the editor offers a floating "Comment" affordance
   // anchored above the selection — fed by the Coeditor's selection reporting
   // instead of a DOM `mouseup`/`selectionchange` handler.
+  // The margin rail's mutation runner mirrors the panel's success gate;
+  // failures surface as toasts since the rail has no error slot.
+  const [marginBusy, setMarginBusy] = useState(false);
+  const runMargin = useCallback(
+    async (fn: () => Promise<unknown>): Promise<boolean> => {
+      setMarginBusy(true);
+      try {
+        await fn();
+        await refreshComments();
+        return true;
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Comment action failed");
+        return false;
+      } finally {
+        setMarginBusy(false);
+      }
+    },
+    [refreshComments],
+  );
+
+  const submitMarginDraft = useCallback(
+    async (body: string) => {
+      const draft = commentDraft;
+      if (!draft) return;
+      if (!headSha) {
+        toast.error("Page version unknown, reload and retry");
+        return;
+      }
+      const ok = await runMargin(() =>
+        createComment({
+          path,
+          anchorSha: headSha,
+          startOffset: draft.startOffset,
+          endOffset: draft.endOffset,
+          quotedText: draft.quotedText,
+          body,
+        }),
+      );
+      if (ok) setCommentDraft(null);
+    },
+    [commentDraft, headSha, path, runMargin],
+  );
+
   const handleSelectionForComment = useCallback(
     (draft: CommentDraft | null, coords: { x: number; y: number } | null) => {
       setSelTool(draft && coords ? { x: coords.x, y: coords.y, draft } : null);
@@ -410,6 +517,8 @@ export function FileView({ path }: FileViewProps) {
   useEffect(() => {
     loadLatest();
     setHistoryOpen(false);
+    setHistoryListOpen(false);
+    setWatcherEditor(null);
     setCommits(null);
   }, [loadLatest]);
 
@@ -551,14 +660,22 @@ export function FileView({ path }: FileViewProps) {
     }
   }, [path]);
 
+  // The Updates tab's Total Edits summary needs the commit count, so the
+  // history loads as soon as the tab opens, not only on card expand.
+  useEffect(() => {
+    if (panelTab === "updates" && commits === null) void refreshHistory();
+  }, [panelTab, commits, refreshHistory]);
+
   function closeHistory() {
     setHistoryOpen(false);
-    // Closing the panel exits history mode entirely — back to the live
-    // editor, which rejoins the coedit session (`enabled: !viewingVersion`).
+    // Exiting version mode goes back to the live editor, which rejoins the
+    // coedit session (`enabled: !viewingVersion`), and lands on the Updates
+    // tab, where the version list lives.
     if (viewingSha !== null) {
       setViewingSha(null);
       setDiffData(null);
     }
+    setPanelTab("updates");
   }
 
   async function toggleHistory() {
@@ -566,25 +683,27 @@ export function FileView({ path }: FileViewProps) {
       closeHistory();
       return;
     }
-    setHistoryOpen(true);
-    // Mutual exclusion with the comments + policy + automations panels and
-    // the docked trigger editor (see ``openComments``).
-    setCommentsOpen(false);
-    setPolicyOpen(false);
-    setAutomationsOpen(false);
-    setTriggerModalOpen(false);
-    setEditingTrigger(null);
-    setCommentDraft(null);
-    // Opening history: show the newest commit's diff immediately rather
-    // than leaving the rendered body up until the user clicks a row.
+    // Entering version mode lands on the newest commit's diff rather than
+    // leaving the rendered body up until the user clicks a row.
     const loaded = commits ?? (await refreshHistory())?.commits ?? null;
     const newest = loaded?.[0];
-    if (newest && viewingSha === null) {
+    if (newest) {
       void onPickCommit(newest.sha);
+      return;
     }
+    // No commits: still take the rail so the empty list explains itself.
+    setHistoryOpen(true);
+    setPanelTab(null);
+    setCommentDraft(null);
   }
 
+  // Viewing any version = version mode: the rail becomes the Update History
+  // surface and the tabbed panel yields (one rail occupant). Callers must
+  // load commits before picking.
   async function onPickCommit(sha: string) {
+    setHistoryOpen(true);
+    setPanelTab(null);
+    setCommentDraft(null);
     if (sha === viewingSha) return;
     setLoading(true);
     setError(null);
@@ -596,6 +715,38 @@ export function FileView({ path }: FileViewProps) {
       setError(e instanceof Error ? e.message : "failed to load version");
     } finally {
       setLoading(false);
+    }
+  }
+
+  function toggleHistoryList() {
+    const next = !historyListOpen;
+    setHistoryListOpen(next);
+    if (next && commits === null) void refreshHistory();
+  }
+
+  // Restore = new commit of the viewed body. base_sha HEAD makes it a diff
+  // onto the latest version, so concurrent edits merge (true conflicts 409).
+  async function restoreVersion() {
+    const sha = viewingSha;
+    if (!sha || restoring) return;
+    setRestoring(true);
+    setError(null);
+    try {
+      const r = await apiFetch<FileResponse>(
+        `/wiki/file?path=${encodeURIComponent(path)}&ref=${encodeURIComponent(sha)}`,
+      );
+      await apiFetch("/wiki/file", {
+        method: "PUT",
+        body: JSON.stringify({ path, body: r.body, base_sha: headSha }),
+      });
+      setHistoryOpen(false);
+      setPanelTab("updates");
+      loadLatest();
+      void refreshHistory();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "failed to restore version");
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -634,87 +785,259 @@ export function FileView({ path }: FileViewProps) {
   }
 
   // Page actions live in the single pinned header (WikiHeader), not a second
-  // header inside the scroll area — they portal into its right-aligned slot.
-  // The panel toggles are icon SelectButtons so the open panel shows the
-  // selected tint; the others are tertiary icon Buttons. No Edit/Done button
-  // — the editor is always live and autosaves; `saveStatus` is the only
-  // feedback for that.
+  // header inside the scroll area. They portal into its right-aligned slot.
+  // The panel toggle is a SelectButton so an open panel shows the selected
+  // tint, the others are tertiary icon Buttons. There is no Edit/Done button
+  // since the editor is always live and autosaves, with `saveStatus` as the
+  // only feedback for that.
+  const panelOpen = panelTab !== null;
+
+  // Version mode strips the header down to crumbs + version chip (mock
+  // 1912:355117 hides every action). Back to Current / Restore / Exit live
+  // in the rail's own header row instead.
+  const viewingCommit = commits?.find((c) => c.sha === viewingSha) ?? null;
+  const versionActions = viewingOld ? (
+    <>
+      <Button
+        prominence="secondary"
+        disabled={loading}
+        onClick={() => headSha && void onPickCommit(headSha)}
+      >
+        Back to Current
+      </Button>
+      <Button
+        variant="action"
+        disabled={restoring}
+        onClick={() => void restoreVersion()}
+      >
+        {restoring ? "Restoring…" : "Restore This Version"}
+      </Button>
+    </>
+  ) : (
+    <Button prominence="tertiary" rightIcon={SvgX} onClick={closeHistory}>
+      Exit Update History
+    </Button>
+  );
+
+  // Dismissible version chip joining the breadcrumbs (mock chip in
+  // 1912:355220): history glyph, spelled-out timestamp, relative age or
+  // "(Current)", and an x back to the live editor.
+  const versionChip = viewingCommit ? (
+    <span className="flex items-center overflow-hidden rounded-(--radius-08) bg-(--background-tint-02) px-1 py-[2px]">
+      <span className="flex size-4 shrink-0 items-center justify-center text-(--text-04)">
+        <SvgHistory size={13} />
+      </span>
+      <span className="flex items-baseline gap-[2px] px-[2px] text-[14px] leading-5 whitespace-nowrap">
+        <span className="max-w-40 truncate font-medium text-(--text-04)">
+          {longDateTime(viewingCommit.ts)}
+        </span>
+        <span className="max-w-40 truncate text-(--text-03)">
+          {viewingOld
+            ? `(${relativeTime(viewingCommit.ts, "long")})`
+            : "(Current)"}
+        </span>
+      </span>
+      <Button
+        size="2xs"
+        prominence="tertiary"
+        icon={SvgX}
+        tooltip="Exit update history"
+        onClick={closeHistory}
+      />
+    </span>
+  ) : null;
+
+  const versionList = (
+    <VersionHistoryList
+      commits={commits}
+      error={historyError}
+      headSha={headSha}
+      viewingSha={viewingSha}
+      selfName={user?.name ?? null}
+      onPick={(sha) => void onPickCommit(sha)}
+    />
+  );
+
+  // One element for both hosts: the desktop right-rail portal and the
+  // mobile sheet render the identical rail.
+  const historyRail = (
+    <UpdateHistoryRail
+      commits={commits}
+      error={historyError}
+      headSha={headSha}
+      viewingSha={viewingSha}
+      selfName={user?.name ?? null}
+      onPick={(sha) => void onPickCommit(sha)}
+      headerActions={versionActions}
+    />
+  );
+
   const headerActions =
-    !loading && !error ? (
+    !loading && !error && !historyOpen ? (
       <>
-        {!viewingVersion && (
+        {/* Save-in-flight and failure feedback only. The mock's header
+            carries no idle "Saved" label, so the saved state renders
+            nothing. */}
+        {!viewingVersion && coedit.saveStatus !== "saved" && (
           <span className="mr-1 text-[12px] text-(--text-03)">
-            {coedit.saveStatus === "saving"
-              ? "Saving…"
-              : coedit.saveStatus === "error"
-                ? "Couldn't save"
-                : "Saved"}
+            {coedit.saveStatus === "saving" ? "Saving…" : "Couldn't save"}
           </span>
         )}
-        <Button
-          icon={SvgSparkle}
-          prominence="tertiary"
-          tooltip="Run Agent"
-          onClick={() => setRunAgentOpen(true)}
-        />
-        <SelectButton
-          icon={SvgWorkflow}
-          state={automationsOpen ? "selected" : "empty"}
-          tooltip="Triggers"
-          onClick={() => {
-            if (automationsOpen || triggerModalOpen) {
-              setAutomationsOpen(false);
-              setTriggerModalOpen(false);
-              setEditingTrigger(null);
-              return;
-            }
-            setHistoryOpen(false);
-            setCommentsOpen(false);
-            setCommentDraft(null);
-            setPolicyOpen(false);
-            setAutomationsOpen(true);
-          }}
-        />
         <Button
           icon={SvgShare}
           prominence="tertiary"
           tooltip="Share"
           onClick={() => setShareOpen(true)}
         />
-        <SelectButton
-          icon={SvgHistory}
-          state={historyOpen ? "selected" : "empty"}
-          tooltip="History"
-          onClick={toggleHistory}
-        />
-        <SelectButton
-          icon={SvgBubbleText}
-          state={commentsOpen ? "selected" : "empty"}
-          tooltip="Comments"
-          onClick={() =>
-            commentsOpen ? setCommentsOpen(false) : openComments()
-          }
-        />
-        <SelectButton
-          icon={SvgShield}
-          state={policyOpen ? "selected" : "empty"}
-          tooltip="Update Policy"
-          onClick={() => {
-            if (policyOpen) {
-              setPolicyOpen(false);
-              return;
-            }
-            setHistoryOpen(false);
-            setCommentsOpen(false);
-            setCommentDraft(null);
-            setAutomationsOpen(false);
-            setTriggerModalOpen(false);
-            setEditingTrigger(null);
-            setPolicyOpen(true);
-          }}
-        />
+        <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+          <Popover.Trigger asChild>
+            <span className="inline-flex">
+              <Button
+                icon={SvgMoreHorizontal}
+                prominence="tertiary"
+                tooltip="More"
+              />
+            </span>
+          </Popover.Trigger>
+          <Popover.Content width="fit" align="end">
+            <PopoverMenu>
+              <LineItemButton
+                title="Run Agent"
+                icon={SvgSparkle}
+                sizePreset="main-ui"
+                variant="section"
+                onClick={() => {
+                  setMoreOpen(false);
+                  setRunAgentOpen(true);
+                }}
+              />
+              <LineItemButton
+                title="Version history"
+                icon={SvgHistory}
+                sizePreset="main-ui"
+                variant="section"
+                onClick={() => {
+                  setMoreOpen(false);
+                  void toggleHistory();
+                }}
+              />
+            </PopoverMenu>
+          </Popover.Content>
+        </Popover>
+        <span className="panel-toggle inline-flex">
+          <SelectButton
+            icon={SvgSidebar}
+            state={panelOpen ? "selected" : "empty"}
+            tooltip={panelOpen ? "Close panel" : "Open panel"}
+            onClick={() => (panelOpen ? closePanel() : openPanel("updates"))}
+          />
+        </span>
       </>
     ) : null;
+
+  // One body per tab, shared by the desktop rail portal and the mobile sheet.
+  const panelBody = (() => {
+    switch (panelTab) {
+      case "updates":
+        return (
+          // The mock's Panel body (1790:52468) pads the card stack 8px/4px.
+          <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
+            <UpdatePolicyPanel
+              path={path}
+              onShowHistory={toggleHistoryList}
+              historyOpen={historyListOpen}
+              historyList={versionList}
+              totalEdits={commits ? commits.length : null}
+              fullHeight
+            />
+          </div>
+        );
+      case "comments":
+        return (
+          // Same card-stack host as the other tabs. The panel scrolls inside
+          // its bordered shell.
+          <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
+            <CommentsPanel
+              path={path}
+              headSha={headSha}
+              draft={commentDraft}
+              threads={commentThreads}
+              onChanged={refreshComments}
+              activeId={activeCommentId}
+              onActivate={activateComment}
+              onHoverThread={setHoveredCommentId}
+              editorRef={viewingVersion ? undefined : coeditorRef}
+              listView={commentsListView}
+              onListViewChange={setCommentsListView}
+              onDraftConsumed={() => setCommentDraft(null)}
+              onClose={closePanel}
+              fullHeight
+            />
+          </div>
+        );
+      case "sources":
+        return (
+          <div className="flex flex-1 items-center justify-center p-4">
+            <EmptyMessageCard
+              sizePreset="main-ui"
+              icon={SvgExternalLink}
+              title="Sources"
+              description="Source attribution for this page is coming soon."
+            />
+          </div>
+        );
+      case "watching":
+        return (
+          // The watcher list scrolls inside its bordered panel. Only the
+          // docked editor needs this wrapper to scroll.
+          <div
+            className={`flex min-h-0 flex-1 flex-col px-2 py-1 ${
+              watcherEditor ? "scroll-y-hidden overflow-y-auto" : ""
+            }`}
+          >
+            {watcherEditor ? (
+              <TriggerPanel
+                open
+                docked
+                initial={watcherEditor.trigger ?? { scope_path: path }}
+                lockScope={!watcherEditor.trigger}
+                onClose={() => setWatcherEditor(null)}
+                onSaved={() => {
+                  setWatcherEditor(null);
+                  void refreshTriggers();
+                }}
+                onDelete={
+                  watcherEditor.trigger
+                    ? async () => {
+                        const t = watcherEditor.trigger!;
+                        if (
+                          !(await confirmDialog({
+                            title: "Delete this watcher?",
+                            body: `"${t.nl_description}"`,
+                            confirmLabel: "Delete",
+                          }))
+                        )
+                          return;
+                        await deleteTrigger(t.id);
+                        await refreshTriggers();
+                        setWatcherEditor(null);
+                      }
+                    : undefined
+                }
+              />
+            ) : (
+              <WatchingPanel
+                path={path}
+                onNew={() => setWatcherEditor({ trigger: null })}
+                onEdit={(t) => setWatcherEditor({ trigger: t })}
+              />
+            )}
+          </div>
+        );
+      default:
+        return null;
+    }
+  })();
 
   return (
     <main
@@ -724,6 +1047,10 @@ export function FileView({ path }: FileViewProps) {
       )}
     >
       {host?.el && headerActions && createPortal(headerActions, host.el)}
+      {historyOpen &&
+        versionChip &&
+        crumbHost?.el &&
+        createPortal(versionChip, crumbHost.el)}
 
       {agentsBarHost?.el &&
         createPortal(
@@ -738,354 +1065,219 @@ export function FileView({ path }: FileViewProps) {
           agentsBarHost.el,
         )}
 
-      <DocTitle
-        path={path}
-        onRename={viewingVersion ? undefined : handleRename}
-      />
+      {/* The margin-comments lane overlays the right 360px of the doc area
+          while every centered block reserves that width via .rail-reserved
+          (globals.css), so the editor keeps its full-width scroller with
+          the scrollbar at the window edge and content never slides under
+          the cards. */}
+      <div
+        ref={docRowRef}
+        className={`@container relative flex min-h-0 min-w-0 flex-1 flex-col ${
+          railActive ? "rail-reserved" : ""
+        } ${anchoredPanelActive ? "comments-anchored" : ""}`}
+      >
+        <DocTitle
+          path={path}
+          onRename={viewingVersion ? undefined : handleRename}
+        />
 
-      {triggerStatus && (
-        <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
-      )}
+        <ShareDialog
+          path={path}
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+        />
 
-      <TriggerPanel
-        open={triggerModalOpen && (isMobile || !rightHost?.el)}
-        initial={editingTrigger ?? { scope_path: path }}
-        lockScope={!editingTrigger}
-        onDelete={
-          editingTrigger
-            ? async () => {
-                if (
-                  !(await confirmDialog({
-                    title: "Delete this trigger?",
-                    body: `"${editingTrigger.nl_description}"`,
-                    confirmLabel: "Delete",
-                  }))
-                )
-                  return;
-                await deleteTrigger(editingTrigger.id);
-                await refreshTriggers();
-                setTriggerModalOpen(false);
-                setEditingTrigger(null);
-              }
-            : undefined
-        }
-        onClose={() => {
-          setTriggerModalOpen(false);
-          setEditingTrigger(null);
-        }}
-        onSaved={(t) => {
-          setTriggerStatus(
-            editingTrigger
-              ? `Updated trigger for ${t.scope_path}`
-              : `Created trigger for ${t.scope_path}`,
-          );
-          void refreshTriggers();
-        }}
-      />
+        <RunAgentPanel
+          open={runAgentOpen}
+          onClose={() => setRunAgentOpen(false)}
+          wikiPath={path || null}
+        />
 
-      <ShareDialog
-        path={path}
-        open={shareOpen}
-        onClose={() => setShareOpen(false)}
-      />
+        {error && (
+          <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
+            {error}
+          </div>
+        )}
 
-      <RunAgentPanel
-        open={runAgentOpen}
-        onClose={() => setRunAgentOpen(false)}
-        wikiPath={path || null}
-      />
+        {loading && <LoadingSpinner />}
 
-      {error && (
-        <div className="mb-3 rounded-(--radius-04) bg-(--status-error-01) p-[10px] text-[13px] text-(--status-text-error-05)">
-          {error}
-        </div>
-      )}
-
-      {viewingOld && !loading && !error && (
-        <div className="mb-3 flex items-center gap-3 rounded-(--radius-08) border border-(--status-warning-02) bg-(--status-warning-01) px-3 py-2 text-[13px] text-(--status-text-warning-05)">
-          <span>
-            Viewing an older version
-            {viewingSha ? ` (${viewingSha.slice(0, 7)})` : ""}.
-          </span>
-          <div className="flex-1" />
-          <Button size="sm" onClick={loadLatest}>
-            Back to latest
-          </Button>
-        </div>
-      )}
-
-      {loading && <LoadingSpinner />}
-
-      {!loading && !error && (
-        <>
-          {/* The live editor when showing the current version, or DiffView
+        {!loading && !error && (
+          <>
+            {/* The live editor when showing the current version, or DiffView
               when viewing an old commit. The editor pins the viewport (its own
               internal scroll) but spans full width so the scrollbar sits flush
               at the far-right edge; the text is capped + centered. */}
-          {viewingVersion && diffData ? (
-            <div className="flex min-h-0 flex-1 justify-center">
-              <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
-                <DiffView
-                  data={diffData!}
-                  commit={
-                    commits?.find((c) => c.sha === viewingSha) ?? undefined
-                  }
-                  loadBody={async () => {
-                    const sha = viewingSha;
-                    if (!sha) return "";
-                    const r = await apiFetch<FileResponse>(
-                      `/wiki/file?path=${encodeURIComponent(
-                        path,
-                      )}&ref=${encodeURIComponent(sha)}`,
-                    );
-                    return r.body;
-                  }}
-                />
+            {viewingVersion && diffData ? (
+              <div className="flex min-h-0 flex-1 justify-center">
+                <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
+                  <DiffView data={diffData!} />
+                </div>
               </div>
-            </div>
-          ) : (
-            // Live editor: the full-width editor owns the scroll, so its
-            // scrollbar sits flush at the far-right edge while the text stays
-            // capped + centered by the editor theme. `--cm-gutter` mirrors the
-            // negative margin (which cancels `<main>`'s padding) so the editor
-            // text keeps the same side gutter as the DocTitle at every
-            // breakpoint. The banners stay capped + centered above it, aligned
-            // with the text and DocTitle (`empty:hidden` drops the gap when
-            // none render).
-            <div
-              className={`flex min-h-0 flex-1 flex-col gap-3 ${
-                isMobile
-                  ? "-mx-3 [--cm-gutter:0.75rem]"
-                  : "-mx-8 [--cm-gutter:2rem]"
-              }`}
-            >
+            ) : (
+              // Live editor: the full-width editor owns the scroll, so its
+              // scrollbar sits flush at the far-right edge while the text stays
+              // capped + centered by the editor theme. `--cm-gutter` mirrors the
+              // negative margin (which cancels `<main>`'s padding) so the editor
+              // text keeps the same side gutter as the DocTitle at every
+              // breakpoint. The banners stay capped + centered above it, aligned
+              // with the text and DocTitle (`empty:hidden` drops the gap when
+              // none render).
               <div
-                className={`mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
-                  isMobile ? "px-3" : ""
+                className={`flex min-h-0 flex-1 flex-col gap-3 ${
+                  isMobile
+                    ? "-mx-3 [--cm-gutter:0.75rem]"
+                    : "-mx-8 [--cm-gutter:2rem]"
                 }`}
               >
-                <UpdateHealthBanner
-                  path={path}
-                  onOpenPolicy={() => {
-                    setHistoryOpen(false);
-                    setCommentsOpen(false);
-                    setAutomationsOpen(false);
-                    setTriggerModalOpen(false);
-                    setEditingTrigger(null);
-                    setPolicyOpen(true);
-                  }}
-                />
-                <Path2ReviewBanner path={path} canWrite={canWrite} />
-                <CoeditPresenceBar
-                  participants={coedit.participants}
-                  peers={coedit.peers}
-                  typing={coedit.typing}
-                  selfUserId={user?.id ?? null}
-                />
-                {(() => {
-                  // Cards visible while the body is still "empty enough"
-                  // to discard without losing user work: truly blank, or
-                  // still verbatim equal to the template the user just
-                  // applied (so they can keep swapping templates).
-                  const isBlank = coedit.buffer.trim() === "";
-                  const matchesApplied =
-                    appliedTemplateBody !== null &&
-                    coedit.buffer === appliedTemplateBody;
-                  const showGallery =
-                    (isBlank || matchesApplied) &&
-                    templates !== null &&
-                    templates.length > 0;
-                  if (!showGallery) return null;
-                  return (
-                    <TemplateGallery
-                      templates={templates!}
-                      activeId={matchesApplied ? appliedTemplateId : null}
-                      applyingId={applyingTemplateId}
-                      blankActive={isBlank && appliedTemplateId === null}
-                      onPick={(t) => void onPickTemplate(t)}
-                      onBlank={() => void onPickBlank()}
+                <div
+                  className={`rail-inset mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
+                    isMobile ? "px-3" : ""
+                  }`}
+                >
+                  <UpdateHealthBanner
+                    path={path}
+                    onOpenPolicy={() => openPanel("updates")}
+                  />
+                  <Path2ReviewBanner path={path} canWrite={canWrite} />
+                  <CoeditPresenceBar
+                    participants={coedit.participants}
+                    peers={coedit.peers}
+                    typing={coedit.typing}
+                    selfUserId={user?.id ?? null}
+                  />
+                  {(() => {
+                    // Cards visible while the body is still "empty enough"
+                    // to discard without losing user work: truly blank, or
+                    // still verbatim equal to the template the user just
+                    // applied (so they can keep swapping templates).
+                    const isBlank = coedit.buffer.trim() === "";
+                    const matchesApplied =
+                      appliedTemplateBody !== null &&
+                      coedit.buffer === appliedTemplateBody;
+                    const showGallery =
+                      (isBlank || matchesApplied) &&
+                      templates !== null &&
+                      templates.length > 0;
+                    if (!showGallery) return null;
+                    return (
+                      <TemplateGallery
+                        templates={templates!}
+                        activeId={matchesApplied ? appliedTemplateId : null}
+                        applyingId={applyingTemplateId}
+                        blankActive={isBlank && appliedTemplateId === null}
+                        onPick={(t) => void onPickTemplate(t)}
+                        onBlank={() => void onPickBlank()}
+                      />
+                    );
+                  })()}
+                </div>
+                {coedit.session ? (
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    <Coeditor
+                      key={coedit.session.id}
+                      ref={coeditorRef}
+                      session={coedit.session}
+                      peers={coedit.peers}
+                      onSelectionChange={coedit.reportSelection}
+                      onCaretCleared={coedit.reportCaretCleared}
+                      getCaretSeq={coedit.getCaretSeq}
+                      onServerFrame={coedit.onServerFrame}
+                      reportDoc={coedit.reportDoc}
+                      registerFlush={coedit.registerFlush}
+                      registerSetDoc={coedit.registerSetDoc}
+                      registerCatchUp={coedit.registerCatchUp}
+                      readOnly={!canWrite}
+                      commentHighlights={commentHighlights}
+                      activeCommentIds={activeCommentIds}
+                      onSelectionForComment={handleSelectionForComment}
+                      placeholder="Start typing, or pick a template above…"
                     />
-                  );
-                })()}
+                  </div>
+                ) : coedit.joinError ? (
+                  // The join handshake itself failed and there is no read-only
+                  // fallback to fall back to, so this has to be an actionable
+                  // dead end, not a permanent "Connecting…".
+                  <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
+                    <span>
+                      Couldn't connect to the live session: {coedit.joinError}
+                    </span>
+                    <Button size="sm" onClick={coedit.retryJoin}>
+                      Retry
+                    </Button>
+                  </div>
+                ) : (
+                  // Joining the session. The editor mounts once we have its
+                  // start version + doc.
+                  <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
+                    Connecting…
+                  </div>
+                )}
               </div>
-              {coedit.session ? (
-                <Coeditor
-                  key={coedit.session.id}
-                  ref={coeditorRef}
-                  session={coedit.session}
-                  peers={coedit.peers}
-                  onSelectionChange={coedit.reportSelection}
-                  onCaretCleared={coedit.reportCaretCleared}
-                  getCaretSeq={coedit.getCaretSeq}
-                  onServerFrame={coedit.onServerFrame}
-                  reportDoc={coedit.reportDoc}
-                  registerFlush={coedit.registerFlush}
-                  registerSetDoc={coedit.registerSetDoc}
-                  registerCatchUp={coedit.registerCatchUp}
-                  readOnly={!canWrite}
-                  commentHighlights={commentHighlights}
-                  onSelectionForComment={handleSelectionForComment}
-                  placeholder="Start typing, or pick a template above…"
-                />
-              ) : coedit.joinError ? (
-                // The join handshake itself failed — there's no read-only
-                // fallback to fall back to, so this has to be an actionable
-                // dead end, not a permanent "Connecting…".
-                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
-                  <span>
-                    Couldn't connect to the live session: {coedit.joinError}
-                  </span>
-                  <Button size="sm" onClick={coedit.retryJoin}>
-                    Retry
-                  </Button>
-                </div>
-              ) : (
-                // Joining the session; the editor mounts once we have its
-                // start version + doc.
-                <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
-                  Connecting…
-                </div>
-              )}
-            </div>
-          )}
-          {/* Desktop side panels dock at the app's right edge (full height,
+            )}
+            {/* Desktop side panels dock at the app's right edge (full height,
               beside the header) by portaling into the shell's right-panel host,
               so they never eat into the reading column above. Mobile keeps the
               fixed sheet rendered below. */}
-          {historyOpen &&
-            !isMobile &&
-            rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <HistoryPanel
-                  commits={commits}
-                  error={historyError}
-                  headSha={headSha}
-                  viewingSha={viewingSha}
-                  onPick={onPickCommit}
-                  onClose={closeHistory}
-                  fullHeight
-                />
-              </div>,
-              rightHost.el,
-            )}
-          {commentsOpen &&
-            !isMobile &&
-            rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <CommentsPanel
-                  path={path}
-                  headSha={headSha}
-                  draft={commentDraft}
-                  threads={commentThreads}
-                  onChanged={refreshComments}
-                  activeId={activeCommentId}
-                  onActivate={activateComment}
-                  onDraftConsumed={() => setCommentDraft(null)}
-                  onClose={() => {
-                    setCommentsOpen(false);
-                    setCommentDraft(null);
-                  }}
-                  fullHeight
-                />
-              </div>,
-              rightHost.el,
-            )}
-          {policyOpen &&
-            !isMobile &&
-            rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[400px] border-l border-(--border-01)">
-                <UpdatePolicyPanel
-                  path={path}
-                  onClose={() => setPolicyOpen(false)}
-                  onShowHistory={toggleHistory}
-                  fullHeight
-                />
-              </div>,
-              rightHost.el,
-            )}
-          {automationsOpen &&
-            !isMobile &&
-            rightHost?.el &&
-            createPortal(
-              <div className="flex h-full w-[480px] flex-col border-l border-(--border-01) bg-(--background-tint-01) p-2">
-                <TriggersSidePanel path={path} onStatus={setTriggerStatus} />
-              </div>,
-              rightHost.el,
-            )}
-        </>
-      )}
+            {historyOpen &&
+              !isMobile &&
+              rightHost?.el &&
+              createPortal(historyRail, rightHost.el)}
+            {panelTab &&
+              !isMobile &&
+              rightHost?.el &&
+              createPortal(
+                <DocPanel tab={panelTab} onTabChange={setPanelTab}>
+                  {panelBody}
+                </DocPanel>,
+                rightHost.el,
+              )}
+          </>
+        )}
+        {railActive && (
+          <CommentMarginRail
+            threads={commentThreads}
+            draft={commentDraft}
+            editorRef={coeditorRef}
+            activeId={activeCommentId}
+            onActivate={activateComment}
+            onHoverThread={setHoveredCommentId}
+            selfName={user?.name || user?.email || "You"}
+            path={path}
+            selfId={user?.id}
+            isAdmin={!!user?.is_admin}
+            busy={marginBusy}
+            run={runMargin}
+            onSubmitDraft={(body) => void submitMarginDraft(body)}
+            onCancelDraft={() => setCommentDraft(null)}
+          />
+        )}
+      </div>
       {historyOpen && isMobile && (
-        // Mobile: render history as a fixed slide-in sheet over the
-        // markdown content rather than a 320px side-panel that would
-        // squeeze the body to nothing on a 375px screen.
+        // Mobile: render the version-mode rail as a fixed slide-in sheet
+        // over the content rather than a side column that would squeeze
+        // the body to nothing on a 375px screen.
         <>
           <div
             onClick={closeHistory}
             aria-hidden
             className="fixed inset-0 z-[60] bg-(--mask-03)"
           />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <HistoryPanel
-              commits={commits}
-              error={historyError}
-              headSha={headSha}
-              viewingSha={viewingSha}
-              onPick={(sha) => {
-                onPickCommit(sha);
-                // Plain close (no reset): the sheet covers the content, so a
-                // deliberate pick must keep the chosen version visible. The
-                // banner's "Back to latest" is the way back.
-                setHistoryOpen(false);
-              }}
-              onClose={closeHistory}
-              fullHeight
-            />
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] bg-(--background-tint-00) shadow-(--shadow-panel)">
+            {historyRail}
           </div>
         </>
       )}
-      {commentsOpen && isMobile && (
+      {panelTab && isMobile && (
         <>
           <div
-            onClick={() => setCommentsOpen(false)}
+            onClick={closePanel}
             aria-hidden
             className="fixed inset-0 z-[60] bg-(--mask-03)"
           />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <CommentsPanel
-              path={path}
-              headSha={headSha}
-              draft={commentDraft}
-              threads={commentThreads}
-              onChanged={refreshComments}
-              activeId={activeCommentId}
-              onActivate={activateComment}
-              onDraftConsumed={() => setCommentDraft(null)}
-              onClose={() => {
-                setCommentsOpen(false);
-                setCommentDraft(null);
-              }}
-              fullHeight
-            />
-          </div>
-        </>
-      )}
-      {policyOpen && isMobile && (
-        <>
-          <div
-            onClick={() => setPolicyOpen(false)}
-            aria-hidden
-            className="fixed inset-0 z-[60] bg-(--mask-03)"
-          />
-          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] shadow-(--shadow-panel)">
-            <UpdatePolicyPanel
-              path={path}
-              onClose={() => setPolicyOpen(false)}
-              onShowHistory={toggleHistory}
-              fullHeight
-            />
+          <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(360px,100vw)] bg-(--background-tint-00) shadow-(--shadow-panel)">
+            <DocPanel tab={panelTab} onTabChange={setPanelTab}>
+              {panelBody}
+            </DocPanel>
           </div>
         </>
       )}
@@ -1103,7 +1295,10 @@ export function FileView({ path }: FileViewProps) {
             size="sm"
             onClick={() => {
               setCommentDraft(selTool.draft);
-              openComments();
+              // Match the lane's 920px container query at click time:
+              // anywhere the lane can't show, the draft routes to the panel.
+              const rowWide = (docRowRef.current?.clientWidth ?? 0) >= 920;
+              if (panelTab !== null || isMobile || !rowWide) openComments();
               setSelTool(null);
               window.getSelection()?.removeAllRanges();
             }}

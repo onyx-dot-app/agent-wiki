@@ -9,7 +9,9 @@
 }
 
 /* Add + Remove block tokens (Figma 284:22702 / 284:22725).
-   Colors are Opal status tokens, which flip for dark mode. */
+   Colors are Opal status tokens, which flip for dark mode. Band text is
+   bold and status-colored throughout (Figma 1912:357245). Code spans stay
+   regular weight since DM Mono carries no bold cut in the mock. */
 .add,
 .remove {
   border-radius: 8px;
@@ -21,7 +23,7 @@
 
 .add {
   background: var(--status-success-01);
-  color: var(--text-05);
+  color: var(--status-text-success-05);
   padding: 4px;
 }
 
@@ -30,6 +32,24 @@
 .remove {
   background: var(--status-error-01);
   color: var(--status-text-error-05);
+}
+
+/* The inner .markdown wrapper and its heading/link rules pin color and
+   weight. Re-assert the band's treatment over them. */
+.add .blockContent,
+.remove .blockContent {
+  color: inherit;
+  font-weight: 700;
+}
+.add .blockContent :is(h1, h2, h3, h4, h5, h6, a),
+.remove .blockContent :is(h1, h2, h3, h4, h5, h6, a) {
+  color: inherit;
+  font-weight: 700;
+}
+.add .blockContent code,
+.remove .blockContent code,
+.hunk .wordLine code {
+  font-weight: 400;
 }
 
 .blockContent {
@@ -81,12 +101,21 @@
   color: currentColor;
 }
 
-/* Single-line edits render as a plain line (matching .context inset) with
-   only the changed words highlighted — no full-line band — so it's clear
-   exactly where the change is. */
-.wordLine {
-  padding: 0 12px;
-  color: var(--text-05);
+/* Single-line edits render as a full-line band (Figma 1912:357245): green
+   surface, all text bold, unchanged words in text-04, changed words carrying
+   only status color (no chip background). Padding keeps the 12px text inset
+   shared with .context and the block bands. */
+.hunk .wordLine {
+  background: var(--status-success-01);
+  border-radius: 8px;
+  margin: 4px 0;
+  padding: 4px 12px;
+  color: var(--text-04);
+  font-weight: 700;
+}
+.hunk .wordLine :is(h1, h2, h3, h4, h5, h6, a) {
+  color: inherit;
+  font-weight: 700;
 }
 
 /* Inline anchor wrapping the changed words; the navigator scrolls here so a
@@ -96,22 +125,14 @@
   scroll-margin: 24px 0;
 }
 
-/* Highlight scoped to just the changed words, reusing the block-band status
-   tokens. clone keeps the background intact where the span wraps lines. */
+/* Changed words carry status color only. The band supplies the surface. */
 .wordRemoved {
-  background: var(--status-error-01);
   color: var(--status-text-error-05);
   text-decoration: line-through;
-  border-radius: 3px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+  text-decoration-color: currentColor;
 }
 
 .wordAdded {
-  background: var(--status-success-01);
   color: var(--status-text-success-05);
-  text-decoration: underline;
-  border-radius: 3px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+  text-decoration: none;
 }

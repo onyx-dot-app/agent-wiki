@@ -6,9 +6,10 @@ import logging
 from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import and_, not_, or_, select
 
 from app.auth import User
+from app.auth import users as users_repo
 from app.auth.deps import require_user
 from app.db.models import Event as EventRow, Trigger, WikiOwner
 from app.db.session import session
@@ -27,15 +28,25 @@ def _parse_payload(raw: str) -> dict[str, Any]:
     return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else {}
 
 
-def _to_view(e: EventRow) -> Event:
+def _to_view(e: EventRow, names: dict[str, str] | None = None) -> Event:
     return Event(
         id=e.id,
         ts=e.ts,
         kind=e.kind,
         actor=e.actor,
+        actor_display=(names or {}).get(e.actor or ""),
         target=e.target,
         payload=_parse_payload(e.payload_json),
     )
+
+
+def _display_names(actor_ids: set[str]) -> dict[str, str]:
+    rows = users_repo.get_many(actor_ids)
+    return {
+        uid: str(row.get("name") or row.get("email") or "")
+        for uid, row in rows.items()
+        if row.get("name") or row.get("email")
+    }
 
 
 @router.get("", response_model=EventListResponse)
@@ -63,6 +74,13 @@ def list_events(
     stmt = (
         select(EventRow)
         .where(visibility)
+        # Your own comments are not news to you, they stay visible to
+        # everyone else who can see the page's events.
+        .where(
+            not_(
+                and_(EventRow.kind == "page.comment", EventRow.actor == user.id)
+            )
+        )
         .order_by(EventRow.id.desc())
         .limit(limit)
     )
@@ -72,7 +90,8 @@ def list_events(
     with session() as s:
         rows = s.scalars(stmt).all()
 
-    return EventListResponse(events=[_to_view(e) for e in rows])
+    names = _display_names({e.actor for e in rows if e.actor})
+    return EventListResponse(events=[_to_view(e, names) for e in rows])
 
 
 @router.get("/{event_id}", response_model=Event)
@@ -83,7 +102,7 @@ def get_event(event_id: int, user: User = Depends(require_user)) -> Event:
             raise HTTPException(status_code=404, detail="not found")
         # Admins can read any automanage event (mirrors the list's audit view).
         if user.is_admin and e.kind.startswith("automanage."):
-            return _to_view(e)
+            return _to_view(e, _display_names({e.actor} if e.actor else set()))
         # Hide cross-owner rows behind a 404 so we don't leak existence.
         if e.target is None:
             raise HTTPException(status_code=404, detail="not found")
@@ -92,4 +111,4 @@ def get_event(event_id: int, user: User = Depends(require_user)) -> Event:
         )
         if owner != user.id:
             raise HTTPException(status_code=404, detail="not found")
-        return _to_view(e)
+        return _to_view(e, _display_names({e.actor} if e.actor else set()))

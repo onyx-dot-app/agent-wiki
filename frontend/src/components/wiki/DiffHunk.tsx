@@ -104,8 +104,8 @@ export function DiffHunk({ entries }: { entries: AnnotatedEntry[] }) {
       {entries.map(({ entry, changeIndex }, idx) => {
         const anchor = changeIndex ?? undefined;
         if (entry.kind === "word") {
-          // Single-line edits render inline (no full-line band) so only the
-          // changed words are highlighted, not the whole line.
+          // Single-line edits render as one band with only the changed
+          // words status-colored, so the edit position stays visible.
           return (
             <div key={idx} className={`${styles.wordLine} markdown`}>
               <WordLine w={entry.line.word_diff} anchor={anchor} />

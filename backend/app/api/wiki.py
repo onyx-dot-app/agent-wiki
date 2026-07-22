@@ -1023,7 +1023,9 @@ def update_health(
         auto_update_disabled=update_policy_repo.resolve_for_path(
             rel
         ).ingestion_auto_update_disabled,
-        can_manage=acl.can(user.id, user.is_admin, "write", rel),
+        # Managing limits is owner/admin only (mock annotation: "Only page
+        # owner and admins can click the usage bar to open this dialog").
+        can_manage=user.is_admin or acl.get_owner(rel) == user.id,
         cap_resets_at=cap_resets_at,
     )
 

@@ -12,11 +12,13 @@ import {
   SvgListTree,
   SvgMoreHorizontal,
 } from "@onyx-ai/opal/icons";
-import { NotificationBell } from "@/components/common/NotificationBell";
 import { CraftNotifier } from "@/components/wiki/CraftNotifier";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
-import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
+import {
+  useHeaderActionsHost,
+  useHeaderCrumbHost,
+} from "@/providers/WikiHeaderActionsProvider";
 import { resolveIds, wikiHref } from "@/lib/wikiHref";
 
 function segmentLabel(segment: string): string {
@@ -81,9 +83,9 @@ function FoldedCrumb({
 export function WikiHeader() {
   const router = useRouter();
   const { view, toggleTree } = useLeftPanel();
-  const treeVisible = view === "wiki-tree";
   const { wikiPath } = useAppFocus();
   const host = useHeaderActionsHost();
+  const crumbHost = useHeaderCrumbHost();
   const [foldOpen, setFoldOpen] = useState(false);
 
   const segments = wikiPath ? wikiPath.split("/") : [];
@@ -117,10 +119,12 @@ export function WikiHeader() {
   const trail = isFolded ? crumbs.slice(-FOLD_TRAIL) : crumbs.slice(1);
 
   return (
-    <div className="flex h-14 items-center gap-3 px-4">
-      {/* The expand control lives here only while the tree is closed. When
-          open, the collapse control sits in the tree panel's own header. */}
-      {!treeVisible && (
+    <div className="flex h-13 items-center gap-3 px-2">
+      {/* The expand control shows only while no left panel is open. The
+          tree's collapse control sits in its own header, and while the
+          activities panel occupies the slot a tree toggle would flip state
+          invisibly underneath it. */}
+      {view === null && (
         <Button
           icon={SvgListTree}
           prominence="tertiary"
@@ -129,22 +133,23 @@ export function WikiHeader() {
         />
       )}
       {/* min-w-0 + nowrap + overflow-hidden: one line, always. The container
-          only clips, the per-crumb truncate classes render the ellipsis. */}
-      <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-sm whitespace-nowrap">
-        {/* Home renders as its glyph, not text, and only when there is a
+          only clips, the per-crumb truncate classes render the ellipsis.
+          Crumbs use the mock's 12/16 SemiBold caption style. */}
+      <nav className="flex min-w-0 items-center gap-0.5 overflow-hidden text-xs font-semibold whitespace-nowrap">
+        {/* Home renders as its glyph in a 28px button, only when there is a
             path to crumb back from. The entry stays in crumbs so the fold
             math counts it, and its label becomes the aria-label. */}
         {segments.length > 0 && (
-          <Link
+          <Button
+            icon={SvgHome}
+            prominence="tertiary"
+            size="md"
             href={crumbs[0].href}
             aria-label={crumbs[0].label}
-            className="flex shrink-0 items-center text-(--text-03) hover:text-(--text-05)"
-          >
-            <SvgHome size={16} />
-          </Link>
+          />
         )}
         {folded.length > 0 && (
-          <span className="flex shrink-0 items-center gap-1.5">
+          <span className="flex shrink-0 items-center gap-0.5">
             <SvgChevronRight size={12} className="text-(--text-02)" />
             <Popover open={foldOpen} onOpenChange={setFoldOpen}>
               <Popover.Trigger asChild>
@@ -179,11 +184,11 @@ export function WikiHeader() {
           return (
             <span
               key={c.href}
-              className={`flex items-center gap-1.5 ${last ? "min-w-0" : "shrink-0"}`}
+              className={`flex items-center gap-0.5 ${last ? "min-w-0" : "shrink-0"}`}
             >
               <SvgChevronRight size={12} className="text-(--text-02)" />
               {last ? (
-                <span className="overflow-hidden font-semibold text-ellipsis text-(--text-05)">
+                <span className="overflow-hidden text-ellipsis text-(--text-04)">
                   {c.label}
                 </span>
               ) : (
@@ -197,12 +202,14 @@ export function WikiHeader() {
             </span>
           );
         })}
+        {/* Version chip slot. The active wiki route portals a dismissible
+            version chip here while viewing update history. */}
+        <span ref={crumbHost?.setEl} className="flex shrink-0 items-center" />
       </nav>
       {/* Page-level actions portal here from the active wiki route (see
           WikiHeaderActionsProvider). Pushed right by the flex spacer. */}
       <div className="min-w-4 flex-1" />
-      <div ref={host?.setEl} className="flex items-center gap-2" />
-      <NotificationBell />
+      <div ref={host?.setEl} className="flex items-center gap-0" />
       <CraftNotifier />
     </div>
   );

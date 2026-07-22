@@ -94,9 +94,9 @@ def resolve_warn_threshold(path: str) -> int:
     """Effective too-frequent-update warning threshold for ``path``.
 
     The page's own ``warn_update_threshold`` if set, else the wiki-wide default
-    (``ingest_settings.warn_update_threshold_default``). Per-page only — unlike
-    the two cascaded fields, this does not walk ancestor folders. ``0`` means
-    warnings are off for the page.
+    (``ingest_settings.warn_update_threshold_default``). Per-page only, unlike
+    the two cascaded fields it does not walk ancestor folders. ``0`` warns
+    on every auto-update.
     """
     with session() as s:
         row = s.get(UpdatePolicy, normalize_path(path))

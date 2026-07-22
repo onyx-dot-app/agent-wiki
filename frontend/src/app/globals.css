@@ -2,14 +2,14 @@
 @import "./css/z-index.css";
 @config "../../tailwind.config.cjs";
 
-/* Reserve the scrollbar gutter on the root scroll container so layout
-   width stays constant whether content fits or overflows. Without this,
-   pages that toggle between short and tall content cause a horizontal
-   shift as the scrollbar appears/disappears. */
+/* The app shell is height-capped and scrolls inside its own columns, so
+   the root never scrolls. No scrollbar-gutter here: reserving one paints
+   a permanent dead margin down the page's right edge. A route whose own
+   container toggles between fitting and overflowing sets the gutter on
+   that scroll container. */
 html,
 body {
   height: 100%;
-  scrollbar-gutter: stable;
 }
 
 @layer base {
@@ -21,7 +21,23 @@ body {
 
 :root {
   /* agent-wiki layout tokens — not part of Opal */
-  --activities-view: 22rem;
+  --left-panel-view: 22rem;
+}
+
+/* One card envelope for every left-panel occupant (wiki tree, activities):
+   the shared width, 4px inset, tinted card chrome. Occupants only add
+   their own internal gap and content. */
+.left-panel-card {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: var(--left-panel-view);
+  height: calc(100% - 8px);
+  margin: 4px;
+  background: var(--background-tint-01);
+  border: 1px solid var(--border-01);
+  border-radius: var(--radius-12);
+  padding: 4px;
 }
 
 /* ── Shadow tokens ────────────────────────────────────────────────────────
@@ -105,6 +121,13 @@ body {
   --interactive-foreground-icon: var(--text-05) !important;
 }
 
+/* Header panel toggle: the mock's active state is a raised white square,
+   not Opal's selection tint. */
+.panel-toggle .interactive[data-interactive-state="selected"] {
+  background-color: var(--background-tint-00);
+  box-shadow: var(--shadow-box-00);
+}
+
 /* ── Horizontal scroll containers ─────────────────────────────────────────
    Native swipe/scroll without a visible scrollbar (e.g. mobile template
    picker). The container still scrolls — only the chrome is hidden.
@@ -115,6 +138,80 @@ body {
 }
 .scroll-x-hidden::-webkit-scrollbar {
   display: none;
+}
+
+/* Panel and drawer scroll columns: the scrollbar is hidden so the column's
+   content width never shifts between overflowing and fitting content. */
+.scroll-y-hidden {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll-y-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+/* Opal's side-panel regions never scroll themselves, occupants own their
+   scrolling. Without the clip the region computes a few px of phantom
+   scroll area and paints a scrollbar beside the card on classic-scrollbar
+   setups. */
+.opal-root-layout__panel {
+  overflow: clip;
+}
+
+/* The editor hides its scroll chrome per the mocks. The scroll-position
+   tick rail is the intended indicator surface. */
+.cm-scroller {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.cm-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Doc panel tab transitions ────────────────────────────────────────────
+   Enter-only fade + directional slide for the incoming tab surface, matched
+   to the underline indicator's travel (DocPanel keys the body by tab). No
+   fill mode: a retained transform would become a containing block for any
+   future fixed-position descendant. Compositor properties only.
+   ───────────────────────────────────────────────────────────────────── */
+@keyframes panel-tab-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes panel-tab-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.panel-tab-in-right {
+  animation: panel-tab-in-right 180ms ease-out;
+}
+.panel-tab-in-left {
+  animation: panel-tab-in-left 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-tab-in-right,
+  .panel-tab-in-left {
+    animation: none;
+  }
+}
+
+/* Scroll-edge fade from the mocks' full-size Mask layer: an SVG gradient
+   with stops at 95.17% → 100%, so the fade depth scales with the container
+   (~40px on the version rail, ~23px on the expanded history card). */
+.scroll-fade-bottom {
+  mask-image: linear-gradient(to bottom, black 95.17%, transparent);
 }
 
 /* ── Radix popovers ───────────────────────────────────────────────────────
@@ -260,4 +357,106 @@ body {
 
 @utility dbg-green {
   border: 1px solid green;
+}
+
+/* Doc side panel tab strip: the mock's tabs use the 14px semibold Main UI
+   style, which Opal's Tabs does not expose as props. Labels render through a
+   Text child carrying its own font classes, so descendants must inherit.
+   Scoped to the panel strip so other tab surfaces keep Opal's defaults. */
+.doc-panel-tabs .opal-tabs-trigger {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.doc-panel-tabs .opal-tabs-trigger * {
+  font-weight: inherit;
+}
+
+/* The mock's strip has no fill, the page background shows through. Opal's
+   underline list paints background-tint-00, an opaque fill that reads as a
+   band on the tinted app shell. The mock's label-to-underline gap is 2px
+   for a 36px strip total, so the list's 5px pad drops to 4px. */
+.doc-panel-tabs .opal-tabs-list {
+  background: transparent;
+  padding-bottom: 4px;
+}
+
+/* The mock's active-tab underline is theme primary, not Opal's default
+   background-tint-inverted-03 gray. */
+.doc-panel-tabs .opal-tabs-pill-indicator {
+  background: var(--theme-primary-05);
+}
+
+/* Panel search fields use the 14px Main UI size, which InputTypeIn does
+   not expose as a prop. Scoped so other inputs keep Opal's default. */
+.panel-search .opal-input input {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Update-instructions editor uses the mock's 14/20 Medium text-04 style.
+   Opal's textarea field inherits the body font and exposes no size prop. */
+.instructions-editor .opal-input-field {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--text-04);
+}
+
+/* Margin-comments lane reservation. The editor stays full width so its
+   scrollbar hugs the window edge, and every centered doc block (title,
+   banners, editor text) reserves the 360px lane inside its own box, so
+   content can never slide under the floating cards. Scoped to the same
+   container query that shows the lane. The extra .cm-scroller hop outranks
+   the runtime-injected CodeMirror theme rule. */
+@container (min-width: 920px) {
+  .rail-reserved .cm-scroller .cm-content,
+  .rail-reserved .rail-inset {
+    max-width: calc(768px + 360px);
+    padding-right: 360px;
+  }
+}
+
+/* Anchored comments panel: the editor's native scrollbar would sit at the
+   doc/panel boundary, so it hides in favor of the panel's viewport-edge
+   scrollbar (EditorEdgeScrollbar). */
+.comments-anchored .cm-scroller {
+  scrollbar-width: none;
+}
+.comments-anchored .cm-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+/* Comment inputs wrap MentionTextarea inside the mock's bordered field
+   (566:19918), so the textarea itself goes chromeless. The wrapper owns
+   the border, focus ring, and padding. */
+.comment-input textarea {
+  /* block, not inline: the inline baseline gap would grow the field past
+     the mock's 36px total height */
+  display: block;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  padding: 2px;
+  min-height: 24px;
+  width: 100%;
+  font-size: 14px;
+  line-height: 20px;
+  resize: none;
+}
+.comment-input textarea::placeholder {
+  color: var(--text-02);
+}
+
+/* Auto-edit limit inputs: the mock shows a 20px leading status glyph and a
+   DM Mono value. InputTypeIn has no leading-icon prop (the glyph overlays
+   via .limit-input's relative wrapper) and inherits the body font. */
+.limit-input .opal-input {
+  padding-left: 29px;
+}
+.limit-input .opal-input-field {
+  font-family: var(--font-dm-mono);
+  font-size: 14px;
+  line-height: 20px;
 }

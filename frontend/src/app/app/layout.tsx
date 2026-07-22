@@ -160,12 +160,16 @@ function AppContent({ children }: AppContentProps) {
         <SidebarAutoFold />
         {view !== null && (
           <RootLayout.LeftPanel>
-            {view === "wiki-tree" && <WikiTree />}
-            {view === "activities" && (
-              <div className="h-full p-1">
-                <ActivitiesPanel />
-              </div>
-            )}
+            {/* Keyed by view so swapping tree/activities plays the same
+                enter animation as the doc panel's tab switches. Both
+                occupants render as .left-panel-card, one width envelope. */}
+            <div
+              key={view}
+              className="panel-tab-in-left h-full overflow-x-clip"
+            >
+              {view === "wiki-tree" && <WikiTree />}
+              {view === "activities" && <ActivitiesPanel />}
+            </div>
           </RootLayout.LeftPanel>
         )}
         <RootLayout.App>

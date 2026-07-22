@@ -10,6 +10,9 @@ class Event(BaseModel):
     ts: str
     kind: str          # doc.update | trigger.fire | webhook.in | ...
     actor: str | None
+    # Resolved display name for ``actor`` (feed rendering), None for system
+    # actors or deleted users.
+    actor_display: str | None = None
     target: str | None
     payload: dict[str, Any]
 

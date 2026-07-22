@@ -43,6 +43,7 @@ import { wysiwygMarkdown } from "@/lib/editor/wysiwyg";
 import {
   commentsField,
   selectionToDraft,
+  setActiveCommentHighlightsEffect,
   setCommentHighlightsEffect,
   type CommentDraft,
   type CommentHighlightTarget,
@@ -156,6 +157,10 @@ const peersField = StateField.define<{
  * `--cm-gutter` custom property that the surrounding column sets (so the text
  * gutter tracks the page's responsive padding at every breakpoint), and it
  * uses a slim scrollbar with a transparent track. */
+// Either comment-highlight mark class, for selectors that must match both.
+const COMMENT_HIGHLIGHT =
+  ":is(.cm-comment-highlight, .cm-comment-highlight-active)";
+
 const baseTheme = EditorView.theme({
   "&": {
     height: "100%",
@@ -253,11 +258,34 @@ const baseTheme = EditorView.theme({
     borderTop: "1px solid var(--border-02)",
     verticalAlign: "middle",
   },
+  // Idle threads at 30% amber (the mock's 20% reads as unhighlighted on
+  // real content), the hovered/selected thread at Highlight/Active (60%).
   ".cm-comment-highlight": {
-    backgroundColor: "var(--status-warning-01)",
+    backgroundColor: "var(--neon-amber-a30)",
   },
   ".cm-comment-highlight-active": {
-    backgroundColor: "var(--status-warning-02)",
+    backgroundColor: "var(--highlight-active)",
+  },
+  // Code marks nest inside highlight marks with an opaque tint that would
+  // occlude the wrapping span's amber, so they repaint the highlight color
+  // over their own background.
+  ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline":
+    {
+      backgroundImage:
+        "linear-gradient(var(--neon-amber-a30), var(--neon-amber-a30))",
+    },
+  ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline":
+    {
+      backgroundImage:
+        "linear-gradient(var(--highlight-active), var(--highlight-active))",
+    },
+  // A highlight mark splits the line's block-display code span, and each
+  // piece being a block would break the line at the comment's boundaries.
+  // Inline pieces keep the line whole and the amber hugging the text, the
+  // same as highlights on plain content.
+  [`.cm-line:has(${COMMENT_HIGHLIGHT}) .cm-md-code-block`]: {
+    display: "inline",
+    borderRadius: "0",
   },
   ".cm-coedit-caret": {
     display: "inline-block",
@@ -308,9 +336,10 @@ interface CoeditorProps {
    * `can_write` is false. They stay in the live session (presence + real-time
    * updates); only local mutation is disabled. */
   readOnly?: boolean;
-  /** Comment thread spans to highlight in the doc (the active/selected thread
-   * gets the stronger highlight). */
+  /** Comment thread spans to highlight in the doc. */
   commentHighlights?: CommentHighlightTarget[];
+  /** Thread ids whose spans get the stronger (active) highlight. */
+  activeCommentIds?: string[];
   /** Fires on every selection change with the current selection as a comment
    * draft (null if collapsed) plus its on-screen coordinates, for the caller
    * to position a floating "Comment" affordance. */
@@ -325,6 +354,24 @@ interface CoeditorProps {
  * links). */
 export interface CoeditorHandle {
   scrollToOffset: (offset: number) => void;
+  /** Doc-space top and height (px from the document's start) of the line
+   * block holding a character offset. Stable for off-screen positions
+   * (line-block geometry, not rendered coordinates). */
+  anchorLine: (offset: number) => { top: number; height: number } | null;
+  /** The editor scroller's current scrollTop. */
+  scrollTop: () => number;
+  /** Scroll the editor by a wheel delta, for hosts outside the scroller. */
+  scrollBy: (dy: number) => void;
+  /** The scroller's total scrollHeight, the doc-space lower bound. */
+  scrollHeight: () => number;
+  /** The scroller's viewport height, for external scrollbar math. */
+  clientHeight: () => number;
+  /** Viewport-space top of the scroller, for hosts not sharing its origin. */
+  scrollerTop: () => number;
+  /** Subscribe to scroll and geometry changes. Scroll notifications fire
+   * synchronously inside the scroll event so overlays can repaint in the
+   * same frame as the editor. Returns the unsubscriber. */
+  subscribeLayout: (cb: (kind: "scroll" | "geometry") => void) => () => void;
 }
 
 /** CodeMirror 6 editor that owns the co-edit document via `@codemirror/collab`.
@@ -356,12 +403,17 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       placeholder,
       readOnly,
       commentHighlights,
+      activeCommentIds,
       onSelectionForComment,
     },
     ref,
   ) {
     const host = useRef<HTMLDivElement | null>(null);
     const view = useRef<EditorView | null>(null);
+    // Margin-rail subscribers, notified on scroll and geometry changes.
+    const layoutSubs = useRef<Set<(kind: "scroll" | "geometry") => void>>(
+      new Set(),
+    );
     // Swappable slot for the read-only facets — see readOnlyExtensions.
     const readOnlyCompartment = useRef(new Compartment());
     // Latest callbacks without re-creating the editor.
@@ -370,11 +422,17 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const getCaretSeqRef = useRef(getCaretSeq);
     const reportDocRef = useRef(reportDoc);
     const onSelectionForCommentRef = useRef(onSelectionForComment);
+    const peersRef = useRef(peers);
+    const commentHighlightsRef = useRef(commentHighlights);
+    const activeCommentIdsRef = useRef(activeCommentIds);
     onSelRef.current = onSelectionChange;
     onCaretClearedRef.current = onCaretCleared;
     getCaretSeqRef.current = getCaretSeq;
     reportDocRef.current = reportDoc;
     onSelectionForCommentRef.current = onSelectionForComment;
+    peersRef.current = peers;
+    commentHighlightsRef.current = commentHighlights;
+    activeCommentIdsRef.current = activeCommentIds;
 
     useImperativeHandle(
       ref,
@@ -389,8 +447,41 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
             ),
           });
         },
+        anchorLine: (offset: number) => {
+          const v = view.current;
+          if (!v) return null;
+          const pos = Math.max(0, Math.min(offset, v.state.doc.length));
+          // Line blocks are defined document-wide, unlike coordsAtPos.
+          // documentTop folds in the content padding. A block spans the
+          // wrapped paragraph, so clamp to its first visual line.
+          const contentOffset =
+            v.documentTop -
+            v.scrollDOM.getBoundingClientRect().top +
+            v.scrollDOM.scrollTop;
+          const block = v.lineBlockAt(pos);
+          return {
+            top: block.top + contentOffset,
+            height: Math.min(block.height, v.defaultLineHeight),
+          };
+        },
+        scrollTop: () => view.current?.scrollDOM.scrollTop ?? 0,
+        scrollBy: (dy: number) => {
+          const v = view.current;
+          if (v) v.scrollDOM.scrollTop += dy;
+        },
+        scrollHeight: () => view.current?.scrollDOM.scrollHeight ?? 0,
+        clientHeight: () => view.current?.scrollDOM.clientHeight ?? 0,
+        scrollerTop: () =>
+          view.current?.scrollDOM.getBoundingClientRect().top ?? 0,
+        subscribeLayout: (cb: (kind: "scroll" | "geometry") => void) => {
+          layoutSubs.current.add(cb);
+          return () => {
+            layoutSubs.current.delete(cb);
+          };
+        },
       }),
-      [],
+      // No deps: the handle re-attaches every render, so a live session
+      // never holds an object missing later-added methods.
     );
 
     // Create the collab editor once per session.
@@ -545,11 +636,15 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         if (sendableUpdates(v.state).length > 0) void doPush();
       };
 
+      const notifyLayout = (kind: "scroll" | "geometry") => {
+        for (const cb of layoutSubs.current) cb(kind);
+      };
       const updateListener = EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           reportDocRef.current(u.state.doc.toString());
           void doPush();
         }
+        if (u.geometryChanged || u.docChanged) notifyLayout("geometry");
         // Remote-applied transactions aren't local input — don't report them as
         // our caret/typing.
         if (applyingRemote.current) return;
@@ -606,6 +701,19 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       });
       v = new EditorView({ state, parent: host.current });
       view.current = v;
+      // A fresh state starts with empty peer/highlight fields, and the
+      // prop-tracking effects below only fire on identity change. Seed both.
+      v.dispatch({
+        effects: [
+          setPeersEffect.of(peersRef.current),
+          setCommentHighlightsEffect.of(commentHighlightsRef.current ?? []),
+          setActiveCommentHighlightsEffect.of(
+            activeCommentIdsRef.current ?? [],
+          ),
+        ],
+      });
+      const onScroll = () => notifyLayout("scroll");
+      v.scrollDOM.addEventListener("scroll", onScroll, { passive: true });
       onServerFrame(applyFrame);
       registerFlush(async () => {
         // Deliver every un-acked local op over plain HTTP, treating a 200 as
@@ -692,6 +800,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         // for peers explicitly instead of leaving it parked until the
         // server-side session leave catches up.
         if (v.hasFocus) onCaretClearedRef.current();
+        v.scrollDOM.removeEventListener("scroll", onScroll);
         v.destroy();
         view.current = null;
       };
@@ -710,6 +819,14 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         effects: setCommentHighlightsEffect.of(commentHighlights ?? []),
       });
     }, [commentHighlights]);
+
+    // Push the active/hovered thread ids separately, so a hover flip while
+    // the local doc is ahead of the server can't reset mapped offsets.
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: setActiveCommentHighlightsEffect.of(activeCommentIds ?? []),
+      });
+    }, [activeCommentIds]);
 
     // Reconfigure the read-only facets when the prop changes — they're baked
     // into the state at create time otherwise, and a `can_write` correction
