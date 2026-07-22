@@ -258,10 +258,10 @@ export function FileView({ path }: FileViewProps) {
     void refreshComments();
   }, [refreshComments]);
 
-  // Comment thread spans to highlight in the editor. CodeMirror decorations
-  // (unlike the old DOM/react-markdown approach) update synchronously with
-  // state — no retry loop or MutationObserver needed. Cleared while viewing
-  // an old commit (DiffView, no live editor).
+  // Comment thread spans to highlight in the editor. Cleared while viewing
+  // an old commit (DiffView, no live editor). The active/hovered ids ride a
+  // separate prop: the editor maps these offsets through local edits, and a
+  // hover or selection flip must not re-send the unmapped ones.
   // Hovering a card lights its doc highlight like selection does (mock
   // 1855 annotation: "Hover highlight - match the hovered comment").
   const [hoveredCommentId, setHoveredCommentId] = useState<string | null>(null);
@@ -279,11 +279,16 @@ export function FileView({ path }: FileViewProps) {
           r.end_offset !== null,
       )
       .map((r) => ({
+        id: r.id,
         startOffset: r.start_offset as number,
         endOffset: r.end_offset as number,
-        active: r.id === activeCommentId || r.id === hoveredCommentId,
       }));
-  }, [commentThreads, viewingVersion, activeCommentId, hoveredCommentId]);
+  }, [commentThreads, viewingVersion]);
+  const activeCommentIds = useMemo(
+    () =>
+      [activeCommentId, hoveredCommentId].filter((id): id is string => !!id),
+    [activeCommentId, hoveredCommentId],
+  );
 
   // The doc area hosting the lane, measured at interaction time so the
   // panel fallback keys off the same width as the lane's container query.
@@ -1183,6 +1188,7 @@ export function FileView({ path }: FileViewProps) {
                       registerCatchUp={coedit.registerCatchUp}
                       readOnly={!canWrite}
                       commentHighlights={commentHighlights}
+                      activeCommentIds={activeCommentIds}
                       onSelectionForComment={handleSelectionForComment}
                       placeholder="Start typing, or pick a template above…"
                     />

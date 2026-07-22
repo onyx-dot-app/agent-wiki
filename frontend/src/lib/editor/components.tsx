@@ -43,6 +43,7 @@ import { wysiwygMarkdown } from "@/lib/editor/wysiwyg";
 import {
   commentsField,
   selectionToDraft,
+  setActiveCommentHighlightsEffect,
   setCommentHighlightsEffect,
   type CommentDraft,
   type CommentHighlightTarget,
@@ -335,9 +336,10 @@ interface CoeditorProps {
    * `can_write` is false. They stay in the live session (presence + real-time
    * updates); only local mutation is disabled. */
   readOnly?: boolean;
-  /** Comment thread spans to highlight in the doc (the active/selected thread
-   * gets the stronger highlight). */
+  /** Comment thread spans to highlight in the doc. */
   commentHighlights?: CommentHighlightTarget[];
+  /** Thread ids whose spans get the stronger (active) highlight. */
+  activeCommentIds?: string[];
   /** Fires on every selection change with the current selection as a comment
    * draft (null if collapsed) plus its on-screen coordinates, for the caller
    * to position a floating "Comment" affordance. */
@@ -401,6 +403,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       placeholder,
       readOnly,
       commentHighlights,
+      activeCommentIds,
       onSelectionForComment,
     },
     ref,
@@ -421,6 +424,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const onSelectionForCommentRef = useRef(onSelectionForComment);
     const peersRef = useRef(peers);
     const commentHighlightsRef = useRef(commentHighlights);
+    const activeCommentIdsRef = useRef(activeCommentIds);
     onSelRef.current = onSelectionChange;
     onCaretClearedRef.current = onCaretCleared;
     getCaretSeqRef.current = getCaretSeq;
@@ -428,6 +432,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     onSelectionForCommentRef.current = onSelectionForComment;
     peersRef.current = peers;
     commentHighlightsRef.current = commentHighlights;
+    activeCommentIdsRef.current = activeCommentIds;
 
     useImperativeHandle(
       ref,
@@ -702,6 +707,9 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         effects: [
           setPeersEffect.of(peersRef.current),
           setCommentHighlightsEffect.of(commentHighlightsRef.current ?? []),
+          setActiveCommentHighlightsEffect.of(
+            activeCommentIdsRef.current ?? [],
+          ),
         ],
       });
       const onScroll = () => notifyLayout("scroll");
@@ -811,6 +819,14 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         effects: setCommentHighlightsEffect.of(commentHighlights ?? []),
       });
     }, [commentHighlights]);
+
+    // Push the active/hovered thread ids separately, so a hover flip while
+    // the local doc is ahead of the server can't reset mapped offsets.
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: setActiveCommentHighlightsEffect.of(activeCommentIds ?? []),
+      });
+    }, [activeCommentIds]);
 
     // Reconfigure the read-only facets when the prop changes — they're baked
     // into the state at create time otherwise, and a `can_write` correction
