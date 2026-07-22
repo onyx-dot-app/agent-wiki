@@ -201,6 +201,11 @@ export function CommentMarginRail({
           ? "relative min-h-0 min-w-0 flex-1 overflow-clip"
           : "pointer-events-none absolute inset-y-0 -right-8 w-[360px] overflow-clip @max-[920px]:hidden"
       }
+      // Cards live outside the editor's scroll container, so wheel input
+      // over them forwards to the doc (deltaMode 1 is line-based deltas).
+      onWheel={(e) => {
+        editorRef.current?.scrollBy(e.deltaY * (e.deltaMode === 1 ? 16 : 1));
+      }}
     >
       {draft && tops[DRAFT_KEY] !== undefined && (
         <div

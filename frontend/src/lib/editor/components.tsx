@@ -334,6 +334,8 @@ export interface CoeditorHandle {
   anchorLine: (offset: number) => { top: number; height: number } | null;
   /** The editor scroller's current scrollTop. */
   scrollTop: () => number;
+  /** Scroll the editor by a wheel delta, for hosts outside the scroller. */
+  scrollBy: (dy: number) => void;
   /** The scroller's total scrollHeight, the doc-space lower bound. */
   scrollHeight: () => number;
   /** Viewport-space top of the scroller, for hosts not sharing its origin. */
@@ -427,6 +429,10 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           };
         },
         scrollTop: () => view.current?.scrollDOM.scrollTop ?? 0,
+        scrollBy: (dy: number) => {
+          const v = view.current;
+          if (v) v.scrollDOM.scrollTop += dy;
+        },
         scrollHeight: () => view.current?.scrollDOM.scrollHeight ?? 0,
         scrollerTop: () =>
           view.current?.scrollDOM.getBoundingClientRect().top ?? 0,
@@ -437,7 +443,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           };
         },
       }),
-      [],
+      // No deps: the handle re-attaches every render, so a live session
+      // never holds an object missing later-added methods.
     );
 
     // Create the collab editor once per session.
