@@ -14,8 +14,14 @@ from app.tasks.queues import automanage_offline_queue
 from app.wiki import git as wiki_git
 from app.wiki import update_policy
 from app.wiki.automanage import runner, runs
+from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.automanage.detectors.empty_folder import _EmptyFolderDetector
-from app.wiki.change_proposals import ProposalStatus, list_by_status, reject
+from app.wiki.change_proposals import (
+    ProposalOp,
+    ProposalStatus,
+    list_by_status,
+    reject,
+)
 from tests._seed import seed_user
 
 
@@ -121,22 +127,19 @@ class _StubDetector:
 
     name = "stub"
 
-    def __init__(self, drafts):
+    def __init__(self, drafts: list[ProposalDraft]) -> None:
         self._drafts = drafts
 
-    def applicable(self, trigger):
+    def applicable(self, trigger: TriggerKind) -> bool:
         return True
 
-    def detect(self, scope):
+    def detect(self, scope: Scope) -> list[ProposalDraft]:
         return list(self._drafts)
 
 
 def test_unsupported_op_draft_is_skipped_not_persisted(repo, monkeypatch):
     """Emit safety: a detector landing ahead of its op's executor degrades to a
     loud skip — the draft never becomes a proposal row."""
-    from app.wiki.automanage.detectors.base import ProposalDraft
-    from app.wiki.change_proposals import ProposalOp
-
     draft = ProposalDraft(
         op=ProposalOp.MERGE,  # valid ledger op, but no executor yet
         source_paths=["team/plan.md"],
@@ -157,9 +160,6 @@ def test_unsupported_op_draft_is_skipped_not_persisted(repo, monkeypatch):
 def test_non_auto_approvable_draft_stays_pending_in_ai_scope(repo, monkeypatch):
     """A detector that hasn't earned auto-apply (auto_approvable=False) gets a
     human even when the whole scope is AI-managed."""
-    from app.wiki.automanage.detectors.base import ProposalDraft
-    from app.wiki.change_proposals import ProposalOp
-
     update_policy.set_policy("archive", ai_management_allowed=True)
     draft = ProposalDraft(
         op=ProposalOp.DELETE_EMPTY_FOLDER,
