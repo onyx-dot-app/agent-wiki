@@ -71,6 +71,26 @@ export interface CommentThreadView {
   replies: CommentView[];
 }
 
+/** Source facts shared by every provenance read (backend WriteProvenance). */
+export interface WriteProvenance {
+  source_document_id: string | null;
+  source_type: string | null;
+  source_url: string | null;
+  source_title: string | null;
+}
+
+/** One ingested document credited to a page (the Sources tab list). */
+export interface SourceRef extends WriteProvenance {
+  last_updated: string;
+}
+
+/** A live span of a page mapped to the document it was ingested from.
+ * Offsets are character positions into the page's current body. */
+export interface SourceSpan extends WriteProvenance {
+  start_offset: number;
+  end_offset: number;
+}
+
 export interface DocumentActivityResponse {
   path: string;
   agents: DocumentActivity[];

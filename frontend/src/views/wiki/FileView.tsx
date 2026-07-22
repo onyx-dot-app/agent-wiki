@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Button,
   Divider,
-  EmptyMessageCard,
   LineItemButton,
   OpenButton,
   Popover,
@@ -41,6 +40,7 @@ import {
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
+import { SourcesPanel } from "@/components/wiki/SourcesPanel";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
@@ -91,6 +91,7 @@ import type {
   CommentThreadView,
   DocumentActivity,
   DocumentActivityResponse,
+  SourceRef,
 } from "@/types";
 
 // Local shape for the /wiki/file API response — mirrored from page.tsx.
@@ -102,6 +103,8 @@ interface FileResponse {
   // Whether the caller may edit this page. False renders the live session as
   // a pure viewer: read-only editor, no cursor/checkpoint sends.
   can_write?: boolean;
+  /** Ingested documents credited to this page (the Sources tab list). */
+  sources?: SourceRef[];
 }
 
 // Minimal doc-entry shape needed by collectFolders / DestinationSelect.
@@ -176,6 +179,7 @@ export function FileView({ path }: FileViewProps) {
   // pure viewer (read-only editor, no write calls). Optimistic `true` until
   // the read lands; the server rejects any write regardless.
   const [canWrite, setCanWrite] = useState(true);
+  const [sources, setSources] = useState<SourceRef[]>([]);
   const [viewingSha, setViewingSha] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyListOpen, setHistoryListOpen] = useState(false);
@@ -509,6 +513,7 @@ export function FileView({ path }: FileViewProps) {
         setBody(r.body);
         setHeadSha(r.head_sha ?? null);
         setCanWrite(r.can_write ?? true);
+        setSources(r.sources ?? []);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "failed to load"))
       .finally(() => setLoading(false));
@@ -977,12 +982,12 @@ export function FileView({ path }: FileViewProps) {
         );
       case "sources":
         return (
-          <div className="flex flex-1 items-center justify-center p-4">
-            <EmptyMessageCard
-              sizePreset="main-ui"
-              icon={SvgExternalLink}
-              title="Sources"
-              description="Source attribution for this page is coming soon."
+          <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
+            <SourcesPanel
+              path={path}
+              headSha={headSha}
+              body={body}
+              sources={sources}
             />
           </div>
         );
