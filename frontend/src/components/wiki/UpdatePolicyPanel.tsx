@@ -376,6 +376,16 @@ export function UpdatePolicyPanel({
                       autoFocus
                       placeholder={`How should this ${kind} be updated?`}
                       onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Enter saves through the blur path and collapses
+                        // (a failed save reopens), Shift+Enter keeps
+                        // inserting a newline.
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          e.currentTarget.blur();
+                          setEditing(false);
+                        }
+                      }}
                       onBlur={() => {
                         const trimmed = draft.trim();
                         if (trimmed === ownInstruction.trim()) return;
