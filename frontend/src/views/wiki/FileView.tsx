@@ -188,7 +188,10 @@ export function FileView({ path }: FileViewProps) {
   const [panelTab, setPanelTab] = useState<DocPanelTab | null>(null);
   // Comments. `commentDraft` is a pending text selection being composed;
   // `selTool` is the floating "Comment" affordance shown on select.
+  // `commentsListView` lives here (not in the panel) because anchored mode
+  // also swaps the editor's native scrollbar for the viewport-edge one.
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
+  const [commentsListView, setCommentsListView] = useState(false);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [selTool, setSelTool] = useState<{
@@ -355,6 +358,15 @@ export function FileView({ path }: FileViewProps) {
     panelTab === null &&
     !isMobile &&
     (marginThreadCount > 0 || commentDraft !== null);
+
+  // Anchored panel mode hides the editor's native scrollbar (it would sit
+  // at the doc/panel boundary) in favor of the panel's viewport-edge one.
+  const anchoredPanelActive =
+    !!coedit.session &&
+    !viewingVersion &&
+    panelTab === "comments" &&
+    !commentsListView &&
+    !isMobile;
 
   // Select a thread (its span gets the orange highlight) and scroll the
   // editor to bring that span into view. Only an explicit click runs this —
@@ -953,6 +965,8 @@ export function FileView({ path }: FileViewProps) {
               onActivate={activateComment}
               onHoverThread={setHoveredCommentId}
               editorRef={viewingVersion ? undefined : coeditorRef}
+              listView={commentsListView}
+              onListViewChange={setCommentsListView}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={closePanel}
               fullHeight
@@ -1058,7 +1072,7 @@ export function FileView({ path }: FileViewProps) {
         ref={docRowRef}
         className={`@container relative flex min-h-0 min-w-0 flex-1 flex-col ${
           railActive ? "rail-reserved" : ""
-        }`}
+        } ${anchoredPanelActive ? "comments-anchored" : ""}`}
       >
         <DocTitle
           path={path}

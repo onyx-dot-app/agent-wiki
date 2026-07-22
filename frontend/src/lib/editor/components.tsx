@@ -338,10 +338,14 @@ export interface CoeditorHandle {
   scrollBy: (dy: number) => void;
   /** The scroller's total scrollHeight, the doc-space lower bound. */
   scrollHeight: () => number;
+  /** The scroller's viewport height, for external scrollbar math. */
+  clientHeight: () => number;
   /** Viewport-space top of the scroller, for hosts not sharing its origin. */
   scrollerTop: () => number;
-  /** Subscribe to scroll and geometry changes. Returns the unsubscriber. */
-  subscribeLayout: (cb: () => void) => () => void;
+  /** Subscribe to scroll and geometry changes. Scroll notifications fire
+   * synchronously inside the scroll event so overlays can repaint in the
+   * same frame as the editor. Returns the unsubscriber. */
+  subscribeLayout: (cb: (kind: "scroll" | "geometry") => void) => () => void;
 }
 
 /** CodeMirror 6 editor that owns the co-edit document via `@codemirror/collab`.
@@ -380,7 +384,9 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const host = useRef<HTMLDivElement | null>(null);
     const view = useRef<EditorView | null>(null);
     // Margin-rail subscribers, notified on scroll and geometry changes.
-    const layoutSubs = useRef<Set<() => void>>(new Set());
+    const layoutSubs = useRef<Set<(kind: "scroll" | "geometry") => void>>(
+      new Set(),
+    );
     // Swappable slot for the read-only facets — see readOnlyExtensions.
     const readOnlyCompartment = useRef(new Compartment());
     // Latest callbacks without re-creating the editor.
@@ -434,9 +440,10 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           if (v) v.scrollDOM.scrollTop += dy;
         },
         scrollHeight: () => view.current?.scrollDOM.scrollHeight ?? 0,
+        clientHeight: () => view.current?.scrollDOM.clientHeight ?? 0,
         scrollerTop: () =>
           view.current?.scrollDOM.getBoundingClientRect().top ?? 0,
-        subscribeLayout: (cb: () => void) => {
+        subscribeLayout: (cb: (kind: "scroll" | "geometry") => void) => {
           layoutSubs.current.add(cb);
           return () => {
             layoutSubs.current.delete(cb);
@@ -599,15 +606,15 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         if (sendableUpdates(v.state).length > 0) void doPush();
       };
 
-      const notifyLayout = () => {
-        for (const cb of layoutSubs.current) cb();
+      const notifyLayout = (kind: "scroll" | "geometry") => {
+        for (const cb of layoutSubs.current) cb(kind);
       };
       const updateListener = EditorView.updateListener.of((u) => {
         if (u.docChanged) {
           reportDocRef.current(u.state.doc.toString());
           void doPush();
         }
-        if (u.geometryChanged || u.docChanged) notifyLayout();
+        if (u.geometryChanged || u.docChanged) notifyLayout("geometry");
         // Remote-applied transactions aren't local input — don't report them as
         // our caret/typing.
         if (applyingRemote.current) return;
@@ -664,7 +671,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       });
       v = new EditorView({ state, parent: host.current });
       view.current = v;
-      v.scrollDOM.addEventListener("scroll", notifyLayout, { passive: true });
+      const onScroll = () => notifyLayout("scroll");
+      v.scrollDOM.addEventListener("scroll", onScroll, { passive: true });
       onServerFrame(applyFrame);
       registerFlush(async () => {
         // Deliver every un-acked local op over plain HTTP, treating a 200 as
@@ -751,7 +759,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         // for peers explicitly instead of leaving it parked until the
         // server-side session leave catches up.
         if (v.hasFocus) onCaretClearedRef.current();
-        v.scrollDOM.removeEventListener("scroll", notifyLayout);
+        v.scrollDOM.removeEventListener("scroll", onScroll);
         v.destroy();
         view.current = null;
       };

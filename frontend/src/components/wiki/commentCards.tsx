@@ -23,12 +23,20 @@ import { Section } from "@onyx-ai/opal/layouts";
 import { MentionTextarea } from "@/components/wiki/MentionTextarea";
 import { toast } from "@/hooks/useToast";
 import {
+  deleteComment,
+  editComment,
+  reopenThread,
+  replyToComment,
+  resolveThread,
+} from "@/lib/comments";
+import {
   detokenizeMentions,
   parseBody,
   tokenizeMentions,
 } from "@/lib/commentMentions";
 import { parseTs, relativeTime } from "@/lib/time";
-import type { CommentView } from "@/types";
+import { shareableWikiUrl } from "@/lib/wikiHref";
+import type { CommentThreadView, CommentView } from "@/types";
 
 // A thread reads as new while its latest message is inside this window
 // (comments carry no per-user read state, mirroring the events feed).
@@ -439,5 +447,162 @@ export function NewCommentComposer({
         />
       </div>
     </Section>
+  );
+}
+
+function authorLabel(
+  authorUserId: string | null,
+  authorDisplay: string | null,
+  selfId: string | undefined,
+): string {
+  if (authorUserId && authorUserId === selfId) return "You";
+  return authorDisplay ?? "User";
+}
+
+/** Deep-link to a specific thread: the page route reads `?comment=<id>`, opens
+ * the panel, and scrolls to the thread's anchored span. Uses the durable
+ * id-based URL so the link survives a page rename/move. */
+function commentLink(path: string, rootId: string): Promise<string> {
+  return shareableWikiUrl(path, `comment=${rootId}`);
+}
+
+/** One thread card (mock 1856 list rows, mock 669 anchored): collapsed
+ *  shows the root message, active/expanded shows the whole conversation with
+ *  a reply input below (mock 778:262971). Unread = white card with the blue
+ *  marker, read sits on tint-01, resolved on tint-02. Anchored cards round
+ *  at 12 instead of the list's 8. */
+export function ThreadCard({
+  thread,
+  path,
+  selfId,
+  isAdmin,
+  busy,
+  active,
+  anchored,
+  onActivate,
+  onHoverChange,
+  run,
+}: {
+  thread: CommentThreadView;
+  path: string;
+  selfId: string | undefined;
+  isAdmin: boolean;
+  busy: boolean;
+  active: boolean;
+  anchored?: boolean;
+  onActivate: () => void;
+  onHoverChange?: (hovering: boolean) => void;
+  run: (fn: () => Promise<unknown>) => Promise<boolean>;
+}) {
+  const { root } = thread;
+  const resolved = root.status === "resolved";
+  const conversation = [root, ...thread.replies];
+  const latest = conversation[conversation.length - 1]!;
+  const unread = !resolved && isNewComment(latest.created_at);
+
+  const [replyBody, setReplyBody] = useState("");
+  const [replyMentions] = useState<Record<string, string>>({});
+
+  // Active threads expand to the full conversation, collapsed cards show
+  // only the root message (mock 1856 stacks both forms).
+  const expanded = active;
+  const shown = expanded ? conversation : [root];
+
+  const bg = resolved
+    ? "bg-(--background-tint-02)"
+    : unread || expanded
+      ? "bg-(--background-tint-00)"
+      : "bg-(--background-tint-01)";
+  const shadow = expanded
+    ? "shadow-(--shadow-box-01)"
+    : "shadow-(--shadow-box-00) hover:shadow-(--shadow-box-01) hover:bg-(--background-tint-00)";
+
+  const messageActions = (c: CommentView) => ({
+    onResolve: () => void run(() => resolveThread(root.id)),
+    onReopen: () => void run(() => reopenThread(root.id)),
+    onCopyLink: async () => {
+      // Durable id-based deep-link (survives rename/move). A transient
+      // id-resolve failure skips the copy rather than handing over a
+      // fragile path link.
+      try {
+        const url = await commentLink(path, root.id);
+        await navigator.clipboard.writeText(url);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    onEdit: (body: string) => run(() => editComment(c.id, body)),
+    onDelete: () => void run(() => deleteComment(c.id)),
+  });
+
+  return (
+    <div className="flex w-full shrink-0 flex-col" data-thread-id={root.id}>
+      {/* raw-ok: the card is a selectable region hosting nested buttons and inputs, which a native button cannot contain */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onActivate}
+        onMouseEnter={() => onHoverChange?.(true)}
+        onMouseLeave={() => onHoverChange?.(false)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && e.target === e.currentTarget) {
+            e.preventDefault();
+            onActivate();
+          }
+        }}
+        className={`group/comment flex w-full cursor-pointer flex-col overflow-clip text-left ${anchored ? "rounded-(--radius-12)" : "rounded-(--radius-08)"} ${bg} ${shadow}`}
+      >
+        {root.status === "orphaned" && (
+          <div className="px-2 pt-1 text-[12px] leading-4 text-(--text-03)">
+            Original content deleted
+          </div>
+        )}
+        {shown.map((c) => (
+          <CommentMessage
+            key={c.id}
+            comment={c}
+            authorName={authorLabel(c.author_user_id, c.author_display, selfId)}
+            isRoot={c.id === root.id}
+            resolved={resolved}
+            unread={unread && !expanded}
+            emphasized={expanded}
+            canModify={isAdmin || c.author_user_id === selfId}
+            busy={busy}
+            actions={messageActions(c)}
+          />
+        ))}
+        {!expanded && thread.replies.length > 0 && (
+          <span className="px-[10px] pb-2 text-[12px] leading-4 text-(--text-03)">
+            {thread.replies.length}{" "}
+            {thread.replies.length === 1 ? "reply" : "replies"}
+          </span>
+        )}
+      </div>
+      {expanded && !resolved && (
+        <div className="pt-1 pb-3">
+          <CommentInput
+            placeholder="Reply…"
+            value={replyBody}
+            onChange={setReplyBody}
+            onPickMention={(d, id) => {
+              replyMentions[d] = id;
+            }}
+            disabled={busy}
+            submitTooltip="Send reply"
+            onSubmit={async () => {
+              // Clear only on success so a failed reply isn't lost.
+              const ok = await run(() =>
+                replyToComment(
+                  root.id,
+                  tokenizeMentions(replyBody.trim(), replyMentions),
+                ),
+              );
+              if (ok) setReplyBody("");
+            }}
+          />
+        </div>
+      )}
+    </div>
   );
 }

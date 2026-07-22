@@ -11,29 +11,16 @@ import { SvgMenu } from "@onyx-ai/opal/icons";
 import { Section } from "@onyx-ai/opal/layouts";
 
 import { useAuth } from "@/lib/auth";
-import { shareableWikiUrl } from "@/lib/wikiHref";
-import {
-  createComment,
-  deleteComment,
-  editComment,
-  reopenThread,
-  replyToComment,
-  resolveThread,
-} from "@/lib/comments";
+import { createComment } from "@/lib/comments";
 import type { CommentDraft } from "@/lib/editor/comments";
 import type { CoeditorHandle } from "@/lib/editor/components";
-import { tokenizeMentions } from "@/lib/commentMentions";
 import { useIsMobile } from "@/lib/viewport";
-import type { CommentThreadView, CommentView } from "@/types";
+import type { CommentThreadView } from "@/types";
 
 import { CommentMarginRail } from "./CommentMarginRail";
+import { EditorEdgeScrollbar } from "./EditorEdgeScrollbar";
 import { PanelSearchField } from "./PanelSearch";
-import {
-  CommentInput,
-  CommentMessage,
-  NewCommentComposer,
-  isNewComment,
-} from "./commentCards";
+import { NewCommentComposer, ThreadCard } from "./commentCards";
 
 export type { CommentDraft };
 
@@ -52,25 +39,13 @@ interface Props {
   onHoverThread?: (id: string | null) => void;
   /** The live editor, required by anchored mode to track doc positions. */
   editorRef?: RefObject<CoeditorHandle | null>;
+  /** List/anchored mode is page-owned: the page hides the editor's native
+   * scrollbar while anchored mode shows the viewport-edge one. */
+  listView: boolean;
+  onListViewChange: (v: boolean) => void;
   onDraftConsumed: () => void;
   onClose: () => void;
   fullHeight?: boolean;
-}
-
-function authorLabel(
-  authorUserId: string | null,
-  authorDisplay: string | null,
-  selfId: string | undefined,
-): string {
-  if (authorUserId && authorUserId === selfId) return "You";
-  return authorDisplay ?? "User";
-}
-
-/** Deep-link to a specific thread: the page route reads `?comment=<id>`, opens
- * the panel, and scrolls to the thread's anchored span. Uses the durable
- * id-based URL so the link survives a page rename/move. */
-function commentLink(path: string, rootId: string): Promise<string> {
-  return shareableWikiUrl(path, `comment=${rootId}`);
 }
 
 // Searchable text for a thread across every message.
@@ -103,6 +78,8 @@ export function CommentsPanel({
   onActivate,
   onHoverThread,
   editorRef,
+  listView,
+  onListViewChange,
   onDraftConsumed,
   onClose: _onClose,
   fullHeight: _fullHeight,
@@ -112,7 +89,6 @@ export function CommentsPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
-  const [listView, setListView] = useState(false);
   const listMode = listView || isMobile || !editorRef;
 
   // Returns true on success so callers can clear/close their input only when
@@ -223,7 +199,7 @@ export function CommentsPanel({
           icon={SvgMenu}
           state={listView ? "selected" : "empty"}
           tooltip={listView ? "Anchored view" : "List view"}
-          onClick={() => setListView((v) => !v)}
+          onClick={() => onListViewChange(!listView)}
         />
       )}
     </Section>
@@ -231,14 +207,16 @@ export function CommentsPanel({
 
   if (!listMode) {
     // Anchored mode (mock 1855): transparent body, chromed search row, cards
-    // positioned inline with the doc through the shared anchor engine.
+    // positioned inline with the doc through the shared anchor engine. The
+    // doc's scrollbar renders at the viewport edge here since the page hides
+    // the editor's native one (comments-anchored, globals.css).
     return (
       <Section
         justifyContent="start"
         alignItems="stretch"
         height="auto"
         gap={0.25}
-        className="min-h-0 flex-1"
+        className="relative min-h-0 flex-1"
       >
         <div className="shrink-0 rounded-(--radius-12) border border-(--border-01) p-1">
           {searchRow}
@@ -265,6 +243,7 @@ export function CommentsPanel({
           onSubmitDraft={(body) => void submitDraft(body)}
           onCancelDraft={onDraftConsumed}
         />
+        <EditorEdgeScrollbar editorRef={editorRef!} />
       </Section>
     );
   }
@@ -337,146 +316,5 @@ export function CommentsPanel({
         )}
       </Section>
     </Section>
-  );
-}
-
-/** One thread card (mock 1856 list rows, mock 669 anchored): collapsed
- *  shows the root message, active/expanded shows the whole conversation with
- *  a reply input below (mock 778:262971). Unread = white card with the blue
- *  marker, read sits on tint-01, resolved on tint-02. Anchored cards round
- *  at 12 instead of the list's 8. */
-export function ThreadCard({
-  thread,
-  path,
-  selfId,
-  isAdmin,
-  busy,
-  active,
-  anchored,
-  onActivate,
-  onHoverChange,
-  run,
-}: {
-  thread: CommentThreadView;
-  path: string;
-  selfId: string | undefined;
-  isAdmin: boolean;
-  busy: boolean;
-  active: boolean;
-  anchored?: boolean;
-  onActivate: () => void;
-  onHoverChange?: (hovering: boolean) => void;
-  run: (fn: () => Promise<unknown>) => Promise<boolean>;
-}) {
-  const { root } = thread;
-  const resolved = root.status === "resolved";
-  const conversation = [root, ...thread.replies];
-  const latest = conversation[conversation.length - 1]!;
-  const unread = !resolved && isNewComment(latest.created_at);
-
-  const [replyBody, setReplyBody] = useState("");
-  const [replyMentions] = useState<Record<string, string>>({});
-
-  // Active threads expand to the full conversation, collapsed cards show
-  // only the root message (mock 1856 stacks both forms).
-  const expanded = active;
-  const shown = expanded ? conversation : [root];
-
-  const bg = resolved
-    ? "bg-(--background-tint-02)"
-    : unread || expanded
-      ? "bg-(--background-tint-00)"
-      : "bg-(--background-tint-01)";
-  const shadow = expanded
-    ? "shadow-(--shadow-box-01)"
-    : "shadow-(--shadow-box-00) hover:shadow-(--shadow-box-01) hover:bg-(--background-tint-00)";
-
-  const messageActions = (c: CommentView) => ({
-    onResolve: () => void run(() => resolveThread(root.id)),
-    onReopen: () => void run(() => reopenThread(root.id)),
-    onCopyLink: async () => {
-      // Durable id-based deep-link (survives rename/move). A transient
-      // id-resolve failure skips the copy rather than handing over a
-      // fragile path link.
-      try {
-        const url = await commentLink(path, root.id);
-        await navigator.clipboard.writeText(url);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    onEdit: (body: string) => run(() => editComment(c.id, body)),
-    onDelete: () => void run(() => deleteComment(c.id)),
-  });
-
-  return (
-    <div className="flex w-full shrink-0 flex-col" data-thread-id={root.id}>
-      {/* raw-ok: the card is a selectable region hosting nested buttons and inputs, which a native button cannot contain */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={onActivate}
-        onMouseEnter={() => onHoverChange?.(true)}
-        onMouseLeave={() => onHoverChange?.(false)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && e.target === e.currentTarget) {
-            e.preventDefault();
-            onActivate();
-          }
-        }}
-        className={`group/comment flex w-full cursor-pointer flex-col overflow-clip text-left ${anchored ? "rounded-(--radius-12)" : "rounded-(--radius-08)"} ${bg} ${shadow}`}
-      >
-        {root.status === "orphaned" && (
-          <div className="px-2 pt-1 text-[12px] leading-4 text-(--text-03)">
-            Original content deleted
-          </div>
-        )}
-        {shown.map((c) => (
-          <CommentMessage
-            key={c.id}
-            comment={c}
-            authorName={authorLabel(c.author_user_id, c.author_display, selfId)}
-            isRoot={c.id === root.id}
-            resolved={resolved}
-            unread={unread && !expanded}
-            emphasized={expanded}
-            canModify={isAdmin || c.author_user_id === selfId}
-            busy={busy}
-            actions={messageActions(c)}
-          />
-        ))}
-        {!expanded && thread.replies.length > 0 && (
-          <span className="px-[10px] pb-2 text-[12px] leading-4 text-(--text-03)">
-            {thread.replies.length}{" "}
-            {thread.replies.length === 1 ? "reply" : "replies"}
-          </span>
-        )}
-      </div>
-      {expanded && !resolved && (
-        <div className="pt-1 pb-3">
-          <CommentInput
-            placeholder="Reply…"
-            value={replyBody}
-            onChange={setReplyBody}
-            onPickMention={(d, id) => {
-              replyMentions[d] = id;
-            }}
-            disabled={busy}
-            submitTooltip="Send reply"
-            onSubmit={async () => {
-              // Clear only on success so a failed reply isn't lost.
-              const ok = await run(() =>
-                replyToComment(
-                  root.id,
-                  tokenizeMentions(replyBody.trim(), replyMentions),
-                ),
-              );
-              if (ok) setReplyBody("");
-            }}
-          />
-        </div>
-      )}
-    </div>
   );
 }
