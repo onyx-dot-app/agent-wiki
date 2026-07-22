@@ -50,10 +50,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
 import { listComments } from "@/lib/comments";
-import type {
-  CommentDraft,
-  CommentHighlightTarget,
-} from "@/lib/editor/comments";
+import type { CommentDraft } from "@/lib/editor/comments";
 import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
 import {
@@ -167,18 +164,15 @@ export function FileView({ path }: FileViewProps) {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [diffData, setDiffData] = useState<FileDiffResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  // Comments. `commentDraft` is a pending text selection being composed;
-  // `selTool` is the floating "Comment" affordance shown on select.
+  // Comments. `commentDraft` is a pending text selection being composed —
+  // the "select text to comment" trigger that used to set it is deferred
+  // along with comment-highlight decorations (see components.tsx); manual
+  // composition from the panel still sets/consumes it normally.
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [policyOpen, setPolicyOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
-  const [selTool, setSelTool] = useState<{
-    x: number;
-    y: number;
-    draft: CommentDraft;
-  } | null>(null);
   const coeditorRef = useRef<CoeditorHandle | null>(null);
   // `viewingVersion`: a history version is displayed in the main pane (no
   // live editor — DiffView instead). `viewingOld`: that version is not the
@@ -235,29 +229,10 @@ export function FileView({ path }: FileViewProps) {
     void refreshComments();
   }, [refreshComments]);
 
-  // Comment thread spans to highlight in the editor. CodeMirror decorations
-  // (unlike the old DOM/react-markdown approach) update synchronously with
-  // state — no retry loop or MutationObserver needed. Cleared while viewing
-  // an old commit (DiffView, no live editor).
-  const commentHighlights = useMemo<CommentHighlightTarget[]>(() => {
-    if (viewingVersion) return [];
-    return commentThreads
-      .map((t) => t.root)
-      .filter(
-        // Resolved threads disappear from the panel, so drop their doc
-        // highlight too; orphaned ones have no live span to paint.
-        (r) =>
-          r.status !== "orphaned" &&
-          r.status !== "resolved" &&
-          r.start_offset !== null &&
-          r.end_offset !== null,
-      )
-      .map((r) => ({
-        startOffset: r.start_offset as number,
-        endOffset: r.end_offset as number,
-        active: r.id === activeCommentId,
-      }));
-  }, [commentThreads, viewingVersion, activeCommentId]);
+  // Comment thread highlight decorations in the editor are deferred along
+  // with the "select text to comment" popover — see components.tsx's
+  // module docstring. The panel/threads/deep-link still work; only the
+  // live in-editor highlight span is missing this pass.
 
   // Renaming is its own action now (Opal's `Content editable` on DocTitle),
   // decoupled from the coedit session/checkpointing — no more "rename at
@@ -292,22 +267,15 @@ export function FileView({ path }: FileViewProps) {
   );
 
   // The page's live session: everyone viewing the current (non-historical)
-  // version joins it — presence plus real-time updates; editing is just a
-  // capability inside it (`canWrite`, ops write-gated server-side). Left when
-  // the user opens an old commit — see `useCoeditSession`'s `enabled` doc. No
-  // explicit Save; teardown (checkpoint + leave) fires from the hook itself
-  // on that transition/unmount, not from a button here.
-  const coedit = useCoeditSession({
-    path,
-    enabled: !viewingVersion,
-    committedBody: body,
-    myUserId: user?.id ?? null,
-    canWrite,
-    onEnd: () => {
-      void refreshComments();
-      void refreshDraftState();
-    },
-  });
+  // version connects — presence plus real-time updates via Yjs Awareness;
+  // editing is just a capability inside it (`canWrite`, write-gated
+  // server-side at WS-connect time — see app/api/coedit_ws.py). Disconnected
+  // when the user opens an old commit — see `useCoeditSession`'s `enabled`
+  // doc. No explicit Save and no client-driven checkpoint call anymore —
+  // the backend's own idle/interval scan commits automatically
+  // (app/wiki/coedit_ws.py's _scan_and_checkpoint_local_rooms).
+  const coedit = useCoeditSession({ path, enabled: !viewingVersion });
+  const [docEmpty, setDocEmpty] = useState(true);
 
   // Select a thread (its span gets the orange highlight) and scroll the
   // editor to bring that span into view. Only an explicit click runs this —
@@ -330,44 +298,28 @@ export function FileView({ path }: FileViewProps) {
     [commentThreads, viewingVersion],
   );
 
-  // Deep-link: `?comment=<id>` opens the panel, selects that thread, and
-  // scrolls to its anchored span — the shareable-link counterpart to
-  // click-to-focus. Runs once per id (focusedCommentRef), and only once the
-  // thread is loaded and the editor has mounted (`coedit.session`).
+  // Deep-link: `?comment=<id>` opens the panel and selects that thread — the
+  // shareable-link counterpart to click-to-focus. Runs once per id
+  // (focusedCommentRef), and only once the thread is loaded and the editor
+  // has mounted (`coedit.conn`). Scrolling to the anchored span is deferred
+  // along with comment-highlight decorations (see components.tsx).
   useEffect(() => {
     const target = searchParams?.get("comment");
-    if (!target || loading || viewingVersion || !coedit.session) return;
+    if (!target || loading || viewingVersion || !coedit.conn) return;
     if (focusedCommentRef.current === target) return;
     const root = commentThreads.find((t) => t.root.id === target)?.root;
     if (!root) return; // not loaded yet, or not a thread on this page
     focusedCommentRef.current = target;
     setActiveCommentId(target);
     openComments();
-    if (
-      root.status === "orphaned" ||
-      root.status === "resolved" ||
-      root.start_offset === null
-    )
-      return; // selected, but no live span to scroll to
-    coeditorRef.current?.scrollToOffset(root.start_offset);
   }, [
     searchParams,
     commentThreads,
     loading,
     viewingVersion,
-    coedit.session,
+    coedit.conn,
     openComments,
   ]);
-
-  // Selecting text in the editor offers a floating "Comment" affordance
-  // anchored above the selection — fed by the Coeditor's selection reporting
-  // instead of a DOM `mouseup`/`selectionchange` handler.
-  const handleSelectionForComment = useCallback(
-    (draft: CommentDraft | null, coords: { x: number; y: number } | null) => {
-      setSelTool(draft && coords ? { x: coords.x, y: coords.y, draft } : null);
-    },
-    [],
-  );
 
   // Active-agents panel (collapsible chip near the top of the doc).
   // We always know the count (so the chip can label "Active agents (N)"),
@@ -604,7 +556,7 @@ export function FileView({ path }: FileViewProps) {
     setError(null);
     try {
       const full = await getTemplate(template.id);
-      coedit.setDoc(full.body);
+      coeditorRef.current?.setDoc(full.body);
       setAppliedTemplateBody(full.body);
       setAppliedTemplateId(template.id);
       await setDraftTemplate(path, template.id);
@@ -617,7 +569,7 @@ export function FileView({ path }: FileViewProps) {
   }
 
   async function onPickBlank() {
-    coedit.setDoc("");
+    coeditorRef.current?.setDoc("");
     setAppliedTemplateBody(null);
     setAppliedTemplateId(null);
     setError(null);
@@ -637,18 +589,16 @@ export function FileView({ path }: FileViewProps) {
   // header inside the scroll area — they portal into its right-aligned slot.
   // The panel toggles are icon SelectButtons so the open panel shows the
   // selected tint; the others are tertiary icon Buttons. No Edit/Done button
-  // — the editor is always live and autosaves; `saveStatus` is the only
-  // feedback for that.
+  // — the editor is always live. No client-visible save status anymore
+  // either: checkpointing (git commit) is entirely backend-driven now (see
+  // useCoeditSession's docstring), so there's no "saving/saved" transition
+  // for the client to observe — only whether the live connection is up.
   const headerActions =
     !loading && !error ? (
       <>
-        {!viewingVersion && (
+        {!viewingVersion && !coedit.connected && coedit.conn && (
           <span className="mr-1 text-[12px] text-(--text-03)">
-            {coedit.saveStatus === "saving"
-              ? "Saving…"
-              : coedit.saveStatus === "error"
-                ? "Couldn't save"
-                : "Saved"}
+            Reconnecting…
           </span>
         )}
         <Button
@@ -877,71 +827,58 @@ export function FileView({ path }: FileViewProps) {
                 />
                 <Path2ReviewBanner path={path} canWrite={canWrite} />
                 <CoeditPresenceBar
-                  participants={coedit.participants}
-                  peers={coedit.peers}
-                  typing={coedit.typing}
-                  selfUserId={user?.id ?? null}
+                  provider={coedit.conn?.provider ?? null}
+                  selfUserId={user?.id ?? ""}
                 />
                 {(() => {
-                  // Cards visible while the body is still "empty enough"
-                  // to discard without losing user work: truly blank, or
-                  // still verbatim equal to the template the user just
-                  // applied (so they can keep swapping templates).
-                  const isBlank = coedit.buffer.trim() === "";
-                  const matchesApplied =
-                    appliedTemplateBody !== null &&
-                    coedit.buffer === appliedTemplateBody;
+                  // Cards visible while the doc is "empty enough" to
+                  // discard without losing user work. Unlike the old
+                  // buffer-based check, this can't tell "still verbatim
+                  // equal to the template just applied" without a
+                  // client-side markdown serializer (deferred — see
+                  // components.tsx's setDoc docstring), so template-swap
+                  // persistence is simplified to "still empty" only; typing
+                  // anything (including applying a template) hides the
+                  // gallery until the page reloads.
                   const showGallery =
-                    (isBlank || matchesApplied) &&
-                    templates !== null &&
-                    templates.length > 0;
+                    docEmpty && templates !== null && templates.length > 0;
                   if (!showGallery) return null;
                   return (
                     <TemplateGallery
                       templates={templates!}
-                      activeId={matchesApplied ? appliedTemplateId : null}
+                      activeId={null}
                       applyingId={applyingTemplateId}
-                      blankActive={isBlank && appliedTemplateId === null}
+                      blankActive={appliedTemplateId === null}
                       onPick={(t) => void onPickTemplate(t)}
                       onBlank={() => void onPickBlank()}
                     />
                   );
                 })()}
               </div>
-              {coedit.session ? (
+              {coedit.conn ? (
                 <Coeditor
-                  key={coedit.session.id}
+                  key={path}
                   ref={coeditorRef}
-                  session={coedit.session}
-                  peers={coedit.peers}
-                  onSelectionChange={coedit.reportSelection}
-                  onCaretCleared={coedit.reportCaretCleared}
-                  getCaretSeq={coedit.getCaretSeq}
-                  onServerFrame={coedit.onServerFrame}
-                  reportDoc={coedit.reportDoc}
-                  registerFlush={coedit.registerFlush}
-                  registerSetDoc={coedit.registerSetDoc}
-                  registerCatchUp={coedit.registerCatchUp}
+                  conn={coedit.conn}
+                  userId={user?.id ?? ""}
+                  userDisplay={user?.name ?? user?.email ?? "Anonymous"}
                   readOnly={!canWrite}
-                  commentHighlights={commentHighlights}
-                  onSelectionForComment={handleSelectionForComment}
+                  onEmptyChange={setDocEmpty}
                   placeholder="Start typing, or pick a template above…"
                 />
-              ) : coedit.joinError ? (
-                // The join handshake itself failed — there's no read-only
-                // fallback to fall back to, so this has to be an actionable
+              ) : coedit.connectError ? (
+                // The connection was refused (no write permission) — no
+                // read-only fallback to offer, so this is an actionable
                 // dead end, not a permanent "Connecting…".
                 <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
                   <span>
-                    Couldn't connect to the live session: {coedit.joinError}
+                    Couldn't connect to the live session: {coedit.connectError}
                   </span>
-                  <Button size="sm" onClick={coedit.retryJoin}>
-                    Retry
-                  </Button>
                 </div>
               ) : (
-                // Joining the session; the editor mounts once we have its
-                // start version + doc.
+                // Connecting; the editor mounts once the WebSocket
+                // connection object exists (transient reconnects after
+                // that don't unmount it — see useCoeditSession).
                 <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-(--text-03)">
                   Connecting…
                 </div>
@@ -1089,29 +1026,10 @@ export function FileView({ path }: FileViewProps) {
           </div>
         </>
       )}
-      {selTool && (
-        <div
-          onMouseDown={(e) => e.preventDefault()}
-          className="fixed z-[80] -translate-x-1/2 -translate-y-full rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-popover)"
-          style={{
-            left: selTool.x,
-            top: selTool.y - 8,
-          }}
-        >
-          <Button
-            prominence="tertiary"
-            size="sm"
-            onClick={() => {
-              setCommentDraft(selTool.draft);
-              openComments();
-              setSelTool(null);
-              window.getSelection()?.removeAllRanges();
-            }}
-          >
-            💬 Comment
-          </Button>
-        </div>
-      )}
+      {/* The "select text to comment" floating popover is deferred along
+          with comment-highlight decorations — see components.tsx's module
+          docstring. Composing a comment from the panel directly still
+          works. */}
     </main>
   );
 }

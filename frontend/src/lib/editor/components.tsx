@@ -1,785 +1,282 @@
 "use client";
 
-/** CodeMirror rendering extensions and the co-edit editor component. */
-import {
-  collab,
-  getSyncedVersion,
-  receiveUpdates,
-  sendableUpdates,
-} from "@codemirror/collab";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import {
-  ChangeSet,
-  Compartment,
-  EditorState,
-  StateEffect,
-  StateField,
-} from "@codemirror/state";
-import {
-  Decoration,
-  type DecorationSet,
-  EditorView,
-  keymap,
-  placeholder as placeholderExt,
-  WidgetType,
-} from "@codemirror/view";
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { ApiError } from "@/lib/api";
-import type {
-  CoeditFrame,
-  CoeditParticipant,
-  CoeditPeer,
-  CoeditSessionHandle,
-} from "@/lib/editor/types";
-import { getOps, sendOp } from "@/lib/editor/svc";
-import { IDLE_UNFOCUS_MS } from "@/lib/editor/constants";
-import {
-  changeSetToChanges,
-  colorFor,
-  syncedDocLength,
-} from "@/lib/editor/utils";
-import { wysiwygMarkdown } from "@/lib/editor/wysiwyg";
-import {
-  commentsField,
-  selectionToDraft,
-  setCommentHighlightsEffect,
-  type CommentDraft,
-  type CommentHighlightTarget,
-} from "@/lib/editor/comments";
-
-/** A remote peer's caret: a thin colored bar with a small name label above it. */
-class CaretWidget extends WidgetType {
-  constructor(
-    readonly color: string,
-    readonly label: string,
-  ) {
-    super();
-  }
-  eq(other: CaretWidget) {
-    return other.color === this.color && other.label === this.label;
-  }
-  toDOM() {
-    const wrap = document.createElement("span");
-    wrap.className = "cm-coedit-caret";
-    wrap.style.borderColor = this.color;
-    const tag = document.createElement("span");
-    tag.className = "cm-coedit-caret-label";
-    tag.style.background = this.color;
-    tag.textContent = this.label;
-    wrap.appendChild(tag);
-    return wrap;
-  }
-  /** Zero-width; never let the editor treat it as an edit boundary. */
-  ignoreEvent() {
-    return true;
-  }
-}
-
-/** Dispatched to update the peer list in `peersField`. */
-const setPeersEffect = StateEffect.define<CoeditPeer[]>();
-
-/** Build a `DecorationSet` from the current peer list: one selection highlight
- * per non-collapsed selection and one `CaretWidget` per peer head position.
- * Offsets are clamped to `docLen` so a stale frame never lands out of range. */
-function buildPeerDecorations(
-  peers: CoeditPeer[],
-  docLen: number,
-): DecorationSet {
-  const ranges = [];
-  for (const p of peers) {
-    const anchor = Math.max(0, Math.min(p.anchor, docLen));
-    const head = Math.max(0, Math.min(p.head, docLen));
-    const from = Math.min(anchor, head);
-    const to = Math.max(anchor, head);
-    const color = colorFor(p.user_id);
-    if (from !== to) {
-      ranges.push(
-        Decoration.mark({
-          attributes: { style: `background-color:${color}33` },
-        }).range(from, to),
-      );
-    }
-    ranges.push(
-      Decoration.widget({
-        widget: new CaretWidget(color, p.user_display),
-        side: 1,
-      }).range(head),
-    );
-  }
-  return Decoration.set(ranges, true);
-}
-
-/** Holds the peer list + its decorations; provides decorations to the view via
- * `EditorView.decorations`. A parked caret must keep pointing at the text its
- * owner left it in, so held positions are mapped through every doc change.
- * When a new peer array arrives, raw offsets are adopted only for entries with
- * a fresh cursor frame (`seq` advanced) — an entry re-sent unchanged (the
- * array was rebuilt by some other peer's frame) keeps its mapped position,
- * since the raw offsets it carries are relative to an older doc. */
-const peersField = StateField.define<{
-  peers: CoeditPeer[];
-  deco: DecorationSet;
-}>({
-  create: () => ({ peers: [], deco: Decoration.none }),
-  update(value, tr) {
-    let incoming: CoeditPeer[] | null = null;
-    for (const e of tr.effects) if (e.is(setPeersEffect)) incoming = e.value;
-    if (incoming === null && !tr.docChanged) return value;
-    let peers = value.peers;
-    if (tr.docChanged) {
-      peers = peers.map((p) => ({
-        ...p,
-        anchor: tr.changes.mapPos(p.anchor),
-        head: tr.changes.mapPos(p.head),
-      }));
-    }
-    if (incoming !== null) {
-      const held = new Map(peers.map((p) => [p.user_id, p]));
-      peers = incoming.map((p) => {
-        const h = held.get(p.user_id);
-        return h && h.seq === p.seq ? h : p;
-      });
-    }
-    return { peers, deco: buildPeerDecorations(peers, tr.state.doc.length) };
-  },
-  provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
-});
-
-/** Base CodeMirror theme: full-height layout, borderless (the WYSIWYG surface
- * reads as part of the page, not a boxed textarea), prose-font scroller,
- * Opal tokens, and styles for the `.cm-coedit-caret` / `.cm-coedit-caret-label`
- * widgets. The scroller spans the full width so its scrollbar sits flush at
- * the far-right edge; the text is capped and centered by `.cm-content`
- * (`max-width` + `margin: auto`) to line up with the `max-w-[768px]`
- * `DocTitle` above it. `.cm-scroller` takes its horizontal gutter from the
- * `--cm-gutter` custom property that the surrounding column sets (so the text
- * gutter tracks the page's responsive padding at every breakpoint), and it
- * uses a slim scrollbar with a transparent track. */
-const baseTheme = EditorView.theme({
-  "&": {
-    height: "100%",
-    // Opal's Main Content/Body preset (see `font-main-content-body` in
-    // @onyx-ai/opal styles.css) — the doc text matches the design system's
-    // content type ramp. CM manages these nodes, so the utility class can't
-    // be applied directly; reference the same tokens instead.
-    fontSize: "var(--height-font-label, 1rem)",
-    fontWeight: "450",
-    color: "var(--text-04)",
-  },
-  "&.cm-focused": { outline: "none" },
-  ".cm-scroller": {
-    overflow: "auto",
-    // The app's font (set on <html> by next/font in layout.tsx) — the doc
-    // text must match DocTitle and the rest of the chrome.
-    fontFamily: "var(--font-hanken-grotesk, system-ui, sans-serif)",
-    lineHeight: "var(--height-line-label, 1.5rem)",
-    padding: "0 var(--cm-gutter, 2rem)",
-    scrollbarWidth: "thin",
-    scrollbarColor: "var(--border-03) transparent",
-  },
-  ".cm-scroller::-webkit-scrollbar": { width: "12px", height: "12px" },
-  ".cm-scroller::-webkit-scrollbar-track": { backgroundColor: "transparent" },
-  ".cm-scroller::-webkit-scrollbar-thumb": {
-    backgroundColor: "var(--border-03)",
-    borderRadius: "9999px",
-    border: "3px solid transparent",
-    backgroundClip: "content-box",
-  },
-  ".cm-scroller::-webkit-scrollbar-thumb:hover": {
-    backgroundColor: "var(--text-04)",
-  },
-  ".cm-content": {
-    padding: "0.5rem 0",
-    width: "100%",
-    maxWidth: "768px",
-    marginInline: "auto",
-    caretColor: "var(--text-05)",
-  },
-  ".cm-line": { padding: "0" },
-  ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text-05)" },
-  "&.cm-focused .cm-selectionBackground, ::selection": {
-    backgroundColor: "var(--background-tint-03)",
-  },
-  ".cm-md-h1, .cm-md-h2, .cm-md-h3, .cm-md-h4, .cm-md-h5, .cm-md-h6": {
-    fontWeight: "bold",
-    display: "inline-block",
-  },
-  ".cm-md-h1": { fontSize: "2em", marginTop: "0.5em" },
-  ".cm-md-h2": { fontSize: "1.6em", marginTop: "0.5em" },
-  ".cm-md-h3": { fontSize: "1.375em", marginTop: "0.4em" },
-  ".cm-md-h4": { fontSize: "1.25em", marginTop: "0.4em" },
-  ".cm-md-h5": { fontSize: "1.125em", marginTop: "0.3em" },
-  ".cm-md-h6": { fontSize: "1.125em", marginTop: "0.3em", opacity: "0.85" },
-  ".cm-md-strong": { fontWeight: "bold" },
-  ".cm-md-em": { fontStyle: "italic" },
-  ".cm-md-code-inline": {
-    fontFamily: "var(--font-dm-mono, ui-monospace, monospace)",
-    backgroundColor: "var(--background-tint-01)",
-    borderRadius: "var(--radius-04, 4px)",
-    padding: "0.1em 0.3em",
-  },
-  ".cm-md-code-block": {
-    fontFamily: "var(--font-dm-mono, ui-monospace, monospace)",
-    display: "block",
-    backgroundColor: "var(--background-tint-01)",
-    borderRadius: "var(--radius-08)",
-  },
-  ".cm-md-blockquote": {
-    display: "inline-block",
-    borderLeft: "3px solid var(--border-02)",
-    paddingLeft: "0.75em",
-    color: "var(--text-03)",
-  },
-  ".cm-md-link": {
-    color: "var(--accent-01)",
-    textDecoration: "underline",
-  },
-  ".cm-md-list-bullet, .cm-md-list-number": {
-    color: "var(--text-03)",
-    userSelect: "none",
-  },
-  ".cm-md-task-checkbox": {
-    width: "0.95em",
-    height: "0.95em",
-    margin: "0 0.35em 0 0",
-    verticalAlign: "middle",
-    accentColor: "var(--accent-01)",
-    cursor: "pointer",
-  },
-  ".cm-md-hr": {
-    display: "inline-block",
-    width: "100%",
-    borderTop: "1px solid var(--border-02)",
-    verticalAlign: "middle",
-  },
-  ".cm-comment-highlight": {
-    backgroundColor: "var(--status-warning-01)",
-  },
-  ".cm-comment-highlight-active": {
-    backgroundColor: "var(--status-warning-02)",
-  },
-  ".cm-coedit-caret": {
-    display: "inline-block",
-    width: "0",
-    borderLeft: "2px solid",
-    marginLeft: "-1px",
-    height: "1.2em",
-    verticalAlign: "text-bottom",
-    position: "relative",
-  },
-  ".cm-coedit-caret-label": {
-    position: "absolute",
-    top: "-1.15em",
-    left: "-1px",
-    fontSize: "10px",
-    lineHeight: "1.2",
-    padding: "0 3px",
-    borderRadius: "3px",
-    color: "var(--text-inverse, #fff)",
-    whiteSpace: "nowrap",
-    fontFamily: "var(--font-hanken-grotesk, system-ui, sans-serif)",
-    pointerEvents: "none",
-    userSelect: "none",
-  },
-});
-
-interface CoeditorProps {
-  session: CoeditSessionHandle;
-  peers: CoeditPeer[];
-  onSelectionChange: (anchor: number, head: number, isEdit: boolean) => void;
-  /** Fires when the editor loses focus — the local caret is no longer placed,
-   * so peers drop it and presence flips us to "viewing". */
-  onCaretCleared: () => void;
-  /** The current caret epoch while our caret is placed, else null — attached
-   * to every op so an edit asserts caret placement with the same ordering as
-   * cursor writes (see useCoeditSession.getCaretSeq). */
-  getCaretSeq: () => number | null;
-  onServerFrame: (handler: ((frame: CoeditFrame) => void) | null) => void;
-  reportDoc: (doc: string) => void;
-  registerFlush: (fn: (() => Promise<void>) | null) => void;
-  registerSetDoc: (fn: ((text: string) => void) | null) => void;
-  /** Register the editor's "pull missed ops" fn — the hook calls it after an
-   * SSE reconnect and when the tab becomes visible again, so a returning user
-   * catches up instead of interacting with a stale doc. */
-  registerCatchUp: (fn: (() => void) | null) => void;
-  placeholder?: string;
-  /** Render the doc without accepting edits — for participants whose
-   * `can_write` is false. They stay in the live session (presence + real-time
-   * updates); only local mutation is disabled. */
-  readOnly?: boolean;
-  /** Comment thread spans to highlight in the doc (the active/selected thread
-   * gets the stronger highlight). */
-  commentHighlights?: CommentHighlightTarget[];
-  /** Fires on every selection change with the current selection as a comment
-   * draft (null if collapsed) plus its on-screen coordinates, for the caller
-   * to position a floating "Comment" affordance. */
-  onSelectionForComment?: (
-    draft: CommentDraft | null,
-    coords: { x: number; y: number } | null,
-  ) => void;
-}
-
-/** Imperative handle for scrolling the editor to a raw-doc offset — used to
- * bring an anchored comment into view (click-to-focus, `?comment=<id>` deep
- * links). */
-export interface CoeditorHandle {
-  scrollToOffset: (offset: number) => void;
-}
-
-/** CodeMirror 6 editor that owns the co-edit document via `@codemirror/collab`.
+/**
+ * The Tiptap-based co-edit editor (onyx-editor migration, Phase 2 —
+ * plans/onyx-editor.md). Replaces the CodeMirror 6 implementation this file
+ * used to hold; see git history for that version.
  *
- * The editor is the source of truth for the doc + version; local edits push to
- * the server as ops and inbound ops/resync are fed to collab's `receiveUpdates`,
- * which rebases un-acked local edits through them — so your keystrokes never
- * revert on a concurrent remote edit. It also renders remote peers' carets and
- * selection highlights and reports the local caret. Offsets are UTF-16 code
- * units end-to-end (JS-native, matching the server).
+ * Presence/cursors are no longer hand-rolled: Yjs's own Awareness protocol
+ * (wired through `y-websocket`'s provider + Tiptap's `CollaborationCursor`
+ * extension) replaces the old caret-epoch bookkeeping in `hooks.ts`
+ * entirely — there's no `onSelectionChange`/`getCaretSeq`/cursor-frame
+ * plumbing to port, Yjs already solves "which of two concurrent cursor
+ * updates is newer" natively.
  *
- * Ops are pushed one-per-version (our `/coedit/op` is one op per version); a
- * push is confirmed locally on 200 and the SSE echo is skipped as already-seen.
- * On a 409 or a version gap we pull the missed ops from `/coedit/ops`.
+ * The Notion-like affordances (`BubbleToolbar`, `SlashMenu`, `DragHandle`)
+ * are a from-scratch open-source build against free Tiptap primitives —
+ * Tiptap's own "Notion-like editor" template is a paid product, not
+ * something to copy from; see those two modules' docstrings.
+ *
+ * Scope note (deferred, not a regression — see the migration plan's Phase 2
+ * scope decision): comment-highlight decorations, the "select text to
+ * comment" popover, and real per-cell table editing are not wired up in
+ * this pass. Lists/blockquotes/code blocks/marks are real structural
+ * Tiptap nodes, synced live.
  */
+
+import Collaboration from "@tiptap/extension-collaboration";
+import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
+import Placeholder from "@tiptap/extension-placeholder";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useState,
+  type ForwardedRef,
+} from "react";
+import { SvgHandle } from "@onyx-ai/opal/icons";
+import { DragHandle } from "@tiptap/extension-drag-handle-react";
+import { BubbleToolbar } from "@/lib/editor/BubbleToolbar";
+import type { CoeditProvider } from "@/lib/editor/provider";
+import { SlashCommand } from "@/lib/editor/SlashMenu";
+import {
+  Blockquote,
+  Bold,
+  BulletList,
+  Code,
+  CodeBlock,
+  Heading,
+  Italic,
+  Link,
+  ListItem,
+  OrderedList,
+  Paragraph,
+} from "@/lib/editor/tiptapSchema";
+import { colorFor } from "@/lib/editor/utils";
+
+export interface CoeditorHandle {
+  /** Best-effort: scrolls the editor to a position. Real position-mapped
+   * scroll-to-comment (matching the old CM6 `scrollToOffset`'s offset
+   * semantics) is deferred along with comment-highlight decorations — see
+   * module docstring. */
+  scrollToOffset: (offset: number) => void;
+  /** Replace the whole document (template pick / "start blank"). Inserts
+   * `text` as plain paragraphs (split on blank lines) — NOT a Markdown
+   * parse, so a template's headings/lists/marks show as literal `#`/`-`/
+   * `**` characters rather than rendering richly. A real Markdown ->
+   * ProseMirror importer is deferred (this needs the mirror image of the
+   * backend's markdown_yjs.py codec, on the client, and didn't fit this
+   * pass) — content is preserved losslessly as text, just not reformatted.
+   */
+  setDoc: (text: string) => void;
+}
+
+export interface CoeditorProps {
+  /** The live connection, owned by `useCoeditSession` — a parent (FileView)
+   * creates it once and can also drive a `CoeditPresenceBar` from the same
+   * instance. Null while connecting; `Coeditor` renders nothing until set. */
+  conn: CoeditProvider | null;
+  userId: string;
+  userDisplay: string;
+  readOnly?: boolean;
+  placeholder?: string;
+  /** Fires whenever the document's emptiness changes — for UI that only
+   * makes sense on a blank page (e.g. the template gallery). */
+  onEmptyChange?: (empty: boolean) => void;
+}
+
 export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
-  function Coeditor(
-    {
-      session,
-      peers,
-      onSelectionChange,
-      onCaretCleared,
-      getCaretSeq,
-      onServerFrame,
-      reportDoc,
-      registerFlush,
-      registerSetDoc,
-      registerCatchUp,
-      placeholder,
-      readOnly,
-      commentHighlights,
-      onSelectionForComment,
-    },
-    ref,
-  ) {
-    const host = useRef<HTMLDivElement | null>(null);
-    const view = useRef<EditorView | null>(null);
-    // Swappable slot for the read-only facets — see readOnlyExtensions.
-    const readOnlyCompartment = useRef(new Compartment());
-    // Latest callbacks without re-creating the editor.
-    const onSelRef = useRef(onSelectionChange);
-    const onCaretClearedRef = useRef(onCaretCleared);
-    const getCaretSeqRef = useRef(getCaretSeq);
-    const reportDocRef = useRef(reportDoc);
-    const onSelectionForCommentRef = useRef(onSelectionForComment);
-    onSelRef.current = onSelectionChange;
-    onCaretClearedRef.current = onCaretCleared;
-    getCaretSeqRef.current = getCaretSeq;
-    reportDocRef.current = reportDoc;
-    onSelectionForCommentRef.current = onSelectionForComment;
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        scrollToOffset: (offset: number) => {
-          const v = view.current;
-          if (!v) return;
-          v.dispatch({
-            effects: EditorView.scrollIntoView(
-              Math.max(0, Math.min(offset, v.state.doc.length)),
-              { y: "center" },
-            ),
-          });
-        },
-      }),
-      [],
-    );
-
-    // Create the collab editor once per session.
-    useEffect(() => {
-      if (!host.current) return;
-      let v: EditorView;
-      const pushing = { current: false };
-      const applyingRemote = { current: false };
-      const pullPromise = { current: null as Promise<void> | null };
-      const pullQueued = { current: false };
-      // The synced version we last sent an op at — so we don't re-send the same
-      // op while awaiting its echo (which advances synced past this).
-      const sentAtVersion = { current: -1 };
-
-      // Idle auto-unfocus: N minutes without local activity blurs the editor.
-      // The blur runs the normal focus-loss path (caret clear broadcast,
-      // presence flips to "viewing", reveal-on-focus collapses to preview),
-      // so an untouched tab can't hold an "editing" caret indefinitely. The
-      // timer is armed only while focused and re-armed on every local edit /
-      // caret move; suspended timers fire on wake, so a slept laptop unfocuses
-      // right when the user returns.
-      const idleUnfocus = {
-        current: null as ReturnType<typeof setTimeout> | null,
-      };
-      const armIdleUnfocus = () => {
-        if (idleUnfocus.current) clearTimeout(idleUnfocus.current);
-        idleUnfocus.current = null;
-        if (!v.hasFocus) return;
-        idleUnfocus.current = setTimeout(() => {
-          idleUnfocus.current = null;
-          if (v.hasFocus) v.contentDOM.blur();
-        }, IDLE_UNFOCUS_MS);
-      };
-
-      const dispatchRemote = (spec: Parameters<EditorView["dispatch"]>[0]) => {
-        applyingRemote.current = true;
-        try {
-          v.dispatch(spec);
-        } finally {
-          applyingRemote.current = false;
-        }
-      };
-
-      // Push the first un-acked op at the synced version (our /op is one op per
-      // version). We do NOT confirm locally — the op echoes back over the stream
-      // (client_id === ours) and is confirmed via receiveUpdates like any other,
-      // so every client applies the same ordered sequence (the convergence
-      // invariant; self-confirming out-of-band diverged clients). The next op is
-      // sent once this one's echo confirms + clears it (see the applyFrame/pull
-      // tails). A 409 means we missed ops → pull + rebase, then a tail re-pushes.
-      const doPush = async (): Promise<void> => {
-        if (pushing.current) return;
-        const version = getSyncedVersion(v.state);
-        // Already sent the op at this version; wait for its echo to advance
-        // synced before sending the next (else we'd re-send and 409).
-        if (version === sentAtVersion.current) return;
-        const updates = sendableUpdates(v.state);
-        if (updates.length === 0) return;
-        pushing.current = true;
-        try {
-          await sendOp(
-            session.id,
-            version,
-            changeSetToChanges(updates[0]!.changes),
-            session.clientId,
-            getCaretSeqRef.current(),
-          );
-          sentAtVersion.current = version;
-        } catch (e) {
-          if (e instanceof ApiError && e.status === 409) await pull();
-          // else transient — the op stays sendable; a later echo/edit retries
-        } finally {
-          pushing.current = false;
-        }
-        // Re-push if there's still un-acked work at a *new* synced version — the
-        // 409→pull path above rebased our op onto a later version, and pull's own
-        // tail push was blocked by `pushing`. The `sentAtVersion` guard makes this
-        // a no-op after a clean send (we wait for that op's echo instead).
-        if (getSyncedVersion(v.state) !== sentAtVersion.current) void doPush();
-      };
-
-      // Single-flight: overlapping pulls would both anchor at the same synced
-      // version and re-apply the same ops (duplicate insertions). A concurrent
-      // caller gets the in-flight promise (so a 409 `await pull()` waits for the
-      // real result); a gap that arrives mid-pull queues one more run.
-      const pull = (): Promise<void> => {
-        if (pullPromise.current) {
-          pullQueued.current = true;
-          return pullPromise.current;
-        }
-        const run = (async () => {
-          const synced = getSyncedVersion(v.state);
-          let data;
-          try {
-            data = await getOps(session.id, synced);
-          } catch {
-            return; // transient; a later trigger retries
-          }
-          if (data.ops.length === 0) return;
-          let len = syncedDocLength(v.state);
-          const updates = data.ops.map((o) => {
-            const cs = ChangeSet.of(o.changes, len);
-            len = cs.newLength;
-            return { changes: cs, clientID: o.client_id ?? "" };
-          });
-          dispatchRemote(receiveUpdates(v.state, updates));
-          if (sendableUpdates(v.state).length > 0) void doPush();
-        })();
-        pullPromise.current = run;
-        void run.finally(() => {
-          pullPromise.current = null;
-          if (pullQueued.current) {
-            pullQueued.current = false;
-            void pull();
-          }
-        });
-        return run;
-      };
-
-      const applyFrame = (frame: CoeditFrame): void => {
-        if (frame.type === "resync") {
-          void pull();
-          return;
-        }
-        if (frame.type !== "op") return;
-        // A pull in flight is fetching the authoritative op sequence; applying a
-        // frame now would double-apply. Queue a re-pull so an op that landed
-        // after the pull's snapshot is still fetched, and drop this frame.
-        if (pullPromise.current) {
-          pullQueued.current = true;
-          return;
-        }
-        const synced = getSyncedVersion(v.state);
-        if (frame.version <= synced) return; // already applied (incl. our echo)
-        if (frame.version > synced + 1) {
-          void pull(); // a gap (missed frame / big-op resync) → fetch the ops
-          return;
-        }
-        try {
-          const cs = ChangeSet.of(frame.changes, syncedDocLength(v.state));
-          dispatchRemote(
-            receiveUpdates(v.state, [
-              { changes: cs, clientID: frame.client_id ?? "" },
-            ]),
-          );
-        } catch (err) {
-          // A malformed / mis-anchored op would otherwise be swallowed by the SSE
-          // reader. Surface it and re-sync from the authoritative op log.
-          console.error("coedit: failed to apply op frame; re-syncing", err);
-          void pull();
-        }
-        if (sendableUpdates(v.state).length > 0) void doPush();
-      };
-
-      const updateListener = EditorView.updateListener.of((u) => {
-        if (u.docChanged) {
-          reportDocRef.current(u.state.doc.toString());
-          void doPush();
-        }
-        // Remote-applied transactions aren't local input — don't report them as
-        // our caret/typing.
-        if (applyingRemote.current) return;
-        const sel = u.state.selection.main;
-        // Focus is caret presence: losing it clears our caret for peers;
-        // regaining it re-reports the position the clear removed.
-        if (u.focusChanged) {
-          if (u.view.hasFocus) onSelRef.current(sel.anchor, sel.head, false);
-          else onCaretClearedRef.current();
-        }
-        if (u.docChanged) onSelRef.current(sel.anchor, sel.head, true);
-        else if (u.selectionSet) onSelRef.current(sel.anchor, sel.head, false);
-        // Any local activity (or a focus flip) restarts the idle-unfocus
-        // clock. Remote-applied ops can't reach this line: CM update
-        // listeners run synchronously inside dispatchRemote's
-        // applyingRemote bracket, so they exit at the early-return above —
-        // a busy peer can't keep an idle user's caret alive.
-        if (u.focusChanged || u.docChanged || u.selectionSet) armIdleUnfocus();
-        if (u.selectionSet && onSelectionForCommentRef.current) {
-          const draft = selectionToDraft(u.state);
-          const coords = draft ? u.view.coordsAtPos(sel.head) : null;
-          onSelectionForCommentRef.current(
-            draft,
-            coords ? { x: coords.left, y: coords.top } : null,
-          );
-        }
-      });
-
-      const state = EditorState.create({
-        doc: session.startDoc,
-        extensions: [
-          collab({
-            startVersion: session.startVersion,
-            clientID: session.clientId,
-          }),
-          history(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
-          // GFM base (not the commonmark default) so task-list markers parse
-          // as TaskMarker.
-          markdown({ base: markdownLanguage }),
-          wysiwygMarkdown(),
-          EditorView.lineWrapping,
-          // In a compartment so a later `readOnly` prop change reconfigures
-          // the live editor (facets are otherwise baked in at create time —
-          // e.g. can_write flipping after a permissions change must not
-          // leave the editor writable).
-          readOnlyCompartment.current.of(readOnlyExtensions(!!readOnly)),
-          placeholderExt(placeholder ?? ""),
-          peersField,
-          commentsField,
-          baseTheme,
-          updateListener,
-        ],
-      });
-      v = new EditorView({ state, parent: host.current });
-      view.current = v;
-      onServerFrame(applyFrame);
-      registerFlush(async () => {
-        // Deliver every un-acked local op over plain HTTP, treating a 200 as
-        // delivered. Unlike `doPush`, this must not wait for stream echoes to
-        // drain `sendableUpdates` — flush runs during teardown, when the SSE
-        // stream (and even the view) may be gone, so an echo may never arrive.
-        // The server CAS makes a duplicate send harmless (409). Time out
-        // rather than hang / silently checkpoint a stale buffer.
-        const deadline = Date.now() + 5000;
-        while (true) {
-          if (Date.now() > deadline) {
-            throw new Error(
-              "Could not sync your latest edits — check your connection.",
-            );
-          }
-          if (pushing.current) {
-            // An op is in flight (doPush or a concurrent flush) — wait for it
-            // rather than double-sending at the same version.
-            await new Promise((r) => setTimeout(r, 40));
-            continue;
-          }
-          const updates = sendableUpdates(v.state);
-          if (updates.length === 0) return;
-          let version = getSyncedVersion(v.state);
-          let start = 0;
-          if (version === sentAtVersion.current) {
-            // updates[0] already got its 200 (it's only un-drained because its
-            // echo hasn't landed) — the rest are based one version later.
-            start = 1;
-            version += 1;
-            if (updates.length === 1) return;
-          }
-          pushing.current = true;
-          try {
-            for (let i = start; i < updates.length; i++) {
-              await sendOp(
-                session.id,
-                version,
-                changeSetToChanges(updates[i]!.changes),
-                session.clientId,
-                // Null after a blur/teardown clear — the flushed tail then
-                // makes no caret assertion, so it can't resurrect the caret.
-                getCaretSeqRef.current(),
-              );
-              sentAtVersion.current = version;
-              version += 1;
-            }
-            return;
-          } catch (e) {
-            if (e instanceof ApiError && e.status === 409) {
-              // A peer's op interleaved — rebase through the op log and retry.
-              // Safe even when the teardown flush runs after `v.destroy()`:
-              // CM6's dispatch on a destroyed view still advances the state
-              // (it only skips DOM work — see EditorView.update's destroyed
-              // path), so receiveUpdates rebases and the retry sees it.
-              await pull();
-              continue;
-            }
-            throw e;
-          } finally {
-            pushing.current = false;
-          }
-        }
-      });
-      registerSetDoc((text: string) => {
-        v.dispatch({
-          changes: { from: 0, to: v.state.doc.length, insert: text },
-        });
-      });
-      registerCatchUp(() => void pull());
-
-      return () => {
-        onServerFrame(null);
-        // Deliberately NOT registerFlush(null): the session teardown in
-        // useCoeditSession runs after this cleanup on unmount and needs the
-        // flush for its final flush → checkpoint → leave sequence. The flush
-        // only reads `v.state` and POSTs — both safe after `v.destroy()` —
-        // and the hook clears it once it has taken ownership.
-        registerSetDoc(null);
-        registerCatchUp(null);
-        if (idleUnfocus.current) clearTimeout(idleUnfocus.current);
-        // A focused editor unmounting (in-app navigation, session
-        // replacement) never gets a focusChanged update — clear our caret
-        // for peers explicitly instead of leaving it parked until the
-        // server-side session leave catches up.
-        if (v.hasFocus) onCaretClearedRef.current();
-        v.destroy();
-        view.current = null;
-      };
-      // Recreate the editor when the session changes; callbacks come via refs.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [session.id, session.clientId, session.startVersion]);
-
-    // Push peer carets into the editor state.
-    useEffect(() => {
-      view.current?.dispatch({ effects: setPeersEffect.of(peers) });
-    }, [peers]);
-
-    // Push comment highlight spans into the editor state.
-    useEffect(() => {
-      view.current?.dispatch({
-        effects: setCommentHighlightsEffect.of(commentHighlights ?? []),
-      });
-    }, [commentHighlights]);
-
-    // Reconfigure the read-only facets when the prop changes — they're baked
-    // into the state at create time otherwise, and a `can_write` correction
-    // (e.g. permissions revoked mid-session) must not leave the editor
-    // writable.
-    useEffect(() => {
-      view.current?.dispatch({
-        effects: readOnlyCompartment.current.reconfigure(
-          readOnlyExtensions(!!readOnly),
-        ),
-      });
-    }, [readOnly]);
-
-    return (
-      <div
-        ref={host}
-        className="box-border min-h-0 w-full flex-1 overflow-hidden"
-      />
-    );
+  function Coeditor(props, ref) {
+    if (!props.conn) {
+      return null;
+    }
+    // Keyed by the connection's own Y.Doc identity (via CoeditorInner's own
+    // props, one per `conn` object) so a path change — a new `conn` from
+    // useCoeditSession — tears down and rebuilds the whole Tiptap editor
+    // instance, matching the old component's per-session remount behavior
+    // (FileView.tsx also keys Coeditor by session id for the same reason).
+    return <CoeditorInner {...props} conn={props.conn} forwardedRef={ref} />;
   },
 );
 
-/** The facets that make the editor a pure preview for `readOnly` viewers.
- * Always installed through `readOnlyCompartment` so a prop change can
- * reconfigure the live editor. */
-function readOnlyExtensions(readOnly: boolean) {
-  return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+interface CoeditorInnerProps extends Omit<CoeditorProps, "conn"> {
+  conn: CoeditProvider;
+  forwardedRef: ForwardedRef<CoeditorHandle>;
 }
 
-interface CoeditPresenceBarProps {
-  participants: CoeditParticipant[];
-  /** Peers with a live caret (from `useCoeditSession`) — a participant with
-   * an entry here is "editing", the rest are "viewing". */
-  peers: CoeditPeer[];
-  typing: string[];
-  selfUserId: string | null;
+function CoeditorInner({
+  conn,
+  userId,
+  userDisplay,
+  readOnly,
+  placeholder,
+  onEmptyChange,
+  forwardedRef,
+}: CoeditorInnerProps) {
+  const extensions = useMemo(
+    () => [
+      StarterKit.configure({
+        heading: false,
+        paragraph: false,
+        bulletList: false,
+        orderedList: false,
+        listItem: false,
+        blockquote: false,
+        codeBlock: false,
+        link: false,
+        bold: false,
+        italic: false,
+        code: false,
+        // Tiptap's stock history plugin isn't Yjs-aware and conflicts with
+        // collaborative editing — Collaboration below supplies its own
+        // Yjs-native undo/redo.
+        undoRedo: false,
+      }),
+      Heading,
+      Paragraph,
+      BulletList,
+      OrderedList,
+      ListItem,
+      Blockquote,
+      CodeBlock,
+      Bold,
+      Italic,
+      Code,
+      Link.configure({ openOnClick: false }),
+      Placeholder.configure({ placeholder: placeholder ?? "" }),
+      SlashCommand,
+      Collaboration.configure({ document: conn.ydoc, field: "prosemirror" }),
+      CollaborationCursor.configure({
+        provider: conn.provider,
+        user: { name: userDisplay, color: colorFor(userId) },
+      }),
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    ],
+    [conn, userId, userDisplay, placeholder],
+  );
+
+  const editor = useEditor({
+    extensions,
+    editable: !readOnly,
+    immediatelyRender: false,
+    editorProps: {
+      // Styling for the real h1-h6/ul/ol/li/strong/em/code/pre/blockquote/a
+      // elements this renders lives in globals.css, scoped under
+      // `.ProseMirror` (Tailwind's preflight strips element defaults, same
+      // reason `.markdown` exists there for react-markdown output).
+      attributes: {
+        class: "mx-auto max-w-[768px] px-(--cm-gutter,1.5rem) py-6 min-h-full",
+      },
+    },
+  });
+
+  useEffect(() => {
+    editor?.setEditable(!readOnly);
+  }, [editor, readOnly]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const report = () => onEmptyChange?.(editor.isEmpty);
+    editor.on("update", report);
+    report();
+    return () => {
+      editor.off("update", report);
+    };
+  }, [editor, onEmptyChange]);
+
+  useImperativeHandle(
+    forwardedRef,
+    () => ({
+      scrollToOffset: () => {
+        // Deferred — see CoeditorHandle docstring.
+      },
+      setDoc: (text: string) => {
+        if (!editor) return;
+        const paragraphs = text.split(/\n{2,}/).filter((p) => p.trim() !== "");
+        editor
+          .chain()
+          .clearContent()
+          .insertContent(
+            paragraphs.length > 0
+              ? paragraphs.map((p) => ({
+                  type: "paragraph",
+                  content: [{ type: "text", text: p.trim() }],
+                }))
+              : [{ type: "paragraph" }],
+          )
+          .run();
+      },
+    }),
+    [editor],
+  );
+
+  return (
+    <div className="h-full w-full overflow-y-auto">
+      {editor && (
+        <>
+          <BubbleToolbar editor={editor} />
+          <DragHandle editor={editor}>
+            <SvgHandle className="size-4 cursor-grab text-(--text-03) active:cursor-grabbing" />
+          </DragHandle>
+        </>
+      )}
+      <EditorContent editor={editor} className="h-full" />
+    </div>
+  );
 }
 
-// Live-session presence: who else is on the page — labeled "editing" while
-// their caret is rendered in the content, "viewing" otherwise — and who's
-// typing right now. The label is DERIVED from the same peers list that
-// renders the carets (CaretWidget/peersField above), so bar and doc can
-// never disagree: if a person's cursor is in the content they're editing,
-// otherwise they're viewing. Renders nothing when you're alone.
+export interface CoeditPresenceBarProps {
+  provider: import("y-websocket").WebsocketProvider | null;
+  selfUserId: string;
+}
+
+/** Minimal presence strip driven by Yjs Awareness states directly (no
+ * separate participants/typing plumbing — see module docstring). */
 export function CoeditPresenceBar({
-  participants,
-  peers,
-  typing,
+  provider,
   selfUserId,
 }: CoeditPresenceBarProps) {
-  const others = participants.filter((p) => p.user_id !== selfUserId);
-  if (others.length === 0) return null;
-  const typingSet = new Set(typing);
-  const caretSet = new Set(peers.map((p) => p.user_id));
+  const [others, setOthers] = useState<
+    { userId: string; display: string; color: string }[]
+  >([]);
+
+  useEffect(() => {
+    if (!provider) return;
+    const update = () => {
+      const states = [...provider.awareness.getStates().entries()]
+        .filter(([clientId]) => clientId !== provider.awareness.clientID)
+        .map(([, state]) => state?.user)
+        .filter((u): u is { name: string; color: string } => Boolean(u))
+        .filter((u) => u.name !== selfUserId);
+      setOthers(
+        states.map((u) => ({
+          userId: u.name,
+          display: u.name,
+          color: u.color,
+        })),
+      );
+    };
+    provider.awareness.on("change", update);
+    update();
+    return () => provider.awareness.off("change", update);
+  }, [provider, selfUserId]);
+
+  if (others.length === 0) {
+    return null;
+  }
+
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-(--text-03)">
-      <span
-        className="inline-block h-[7px] w-[7px] rounded-full bg-(--status-success-05)"
-        aria-hidden
-      />
+    <div className="flex items-center gap-2 px-(--cm-gutter,1.5rem) py-1 text-xs text-(--text-04)">
       {others.map((p) => (
-        <span key={p.user_id} className="inline-flex items-center gap-1">
-          <span className="font-medium text-(--text-04)">{p.user_display}</span>
-          <span className="text-(--text-03) italic">
-            {typingSet.has(p.user_id)
-              ? "typing…"
-              : caretSet.has(p.user_id)
-                ? "editing"
-                : "viewing"}
-          </span>
+        <span key={p.userId} className="flex items-center gap-1">
+          <span
+            className="inline-block size-2 rounded-full"
+            style={{ backgroundColor: p.color }}
+          />
+          {p.display}
         </span>
       ))}
     </div>
