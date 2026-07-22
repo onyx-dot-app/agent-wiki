@@ -232,10 +232,12 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
                 .where(UpdatePolicy.path == old_prefix)
                 .values(path=new_prefix)
             )
-            # Policy rows nested under the renamed folder.
+            # Policy rows nested under the renamed folder. `startswith` with
+            # autoescape treats `_`/`%` in the prefix as literals — a bare
+            # LIKE would let `my_project/%` also match `myXproject/...`.
             s.execute(
                 update(UpdatePolicy)
-                .where(UpdatePolicy.path.like(old_prefix + "/%"))
+                .where(UpdatePolicy.path.startswith(old_prefix + "/", autoescape=True))
                 .values(
                     path=func.concat(
                         new_prefix,

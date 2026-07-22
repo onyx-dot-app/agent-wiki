@@ -40,6 +40,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.orm import Session
 
 from app.auth import groups as groups_repo
 from app.db.models import AclEntry, WikiOwner
@@ -732,9 +733,7 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
                     )
                     .values(resource_path=new_p)
                 )
-                s.execute(
-                    update(WikiOwner).where(WikiOwner.path == old_p).values(path=new_p)
-                )
+                _repoint_owner(s, old_p, new_p)
 
         # The folder-level prefix swap. A `.md`-page root is a single page
         # move: the per-file loop above re-keys it and there is no folder to
@@ -760,12 +759,16 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
                 )
                 .values(resource_path=new_prefix)
             )
-            # Folder ACLs nested under the renamed folder.
+            # Folder ACLs nested under the renamed folder. `startswith` with
+            # autoescape treats `_`/`%` in the prefix as literals — a bare
+            # LIKE would let `my_project/%` also match `myXproject/...`.
             s.execute(
                 update(AclEntry)
                 .where(
                     AclEntry.resource_kind == PageKind.FOLDER,
-                    AclEntry.resource_path.like(old_prefix + "/%"),
+                    AclEntry.resource_path.startswith(
+                        old_prefix + "/", autoescape=True
+                    ),
                 )
                 .values(
                     resource_path=func.concat(
@@ -774,6 +777,36 @@ def on_path_moved(moves: list[PathMove], root_move: PathMove | None = None) -> N
                     )
                 )
             )
+            # Owner rows for the renamed folder and folders nested under it.
+            # Page owner rows were already re-keyed by the per-file loop, so
+            # the prefix match only finds folder rows (a page row still at an
+            # old path would be an orphan the rewrite also heals). Row-by-row
+            # so a stale destination row can't abort the move on the path PK.
+            owner_paths = s.scalars(
+                select(WikiOwner.path).where(
+                    or_(
+                        WikiOwner.path == old_prefix,
+                        WikiOwner.path.startswith(old_prefix + "/", autoescape=True),
+                    )
+                )
+            ).all()
+            for p_old in owner_paths:
+                _repoint_owner(s, p_old, new_prefix + p_old[len(old_prefix) :])
+
+
+def _repoint_owner(s: Session, old_path: str, new_path: str) -> None:
+    """Re-key one ``WikiOwner`` row. ``path`` is the primary key, so a row
+    already sitting at the destination would abort the whole move; it can only
+    be a stale orphan (move validation keeps destinations free of live
+    content), so the moving row wins and the orphan is dropped."""
+    row = s.get(WikiOwner, old_path)
+    if row is None:
+        return
+    existing = s.get(WikiOwner, new_path)
+    if existing is not None:
+        s.delete(existing)
+        s.flush()
+    row.path = new_path
 
 
 # Re-export for type-stability of ``Document`` import — keeps pyright happy
