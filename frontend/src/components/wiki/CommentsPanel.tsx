@@ -7,7 +7,6 @@ import {
   SelectButton,
   Text,
 } from "@onyx-ai/opal/components";
-import { SvgMenu } from "@onyx-ai/opal/icons";
 import { Section } from "@onyx-ai/opal/layouts";
 
 import { useAuth } from "@/lib/auth";
@@ -18,6 +17,7 @@ import { useIsMobile } from "@/lib/viewport";
 import type { CommentThreadView } from "@/types";
 
 import { CommentMarginRail } from "./CommentMarginRail";
+import { SvgListLines } from "./icons";
 import { EditorEdgeScrollbar } from "./EditorEdgeScrollbar";
 import { PanelSearchField } from "./PanelSearch";
 import { NewCommentComposer, ThreadCard } from "./commentCards";
@@ -192,7 +192,7 @@ export function CommentsPanel({
       />
       {!isMobile && editorRef && (
         <SelectButton
-          icon={SvgMenu}
+          icon={SvgListLines}
           state={listView ? "selected" : "empty"}
           tooltip={listView ? "Anchored view" : "List view"}
           onClick={() => onListViewChange(!listView)}
