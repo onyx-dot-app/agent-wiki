@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
+from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, CoeditUpdate, User
 from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
 
@@ -631,15 +631,21 @@ def on_path_moved(moves: list[PathMove]) -> None:
 
 
 def close_if_clean(session_id: int) -> bool:
-    """Close the session only if it's clean (``version == checkpointed_version``).
-    Returns True if it closed.
+    """Close the session only if it's clean on *both* protocols'
+    dirty-tracking (``version == checkpointed_version`` for buffer_text,
+    ``ydoc_seq == ydoc_checkpointed_seq`` for the onyx-editor Yjs path —
+    plans/onyx-editor.md). Returns True if it closed. A session that only
+    ever used one protocol has the other pair trivially equal (both start at
+    0), so this is a no-behavior-change superset for buffer_text-only
+    sessions.
 
-    Atomic, to avoid orphaning a late edit: after a checkpoint commits, an op can
-    still land (the session is ``active`` until this runs) and re-dirty the
-    buffer. The conditional ``UPDATE`` closes only when nothing new arrived — if
-    an op bumped ``version`` in the window, it matches no row and the session
-    stays active, so the periodic scan re-checkpoints the new edit rather than
-    sealing it in a closed session.
+    Atomic, to avoid orphaning a late edit: after a checkpoint commits, an op
+    (or Yjs update) can still land (the session is ``active`` until this
+    runs) and re-dirty the session. The conditional ``UPDATE`` closes only
+    when nothing new arrived — if either pair moved in the window, it
+    matches no row and the session stays active, so the next checkpoint scan
+    (either protocol's) re-checkpoints the new edit rather than sealing it
+    in a closed session.
     """
     with session() as s:
         closed = s.scalars(
@@ -648,6 +654,7 @@ def close_if_clean(session_id: int) -> bool:
                 CoeditSession.id == session_id,
                 CoeditSession.status == SessionStatus.ACTIVE.value,
                 CoeditSession.version == CoeditSession.checkpointed_version,
+                CoeditSession.ydoc_seq == CoeditSession.ydoc_checkpointed_seq,
             )
             .values(status=SessionStatus.CLOSED.value, updated_at=_iso(_now()))
             .returning(CoeditSession.id)
@@ -686,6 +693,149 @@ def purge_viewer_sessions(limit: int = 500) -> int:
             .execution_options(synchronize_session=False)
         )
         return len(ids)
+
+
+# --------------------------------------------------------------------------- #
+# Yjs live-doc store (onyx-editor migration, plans/onyx-editor.md) — additive #
+# alongside the buffer_text/coedit_ops store above. A WS session reuses the   #
+# same CoeditSession row (path, status, base_sha, participants, checkpoint    #
+# lock all carry over unchanged) but persists its live pycrdt doc through     #
+# ydoc_snapshot/ydoc_seq/ydoc_checkpointed_seq and CoeditUpdate instead of    #
+# buffer_text/CoeditOp. See app/wiki/coedit_ws.py for the in-memory room that #
+# holds the live Doc between checkpoints.                                     #
+# --------------------------------------------------------------------------- #
+
+
+class YdocState(BaseModel):
+    """A session's persisted Yjs state — what a process needs to reconstruct
+    (or catch up) the live doc without necessarily having it in memory."""
+
+    snapshot: bytes | None  # None: no WS session has ever used this page
+    seq: int
+    checkpointed_seq: int
+    base_sha: str | None
+
+
+def get_ydoc_state(session_id: int) -> YdocState | None:
+    """The session's persisted Yjs state, or ``None`` if the session doesn't
+    exist. Used when a room needs to be (re)built in a process that doesn't
+    already hold the live doc in memory — see ``coedit_ws.get_or_create_room``."""
+    with session() as s:
+        row = s.get(CoeditSession, session_id)
+        if row is None:
+            return None
+        return YdocState(
+            snapshot=row.ydoc_snapshot,
+            seq=row.ydoc_seq,
+            checkpointed_seq=row.ydoc_checkpointed_seq,
+            base_sha=row.base_sha,
+        )
+
+
+def append_ydoc_update(
+    session_id: int, *, update_bytes: bytes, author_user_id: str | None
+) -> int:
+    """Log one raw Yjs update and bump ``ydoc_seq``. Returns the new seq.
+
+    Unlike ``apply_op``, this never re-derives or validates document content —
+    the live doc in the room's memory is already authoritative (pycrdt applied
+    the update before this is called); this is purely the durability/catch-up
+    log; a process crash between "room applied it" and this call loses at most
+    one update, recoverable by any peer that stays connected re-syncing a
+    reconnecting client via the room's own Yjs sync protocol, not this log.
+    """
+    now = _iso(_now())
+    with session() as s:
+        new_seq = s.scalars(
+            update(CoeditSession)
+            .where(CoeditSession.id == session_id)
+            .values(ydoc_seq=CoeditSession.ydoc_seq + 1, updated_at=now)
+            .returning(CoeditSession.ydoc_seq)
+            .execution_options(synchronize_session=False)
+        ).one()
+        s.add(
+            CoeditUpdate(
+                session_id=session_id,
+                seq=new_seq,
+                author_user_id=author_user_id,
+                update_bytes=update_bytes,
+            )
+        )
+        return new_seq
+
+
+def ydoc_updates_since(session_id: int, after_seq: int) -> list[bytes]:
+    """Raw update blobs in ``(after_seq, head]``, oldest first — replayed onto
+    ``ydoc_snapshot`` to reconstruct the live doc when a process doesn't
+    already hold it in memory."""
+    with session() as s:
+        return list(
+            s.scalars(
+                select(CoeditUpdate.update_bytes)
+                .where(CoeditUpdate.session_id == session_id, CoeditUpdate.seq > after_seq)
+                .order_by(CoeditUpdate.seq.asc())
+            ).all()
+        )
+
+
+def checkpoint_ydoc(
+    session_id: int, *, snapshot: bytes, base_sha: str, seq: int
+) -> bool:
+    """Persist a full snapshot as of ``seq`` and mark the session checkpointed
+    through it. Conditional on ``ydoc_checkpointed_seq < seq`` (mirrors
+    ``mark_checkpointed``) so a slow in-flight checkpoint can't regress the
+    watermark past a faster concurrent one. Returns whether the row advanced.
+
+    Once persisted, ``CoeditUpdate`` rows at or before ``seq`` are redundant
+    for catch-up (the snapshot already encodes them) but are left in place —
+    they're an append-only audit trail, not a rolling buffer; pruning is a
+    future cleanup task, not a Phase 1 concern.
+    """
+    with session() as s:
+        updated = s.scalars(
+            update(CoeditSession)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.ydoc_checkpointed_seq < seq,
+            )
+            .values(
+                ydoc_snapshot=snapshot,
+                ydoc_checkpointed_seq=seq,
+                base_sha=base_sha,
+                last_checkpoint_at=_iso(_now()),
+            )
+            .returning(CoeditSession.id)
+            .execution_options(synchronize_session=False)
+        ).one_or_none()
+        return updated is not None
+
+
+def sessions_due_for_ydoc_checkpoint(
+    *, idle_seconds: int, max_interval_seconds: int
+) -> list[SessionRow]:
+    """Active sessions with unpersisted Yjs updates, idle or overdue — the
+    Yjs-store counterpart of ``sessions_due_for_checkpoint``. Same idle/overdue
+    cutoff semantics; see that function's docstring."""
+    now = _now()
+    idle_cutoff = _iso(now - timedelta(seconds=idle_seconds))
+    overdue_cutoff = _iso(now - timedelta(seconds=max_interval_seconds))
+    with session() as s:
+        rows = s.scalars(
+            select(CoeditSession)
+            .where(
+                CoeditSession.status == SessionStatus.ACTIVE.value,
+                CoeditSession.ydoc_seq > CoeditSession.ydoc_checkpointed_seq,
+                or_(
+                    CoeditSession.updated_at <= idle_cutoff,
+                    func.coalesce(
+                        CoeditSession.last_checkpoint_at, CoeditSession.created_at
+                    )
+                    <= overdue_cutoff,
+                ),
+            )
+            .order_by(CoeditSession.updated_at.asc())
+        ).all()
+        return [_session_row(r) for r in rows]
 
 
 # Namespace for checkpoint advisory-lock keys. The whole DB shares one 64-bit

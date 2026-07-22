@@ -20,12 +20,16 @@ from __future__ import annotations
 
 import logging
 
+import anyio
+from pycrdt import Doc
+
 from app.auth import User, set_current_user
 from app.auth import users as users_repo
-from app.models.wiki import ChangeKind
+from app.models.wiki import ChangeKind, CommitResult
 from app.wiki import coedit, coedit_channel, filesystem
 from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
+from app.wiki.markdown_splice import TouchedTracker, checkpoint_body
 from app.wiki.utils import commit_and_fan_out
 
 log = logging.getLogger(__name__)
@@ -206,6 +210,126 @@ def _checkpoint_locked(session_id: int) -> str | None:
         # every future trigger.
         log.warning(
             "coedit checkpoint: no-op merge but no HEAD for %s (session %s); left dirty",
+            path,
+            session_id,
+        )
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Yjs checkpoint (onyx-editor migration, plans/onyx-editor.md) — additive     #
+# --------------------------------------------------------------------------- #
+#
+# Architectural notes this Phase 1 had to validate rather than assume (per
+# the design doc's risk register #2):
+#
+# 1. The live ``pycrdt`` ``Doc`` and its ``TouchedTracker`` exist only in the
+#    web process's memory, owned by the WebSocket connection(s) for a session
+#    (see ``app/wiki/coedit_ws.py``) — they are not something a *separate*
+#    ``worker-light`` process (where ``checkpoint_session`` above normally
+#    runs, via ``coedit_queue``) can reach. So unlike the buffer_text path,
+#    the splice step here cannot be dispatched through the task queue — it
+#    must run in the same process that holds the doc.
+# 2. Less obviously: pycrdt's objects (``Doc``, its ``Subscription``s, every
+#    ``Xml*`` node) are thread-affine — a PyO3/Rust "unsendable" type. Moving
+#    the splice step to a worker *thread* (the natural way to keep it off the
+#    event loop, since #1 rules out a worker *process*) crashes as soon as
+#    anything tries to touch the doc or drop a ``Subscription`` from that
+#    thread. So ``checkpoint_ydoc_session`` below is an async function that
+#    does every doc-touching step (``checkpoint_body``, ``tracker.reset()``,
+#    ``doc.get_update()``) directly on the caller's thread/event loop — the
+#    *only* part it offloads via ``anyio.to_thread.run_sync`` is
+#    ``commit_and_fan_out``, which operates on plain strings and does the
+#    actual git/LLM I/O.
+#
+# A real multi-worker deployment of the WS path would need every checkpoint
+# trigger (idle/interval/last-leave/explicit-save) driven from within the
+# owning web process itself, not a cron-style worker scan like
+# ``scan_and_checkpoint`` below — flagged here as a Phase 1 open item, not
+# resolved.
+
+
+async def checkpoint_ydoc_session(
+    session_id: int, *, doc: Doc, tracker: TouchedTracker, author_user_id: str | None
+) -> str | None:
+    """Splice + commit a Yjs session's live doc to git; return the new sha
+    (or ``None`` on a no-op). Mirrors ``checkpoint_session``'s shape (same
+    lock, same missing-path handling, same commit-message/attribution
+    pattern) but takes the live doc/tracker directly rather than reading
+    ``buffer_text`` — see the module note above for why, and for why this is
+    ``async`` (only the git-commit step below may run off-thread; everything
+    touching ``doc``/``tracker`` must stay on the caller's thread).
+    """
+    with coedit.checkpoint_lock(session_id) as acquired:
+        if not acquired:
+            log.info("coedit ydoc checkpoint: session %s busy; skipping", session_id)
+            return None
+        return await _checkpoint_ydoc_locked(session_id, doc, tracker, author_user_id)
+
+
+async def _checkpoint_ydoc_locked(
+    session_id: int, doc: Doc, tracker: TouchedTracker, author_user_id: str | None
+) -> str | None:
+    sess = coedit.get_session(session_id)
+    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
+        return None
+    state = coedit.get_ydoc_state(session_id)
+    if state is None or state.seq == state.checkpointed_seq:
+        return None  # nothing new since the last checkpoint
+
+    path = sess.path
+    if sess.base_sha is not None and not filesystem.absolute(path).is_file():
+        log.warning(
+            "coedit ydoc checkpoint: session %s targets missing path %r; skipping",
+            session_id,
+            path,
+        )
+        return None
+
+    base_body = wiki_git.read_file_opt(path, ref=sess.base_sha) if sess.base_sha else None
+    change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
+    new_body = checkpoint_body(base_body or "", doc, tracker)  # doc-touching: stays on this thread
+
+    author = _user(author_user_id) if author_user_id else None
+    message = "Co-editing checkpoint"
+
+    def _commit() -> CommitResult | None:
+        with set_current_user(author):
+            return commit_and_fan_out(
+                path,
+                new_body,
+                message,
+                change_kind=change_kind,
+                base_body=base_body,
+                ai_merge=True,
+                skip_acl=True,
+                record_activity=False,
+                trigger_coedit_rebase=False,
+            )
+
+    result = await anyio.to_thread.run_sync(_commit)
+
+    seq = state.seq
+    if result is not None:
+        # Reset the tracker now that its base_body reference (the text this
+        # checkpoint committed against) is stale — the next checkpoint's
+        # untouched-region guarantee is relative to result.new_body, not the
+        # base_body just committed. Both touch the doc/tracker — must run here,
+        # not in the thread that just ran _commit.
+        tracker.reset()
+        snapshot = bytes(doc.get_update())
+        coedit.checkpoint_ydoc(session_id, snapshot=snapshot, base_sha=result.sha, seq=seq)
+        wiki_drafts.clear_if_diverged(path, result.new_body)
+        return result.sha
+
+    head = wiki_git.head_sha_for_path(path)
+    if head is not None:
+        tracker.reset()
+        snapshot = bytes(doc.get_update())
+        coedit.checkpoint_ydoc(session_id, snapshot=snapshot, base_sha=head, seq=seq)
+    else:
+        log.warning(
+            "coedit ydoc checkpoint: no-op merge but no HEAD for %s (session %s); left dirty",
             path,
             session_id,
         )

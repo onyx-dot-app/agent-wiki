@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
@@ -30,6 +30,7 @@ from app.api import (
     automanage,
     chat,
     coedit,
+    coedit_ws,
     comments,
     craft,
     documents,
@@ -68,6 +69,7 @@ from app.tasks.queues import QueueFullError
 from app.triggers import reconcile as triggers_reconcile
 from app.triggers import repo as triggers_repo
 from app.utils.logging import setup_logging
+from app.wiki import coedit_ws as _coedit_ws
 from app.wiki.git import ensure_wiki_repo
 from app.wiki.seed import seed_if_empty
 from app.wiki.templates import seed_starter_templates_if_empty
@@ -185,8 +187,17 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # process owns the SSE stream — Postgres LISTEN/NOTIFY ferries events
     # (MCP doc/job updates, co-edit frames) between them.
     bus.start_listener()
+    # onyx-editor Yjs WS transport (Phase 1, plans/onyx-editor.md): the room
+    # server, this process's update-persistence thread, and its checkpoint
+    # scan loop (app/wiki/coedit_ws.py — see that module for why checkpointing
+    # must run in-process rather than on a coedit_queue worker).
+    async with AsyncExitStack() as coedit_ws_stack:
+        await coedit_ws_stack.enter_async_context(_coedit_ws.SERVER)
+        _coedit_ws.start()
 
-    yield
+        yield
+
+        _coedit_ws.stop()
 
     bus.stop_listener()
 
@@ -244,6 +255,7 @@ def create_app() -> FastAPI:
     app.include_router(automanage.router, prefix="/api/automanage")
     app.include_router(wiki.router, prefix="/api/wiki")
     app.include_router(coedit.router, prefix="/api/coedit")
+    app.include_router(coedit_ws.router, prefix="/api/coedit")
     app.include_router(comments.router, prefix="/api/comments")
     app.include_router(documents.router, prefix="/api/documents")
     app.include_router(chat.router, prefix="/api/chat")

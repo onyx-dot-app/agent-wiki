@@ -33,6 +33,9 @@ dependencies = [
     "uvicorn[standard]>=0.27",  # ASGI server — production entry via Dockerfile CMD
     "itsdangerous>=2.1", # Starlette SessionMiddleware signs the session cookie
     "onnxruntime>=1.17", # in-process relevance scoring (two-tower ONNX); no torch
+    "markdown-it-py>=3.0",     # app/wiki/markdown_blocks.py: GFM structural parsing
+    "pycrdt>=0.14",            # co-editing live doc CRDT (app/wiki/markdown_yjs.py, markdown_splice.py)
+    "pycrdt-websocket>=0.16",  # co-editing WebSocket transport (Phase 1: app/api/coedit.py)
 ]
 
 [project.optional-dependencies]
@@ -43,7 +46,6 @@ dev = [
     "ruff>=0.4",
     "basedpyright>=1.18",
     "httpx>=0.27",            # fastapi.testclient.TestClient transport
-    "markdown-it-py>=3.0",    # eval scorer: structural markdown validity
 ]
 
 [tool.setuptools.packages.find]
@@ -105,6 +107,74 @@ reportMissingTypeArgument = "none"
 reportUntypedFunctionDecorator = "none"
 reportPrivateUsage = "none"
 reportUnusedFunction = "none"
+# pycrdt's `.attributes` stub is bytes-keyed but str-keyed at runtime (see
+# the onyx-editor migration overrides below) — test_markdown_yjs.py hits
+# the same mismatch dict()-ing an XmlElement's attributes.
+reportArgumentType = "none"
+reportCallIssue = "none"
+
+# pycrdt's bundled stubs are loosely typed under strict mode: `Doc` is
+# generic with no usable neutral type argument, `.attributes`/`.children`
+# are declared with types (bytes-keyed dicts, unions including XmlFragment)
+# that don't match verified runtime behavior (str-keyed, always XmlElement
+# for our own tree shape) — see the onyx-editor migration
+# (plans/onyx-editor.md). Relaxed here, per-file, same pattern as the
+# `tests` override above, rather than scattering `# type: ignore` at every
+# call site across the four modules that talk to pycrdt directly.
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/markdown_yjs.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownLambdaType = "none"
+reportMissingTypeArgument = "none"
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportAttributeAccessIssue = "none"
+reportReturnType = "none"
+reportUnnecessaryComparison = "none"
+reportOperatorIssue = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/markdown_splice.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeArgument = "none"
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportAttributeAccessIssue = "none"
+reportReturnType = "none"
+reportAssignmentType = "none"
+reportUnnecessaryComparison = "none"
+reportUnnecessaryContains = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/coedit_ws.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownLambdaType = "none"
+reportMissingTypeArgument = "none"
+reportAttributeAccessIssue = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/coedit_checkpoint.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeArgument = "none"
+reportAttributeAccessIssue = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "app/api/coedit_ws.py"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnnecessaryComparison = "none"
 
 [tool.uv]
 # Some transitive deps (e.g. greenlet) publish releases missing Linux wheels;

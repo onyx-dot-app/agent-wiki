@@ -974,6 +974,21 @@ class CoeditSession(Base):
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
     last_checkpoint_at: Mapped[str | None] = mapped_column(Text)
+    # --- onyx-editor migration (plans/onyx-editor.md), additive alongside the
+    # buffer_text/coedit_ops columns above: the Yjs/pycrdt live-doc path is a
+    # parallel session store, not a replacement, until the frontend (Phase 2)
+    # and cutover (Phase 3) land. `ydoc_snapshot` is the durable
+    # `encode_state_as_update()` snapshot as of the last checkpoint (or seed);
+    # `ydoc_seq`/`ydoc_checkpointed_seq` mirror `version`/`checkpointed_version`
+    # but count appended `coedit_updates` rows rather than text ops, so a WS
+    # session's dirty-detection doesn't share state with a buffer_text session
+    # on the same row. Null `ydoc_snapshot` = no WS session has used this page
+    # yet.
+    ydoc_snapshot: Mapped[bytes | None] = mapped_column(LargeBinary)
+    ydoc_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    ydoc_checkpointed_seq: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -1053,6 +1068,37 @@ class CoeditOp(Base):
         # "ops since version N" catch-up.
         UniqueConstraint("session_id", "seq", name="idx_coedit_ops_session_seq"),
     )
+
+
+class CoeditUpdate(Base):
+    """Append-only log of raw Yjs update blobs applied to a session's live
+    ``pycrdt`` doc — the onyx-editor migration's counterpart to ``CoeditOp``
+    (see ``plans/onyx-editor.md``). Same purpose (late-joiner/cross-process
+    catch-up, audit trail), but the payload is an opaque CRDT update rather
+    than a JSON text-diff, so it needs no schema beyond "bytes that apply
+    cleanly on top of ``ydoc_snapshot``." ``seq`` matches
+    ``CoeditSession.ydoc_seq`` after this update was appended.
+    """
+
+    __tablename__ = "coedit_updates"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("coedit_sessions.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Best-effort attribution: the connection that produced the update. Yjs
+    # updates can bundle changes from a merge/rebase with no single author,
+    # so unlike CoeditOp.author_user_id this is nullable.
+    author_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    update_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (UniqueConstraint("session_id", "seq", name="idx_coedit_updates_session_seq"),)
 
 
 # --------------------------------------------------------------------------- #
