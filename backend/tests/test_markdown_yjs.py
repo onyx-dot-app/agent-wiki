@@ -55,6 +55,18 @@ def test_reconstruct_body_round_trips_simple_body() -> None:
     assert reconstruct_body(doc) == body
 
 
+def test_empty_heading_does_not_raise() -> None:
+    """`# ` with no title text after it — a real state while editing (type
+    `#`, hit space, haven't typed a title yet), not a hypothetical. Used to
+    raise StopIteration: parsing the stripped (empty) heading text standalone
+    produces zero markdown-it tokens at all, unlike parsing the unstripped
+    `"# "` line, which still produces an `inline` token with empty content."""
+    doc = seed_doc_from_markdown("# \n")
+    root = _root(doc)
+    assert root.children[0].tag == "heading"
+    assert reconstruct_body(doc) == "# \n"
+
+
 def test_reconstruct_body_round_trips_bold_italic_code_link() -> None:
     body = "A **bold** and *italic* and `code` and [a link](https://x.example) end.\n"
     doc = seed_doc_from_markdown(body)

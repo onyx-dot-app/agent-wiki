@@ -163,9 +163,19 @@ def _make_inline_element(
     its inline token, then build the (plain-text, mark-runs) pair. Marks are
     applied via ``.format()`` once the text node is integrated (pycrdt
     requires integration before ``.insert``/``.format`` — see
-    ``_build_block_element``'s finisher-callback pattern, which this feeds)."""
+    ``_build_block_element``'s finisher-callback pattern, which this feeds).
+
+    ``line`` can be empty — e.g. a heading block whose text was stripped
+    down to nothing (``"# "`` with no title after it, a real state while
+    editing, not a hypothetical). Parsing an empty string standalone
+    produces zero tokens at all (no ``inline`` token, unlike parsing the
+    unstripped ``"# "`` line, which still gets one with empty content) —
+    confirmed directly. A block with genuinely empty inline content is
+    just an empty text node with no mark runs, not an error."""
     mini_tokens = gfm_parser().parse(line)
-    inline_token = next(t for t in mini_tokens if t.type == "inline")
+    inline_token = next((t for t in mini_tokens if t.type == "inline"), None)
+    if inline_token is None:
+        return XmlElement(tag, attrs, contents=[XmlText("")]), []
     plain_text, runs = _inline_runs(inline_token)
     el = XmlElement(tag, attrs, contents=[XmlText(plain_text)])
     return el, runs
