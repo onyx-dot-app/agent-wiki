@@ -67,6 +67,13 @@ class ProposalDraft(BaseModel):
     merge/split carry ``proposed_bodies``). ``dedupe_key`` lets the runner's
     do-not-re-propose guard match this draft against rejected history without
     re-deriving the op's identity.
+
+    ``auto_approvable`` is the detector's own consent to skip the human queue:
+    the runner auto-applies a draft only when the scope allows AI management
+    **and** the detector marked it auto-approvable. Deterministic detectors
+    (empty folder, byte-identical duplicates) default True; a detector whose
+    judgment is probabilistic (LLM-confirmed merges, misplacement) should emit
+    False until its precision has earned auto-apply.
     """
 
     op: ProposalOp
@@ -74,6 +81,7 @@ class ProposalDraft(BaseModel):
     target_paths: list[str] = Field(default_factory=list)
     summary: str
     proposed_bodies: dict[str, str] | None = None
+    auto_approvable: bool = True
 
     @property
     def dedupe_key(self) -> str:

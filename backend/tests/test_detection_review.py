@@ -102,3 +102,38 @@ def test_approve_recovers_stuck_approved(repo):
     with automanage_nearline_queue.immediate_mode():
         assert review.approve(pid, user_id=uid) is True  # re-dispatches
     assert _get(pid)["status"] == "applied"
+
+
+def _mk_unsupported(path: str) -> int:
+    """A proposal whose op has no executor yet (merge is a valid ledger op)."""
+    return create_proposal(
+        op=ProposalOp.MERGE,
+        source_paths=[path],
+        target_paths=["kept.md"],
+        base_shas={path: "0" * 40},
+        summary=f"Merge “{path}” into “kept.md”",
+        created_via=ProposalCreatedVia.SWEEP,
+    )["id"]
+
+
+def test_approve_refuses_op_without_executor(repo):
+    """Emit safety: an op the executor can't apply must dead-end at approval —
+    approving it would crash the execute task (or silently freeze)."""
+    uid = seed_user(uid="u1", email="u@x.com")
+    wiki_git.commit_file("dup.md", "# Dup\n", "create", author=None)
+    pid = _mk_unsupported("dup.md")
+
+    with automanage_nearline_queue.immediate_mode():
+        assert review.approve(pid, user_id=uid) is False
+
+    assert _get(pid)["status"] == "pending"  # untouched, no execution attempted
+
+
+def test_auto_approve_refuses_op_without_executor(repo):
+    wiki_git.commit_file("dup2.md", "# Dup\n", "create", author=None)
+    pid = _mk_unsupported("dup2.md")
+
+    with automanage_offline_queue.immediate_mode():
+        assert review.auto_approve(pid, acting_user_id=AI_USER_ID) is False
+
+    assert _get(pid)["status"] == "pending"
