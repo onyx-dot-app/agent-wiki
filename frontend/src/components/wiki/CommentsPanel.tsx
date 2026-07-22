@@ -446,6 +446,12 @@ export function ThreadCard({
             actions={messageActions(c)}
           />
         ))}
+        {!expanded && thread.replies.length > 0 && (
+          <span className="px-[10px] pb-2 text-[12px] leading-4 text-(--text-03)">
+            {thread.replies.length}{" "}
+            {thread.replies.length === 1 ? "reply" : "replies"}
+          </span>
+        )}
       </div>
       {expanded && !resolved && (
         <div className="pt-1 pb-3">
