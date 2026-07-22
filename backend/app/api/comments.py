@@ -33,7 +33,8 @@ from app.models.comment import (
     CreateReplyRequest,
     EditCommentRequest,
 )
-from app.wiki import comment_remap, comments as comments_repo, filesystem
+from app.wiki import comment_mentions, comment_remap, filesystem
+from app.wiki import comments as comments_repo
 from app.wiki import comment_notifications
 
 log = logging.getLogger(__name__)
@@ -109,6 +110,12 @@ def _fire_event(doc_path: str, row: dict[str, Any], user: User) -> None:
                             "comment_id": row["id"],
                             "thread_root_id": row["thread_root_id"],
                             "doc_path": doc_path,
+                            # Display form so the feed can show the comment
+                            # itself, capped to keep event rows lean.
+                            "body": comment_mentions.detokenize(
+                                str(row.get("body") or "")
+                            )[:500],
+                            "author_display": user.name or user.email,
                         }
                     ),
                 )

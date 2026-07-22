@@ -51,6 +51,11 @@ interface ActivityPayload {
   source_paths?: string[];
   target_paths?: string[];
   applied_sha?: string;
+  // page.comment
+  comment_id?: string;
+  thread_root_id?: string;
+  body?: string;
+  author_display?: string;
 }
 
 interface RowTexts {
@@ -121,6 +126,20 @@ function eventTexts(event: AppEvent): RowTexts {
       subject: p.destination_name ?? destinationName(p.destination_type),
       body: p.message || p.reason || null,
       destinationTypes: [p.destination_type ?? "event_log"],
+    };
+  }
+  if (event.kind === "page.comment") {
+    const page =
+      (p.doc_path ?? event.target ?? "")
+        .split("/")
+        .pop()
+        ?.replace(/\.md$/, "") || "a page";
+    return {
+      chipScope,
+      prefix: `${p.author_display ?? "Someone"} commented on`,
+      subject: page,
+      body: p.body || null,
+      destinationTypes: [],
     };
   }
   if (event.kind === "automanage.applied") {
