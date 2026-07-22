@@ -952,6 +952,7 @@ export function FileView({ path }: FileViewProps) {
               activeId={activeCommentId}
               onActivate={activateComment}
               onHoverThread={setHoveredCommentId}
+              editorRef={viewingVersion ? undefined : coeditorRef}
               onDraftConsumed={() => setCommentDraft(null)}
               onClose={closePanel}
               fullHeight

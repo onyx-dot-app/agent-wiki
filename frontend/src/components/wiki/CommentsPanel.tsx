@@ -1,7 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Divider, EndOfList, Text } from "@onyx-ai/opal/components";
+import { useCallback, useEffect, useState, type RefObject } from "react";
+import {
+  Divider,
+  EndOfList,
+  SelectButton,
+  Text,
+} from "@onyx-ai/opal/components";
+import { SvgMenu } from "@onyx-ai/opal/icons";
 import { Section } from "@onyx-ai/opal/layouts";
 
 import { useAuth } from "@/lib/auth";
@@ -15,9 +21,12 @@ import {
   resolveThread,
 } from "@/lib/comments";
 import type { CommentDraft } from "@/lib/editor/comments";
+import type { CoeditorHandle } from "@/lib/editor/components";
 import { tokenizeMentions } from "@/lib/commentMentions";
+import { useIsMobile } from "@/lib/viewport";
 import type { CommentThreadView, CommentView } from "@/types";
 
+import { CommentMarginRail } from "./CommentMarginRail";
 import { PanelSearchField } from "./PanelSearch";
 import {
   CommentInput,
@@ -41,6 +50,8 @@ interface Props {
   onActivate: (id: string | null) => void;
   /** Hovered thread, so the page can light its doc highlight (mock 1855). */
   onHoverThread?: (id: string | null) => void;
+  /** The live editor, required by anchored mode to track doc positions. */
+  editorRef?: RefObject<CoeditorHandle | null>;
   onDraftConsumed: () => void;
   onClose: () => void;
   fullHeight?: boolean;
@@ -72,10 +83,15 @@ function threadHaystack(t: CommentThreadView): string {
 }
 
 /**
- * Comments tab (mock 1856:285030, list mode): a bordered panel holding the
- * sticky search bar, thread cards ordered by document position, a Resolved
- * section, and the end-of-list count. Threads expand in place (mock
- * 778:262971) with a reply input under the expanded card.
+ * Comments tab with the mock's two modes. Anchored, the default (mock
+ * 1855:281270): a transparent body where cards track their doc positions
+ * beside the text, only the search row carries chrome. List (mock
+ * 1856:285030): a bordered panel holding the search bar, thread cards
+ * ordered by document position, a Resolved section, and the end-of-list
+ * count. Threads expand in place (mock 778:262971) with a reply input
+ * under the expanded card. Orphaned and resolved threads only appear in
+ * list mode, which anchored users reach through the search-row toggle.
+ * Mobile always lists, the sheet covers the doc the cards would track.
  */
 export function CommentsPanel({
   path,
@@ -86,14 +102,18 @@ export function CommentsPanel({
   activeId,
   onActivate,
   onHoverThread,
+  editorRef,
   onDraftConsumed,
   onClose: _onClose,
   fullHeight: _fullHeight,
 }: Props) {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
+  const [listView, setListView] = useState(false);
+  const listMode = listView || isMobile || !editorRef;
 
   // Returns true on success so callers can clear/close their input only when
   // the action actually went through.
@@ -163,6 +183,92 @@ export function CommentsPanel({
     />
   );
 
+  // Shared by the anchored composer and the list composer, clearing the
+  // draft only when the create actually landed.
+  const submitDraft = async (body: string) => {
+    if (!draft) return;
+    if (!headSha) {
+      setError("page version unknown, reload and retry");
+      return;
+    }
+    const ok = await run(() =>
+      createComment({
+        path,
+        anchorSha: headSha,
+        startOffset: draft.startOffset,
+        endOffset: draft.endOffset,
+        quotedText: draft.quotedText,
+        body,
+      }),
+    );
+    if (ok) onDraftConsumed();
+  };
+
+  const searchRow = (
+    <Section
+      flexDirection="row"
+      justifyContent="start"
+      alignItems="center"
+      height="fit"
+      gap={0.25}
+      className="shrink-0"
+    >
+      <PanelSearchField
+        value={query}
+        onChange={setQuery}
+        placeholder="Search comments…"
+      />
+      {!isMobile && editorRef && (
+        <SelectButton
+          icon={SvgMenu}
+          state={listView ? "selected" : "empty"}
+          tooltip={listView ? "Anchored view" : "List view"}
+          onClick={() => setListView((v) => !v)}
+        />
+      )}
+    </Section>
+  );
+
+  if (!listMode) {
+    // Anchored mode (mock 1855): transparent body, chromed search row, cards
+    // positioned inline with the doc through the shared anchor engine.
+    return (
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        height="auto"
+        gap={0.25}
+        className="min-h-0 flex-1"
+      >
+        <div className="shrink-0 rounded-(--radius-12) border border-(--border-01) p-1">
+          {searchRow}
+        </div>
+        {error && (
+          <div className="px-2 py-1 text-xs text-(--status-text-error-05)">
+            {error}
+          </div>
+        )}
+        <CommentMarginRail
+          inPanel
+          threads={searched}
+          draft={draft}
+          editorRef={editorRef!}
+          activeId={activeId}
+          onActivate={onActivate}
+          onHoverThread={onHoverThread}
+          selfName={user?.name || user?.email || "You"}
+          path={path}
+          selfId={user?.id}
+          isAdmin={!!user?.is_admin}
+          busy={busy}
+          run={run}
+          onSubmitDraft={(body) => void submitDraft(body)}
+          onCancelDraft={onDraftConsumed}
+        />
+      </Section>
+    );
+  }
+
   return (
     <Section
       justifyContent="start"
@@ -172,20 +278,7 @@ export function CommentsPanel({
       padding={0.25}
       className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01)"
     >
-      <Section
-        flexDirection="row"
-        justifyContent="start"
-        alignItems="center"
-        height="fit"
-        gap={0.25}
-        className="shrink-0"
-      >
-        <PanelSearchField
-          value={query}
-          onChange={setQuery}
-          placeholder="Search comments…"
-        />
-      </Section>
+      {searchRow}
       <Section
         justifyContent="start"
         alignItems="stretch"
@@ -204,23 +297,7 @@ export function CommentsPanel({
             selfName={user?.name || user?.email || "You"}
             disabled={busy || !headSha}
             onCancel={onDraftConsumed}
-            onSubmit={async (body) => {
-              if (!headSha) {
-                setError("page version unknown, reload and retry");
-                return;
-              }
-              const ok = await run(() =>
-                createComment({
-                  path,
-                  anchorSha: headSha,
-                  startOffset: draft.startOffset,
-                  endOffset: draft.endOffset,
-                  quotedText: draft.quotedText,
-                  body,
-                }),
-              );
-              if (ok) onDraftConsumed();
-            }}
+            onSubmit={(body) => void submitDraft(body)}
           />
         )}
 
