@@ -199,9 +199,16 @@ export function CommentMessage({
               />
             </span>
           </Popover.Trigger>
-          {/* The mock opens the menu above the card, right-aligned
-              (670:266803 measures it at top -144 / right -4). */}
-          <Popover.Content width="fit" side="top" align="end" sideOffset={4}>
+          {/* The mock opens the menu above the card, right edge hanging 4px
+              past it (670:266803). alignOffset is the horizontal overhang,
+              sideOffset the vertical gap. */}
+          <Popover.Content
+            width="fit"
+            side="top"
+            align="end"
+            sideOffset={4}
+            alignOffset={-4}
+          >
             <Popover.Menu>
               <LineItemButton
                 title={copied ? "Link copied" : "Copy Link"}

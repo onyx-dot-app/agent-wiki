@@ -18,9 +18,10 @@ import { NewCommentComposer } from "./commentCards";
 const CARD_GAP = 4;
 const DEFAULT_CARD_HEIGHT = 64;
 const DRAFT_KEY = "__draft__";
-// Card top such that the 32px title row's center sits on the anchor line's
+// Card top such that the title row's center sits on the anchor line's
 // center (mocks 566:19918 / 669:264296 measure the two centers equal).
-const TITLE_ROW_CENTER = 20;
+// The rendered title row is pt-4 over a 28px cluster, center at 18.
+const TITLE_ROW_CENTER = 18;
 
 /**
  * Margin comments column (mocks 566:19918 / 669:264296 / 778:262971 /
@@ -63,7 +64,11 @@ export function CommentMarginRail({
   onCancelDraft: () => void;
 }) {
   const [tops, setTops] = useState<Record<string, number>>({});
-  const [scrollTop, setScrollTop] = useState(0);
+  // Screen offset of the anchor origin: the editor scroller's top relative
+  // to the rail (which flanks the whole doc column, title included), minus
+  // the scroller's own scroll position.
+  const [originY, setOriginY] = useState(0);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const heights = useRef<Record<string, number>>({});
   const rafId = useRef(0);
 
@@ -106,8 +111,17 @@ export function CommentMarginRail({
       if (next[key]! + h > bottom) next[key] = Math.max(0, bottom - h);
       bottom = next[key]! - CARD_GAP;
     }
+    // Prune entries for threads that no longer lay out, so deletions don't
+    // grow the maps for the component's lifetime.
+    for (const key of Object.keys(heights.current)) {
+      if (!(key in next)) {
+        delete heights.current[key];
+        refCallbacks.current.delete(key);
+      }
+    }
     setTops(next);
-    setScrollTop(editor.scrollTop());
+    const railTop = rootRef.current?.getBoundingClientRect().top ?? 0;
+    setOriginY(editor.scrollerTop() - railTop - editor.scrollTop());
   }, [threads, draft, editorRef]);
 
   // Scroll and geometry changes arrive per frame at most.
@@ -172,13 +186,16 @@ export function CommentMarginRail({
   const anchoredThreads = threads.filter((t) => tops[t.root.id] !== undefined);
 
   return (
-    <div className="relative w-[360px] shrink-0 overflow-clip @max-[920px]:hidden">
+    <div
+      ref={rootRef}
+      className="relative w-[360px] shrink-0 overflow-clip @max-[920px]:hidden"
+    >
       {draft && tops[DRAFT_KEY] !== undefined && (
         <div
           ref={measureRef(DRAFT_KEY)}
           className="absolute inset-x-3 top-0"
           style={{
-            transform: `translateY(${tops[DRAFT_KEY]! - scrollTop}px)`,
+            transform: `translateY(${tops[DRAFT_KEY]! + originY}px)`,
           }}
         >
           <NewCommentComposer
@@ -195,7 +212,7 @@ export function CommentMarginRail({
           ref={measureRef(t.root.id)}
           className="absolute inset-x-3 top-0"
           style={{
-            transform: `translateY(${tops[t.root.id]! - scrollTop}px)`,
+            transform: `translateY(${tops[t.root.id]! + originY}px)`,
           }}
         >
           <ThreadCard
