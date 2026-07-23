@@ -207,6 +207,12 @@ def _execute_agentic(p: dict[str, Any]) -> None:
         outcome = automanage_apply.apply_proposal(p, author=author)
 
     violations = _scope_violations(base_sha, allowed)
+    # Targets are the surviving side of any op by schema semantics — a run
+    # that removed one (however it managed to) is invalid regardless of op.
+    live = set(git.list_paths())
+    lost_targets = [t for t in p["target_paths"] if t not in live]
+    if lost_targets:
+        violations = violations + [f"target removed: {t}" for t in lost_targets]
     if violations or not outcome.ok:
         reverted = git.revert_to(
             base_sha,

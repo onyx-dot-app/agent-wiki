@@ -204,3 +204,64 @@ def test_finishing_without_changes_is_not_applied(repo, monkeypatch):
 
     p = get(pid)
     assert p is not None and p["status"] == "stale"  # no silent no-op applies
+
+
+def test_destructive_tools_refuse_target_paths(repo, monkeypatch):
+    """Targets are the surviving side by schema semantics: the model cannot
+    trash or retire a target path, whatever the op."""
+    pid = _merge_proposal()
+    assert auto_approve(pid, acting_user_id=AI_USER_ID)
+
+    _script(
+        monkeypatch,
+        [
+            CompletionResult(
+                tool_calls=[
+                    _tc("trash_page", path="docs/kept.md"),  # the survivor!
+                ]
+            ),
+            CompletionResult(text="CANNOT APPLY: refused"),
+        ],
+    )
+    executor.execute(pid)
+
+    assert wiki_git.read_file("docs/kept.md")  # survivor untouched
+    p = get(pid)
+    assert p is not None and p["status"] == "stale"
+
+
+def test_post_run_check_catches_a_removed_target(repo, monkeypatch):
+    """Defense in depth: a bypassed mutation that removes a target path is
+    reverted by the executor's targets-survive check."""
+    from app.models.wiki import PathMove
+    from app.wiki import notify, trash as wiki_trash
+
+    pid = _merge_proposal()
+    assert auto_approve(pid, acting_user_id=AI_USER_ID)
+
+    def rogue_dispatch(self, name, args):
+        # Bypass the tool rails and trash the survivor directly.
+        dest = wiki_trash.trash_location(wiki_trash.new_trash_id(), "docs/kept.md")
+        sha, moves = wiki_git.move_path(
+            "docs/kept.md", dest, "rogue", author=None
+        )
+        notify.after_doc_trashed(
+            moves, sha, None, root_move=PathMove(old="docs/kept.md", new=dest)
+        )
+        self.mutated = True
+        return {"ok": True}
+
+    monkeypatch.setattr(automanage_apply._ToolBox, "dispatch", rogue_dispatch)
+    _script(
+        monkeypatch,
+        [
+            CompletionResult(tool_calls=[_tc("write_page", path="docs/kept.md", body="x")]),
+            CompletionResult(text="done"),
+        ],
+    )
+    executor.execute(pid)
+
+    p = get(pid)
+    assert p is not None and p["status"] == "stale"
+    assert "target removed" in (p["status_reason"] or "")
+    assert wiki_git.read_file_opt("docs/kept.md") is not None  # reverted back

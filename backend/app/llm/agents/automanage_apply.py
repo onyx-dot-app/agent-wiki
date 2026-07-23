@@ -125,15 +125,27 @@ def _render_proposal(p: dict[str, Any]) -> str:
 
 
 class _ToolBox:
-    """Bounded tool handlers, closed over the proposal's allowed paths."""
+    """Bounded tool handlers, closed over the proposal's paths.
 
-    def __init__(self, allowed: frozenset[str], author: str | None):
-        self._allowed = allowed
+    Two path rules, both from the proposal's own data: every touched path
+    must be one of the proposal's paths (scope), and **target paths must
+    survive** — targets are, by schema semantics, the surviving/receiving
+    side of any op (merge target, move destination), so the destructive
+    tools refuse them. The executor re-checks both after the run."""
+
+    def __init__(
+        self,
+        sources: frozenset[str],
+        targets: frozenset[str],
+        author: str | None,
+    ):
+        self._allowed = sources | targets
+        self._targets = targets
         self._author = author
         self.mutated = False
 
-    def _check(self, *paths: str) -> str | None:
-        for raw in paths:
+    def _check(self, *paths: str, consumes: tuple[str, ...] = ()) -> str | None:
+        for raw in (*paths, *consumes):
             try:
                 path = safe_rel_path(raw)
             except ValueError as e:
@@ -142,6 +154,13 @@ class _ToolBox:
                 return (
                     f"path {path!r} is outside this proposal's scope; allowed: "
                     f"{sorted(self._allowed)}"
+                )
+        for raw in consumes:
+            if safe_rel_path(raw) in self._targets:
+                return (
+                    f"path {raw!r} is one of the proposal's target paths — "
+                    "targets must survive the operation and cannot be "
+                    "trashed, retired, or moved away"
                 )
         return None
 
@@ -165,7 +184,7 @@ class _ToolBox:
         return {"path": path, "sha": sha}
 
     def move_page(self, args: dict[str, Any]) -> Any:
-        if err := self._check(args["source"], args["dest"]):
+        if err := self._check(args["dest"], consumes=(args["source"],)):
             return {"error": err}
         src, dst = args["source"], args["dest"]
         sha, moves = git.move_path(
@@ -178,7 +197,7 @@ class _ToolBox:
         return {"source": src, "dest": dst, "sha": sha}
 
     def trash_page(self, args: dict[str, Any]) -> Any:
-        if err := self._check(args["path"]):
+        if err := self._check(consumes=(args["path"],)):
             return {"error": err}
         path = args["path"]
         dest = trash.trash_location(trash.new_trash_id(), path)
@@ -192,7 +211,7 @@ class _ToolBox:
         return {"trashed": path, "sha": sha}
 
     def retire_page(self, args: dict[str, Any]) -> Any:
-        if err := self._check(args["source"], args["target"]):
+        if err := self._check(args["target"], consumes=(args["source"],)):
             return {"error": err}
         sha = retire.retire_page(
             args["source"], args["target"], author=self._author
@@ -214,10 +233,9 @@ class _ToolBox:
 def apply_proposal(p: dict[str, Any], *, author: str | None) -> ApplyOutcome:
     """Drive the LLM to apply an approved proposal. Pure orchestration — the
     executor owns the pre-gates and the post-run scope check/revert."""
-    allowed = frozenset(
-        safe_rel_path(x) for x in (p["source_paths"] + p["target_paths"])
-    )
-    box = _ToolBox(allowed, author)
+    sources = frozenset(safe_rel_path(x) for x in p["source_paths"])
+    targets = frozenset(safe_rel_path(x) for x in p["target_paths"])
+    box = _ToolBox(sources - targets, targets, author)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": _render_proposal(p)},
