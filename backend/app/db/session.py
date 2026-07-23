@@ -138,9 +138,10 @@ def init_db() -> None:
     bootstrap migration creates every ORM-declared table; subsequent
     migrations layer real ALTERs on top.
 
-    Per-test schema isolation works because ``CONFIG.database_url``
-    carries the schema in its ``options=-csearch_path=…`` query string
-    — Alembic picks it up from the URL like any other connection.
+    Per-test isolation works because ``CONFIG.database_url`` names the
+    test's own database — Alembic picks it up from the URL like any
+    other connection. (Tests rarely reach this: their databases are
+    cloned from an already-migrated template, see ``tests/conftest.py``.)
 
     A Postgres advisory lock (``_MIGRATION_ADVISORY_LOCK``) serialises concurrent
     callers — uvicorn ``--workers N`` fires the lifespan in every worker

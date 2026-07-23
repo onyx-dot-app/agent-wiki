@@ -16,10 +16,11 @@ prefer it over wiring fixtures by hand.
 
 What's already provided by the parent ``tests/conftest.py``:
 
-  * ``tmp_config`` — per-test Postgres schema; ``CONFIG`` patched.
-  * ``tmp_db``     — same + ``init_db()`` (runs ``alembic upgrade head`` —
-                     ``Base.metadata.create_all`` via the bootstrap migration)
-                     against that schema.
+  * ``tmp_config`` — per-test Postgres database cloned from a migrated
+                     template; ``CONFIG`` patched.
+  * ``tmp_db``     — alias of ``tmp_config`` (the clone is already at
+                     head) — tests take it to declare they need a
+                     migrated database.
   * ``tmp_repo``   — same + a freshly initialized wiki git repo.
 
 What this file adds:
@@ -32,7 +33,7 @@ What this file adds:
     captured calls.
   * ``app`` / ``client`` — a real FastAPI app via ``app.main.create_app``
     (the test factory builds the app without the lifespan firing — the
-    schema is already migrated by ``tmp_db``).
+    database is already migrated by ``tmp_db``).
   * ``integration``     — composite fixture that bundles the above plus a
     handful of high-level helpers (signup, login, PUT doc, list events).
 
