@@ -60,7 +60,7 @@ function sourceTypeLabel(type: string): string {
 /** Stable card identity, mirroring the backend's dedupe key (document id,
  * falling back to url or title). */
 function sourceKey(s: WriteProvenance): string {
-  return s.source_document_id ?? s.source_url ?? s.source_title ?? "";
+  return s.source_document_id || s.source_url || s.source_title || "";
 }
 
 function SourceCard({ source }: { source: SourceRef }) {
@@ -114,8 +114,8 @@ function SourceCard({ source }: { source: SourceRef }) {
 
 /**
  * Sources tab (mock 1837:103626): the ingested documents credited to this
- * page, each previewing its own content via the snippet captured at ingest.
- * Sources ride the page load, nothing else is fetched.
+ * page, previewing their content via the snippet captured at ingest when
+ * one exists. Sources ride the page load, nothing else is fetched.
  */
 export function SourcesPanel({ sources }: Props) {
   const [query, setQuery] = useState("");

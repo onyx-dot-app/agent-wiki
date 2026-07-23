@@ -84,7 +84,8 @@ class SourceRangeStatus(str, Enum):
 
 class WriteProvenance(BaseModel):
     """Source facts for an ingestion write, threaded through the commit gateway
-    into the provenance ledger. Set only for ingestion writes.
+    into the provenance ledger, and the base every provenance read shape
+    extends. Populated only for ingestion writes.
 
     Field names mirror the ``provenance_ledger`` source columns so the ledger
     insert can spread them.
@@ -115,7 +116,7 @@ class Attribution(WriteProvenance):
 
 class SourceRef(WriteProvenance):
     """One ingested document that has contributed to a page (the Sources tab
-    list). Compact by design: identity and links, no content ranges.
+    list). Identity, links, and the preview snippet, but no content ranges.
     """
 
     last_updated: str
