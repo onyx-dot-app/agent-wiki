@@ -325,6 +325,28 @@ code — domain exceptions (`HTTPException`, `PermissionDenied`,
 installed in `app/main.py:_install_error_handlers`. The frontend's
 `ApiError` parses this shape.
 
+### WebSocket routes — asyncio is transport-only
+
+A `@router.websocket(...)` handler's own `async def` body is for connection
+lifecycle (accept, receive/send loops, task orchestration) — nothing more.
+Every call into domain logic (`require_can`, an ORM repo function, a git
+read, `apply_op`, ...) is blocking and must go through `asyncio.to_thread`;
+it does not get FastAPI's automatic threadpool dispatch the way a plain
+`def` HTTP route does, so an un-offloaded blocking call stalls the event
+loop for every other WebSocket connection sharing this process, not just
+the one making the call. See `app/api/coedit.py` (`ws`, `_recv_loop`,
+`_send_loop`, and the `_connect_sync`/`_disconnect_sync`/`_handle_*` helper
+functions they wrap in `asyncio.to_thread`) as the canonical example: the
+helpers themselves are plain sync functions, unaware they're being called
+from an async context at all.
+
+Also watch the send side specifically: if more than one task can write to
+the same `WebSocket` (e.g. a receive loop replying directly *and* a
+separate broadcast-drain loop), route every outbound frame through one
+queue drained by a single writer task instead — two tasks calling
+`send_json` concurrently on one socket races the frame order and risks
+corrupting the write.
+
 ## Frontend rules
 
 See `frontend/AGENTS.md` for the complete frontend guide: directory layout,

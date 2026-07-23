@@ -1168,7 +1168,7 @@ export function FileView({ path }: FileViewProps) {
           </div>
         )}
 
-        {loading && <LoadingSpinner />}
+        {loading && <LoadingSpinner center />}
 
         {!loading && !error && (
           <>
@@ -1219,8 +1219,21 @@ export function FileView({ path }: FileViewProps) {
                     // to discard without losing user work: truly blank, or
                     // still verbatim equal to the template the user just
                     // applied (so they can keep swapping templates).
-                    const isBlank = coedit.buffer.trim() === "";
+                    //
+                    // Gated on `coedit.session` too, not just the buffer
+                    // text: `coedit.buffer` starts as `""` before the coedit
+                    // session has actually resolved (a separate async
+                    // handshake from the file fetch that drives `loading`
+                    // above), so without this a real, non-blank page could
+                    // flash the template picker for the gap between the file
+                    // fetch resolving and the session catching up — reusing
+                    // the exact "has the session resolved" signal the editor
+                    // fallback below already keys off (`coedit.session` vs.
+                    // `coedit.joinError` vs. "Connecting…").
+                    const isBlank =
+                      coedit.session !== null && coedit.buffer.trim() === "";
                     const matchesApplied =
+                      coedit.session !== null &&
                       appliedTemplateBody !== null &&
                       coedit.buffer === appliedTemplateBody;
                     const showGallery =

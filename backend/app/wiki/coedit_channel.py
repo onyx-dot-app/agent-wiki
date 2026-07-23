@@ -1,16 +1,18 @@
-"""Live channel for co-editing — the SSE-down + POST-up transport.
+"""Live channel for co-editing — transport-agnostic pub/sub, currently fed by
+one ``WebSocket`` per session (``app/api/coedit.py``).
 
-Browser clients open one SSE connection per co-edit session (cookie-authed) and
+Browser clients open one connection per co-edit session (cookie-authed) and
 the server pushes session frames (e.g. presence) to every connection in the
 session. Cross-process delivery rides the shared realtime bus
 (``app/realtime/bus.py``, Postgres LISTEN/NOTIFY) under a ``coedit`` payload
 kind, so participants connected to different app servers still see each other.
 
-One thread per connection with a thread-safe ``queue.Queue``, mirroring the MCP
-pubsub's sync ``_queues`` / ``drain_blocking`` path. Connection state is
-in-process and ephemeral — nothing here is persisted; durable
-session/participant state lives in ``app/wiki/coedit.py``. Frames are plain
-JSON-serializable dicts.
+One thread-safe ``queue.Queue`` per connection, mirroring the MCP pubsub's
+sync ``_queues`` / ``drain_blocking`` path — this module has no opinion on
+how a connection drains its queue (``app/api/coedit.py``'s WS send loop
+calls ``drain`` in a thread). Frames are plain JSON-serializable dicts.
+Connection state is in-process and ephemeral — nothing here is persisted;
+durable session/participant state lives in ``app/wiki/coedit.py``.
 
 See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 """
@@ -34,19 +36,31 @@ log = logging.getLogger(__name__)
 Frame = dict[str, Any]
 
 
+class _CloseSignal:
+    """Sentinel type for the one non-``Frame`` value a connection's queue can
+    carry. Distinct from ``None`` (which ``drain`` already uses to mean "the
+    poll timed out, nothing arrived") and from any real ``Frame`` (a plain
+    ``dict``, so nothing dict-shaped could ever collide with an ``is``
+    check against the singleton instance below)."""
+
+
+CLOSE_SIGNAL = _CloseSignal()
+QueueItem = Frame | _CloseSignal
+
+
 class Connection(BaseModel):
-    """Handle for one live SSE connection: its opaque id (for ``disconnect``)
-    and the queue the stream generator drains."""
+    """Handle for one live connection: its opaque id (for ``disconnect``) and
+    the queue its send loop drains."""
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     id: str
-    queue: queue.Queue[Frame]
+    queue: queue.Queue[QueueItem]
 
-# Per-connection registry, keyed by an opaque connection id (one per open SSE
-# stream). Parallel dicts rather than a class, mirroring ``pubsub``'s sync
+# Per-connection registry, keyed by an opaque connection id (one per open
+# WebSocket). Parallel dicts rather than a class, mirroring ``pubsub``'s sync
 # ``_queues`` style for the same runtime state.
-_queues: dict[str, queue.Queue[Frame]] = {}
+_queues: dict[str, queue.Queue[QueueItem]] = {}
 _session_of: dict[str, int] = {}  # conn_id -> coedit_session_id
 _user_of: dict[str, str] = {}  # conn_id -> user_id
 _conns_by_session: dict[int, set[str]] = {}  # coedit_session_id -> {conn_id}
@@ -56,7 +70,7 @@ _lock = threading.Lock()
 def connect(coedit_session_id: int, user_id: str) -> Connection:
     """Register a live connection for a session. Returns its handle."""
     conn_id = uuid.uuid4().hex
-    q: queue.Queue[Frame] = queue.Queue()
+    q: queue.Queue[QueueItem] = queue.Queue()
     with _lock:
         _queues[conn_id] = q
         _session_of[conn_id] = coedit_session_id
@@ -82,8 +96,8 @@ def disconnect(conn_id: str) -> None:
 def user_still_connected(coedit_session_id: int, user_id: str) -> bool:
     """True if ``user_id`` still has any open connection to the session.
 
-    Lets the SSE handler avoid firing ``leave`` when one of a user's several
-    tabs closes while another stays open.
+    Lets the caller avoid firing ``leave`` when one of a user's several tabs
+    closes while another stays open.
     """
     with _lock:
         return any(
@@ -92,13 +106,36 @@ def user_still_connected(coedit_session_id: int, user_id: str) -> bool:
         )
 
 
-def drain(q: queue.Queue[Frame], timeout: float) -> Frame | None:
+def drain(q: queue.Queue[QueueItem], timeout: float) -> QueueItem | None:
     """Block up to ``timeout`` seconds for the next frame; ``None`` on timeout so
-    the SSE writer can emit a heartbeat."""
+    the caller can emit a heartbeat. Can also return ``CLOSE_SIGNAL`` — see
+    ``wake``."""
     try:
         return q.get(timeout=timeout)
     except queue.Empty:
         return None
+
+
+def wake(conn_id: str) -> None:
+    """Unblock a connection's own ``drain`` call immediately, instead of
+    leaving it to run out its poll timeout.
+
+    ``queue.Queue.get(timeout=...)`` has no cancellation hook — a task
+    awaiting it via ``asyncio.to_thread`` can be cancelled at the asyncio
+    level, but the underlying OS thread has no way to know that and keeps
+    blocking regardless, for up to the full timeout, occupying a thread-pool
+    slot the whole time (confirmed directly: cancelling the wrapping Future
+    doesn't stop the executor's function, it only makes the *awaiter* stop
+    watching it — see ``loop.run_in_executor``'s documented behavior). This
+    reaches the blocked call the only way that's actually possible: pushing
+    something into the same queue it's already waiting on, so ``get()``
+    returns immediately the normal way, on its own thread, same as a real
+    frame arriving. The caller (``app/api/coedit.py``'s teardown path) must
+    call this whenever it's about to cancel a connection's send loop."""
+    with _lock:
+        q = _queues.get(conn_id)
+    if q is not None:
+        q.put_nowait(CLOSE_SIGNAL)
 
 
 def _bus_payload(coedit_session_id: int, frame: Frame) -> dict[str, Any]:

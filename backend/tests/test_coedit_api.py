@@ -1,11 +1,19 @@
-"""Co-edit HTTP surface (app/api/coedit.py) — join / leave and their
-permission gating. The SSE stream's live delivery is covered at the channel
-level in test_coedit_channel.py; here we exercise the request layer.
+"""Co-edit WebSocket surface (app/api/coedit.py) — the connect handshake,
+per-message write-permission re-checks, and op/cursor/checkpoint/get_ops
+message handling. Live delivery fan-out is covered at the channel level in
+test_coedit_channel.py; here we exercise the WS route itself.
+
+Pure transport swap from the old SSE-down + HTTP-POST-up protocol (see the
+module docstring in app/api/coedit.py) — same domain logic, same message
+shapes, one WebSocket instead of eight endpoints.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import pytest
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketDenialResponse
 
 from app.auth import users as users_repo
 from app.main import create_app
@@ -26,40 +34,92 @@ def _seed_page(body: str = "# Setup\n\nhello\n") -> str:
     return git.commit_file(_PATH, body, message="seed", author="t <t@x.com>")
 
 
-def test_join_requires_auth(client):
-    assert client.post("/api/coedit/join", json={"path": _PATH}).status_code == 401
+@contextmanager
+def _ws(client, path: str = _PATH):
+    """Open the coedit WS and yield `(ws, joined_frame)` once the handshake
+    completes. Closing the `with` block closes the connection — the WS
+    equivalent of the old `POST /leave` (see app/api/coedit.py: the server's
+    disconnect handler is the leave signal, not a client message)."""
+    with client.websocket_connect(f"/api/coedit/ws?path={path}") as ws:
+        joined = ws.receive_json()
+        assert joined["type"] == "joined"
+        yield ws, joined
 
 
-def test_join_creates_session_seeded_from_head(client):
+def _receive_typed(ws, expected_type: str) -> dict:
+    """Skip past any broadcast frames (the sender's own op/cursor echoes,
+    presence, etc.) to find the correlated reply — a connection sees its own
+    broadcasts too, and there's no ordering guarantee worth hard-coding a
+    test against beyond "the reply eventually arrives" (the server enqueues
+    a reply before triggering its own broadcast, but a test asserting on
+    exact interleaving would be pinned to that implementation detail, not
+    the actual contract)."""
+    for _ in range(10):
+        frame = ws.receive_json()
+        if frame["type"] == expected_type:
+            return frame
+    raise AssertionError(f"never received a {expected_type!r} frame")
+
+
+def _op(ws, base_version: int, changes: list[dict], **extra) -> dict:
+    ws.send_json({"type": "op", "request_id": "r", "base_version": base_version, "changes": changes, **extra})
+    return _receive_typed(ws, "op_result")
+
+
+def _apply_op(ws, base_version: int, changes: list[dict]) -> int:
+    result = _op(ws, base_version, changes)
+    assert result == {"type": "op_result", "request_id": "r", "ok": True, "version": result["version"], "error": None}
+    return result["version"]
+
+
+def _cursor(ws, **fields) -> None:
+    ws.send_json({"type": "cursor", **fields})
+
+
+def _checkpoint(ws) -> dict:
+    ws.send_json({"type": "checkpoint", "request_id": "c"})
+    return _receive_typed(ws, "checkpoint_result")
+
+
+def _get_ops(ws, since_version: int) -> dict:
+    ws.send_json({"type": "get_ops", "request_id": "g", "since_version": since_version})
+    return _receive_typed(ws, "ops_result")
+
+
+def test_connect_requires_auth(client):
+    with pytest.raises(WebSocketDenialResponse) as exc_info:
+        with client.websocket_connect(f"/api/coedit/ws?path={_PATH}"):
+            pass
+    assert exc_info.value.status_code == 401
+
+
+def test_connect_creates_session_seeded_from_head(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     sha = _seed_page()
 
-    resp = client.post("/api/coedit/join", json={"path": _PATH})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["version"] == 0
-    assert body["buffer"] == "# Setup\n\nhello\n"
-    assert body["base_sha"] == sha
-    assert [p["user_id"] for p in body["participants"]] == [uid]
+    with _ws(client) as (_ws_conn, joined):
+        assert joined["version"] == 0
+        assert joined["buffer"] == "# Setup\n\nhello\n"
+        assert joined["base_sha"] == sha
+        assert [p["user_id"] for p in joined["participants"]] == [uid]
 
 
-def test_join_is_idempotent_and_shared(client):
+def test_connect_is_idempotent_and_shared(client):
     a = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     b = users_repo.create(email="bo@x.com", password="hunter2-x", name="Bo")
     _seed_page()
 
     login_fastapi(client, a)
-    first = client.post("/api/coedit/join", json={"path": _PATH}).json()
-    login_fastapi(client, b)
-    second = client.post("/api/coedit/join", json={"path": _PATH}).json()
+    with _ws(client) as (_ws_a, first):
+        login_fastapi(client, b)
+        with _ws(client) as (_ws_b, second):
+            # Same shared session; both users are participants.
+            assert first["session_id"] == second["session_id"]
+            assert {p["user_id"] for p in second["participants"]} == {a, b}
 
-    # Same shared session; both users are participants.
-    assert first["session_id"] == second["session_id"]
-    assert {p["user_id"] for p in second["participants"]} == {a, b}
 
-
-def test_join_without_read_is_forbidden(client):
+def test_connect_without_read_is_forbidden(client):
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
     _seed_page()
@@ -68,30 +128,17 @@ def test_join_without_read_is_forbidden(client):
     acl.set_owner(_PATH, owner)
 
     login_fastapi(client, other)
-    assert client.post("/api/coedit/join", json={"path": _PATH}).status_code == 403
-
-
-def test_stream_requires_read(client):
-    # Opening the stream joins the roster (page-open presence), gated on read
-    # — symmetric with /join; writes are gated at /op. require_can raises
-    # before the response starts streaming, so this returns 403 without
-    # hanging.
-    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
-    other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
-    _seed_page()
-    acl.set_owner(_PATH, owner)  # owner-only page
-
-    login_fastapi(client, owner)
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-
-    login_fastapi(client, other)
-    assert client.get(f"/api/coedit/stream?session_id={sid}").status_code == 403
+    with pytest.raises(WebSocketDenialResponse) as exc_info:
+        with client.websocket_connect(f"/api/coedit/ws?path={_PATH}"):
+            pass
+    assert exc_info.value.status_code == 403
 
 
 def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
-    # Joining is page-open presence (read-gated); the write boundary is /op
-    # and /cursor. A read-only user lands in the roster; they never broadcast
-    # a caret, so presence renders them "viewing" client-side.
+    # Connecting is page-open presence (read-gated); the write boundary is
+    # per-message (op/cursor/checkpoint). A read-only user lands in the
+    # roster; they never broadcast a caret, so presence renders them
+    # "viewing" client-side.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     reader = users_repo.create(email="reader@x.com", password="hunter2-x", name="Reader")
     _seed_page()
@@ -106,26 +153,14 @@ def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
     )  # ...plus an explicit read grant for the viewer
 
     login_fastapi(client, reader)
-    resp = client.post("/api/coedit/join", json={"path": _PATH})
-    assert resp.status_code == 200
-    sid = resp.json()["session_id"]
-    me = [p for p in resp.json()["participants"] if p["user_id"] == reader]
-    assert me and me[0]["last_edited_at"] is None
+    with _ws(client) as (ws, joined):
+        me = [p for p in joined["participants"] if p["user_id"] == reader]
+        assert me and me[0]["last_edited_at"] is None
 
-    op = client.post(
-        "/api/coedit/op",
-        json={
-            "session_id": sid,
-            "base_version": 0,
-            "changes": [{"from": 0, "to": 0, "insert": "x"}],
-        },
-    )
-    assert op.status_code == 403
-    cursor = client.post(
-        "/api/coedit/cursor",
-        json={"session_id": sid, "anchor": 0, "head": 0, "typing": False},
-    )
-    assert cursor.status_code == 403
+        op_result = _op(ws, 0, [{"from": 0, "to": 0, "insert": "x"}])
+        assert op_result == {"type": "op_result", "request_id": "r", "ok": False, "version": None, "error": "forbidden"}
+
+        _cursor(ws, anchor=0, head=0, typing=False, seq=None)  # fire-and-forget, no reply to assert
 
     # The read tells the frontend not to offer editing at all.
     doc = client.get(f"/api/wiki/file?path={_PATH}")
@@ -141,195 +176,289 @@ def test_op_stamps_last_edited_at(client):
     login_fastapi(client, uid)
     _seed_page()
 
-    joined = client.post("/api/coedit/join", json={"path": _PATH}).json()
-    sid = joined["session_id"]
-    assert joined["participants"][0]["last_edited_at"] is None
-
-    _apply_op(client, sid, 0, [{"from": 0, "to": 0, "insert": "x"}])
-    after = client.get(f"/api/coedit/session?session_id={sid}").json()
-    me = [p for p in after["participants"] if p["user_id"] == uid]
-    assert me and me[0]["last_edited_at"] is not None
+    with _ws(client) as (ws, joined):
+        assert joined["participants"][0]["last_edited_at"] is None
+        _apply_op(ws, 0, [{"from": 0, "to": 0, "insert": "x"}])
+        after = coedit.list_participants(joined["session_id"])
+        me = [p for p in after if p.user_id == uid]
+        assert me and me[0].last_edited_at is not None
 
 
-def test_leave_removes_participant(client):
+def test_disconnect_removes_participant(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page()
 
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    assert len(coedit.list_participants(sid)) == 1
+    with _ws(client) as (_ws_conn, joined):
+        sid = joined["session_id"]
+        assert len(coedit.list_participants(sid)) == 1
 
-    resp = client.post("/api/coedit/leave", json={"session_id": sid})
-    assert resp.status_code == 200
     assert coedit.list_participants(sid) == []
 
 
-def test_leave_last_participant_checkpoints(client):
+def test_disconnect_of_last_participant_checkpoints(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page("hello world")
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 5, "insert": "hi"}]},
-    )
 
-    # The last leave enqueues a checkpoint; immediate_mode runs it inline.
     with coedit_queue.immediate_mode():
-        assert client.post("/api/coedit/leave", json={"session_id": sid}).status_code == 200
+        with _ws(client) as (ws, joined):
+            sid = joined["session_id"]
+            _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
+        # The disconnect handler enqueues a checkpoint; immediate_mode runs
+        # it inline before websocket_connect's __exit__ returns.
 
     assert git.read_file(_PATH) == "hi world"
     assert coedit.get_active_session(_PATH) is None
+    assert sid is not None
 
 
-def test_checkpoint_endpoint_commits_buffer(client):
+def test_checkpoint_message_commits_buffer(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page("hello world")
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 5, "insert": "hi"}]},
-    )
 
     with coedit_queue.immediate_mode():
-        resp = client.post("/api/coedit/checkpoint", json={"session_id": sid})
-    assert resp.status_code == 200
-    assert resp.json() == {"queued": True}
+        with _ws(client) as (ws, joined):
+            sid = joined["session_id"]
+            _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
+            result = _checkpoint(ws)
+            assert result == {"type": "checkpoint_result", "request_id": "c", "ok": True}
+            # An explicit checkpoint doesn't close a session with an active
+            # participant — must assert this before the connection closes;
+            # disconnecting drops the last participant too, which (with an
+            # already-clean buffer) triggers its own close.
+            assert coedit.get_active_session(_PATH) is not None
+
     assert git.read_file(_PATH) == "hi world"
-    # An explicit checkpoint doesn't close a session with an active participant.
-    assert coedit.get_active_session(_PATH) is not None
+    assert sid is not None
 
 
 def test_checkpoint_requires_write(client):
+    # `other` needs *read* to connect at all (the WS handshake is read-gated
+    # — see app/api/coedit.py) — granting only read, not write, is what
+    # actually exercises the write-specific rejection; owner-only with no
+    # grant for `other` would reject the connection itself, never reaching
+    # the per-message check this test is about.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
     _seed_page()
-    acl.set_owner(_PATH, owner)  # owner-only
+    acl.set_owner(_PATH, owner)
+    acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=other,
+        permission="read",
+        granted_by_user_id=owner,
+    )
     login_fastapi(client, owner)
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    with _ws(client) as (_owner_ws, _joined):
+        login_fastapi(client, other)
+        with _ws(client) as (ws, _joined2):
+            result = _checkpoint(ws)
+            assert result == {"type": "checkpoint_result", "request_id": "c", "ok": False}
 
-    login_fastapi(client, other)
-    assert client.post("/api/coedit/checkpoint", json={"session_id": sid}).status_code == 403
 
-
-def _login_and_join(client, email="ada@x.com") -> int:
+def _login_and_join(client, email="ada@x.com"):
     uid = users_repo.create(email=email, password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page("hello world")
-    return client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    return client.websocket_connect(f"/api/coedit/ws?path={_PATH}")
 
 
 def test_op_applies_and_returns_version(client):
-    sid = _login_and_join(client)  # buffer seeded as "hello world"
-    resp = client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 5, "insert": "hi"}]},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["version"] == 1
-    # GET /session reflects the applied edit.
-    state = client.get(f"/api/coedit/session?session_id={sid}").json()
-    assert state["version"] == 1
-    assert state["buffer"] == "hi world"
+    with _login_and_join(client) as ws:
+        joined = ws.receive_json()  # buffer seeded as "hello world"
+        version = _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
+        assert version == 1
+        # get_ops reflects the applied edit.
+        ops = _get_ops(ws, 0)
+        assert ops["current_head_version"] == 1
+        assert ops["ops"][0]["changes"] == [{"from": 0, "to": 5, "insert": "hi"}]
+        assert joined["session_id"]  # sanity: joined before the op
 
 
-def test_op_stale_base_version_is_409(client):
-    sid = _login_and_join(client)
-    client.post("/api/coedit/op", json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 0, "insert": "x"}]})
-    resp = client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 0, "insert": "y"}]},
-    )
-    assert resp.status_code == 409
+def test_op_stale_base_version_is_stale_version_error(client):
+    with _login_and_join(client) as ws:
+        ws.receive_json()
+        _apply_op(ws, 0, [{"from": 0, "to": 0, "insert": "x"}])
+        result = _op(ws, 0, [{"from": 0, "to": 0, "insert": "y"}])
+        assert result == {"type": "op_result", "request_id": "r", "ok": False, "version": None, "error": "stale_version"}
 
 
-def test_op_out_of_bounds_is_422(client):
-    sid = _login_and_join(client)
-    resp = client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 9999, "insert": "x"}]},
-    )
-    assert resp.status_code == 422
+def test_op_out_of_bounds_is_invalid_op_error(client):
+    with _login_and_join(client) as ws:
+        ws.receive_json()
+        result = _op(ws, 0, [{"from": 0, "to": 9999, "insert": "x"}])
+        assert result == {"type": "op_result", "request_id": "r", "ok": False, "version": None, "error": "invalid_op"}
 
 
-def test_op_malformed_change_is_rejected(client):
-    # Missing 'to' fails Change request-body validation → the app's handler
-    # returns 400 (semantic out-of-bounds is the 422 case above).
-    sid = _login_and_join(client)
-    resp = client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "insert": "x"}]},
-    )
-    assert resp.status_code == 400
+def test_op_malformed_change_logs_and_drops_silently(client):
+    # Missing 'to' fails pydantic validation inside the recv loop — logged
+    # and dropped (see app/api/coedit.py's ValidationError handling), not a
+    # per-message error reply, since a malformed frame has no valid
+    # request_id to correlate a reply against. A well-formed op sent right
+    # after still gets a normal reply, proving the connection survives it.
+    with _login_and_join(client) as ws:
+        ws.receive_json()
+        ws.send_json({"type": "op", "request_id": "bad", "base_version": 0, "changes": [{"from": 0, "insert": "x"}]})
+        version = _apply_op(ws, 0, [{"from": 0, "to": 0, "insert": "ok"}])
+        assert version == 1
 
 
-def test_cursor_broadcasts_and_returns_ok(client):
-    sid = _login_and_join(client)
-    resp = client.post(
-        "/api/coedit/cursor",
-        json={"session_id": sid, "anchor": 0, "head": 5, "typing": True},
-    )
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
+def test_cursor_broadcasts_to_peers(client):
+    a = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    b = users_repo.create(email="bo@x.com", password="hunter2-x", name="Bo")
+    _seed_page("hello world")
+
+    login_fastapi(client, a)
+    with _ws(client) as (ws_a, _joined_a):
+        login_fastapi(client, b)
+        with _ws(client) as (ws_b, _joined_b):
+            ws_a.receive_json()  # the presence frame announcing b's join
+            _cursor(ws_a, anchor=0, head=5, typing=True, seq=1)
+            frame = ws_b.receive_json()
+            assert frame["type"] == "cursor"
+            assert frame["user_id"] == a
+            assert frame["anchor"] == 0 and frame["head"] == 5
 
 
-def test_cursor_clear_returns_ok(client):
+def test_cursor_clear_broadcasts_null_anchor(client):
     # A null-position cursor (editor blur / tab hidden) is a caret clear —
     # broadcast to the session so peers drop the caret; nothing persisted.
-    sid = _login_and_join(client)
-    resp = client.post(
-        "/api/coedit/cursor",
-        json={
-            "session_id": sid,
-            "anchor": None,
-            "head": None,
-            "typing": False,
-            "seq": 2,
-        },
-    )
-    assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
+    a = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    b = users_repo.create(email="bo@x.com", password="hunter2-x", name="Bo")
+    _seed_page("hello world")
+
+    login_fastapi(client, a)
+    with _ws(client) as (ws_a, _joined_a):
+        login_fastapi(client, b)
+        with _ws(client) as (ws_b, _joined_b):
+            ws_a.receive_json()  # presence
+            _cursor(ws_a, anchor=None, head=None, typing=False, seq=2)
+            frame = ws_b.receive_json()
+            assert frame["type"] == "cursor"
+            assert frame["anchor"] is None and frame["head"] is None
 
 
 def test_cursor_requires_write(client):
+    # See test_checkpoint_requires_write's comment: `other` needs read to
+    # connect at all — granting only read (not write) is what exercises the
+    # write-specific rejection this test is actually about.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
     _seed_page()
-    acl.set_owner(_PATH, owner)  # owner-only
-    login_fastapi(client, owner)
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-
-    login_fastapi(client, other)
-    resp = client.post(
-        "/api/coedit/cursor", json={"session_id": sid, "anchor": 0, "head": 0, "typing": False}
+    acl.set_owner(_PATH, owner)
+    acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=other,
+        permission="read",
+        granted_by_user_id=owner,
     )
-    assert resp.status_code == 403
+    login_fastapi(client, owner)
+    with _ws(client) as (owner_ws, _joined):
+        login_fastapi(client, other)
+        with _ws(client) as (ws, _joined2):
+            owner_ws.receive_json()  # presence frame for other's join
+            _cursor(ws, anchor=0, head=0, typing=False, seq=None)
+            # Cursor is fire-and-forget (no result frame to assert on
+            # directly — see app/api/coedit.py), so prove the rejection by
+            # racing it against a legitimate, always-broadcast op from the
+            # owner: broadcasts (including a sender's own) land on every
+            # connection in arrival order, so if `other`'s connection sees
+            # the owner's op *before* any cursor frame, their own cursor was
+            # dropped rather than merely reordered behind it.
+            result = _op(owner_ws, 0, [{"from": 0, "to": 0, "insert": "x"}])
+            assert result["ok"] is True
+            first = ws.receive_json()
+            assert first["type"] == "op"
 
 
 def test_op_requires_write(client):
+    # See test_checkpoint_requires_write's comment: `other` needs read to
+    # connect at all — granting only read (not write) is what exercises the
+    # write-specific rejection this test is actually about.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     other = users_repo.create(email="other@x.com", password="hunter2-x", name="Other")
     _seed_page()
-    acl.set_owner(_PATH, owner)  # owner-only
+    acl.set_owner(_PATH, owner)
+    acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=other,
+        permission="read",
+        granted_by_user_id=owner,
+    )
     login_fastapi(client, owner)
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
+    with _ws(client) as (_owner_ws, _joined):
+        login_fastapi(client, other)
+        with _ws(client) as (ws, _joined2):
+            result = _op(ws, 0, [{"from": 0, "to": 0, "insert": "x"}])
+            assert result == {"type": "op_result", "request_id": "r", "ok": False, "version": None, "error": "forbidden"}
 
-    login_fastapi(client, other)
-    resp = client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": 0, "changes": [{"from": 0, "to": 0, "insert": "x"}]},
+
+def test_write_permission_revoked_mid_session_is_enforced_on_next_message(client):
+    # The one behavior this migration was explicit about preserving: unlike
+    # the other (Yjs) WS work's connect-time-only gate, write permission is
+    # re-checked on every message, not just at connect — a mid-session ACL
+    # change takes effect immediately, not just on the next reconnect.
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    editor = users_repo.create(email="editor@x.com", password="hunter2-x", name="Editor")
+    _seed_page("hello world")
+    acl.set_owner(_PATH, owner)
+    entry_id = acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=editor,
+        permission="write",
+        granted_by_user_id=owner,
     )
-    assert resp.status_code == 403
+
+    login_fastapi(client, editor)
+    with _ws(client) as (ws, _joined):
+        assert _apply_op(ws, 0, [{"from": 0, "to": 0, "insert": "x"}]) == 1
+        acl.revoke(entry_id)
+        result = _op(ws, 1, [{"from": 0, "to": 0, "insert": "y"}])
+        assert result == {"type": "op_result", "request_id": "r", "ok": False, "version": None, "error": "forbidden"}
 
 
-def _apply_op(client, sid: int, base_version: int, changes: list[dict]) -> int:
-    resp = client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": base_version, "changes": changes},
-    )
-    assert resp.status_code == 200, resp.text
-    return resp.json()["version"]
+def test_get_ops_returns_missed_changes_for_rebase(client):
+    with _login_and_join(client) as ws:
+        ws.receive_json()
+        v1 = _apply_op(ws, 0, [{"from": 0, "to": 0, "insert": "X"}])
+        v2 = _apply_op(ws, v1, [{"from": 0, "to": 0, "insert": "Y"}])
+
+        # since_version=0 → both ops, oldest first, wire-shaped like op frames ("from" alias).
+        body = _get_ops(ws, 0)
+        assert body["current_head_version"] == v2
+        assert [o["version"] for o in body["ops"]] == [v1, v2]
+        assert body["ops"][0]["changes"] == [{"from": 0, "to": 0, "insert": "X"}]
+
+        # since_version=v1 → only the op after it.
+        body2 = _get_ops(ws, v1)
+        assert [o["version"] for o in body2["ops"]] == [v2]
+
+        # since_version=head → nothing missed.
+        assert _get_ops(ws, v2)["ops"] == []
+
+
+def test_op_client_id_round_trips_to_get_ops(client):
+    with _login_and_join(client) as ws:
+        ws.receive_json()
+        # Op tagged with a per-connection client id.
+        _op(ws, 0, [{"from": 0, "to": 0, "insert": "X"}], client_id="cli_abc")
+        op = _get_ops(ws, 0)["ops"][0]
+        assert op["client_id"] == "cli_abc"
+
+        # Omitting client_id (non-collab client) is fine — it's null.
+        _op(ws, 1, [{"from": 0, "to": 0, "insert": "Y"}])
+        ops = _get_ops(ws, 1)["ops"]
+        assert ops[0]["client_id"] is None
 
 
 def test_file_read_serves_live_buffer_during_session(client):
@@ -339,16 +468,16 @@ def test_file_read_serves_live_buffer_during_session(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     sha = _seed_page("# Setup\n\nhello\n")
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    _apply_op(client, sid, 0, [{"from": 0, "to": len("# Setup\n\nhello\n"), "insert": "LIVE\n"}])
+    with _ws(client) as (ws, _joined):
+        _apply_op(ws, 0, [{"from": 0, "to": len("# Setup\n\nhello\n"), "insert": "LIVE\n"}])
 
-    resp = client.get(f"/api/wiki/file?path={_PATH}")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["body"] == "LIVE\n"  # buffer, not committed HEAD
-    assert body["head_sha"] == sha  # HEAD still the pre-session commit
-    # git working tree is untouched — nothing was committed.
-    assert git.read_file(_PATH) == "# Setup\n\nhello\n"
+        resp = client.get(f"/api/wiki/file?path={_PATH}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["body"] == "LIVE\n"  # buffer, not committed HEAD
+        assert body["head_sha"] == sha  # HEAD still the pre-session commit
+        # git working tree is untouched — nothing was committed.
+        assert git.read_file(_PATH) == "# Setup\n\nhello\n"
 
 
 def test_file_read_merges_agent_commit_over_live_buffer(client):
@@ -359,76 +488,14 @@ def test_file_read_merges_agent_commit_over_live_buffer(client):
     login_fastapi(client, uid)
     doc = "one\ntwo\nthree\nfour\nfive\n"
     _seed_page(doc)
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    # Human edits the first line in the buffer...
-    _apply_op(client, sid, 0, [{"from": 0, "to": 3, "insert": "ONE"}])
-    # ...an agent commits a distant, non-overlapping change out of band.
-    git.commit_file(_PATH, "one\ntwo\nthree\nfour\nFIVE\n", message="agent", author="A <a@x.com>")
+    with _ws(client) as (ws, _joined):
+        # Human edits the first line in the buffer...
+        _apply_op(ws, 0, [{"from": 0, "to": 3, "insert": "ONE"}])
+        # ...an agent commits a distant, non-overlapping change out of band.
+        git.commit_file(_PATH, "one\ntwo\nthree\nfour\nFIVE\n", message="agent", author="A <a@x.com>")
 
-    body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
-    assert body == "ONE\ntwo\nthree\nfour\nFIVE\n"  # both edits, no LLM, no commit
-
-
-def test_ops_requires_auth(client):
-    assert client.get("/api/coedit/ops?session_id=1&since_version=0").status_code == 401
-
-
-def test_ops_since_returns_missed_changes_for_rebase(client):
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    login_fastapi(client, uid)
-    _seed_page("abcdef\n")
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    v1 = _apply_op(client, sid, 0, [{"from": 0, "to": 0, "insert": "X"}])
-    v2 = _apply_op(client, sid, v1, [{"from": 0, "to": 0, "insert": "Y"}])
-
-    # since_version=0 → both ops, oldest first, wire-shaped like op frames ("from" alias).
-    body = client.get(f"/api/coedit/ops?session_id={sid}&since_version=0").json()
-    assert body["current_head_version"] == v2
-    assert [o["version"] for o in body["ops"]] == [v1, v2]
-    assert body["ops"][0]["changes"] == [{"from": 0, "to": 0, "insert": "X"}]
-    assert body["ops"][0]["author"] == uid
-
-    # since_version=v1 → only the op after it.
-    body2 = client.get(f"/api/coedit/ops?session_id={sid}&since_version={v1}").json()
-    assert [o["version"] for o in body2["ops"]] == [v2]
-
-    # since_version=head → nothing missed.
-    assert client.get(f"/api/coedit/ops?session_id={sid}&since_version={v2}").json()["ops"] == []
-
-
-def test_ops_404_when_no_active_session(client):
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    login_fastapi(client, uid)
-    assert client.get("/api/coedit/ops?session_id=99999&since_version=0").status_code == 404
-
-
-def test_op_client_id_round_trips_to_ops(client):
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    login_fastapi(client, uid)
-    _seed_page("abc\n")
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    # Op tagged with a per-connection client id.
-    resp = client.post(
-        "/api/coedit/op",
-        json={
-            "session_id": sid,
-            "base_version": 0,
-            "changes": [{"from": 0, "to": 0, "insert": "X"}],
-            "client_id": "cli_abc",
-        },
-    )
-    assert resp.status_code == 200
-    op = client.get(f"/api/coedit/ops?session_id={sid}&since_version=0").json()["ops"][0]
-    assert op["client_id"] == "cli_abc"
-
-    # Omitting client_id (non-collab client) is fine — it's null.
-    resp2 = client.post(
-        "/api/coedit/op",
-        json={"session_id": sid, "base_version": 1, "changes": [{"from": 0, "to": 0, "insert": "Y"}]},
-    )
-    assert resp2.status_code == 200
-    ops = client.get(f"/api/coedit/ops?session_id={sid}&since_version=1").json()["ops"]
-    assert ops[0]["client_id"] is None
+        body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
+        assert body == "ONE\ntwo\nthree\nfour\nFIVE\n"  # both edits, no LLM, no commit
 
 
 def test_file_read_serves_head_when_buffer_conflicts_with_committed_change(client):
@@ -440,14 +507,14 @@ def test_file_read_serves_head_when_buffer_conflicts_with_committed_change(clien
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page("one\ntwo\nthree\n")
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    # Human edits the first line in the buffer...
-    _apply_op(client, sid, 0, [{"from": 0, "to": 3, "insert": "BUFFER"}])
-    # ...an agent commits a CONFLICTING change to the same first line out of band.
-    git.commit_file(_PATH, "AGENT\ntwo\nthree\n", message="agent", author="A <a@x.com>")
+    with _ws(client) as (ws, _joined):
+        # Human edits the first line in the buffer...
+        _apply_op(ws, 0, [{"from": 0, "to": 3, "insert": "BUFFER"}])
+        # ...an agent commits a CONFLICTING change to the same first line out of band.
+        git.commit_file(_PATH, "AGENT\ntwo\nthree\n", message="agent", author="A <a@x.com>")
 
-    body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
-    assert body == "AGENT\ntwo\nthree\n"  # committed HEAD, not the stale buffer
+        body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
+        assert body == "AGENT\ntwo\nthree\n"  # committed HEAD, not the stale buffer
 
 
 def test_file_read_serves_buffer_at_zero_participants_when_no_conflict(client):
@@ -459,11 +526,11 @@ def test_file_read_serves_buffer_at_zero_participants_when_no_conflict(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page("# Setup\n\nhello\n")
-    sid = client.post("/api/coedit/join", json={"path": _PATH}).json()["session_id"]
-    _apply_op(client, sid, 0, [{"from": 0, "to": len("# Setup\n\nhello\n"), "insert": "LIVE\n"}])
-    coedit.leave(sid, uid)  # everyone leaves; session stays active (zombie)
-    st = coedit.get_active_session(_PATH)
-    assert st is not None and st.status == "active"
+    with _ws(client) as (ws, joined):
+        _apply_op(ws, 0, [{"from": 0, "to": len("# Setup\n\nhello\n"), "insert": "LIVE\n"}])
+        coedit.leave(joined["session_id"], uid)  # everyone leaves; session stays active (zombie)
+        st = coedit.get_active_session(_PATH)
+        assert st is not None and st.status == "active"
 
-    body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
-    assert body == "LIVE\n"  # HEAD hasn't moved → buffer still safe to serve
+        body = client.get(f"/api/wiki/file?path={_PATH}").json()["body"]
+        assert body == "LIVE\n"  # HEAD hasn't moved → buffer still safe to serve

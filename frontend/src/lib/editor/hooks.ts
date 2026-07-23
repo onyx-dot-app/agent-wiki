@@ -10,19 +10,21 @@
  * Nothing is persisted: carets appear from live cursor/op frames and go away
  * on a clear (editor blur / hidden tab) or when the peer leaves.
  *
- * On `enabled` it joins the session for `path`, streams inbound frames, and
- * exposes presence (`participants`/`typing`/`peers`) and autosave
- * (`saveStatus`). Teardown (flush → checkpoint → leave → stream abort, in
- * that order — leaving/disconnecting first would let the server's last-leave
- * forced commit race ahead of the final ops) happens entirely inside the
- * hook's own effect cleanup — driven by `enabled`/`path` changing or the
- * component unmounting, never by the caller invoking a function. The
- * *document* is owned by the editor via
- * `@codemirror/collab` (see `Coeditor`), not here — the hook just hands the
- * editor what it needs to run collab (`session` = id/clientId/start
- * version+doc), forwards inbound `op`/`resync` frames to it (`onServerFrame`),
- * and keeps a read-only `buffer` mirror for non-editor UI (the template
- * gallery).
+ * On `enabled` it opens the session's WebSocket for `path` and exposes
+ * presence (`participants`/`typing`/`peers`) and autosave (`saveStatus`).
+ * Teardown (flush → checkpoint → close, in that order — closing before the
+ * final ops and checkpoint have landed would let the server's last-leave
+ * forced commit race ahead of them) happens entirely inside the hook's own
+ * effect cleanup — driven by `enabled`/`path` changing or the component
+ * unmounting, never by the caller invoking a function. There's no explicit
+ * "leave" call: closing the connection *is* the leave signal, handled
+ * server-side (see `app/api/coedit.py`'s module docstring) — this doesn't
+ * depend on the client successfully transmitting anything during teardown.
+ * The *document* is owned by the editor via `@codemirror/collab` (see
+ * `Coeditor`), not here — the hook just hands the editor what it needs to
+ * run collab (`session` = id/clientId/start version+doc), forwards inbound
+ * `op`/`resync` frames to it (`onServerFrame`), and keeps a read-only
+ * `buffer` mirror for non-editor UI (the template gallery).
  *
  * Autosave: every `reportDoc` (called by the editor on each doc change) arms
  * an idle timer (checkpoint `AUTOSAVE_IDLE_MS` after the last edit) and, if
@@ -39,8 +41,6 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiError } from "@/lib/api";
-
 import type {
   CoeditFrame,
   CoeditParticipant,
@@ -50,10 +50,9 @@ import type {
 } from "@/lib/editor/types";
 import {
   checkpointSession,
-  joinSession,
-  leaveSession,
+  closeSession,
+  connectSession,
   sendCursor,
-  streamSession,
 } from "@/lib/editor/svc";
 import {
   AUTOSAVE_IDLE_MS,
@@ -65,14 +64,13 @@ import {
 } from "@/lib/editor/constants";
 
 /** Generate a fresh per-connection collab clientId (UUID v4).
- * Used to filter out our own op echoes from the SSE stream. */
+ * Used to filter out our own op echoes from the broadcast stream. */
 function newClientId(): string {
   return crypto.randomUUID();
 }
 
-/** Manage the full lifecycle of a page's live session: join, stream,
- * presence, and save. Disable with `enabled: false` to leave the session and
- * tear down the stream. */
+/** Manage the full lifecycle of a page's live session: connect, presence,
+ * and save. Disable with `enabled: false` to close the connection. */
 export function useCoeditSession(opts: {
   path: string;
   enabled: boolean;
@@ -82,7 +80,7 @@ export function useCoeditSession(opts: {
    * False joins the live session as a pure viewer: presence + real-time
    * updates flow as usual, but every write call (ops come from the read-only
    * editor anyway, cursor pings, checkpoints) is suppressed — the server
-   * would 403 them. Defaults to true. */
+   * would reject them. Defaults to true. */
   canWrite?: boolean;
   onEnd?: () => void;
 }): UseCoeditSession {
@@ -119,7 +117,6 @@ export function useCoeditSession(opts: {
 
   const sessionId = useRef<number | null>(null);
   const clientId = useRef<string>("");
-  const abort = useRef<AbortController | null>(null);
   // Editor-registered hooks: inbound frame handler + pending-op flush.
   const serverFrame = useRef<((frame: CoeditFrame) => void) | null>(null);
   const flushFn = useRef<(() => Promise<void>) | null>(null);
@@ -127,11 +124,12 @@ export function useCoeditSession(opts: {
   const catchUpFn = useRef<(() => void) | null>(null);
   // Ref mirror of `buffer` (the editor doc) for non-render reads.
   const bufferRef = useRef("");
-  // Local doc carried across a forced re-join: when the session closed under
-  // us and the tail couldn't be delivered, the edits exist only in this tab —
-  // re-applied onto the fresh session instead of being silently replaced by
-  // the checkpointed version. Path-tagged so it can never leak onto another
-  // page.
+  // Local doc carried across a forced reconnect that landed on a *different*
+  // session than we had before (ours closed while we were disconnected —
+  // last participant left, checkpointed, closed): the edits exist only in
+  // this tab, so they're re-applied onto the fresh session instead of being
+  // silently replaced by its checkpointed buffer. Path-tagged so it can
+  // never leak onto another page.
   const recoverDoc = useRef<{ path: string; doc: string } | null>(null);
   // Outbound cursor/typing throttle state.
   const cursorThrottle = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -256,13 +254,7 @@ export function useCoeditSession(opts: {
         const c = pendingCursor.current;
         pendingCursor.current = null;
         if (c && sessionId.current !== null) {
-          void sendCursor(
-            sessionId.current,
-            c.anchor,
-            c.head,
-            c.typing,
-            c.seq,
-          ).catch(() => {});
+          sendCursor(sessionId.current, c.anchor, c.head, c.typing, c.seq);
         }
       };
       if (!cursorThrottle.current) {
@@ -278,13 +270,13 @@ export function useCoeditSession(opts: {
           typingIdle.current = null;
           const lc = lastCursor.current;
           if (sessionId.current !== null && lc) {
-            void sendCursor(
+            sendCursor(
               sessionId.current,
               lc.anchor,
               lc.head,
               false,
               caretEpoch.current,
-            ).catch(() => {});
+            );
           }
         }, TYPING_IDLE_MS);
       }
@@ -308,11 +300,7 @@ export function useCoeditSession(opts: {
       clearTimeout(typingIdle.current);
       typingIdle.current = null;
     }
-    // Immediate (clears are rare) + keepalive so the hidden-tab clear
-    // survives the page backgrounding.
-    void sendCursor(sessionId.current, null, null, false, caretEpoch.current, {
-      keepalive: true,
-    }).catch(() => {});
+    sendCursor(sessionId.current, null, null, false, caretEpoch.current);
   }, [canWrite]);
 
   const getCaretSeq = useCallback(
@@ -428,9 +416,9 @@ export function useCoeditSession(opts: {
 
   // Tears down the *local* session state (timers, presence, handles) and
   // fires `onEnd` — the one and only "session is over" signal. The network
-  // side (flush, checkpoint, leave, stream abort) is NOT done here: the join
-  // effect's cleanup below — the only caller — sequences those explicitly,
-  // because their order matters (see the comment there).
+  // side (flush, checkpoint, close) is NOT done here: the join effect's
+  // cleanup below — the only caller — sequences those explicitly, because
+  // their order matters (see the comment there).
   const stop = useCallback(() => {
     clearAutosaveTimers();
     if (cursorThrottle.current) {
@@ -455,122 +443,108 @@ export function useCoeditSession(opts: {
     onEnd?.();
   }, [clearAutosaveTimers, onEnd]);
 
-  // Join + stream while enabled (the caller passes `!viewingVersion` — i.e.
-  // whenever the live/current doc is showing, not an old commit); leave on
-  // disable/path-change/unmount. `retryToken` lets `retryJoin` force a re-run
-  // without `enabled`/`path` changing.
+  // Connect while enabled (the caller passes `!viewingVersion` — i.e.
+  // whenever the live/current doc is showing, not an old commit); close on
+  // disable/path-change/unmount. `retryToken` lets `retryJoin` force a
+  // re-run without `enabled`/`path` changing.
   useEffect(() => {
     if (!enabled) return;
-    const ctrl = new AbortController();
-    abort.current = ctrl;
     clientId.current = newClientId();
     let cancelled = false;
-    // Mirror shows the committed body until the join resolves.
+    // Mirror shows the committed body until the connection resolves.
     bufferRef.current = committedBody;
     setBuffer(committedBody);
     setJoinError(null);
 
     void (async () => {
-      let snap;
-      try {
-        snap = await joinSession(path);
-      } catch (e) {
-        // The join handshake itself failed — there's no session to fall
-        // back to (no more read-only mode), so this must be surfaced rather
-        // than left as a silent, permanent "Connecting…".
-        if (!cancelled) {
-          setJoinError(
-            e instanceof Error
-              ? e.message
-              : "Failed to join the editing session.",
-          );
-        }
-        return;
-      }
-      if (cancelled) return;
-      sessionId.current = snap.session_id;
-      bufferRef.current = snap.buffer;
-      setBuffer(snap.buffer);
-      participantsRef.current = snap.participants;
-      setParticipants(snap.participants);
-      caretPlaced.current = false;
-      setSession({
-        id: snap.session_id,
-        clientId: clientId.current,
-        startVersion: snap.version,
-        startDoc: snap.buffer,
-      });
-      setActive(true);
-      // The stream loop: reconnect when the connection drops (network blip,
-      // laptop sleep) instead of leaving a silently-stale editable doc — the
-      // server never pushes again on a dead stream, and without this loop the
-      // client would only heal on a full page reload. Re-opening the stream
-      // re-joins us as a participant; the catch-up pull replays ops missed
-      // while disconnected (anything landing in the crack re-pulls via the
-      // op-frame gap detection).
+      // Connect (and reconnect on a drop) in a loop — the server never
+      // pushes again on a dead connection, and without this loop the client
+      // would only heal on a full page reload. Each attempt re-resolves the
+      // session by *path* (get-or-create server-side), so there's no "the
+      // session I had went stale" error to special-case; a reconnect either
+      // adopts the same still-open session or transparently gets a fresh one
+      // (see the session-id-changed branch below for that latter case).
+      let firstConnect = true;
       while (!cancelled) {
+        let snap;
         try {
-          // Gate on `cancelled`: the stream outlives the effect during
-          // teardown (it's aborted only after the final flush/checkpoint/
-          // leave below), and a late frame from the old session must not
-          // leak into state a new session now owns.
-          await streamSession(
-            snap.session_id,
-            (frame) => {
-              if (!cancelled) onFrame(frame);
-            },
-            ctrl.signal,
-          );
+          snap = await connectSession(path, (frame) => {
+            if (!cancelled) onFrame(frame);
+          });
         } catch (e) {
-          if (cancelled || ctrl.signal.aborted) break;
-          if (e instanceof ApiError && e.status === 404) {
-            // The session closed while we were gone (last participant left →
-            // checkpoint + close). Streaming can't resurrect it — re-run the
-            // whole join to mint/adopt a fresh session. First try to deliver
-            // any local tail; if that fails too (ops bounce off the closed
-            // session), those edits exist only in this tab — carry the doc
-            // across the re-join so the fresh session's checkpointed buffer
-            // doesn't silently replace them (see the recovery effect below).
-            try {
-              await flushFn.current?.();
-            } catch {
-              recoverDoc.current = { path, doc: bufferRef.current };
-            }
-            retryJoin();
-            break;
+          // The join handshake itself failed — there's no session to fall
+          // back to (no more read-only mode), so this must be surfaced
+          // rather than left as a silent, permanent "Connecting…".
+          if (!cancelled) {
+            setJoinError(
+              e instanceof Error
+                ? e.message
+                : "Failed to join the editing session.",
+            );
           }
+          return;
         }
-        if (cancelled || ctrl.signal.aborted) break;
+        if (cancelled) {
+          closeSession(snap.session_id);
+          return;
+        }
+
+        // A reconnect that landed on a *different* session than before means
+        // ours closed while we were disconnected (last participant left,
+        // checkpointed, closed) — there's no live target left to flush our
+        // pending edits onto, so stash the local doc for the recovery effect
+        // below instead of losing it to the fresh session's checkpointed
+        // buffer.
+        if (
+          sessionId.current !== null &&
+          sessionId.current !== snap.session_id
+        ) {
+          recoverDoc.current = { path, doc: bufferRef.current };
+        }
+
+        sessionId.current = snap.session_id;
+        bufferRef.current = snap.buffer;
+        setBuffer(snap.buffer);
+        participantsRef.current = snap.participants;
+        setParticipants(snap.participants);
+        caretPlaced.current = false;
+        setSession({
+          id: snap.session_id,
+          clientId: clientId.current,
+          startVersion: snap.version,
+          startDoc: snap.buffer,
+        });
+        setActive(true);
+        if (!firstConnect) catchUpFn.current?.();
+        firstConnect = false;
+
+        // Waits here for the connection's whole lifetime — resolves once it
+        // ends, for any reason (network drop, server close, or our own
+        // teardown's `closeSession` below).
+        const { expected } = await snap.closed;
+        if (cancelled || expected) return;
         await new Promise((r) => setTimeout(r, STREAM_RECONNECT_MS));
-        if (cancelled || ctrl.signal.aborted) break;
-        catchUpFn.current?.();
       }
     })();
 
     return () => {
       cancelled = true;
-      // Teardown must run flush → checkpoint → leave → abort, in that strict
-      // order. The server force-commits and closes the session when the last
-      // participant is gone, and BOTH leaving and dropping the SSE stream
-      // count as "gone" — so leaving (or aborting) before the final ops and
-      // checkpoint have landed lets that forced commit race ahead of them:
-      // it commits a buffer missing the tail, `close_if_clean` closes the
-      // session, and the late ops bounce off a closed session (silent loss).
-      // Leaving last means the forced commit only ever sees a clean,
-      // fully-flushed buffer.
+      // Teardown must run flush → checkpoint → close, in that strict order.
+      // The server force-commits and closes the session when the last
+      // participant is gone, and closing the connection counts as "gone" —
+      // so closing before the final ops and checkpoint have landed lets that
+      // forced commit race ahead of them: it commits a buffer missing the
+      // tail, closes the session, and the late ops bounce off a closed
+      // session (silent loss). Closing last means the forced commit only
+      // ever sees a clean, fully-flushed buffer.
       const sid = sessionId.current;
       // The editor never unregisters its flush (see Coeditor's cleanup) so
       // it's still here even when the child unmounted first; clear it as we
       // take ownership of the final call.
       const flush = flushFn.current;
       flushFn.current = null;
-      const ctrl = abort.current;
-      abort.current = null;
       stop();
-      if (sid === null) {
-        ctrl?.abort();
-        return;
-      }
+      if (sid === null) return;
       void (async () => {
         try {
           await flush?.();
@@ -581,27 +555,23 @@ export function useCoeditSession(opts: {
         }
         if (canWrite) {
           try {
-            await checkpointSession(sid, { keepalive: true });
+            await checkpointSession(sid);
           } catch {
-            // The last-leave forced commit below is the backstop.
+            // The server-side close-triggered forced commit is the backstop.
           }
         }
-        try {
-          await leaveSession(sid, { keepalive: true });
-        } catch {
-          // The server-side leave on SSE disconnect is the backstop.
-        }
-        ctrl?.abort();
+        closeSession(sid);
       })();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, path, retryToken]);
 
-  // Re-apply a doc carried across a forced re-join (see the stream loop's
-  // 404 branch): once the fresh session's editor has mounted (child effects
-  // run before this one, so `setDoc` is registered), replace the buffer with
-  // the saved local doc as a normal local edit — it lands as an op on the
-  // new session instead of being lost to the checkpointed version.
+  // Re-apply a doc carried across a forced reconnect (see the connect loop's
+  // session-id-changed branch above): once the fresh session's editor has
+  // mounted (child effects run before this one, so `setDoc` is registered),
+  // replace the buffer with the saved local doc as a normal local edit — it
+  // lands as an op on the new session instead of being lost to the
+  // checkpointed version.
   useEffect(() => {
     if (session === null || recoverDoc.current === null) return;
     const saved = recoverDoc.current;
@@ -611,17 +581,25 @@ export function useCoeditSession(opts: {
     }
   }, [session, path, setDoc]);
 
-  // Best-effort checkpoint when the tab is backgrounded/closed — `keepalive`
-  // lets the request survive the page tearing down. Covers the gap between
-  // the last edit and the idle-autosave timer firing. A hidden tab also
-  // clears our caret: the user isn't positioned to edit anymore, and CM blur
-  // doesn't fire reliably on tab switches.
+  // Best-effort checkpoint when the tab is backgrounded/closed. Covers the
+  // gap between the last edit and the idle-autosave timer firing. A hidden
+  // tab also clears our caret: the user isn't positioned to edit anymore,
+  // and CM blur doesn't fire reliably on tab switches.
+  //
+  // The WS connection itself stays open while merely backgrounded (browsers
+  // don't tear down a WebSocket on visibility change, only on actual
+  // navigation/close/sleep), so a checkpoint message here reliably reaches
+  // the server. `pagehide` (the tab actually closing) is the one case with
+  // no delivery guarantee: a `send()` racing an abrupt unload can be lost.
+  // The server's own disconnect-triggered forced checkpoint (see
+  // `app/api/coedit.py`) is the backstop for exactly that case, and it
+  // doesn't depend on the client transmitting anything at all.
   useEffect(() => {
     if (!active) return;
     const checkpointNow = () => {
       const sid = sessionId.current;
       if (sid === null || !canWrite) return;
-      void checkpointSession(sid, { keepalive: true }).catch(() => {});
+      void checkpointSession(sid).catch(() => {});
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -629,8 +607,9 @@ export function useCoeditSession(opts: {
         reportCaretCleared();
       } else {
         // Coming back to the tab: pull anything missed while backgrounded —
-        // a slept machine's stream may be dead or healing, and the user must
-        // not resume on a stale doc (the reconnect loop is the other half).
+        // a slept machine's connection may be dead or healing, and the user
+        // must not resume on a stale doc (the reconnect loop is the other
+        // half).
         catchUpFn.current?.();
       }
     };
