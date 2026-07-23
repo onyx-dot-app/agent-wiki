@@ -9,6 +9,7 @@ shapes, one WebSocket instead of eight endpoints.
 """
 from __future__ import annotations
 
+import time
 from contextlib import contextmanager
 
 import pytest
@@ -205,8 +206,17 @@ def test_disconnect_of_last_participant_checkpoints(client):
         with _ws(client) as (ws, joined):
             sid = joined["session_id"]
             _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
-        # The disconnect handler enqueues a checkpoint; immediate_mode runs
-        # it inline before websocket_connect's __exit__ returns.
+        # The disconnect handler enqueues the checkpoint, and immediate_mode
+        # runs it inline — but the handler is the server's `finally` on a
+        # thread, and websocket_connect's __exit__ doesn't guarantee it has
+        # run yet. Wait for it *inside* immediate_mode: once the flag drops,
+        # a late enqueue would go to the real queue and never run here.
+        deadline = time.monotonic() + 5
+        while (
+            git.read_file(_PATH) != "hi world"
+            or coedit.get_active_session(_PATH) is not None
+        ) and time.monotonic() < deadline:
+            time.sleep(0.02)
 
     assert git.read_file(_PATH) == "hi world"
     assert coedit.get_active_session(_PATH) is None
