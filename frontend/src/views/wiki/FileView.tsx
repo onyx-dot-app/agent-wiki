@@ -429,6 +429,14 @@ export function FileView({ path }: FileViewProps) {
   const panelScrollDocked =
     !!coedit.session && !viewingVersion && !isMobile && panelTab !== null;
 
+  // A caret inside a commented span focuses its thread in the panel (the
+  // panel's activeId effect scrolls the card into view), without the doc
+  // scroll a card click performs. Leaving every span clears the focus,
+  // matching the click-off collapse.
+  const handleCommentCaret = useCallback((ids: string[]) => {
+    setActiveCommentId(ids[0] ?? null);
+  }, []);
+
   // Select a thread (its span gets the orange highlight) and scroll the
   // editor to bring that span into view. Only an explicit click runs this —
   // keying a scroll off `activeCommentId` alone would also re-scroll on
@@ -1250,6 +1258,7 @@ export function FileView({ path }: FileViewProps) {
                       readOnly={!canWrite}
                       commentHighlights={commentHighlights}
                       activeCommentIds={activeCommentIds}
+                      onCommentCaret={handleCommentCaret}
                       sourceHighlights={sourceHighlights}
                       activeSourceIds={activeSourceIds}
                       onSourceCaret={setCaretSourceKeys}

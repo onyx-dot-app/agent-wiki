@@ -84,6 +84,24 @@ class CaretWidget extends WidgetType {
 /** Dispatched to update the peer list in `peersField`. */
 const setPeersEffect = StateEffect.define<CoeditPeer[]>();
 
+/** Highlight ids whose spans contain a collapsed caret or intersect a
+ * selection, half-open at span ends so a caret just past a span misses. */
+function caretHitIds(
+  targets: AnchoredHighlightTarget[],
+  from: number,
+  to: number,
+): string[] {
+  const ids: string[] = [];
+  for (const t of targets) {
+    const hit =
+      from === to
+        ? from >= t.startOffset && from < t.endOffset
+        : from < t.endOffset && to > t.startOffset;
+    if (hit && !ids.includes(t.id)) ids.push(t.id);
+  }
+  return ids;
+}
+
 /** Build a `DecorationSet` from the current peer list: one selection highlight
  * per non-collapsed selection and one `CaretWidget` per peer head position.
  * Offsets are clamped to `docLen` so a stale frame never lands out of range. */
@@ -353,6 +371,9 @@ interface CoeditorProps {
   commentHighlights?: CommentHighlightTarget[];
   /** Thread ids whose spans get the stronger (active) highlight. */
   activeCommentIds?: string[];
+  /** Fires with the thread ids whose spans contain the caret (or intersect
+   * the selection), deduped against the last report. */
+  onCommentCaret?: (ids: string[]) => void;
   /** Source-attributed spans to highlight while the Sources tab is open. */
   sourceHighlights?: AnchoredHighlightTarget[];
   /** Source keys whose spans get the stronger (active) highlight. */
@@ -431,6 +452,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       readOnly,
       commentHighlights,
       activeCommentIds,
+      onCommentCaret,
       sourceHighlights,
       activeSourceIds,
       onSourceCaret,
@@ -453,8 +475,11 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const reportDocRef = useRef(reportDoc);
     const onSelectionForCommentRef = useRef(onSelectionForComment);
     const onSourceCaretRef = useRef(onSourceCaret);
-    // Last caret-source report, so selection churn inside one span is quiet.
+    const onCommentCaretRef = useRef(onCommentCaret);
+    // Last caret reports per field, so selection churn inside one span is
+    // quiet.
     const lastCaretIds = useRef("");
+    const lastCommentCaretIds = useRef("");
     const peersRef = useRef(peers);
     const commentHighlightsRef = useRef(commentHighlights);
     const activeCommentIdsRef = useRef(activeCommentIds);
@@ -466,6 +491,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     reportDocRef.current = reportDoc;
     onSelectionForCommentRef.current = onSelectionForComment;
     onSourceCaretRef.current = onSourceCaret;
+    onCommentCaretRef.current = onCommentCaret;
     peersRef.current = peers;
     commentHighlightsRef.current = commentHighlights;
     activeCommentIdsRef.current = activeCommentIds;
@@ -703,32 +729,42 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           void doPush();
         }
         if (u.geometryChanged || u.docChanged) notifyLayout("geometry");
-        // Caret-to-source attribution against the field's live-mapped spans.
-        // Runs above the remote-op return and also on field-value changes,
-        // since remote edits and effect-only target swaps move or clear the
-        // spans under a parked caret.
-        const sourceField = sourceHighlightsExt.field;
-        if (
-          (u.selectionSet ||
-            u.docChanged ||
-            u.startState.field(sourceField) !== u.state.field(sourceField)) &&
-          onSourceCaretRef.current
-        ) {
+        // Caret attribution against each highlight field's live-mapped
+        // spans. Runs above the remote-op return and also on field-value
+        // changes, since remote edits and effect-only target swaps move or
+        // clear the spans under a parked caret.
+        const reportCaret = (
+          field: typeof sourceHighlightsExt.field | typeof commentsField,
+          cb: ((ids: string[]) => void) | undefined,
+          last: { current: string },
+        ) => {
+          if (
+            !cb ||
+            !(
+              u.selectionSet ||
+              u.docChanged ||
+              u.startState.field(field) !== u.state.field(field)
+            )
+          )
+            return;
           const { from, to } = u.state.selection.main;
-          const ids: string[] = [];
-          for (const t of u.state.field(sourceField).targets) {
-            const hit =
-              from === to
-                ? from >= t.startOffset && from < t.endOffset
-                : from < t.endOffset && to > t.startOffset;
-            if (hit && !ids.includes(t.id)) ids.push(t.id);
-          }
+          const ids = caretHitIds(u.state.field(field).targets, from, to);
           const key = ids.join("\n");
-          if (key !== lastCaretIds.current) {
-            lastCaretIds.current = key;
-            onSourceCaretRef.current(ids);
+          if (key !== last.current) {
+            last.current = key;
+            cb(ids);
           }
-        }
+        };
+        reportCaret(
+          sourceHighlightsExt.field,
+          onSourceCaretRef.current,
+          lastCaretIds,
+        );
+        reportCaret(
+          commentsField,
+          onCommentCaretRef.current,
+          lastCommentCaretIds,
+        );
         // Remote-applied transactions aren't local input — don't report them as
         // our caret/typing.
         if (applyingRemote.current) return;
