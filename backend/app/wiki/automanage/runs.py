@@ -16,6 +16,7 @@ from enum import Enum
 from typing import Any
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db.models import DetectionRun
 from app.db.session import execute_dml, session
@@ -104,22 +105,54 @@ def mark_failed(run_id: str, *, error: str) -> None:
 STUCK_RUN_MAX_AGE_HOURS = 2
 
 
-def running_sweep_exists() -> bool:
-    """True while a sweep run is genuinely in flight. Corpse rows — running
-    but older than ``STUCK_RUN_MAX_AGE_HOURS`` — don't count (and any real
-    sweep finishes in minutes, not hours)."""
+def try_start_sweep(*, triggered_by_user_id: str | None) -> str | None:
+    """Atomically acquire the sweep slot: insert the ``running`` row, or
+    return None while a sweep is already in flight.
+
+    The slot is the partial unique index ``uq_detection_runs_single_running_
+    sweep`` (at most one ``running`` sweep row), so acquisition is a single
+    guarded INSERT — no check-then-insert window, safe for direct callers
+    and multi-consumer deployments alike, not just the serialized queue.
+    Corpse rows — ``running`` but older than ``STUCK_RUN_MAX_AGE_HOURS``
+    (a worker died mid-run; any real sweep finishes in minutes) — are failed
+    over first so they never hold the slot forever."""
     cutoff = (
         datetime.now(UTC) - timedelta(hours=STUCK_RUN_MAX_AGE_HOURS)
     ).strftime("%Y-%m-%d %H:%M:%S")
+    run_id = uuid.uuid4().hex
     with session() as s:
-        row = s.execute(
-            select(DetectionRun.id).where(
+        execute_dml(
+            s,
+            update(DetectionRun)
+            .where(
                 DetectionRun.trigger == TriggerKind.SWEEP.value,
                 DetectionRun.status == RunStatus.RUNNING.value,
-                DetectionRun.started_at >= cutoff,
+                DetectionRun.started_at < cutoff,
             )
+            .values(
+                status=RunStatus.FAILED.value,
+                error="timed out — assumed dead (worker exited mid-run?)",
+                finished_at=_now(),
+            ),
+        )
+        # Targetless DO NOTHING: the only realistic conflict is the partial
+        # unique index (a live sweep holds the slot); the uuid4 PK doesn't
+        # collide in practice. RETURNING reports the outcome — the id comes
+        # back only when this insert won the slot (rowcount is unreliable
+        # for INSERT … ON CONFLICT under implicit returning).
+        won = s.execute(
+            pg_insert(DetectionRun)
+            .values(
+                id=run_id,
+                trigger=TriggerKind.SWEEP.value,
+                status=RunStatus.RUNNING.value,
+                triggered_by_user_id=triggered_by_user_id,
+                started_at=_now(),
+            )
+            .on_conflict_do_nothing()
+            .returning(DetectionRun.id)
         ).first()
-        return row is not None
+    return run_id if won is not None else None
 
 
 def get(run_id: str) -> dict[str, Any] | None:

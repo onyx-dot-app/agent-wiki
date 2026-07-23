@@ -132,7 +132,24 @@ def run_detection(
         log.info("detection: Auto Organize disabled — %s run skipped", trigger.value)
         return {"run_id": None, "paths_scanned": 0, "proposals_emitted": 0}
 
-    run_id = runs.start(trigger=trigger, triggered_by_user_id=triggered_by_user_id)
+    # Sweeps are singleton: the run row doubles as the slot (a partial unique
+    # index allows at most one running sweep), so acquisition is atomic — no
+    # check-then-insert window even for direct callers or multiple consumers.
+    if trigger is TriggerKind.SWEEP:
+        acquired = runs.try_start_sweep(triggered_by_user_id=triggered_by_user_id)
+        if acquired is None:
+            log.info("detection: sweep already running — skipped")
+            return {
+                "run_id": None,
+                "paths_scanned": 0,
+                "proposals_emitted": 0,
+                "skipped": "sweep already running",
+            }
+        run_id = acquired
+    else:
+        run_id = runs.start(
+            trigger=trigger, triggered_by_user_id=triggered_by_user_id
+        )
     try:
         scope = Scope(trigger=trigger, paths=tuple(paths), run_id=run_id)
         taken = taken_dedupe_keys(_BLOCKING_STATUSES)
@@ -259,13 +276,12 @@ def run_sweep(*, triggered_by_user_id: str | None) -> dict[str, Any]:
 
     **Singleton:** while a sweep is already running, another one is skipped —
     two concurrent whole-space scans emit the same drafts into the same dedup
-    window and double every detector's cost for nothing. The manual trigger
-    stays available (this skips *overlap*, it doesn't rate-limit); a stuck
-    ``running`` corpse row stops blocking after ``STUCK_RUN_MAX_AGE_HOURS``.
+    window and double every detector's cost for nothing. The slot is acquired
+    atomically inside ``run_detection`` (``runs.try_start_sweep``); the manual
+    trigger stays available (it skips *overlap*, it doesn't rate-limit), and a
+    stuck ``running`` corpse row stops blocking after
+    ``STUCK_RUN_MAX_AGE_HOURS``.
     """
-    if runs.running_sweep_exists():
-        log.info("sweep skipped — another sweep is already running")
-        return {"run_id": None, "paths_scanned": 0, "proposals_emitted": 0, "skipped": "sweep already running"}
     return run_detection(
         trigger=TriggerKind.SWEEP,
         triggered_by_user_id=triggered_by_user_id,

@@ -2,14 +2,18 @@
 
 Two concurrent sweeps emit the same drafts into the same dedup window and
 double every detector's cost; the guard skips overlap without rate-limiting
-the manual trigger. A stuck ``running`` corpse row (worker died mid-run)
-stops blocking after the age cutoff.
+the manual trigger. The slot is the partial unique index on the ``running``
+sweep row, so acquisition is one atomic guarded INSERT — safe beyond the
+serialized queue consumer. A stuck ``running`` corpse row (worker died
+mid-run) stops blocking after the age cutoff.
 """
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
+from sqlalchemy import select
 
 from app.db.models import DetectionRun
 from app.db.session import session
@@ -56,8 +60,25 @@ def test_second_sweep_is_skipped_while_one_runs(repo):
 def test_stuck_corpse_run_does_not_block_forever(repo):
     _plant_running_sweep(hours_old=runs.STUCK_RUN_MAX_AGE_HOURS + 1)
     result = runner.run_sweep(triggered_by_user_id=None)
-    assert result["run_id"] is not None  # corpse ignored, sweep ran
+    assert result["run_id"] is not None  # corpse failed over, sweep ran
     assert result["proposals_emitted"] == 1
+    # The corpse was closed, not ignored — it no longer holds the slot.
+    with session() as s:
+        corpse = s.scalars(
+            select(DetectionRun).where(DetectionRun.id.like("run_test_%"))
+        ).one()
+        assert corpse.status == "failed"
+        assert corpse.error is not None
+
+
+def test_slot_acquisition_is_first_wins(repo):
+    """The slot is a guarded INSERT against the partial unique index — the
+    second acquisition loses atomically, with no exists-check window."""
+    first = runs.try_start_sweep(triggered_by_user_id=None)
+    assert first is not None
+    assert runs.try_start_sweep(triggered_by_user_id=None) is None
+    runs.mark_completed(first, paths_scanned=0, proposals_emitted=0)
+    assert runs.try_start_sweep(triggered_by_user_id=None) is not None
 
 
 def test_sequential_sweeps_are_not_rate_limited(repo):
