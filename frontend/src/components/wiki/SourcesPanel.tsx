@@ -178,8 +178,12 @@ export function SourcesPanel({ sources }: Props) {
           </div>
         )}
 
-        {shown.map((s) => (
-          <SourceCard key={sourceKey(s) || s.last_updated} source={s} />
+        {shown.map((s, i) => (
+          // Rows with no identity fields keep distinct keys via the index.
+          <SourceCard
+            key={sourceKey(s) || `${s.last_updated}-${i}`}
+            source={s}
+          />
         ))}
 
         {shown.length > 0 && (
