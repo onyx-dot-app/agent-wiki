@@ -1,20 +1,22 @@
 """Executor for approved change proposals.
 
 Detection only *emits* proposals; this is the only place that acts on one.
-Phase 1 is human-approved only (delegation/auto-apply is Phase 2). On approval
-a proposal is handed here (via the detection queue) to apply the structural
-change and migrate path-keyed state, then mark itself ``applied``.
+Two execution paths:
 
-``delete_empty_folder`` is the first — and today only — op. It executes as a
-**trash-move** (soft delete): the folder is moved into ``.trash/`` exactly like
-`DELETE /wiki/file`, so `after_doc_trashed` re-points the folder's ACL/policy
-row and tombstones its doc id, and the delete stays losslessly restorable —
-honoring the PRD's "no information is ever deleted" invariant.
+- ``delete_empty_folder`` keeps its **deterministic** branch: trash-move
+  exactly like `DELETE /wiki/file`, losslessly restorable, re-validated
+  (still empty, else stale).
+- Every other allowed op goes through the **agentic applier**
+  (``agentic.apply_proposal``): the LLM applies the approved intent against
+  current wiki state with bounded tools. The rails live here — pre-gates
+  (kill switch, status, audience-fingerprint drift → stale), and a post-run
+  **scope check**: the git diff since the pre-run HEAD may touch only the
+  proposal's paths (or their trash locations); a violating run is additively
+  reverted and the proposal marked stale with the reason.
 
-Re-validation (PRD): a stale proposal never executes. For an empty-folder
-delete the meaningful precondition is that the folder is *still empty* — a page
-added since detection means the proposal no longer applies, so it goes stale
-rather than deleting content.
+Re-validation (PRD): a stale proposal never executes. Audience drift always
+stales (who consented changed); trivial *content* drift is the agentic
+applier's to absorb — intent-level consent.
 """
 from __future__ import annotations
 
@@ -25,10 +27,13 @@ from typing import Any
 from app.auth import users
 from app.db.models import Event
 from app.db.session import session
-from app.models.wiki import PathMove
+from app.models.wiki import ChangeKind, PathMove
 from app.wiki import change_proposals, doc_ids, git, notify, trash
-from app.wiki.automanage import settings
+from app.llm.agents import automanage_apply
+from app.wiki.automanage import fingerprint, settings
 from app.wiki.change_proposals import ProposalOp, ProposalStatus
+from app.wiki.filesystem import TRASH_PREFIX
+from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 
@@ -37,12 +42,13 @@ log = logging.getLogger(__name__)
 # admins the space-wide audit trail — keep new automanage kinds under it.
 EVENT_AUTOMANAGE_APPLIED = "automanage.applied"
 
-# The ops this executor can actually apply. The emit/approve layers gate on
-# this set (runner refuses to persist a draft, review refuses to approve), so
-# a detector landing ahead of its executor degrades to a loud skip instead of
-# an approved-but-unexecutable proposal. Grow it in the same PR as each new
-# `_execute_*` branch.
-SUPPORTED_OPS: frozenset[str] = frozenset({ProposalOp.DELETE_EMPTY_FOLDER.value})
+# The ops detectors may emit and reviewers may approve — a *policy allowlist*
+# (the agentic applier can apply any op the proposal describes; this is the
+# gate on which proposals we let exist). The emit/approve layers check it, so
+# widening it is a deliberate one-line decision per op.
+SUPPORTED_OPS: frozenset[str] = frozenset(
+    {ProposalOp.DELETE_EMPTY_FOLDER.value, ProposalOp.MERGE.value}
+)
 
 
 def _git_author(user_id: str | None) -> str | None:
@@ -79,13 +85,122 @@ def execute(proposal_id: int) -> None:
             "execute: proposal %s not approved (%s) — skip", proposal_id, p["status"]
         )
         return
+    # Audience drift always stales: the fingerprint identifies *who consented*
+    # (readers/writers of every touched path); if it moved since emit, the
+    # approval no longer covers the world being changed. Content drift, by
+    # contrast, is the agentic applier's to absorb. Unstamped rows (pre-
+    # fingerprint history) skip the check.
+    stamped = p.get("acl_fingerprint_before")
+    if stamped is not None:
+        current = fingerprint.combined_fingerprint(
+            p["source_paths"] + p["target_paths"]
+        )
+        if current != stamped:
+            change_proposals.mark_stale(
+                proposal_id,
+                reason="permissions of the affected paths changed since this "
+                "was proposed",
+            )
+            log.info(
+                "execute: proposal %s stale — audience fingerprint drifted",
+                proposal_id,
+            )
+            return
     op = p["op"]
     if op == ProposalOp.DELETE_EMPTY_FOLDER.value:
         _execute_delete_empty_folder(p)
         return
-    # Only delete_empty_folder has a producer today; other ops are added here
-    # alongside their detectors.
-    raise ValueError(f"no executor for op {op!r}")
+    _execute_agentic(p)
+
+
+def _scope_violations(base_sha: str, allowed: frozenset[str]) -> list[str]:
+    """Paths the run touched outside the proposal's scope. A path is in scope
+    when it is one of the proposal's paths, or that path's location inside a
+    trash entry (`.trash/<id>/<path>` — trash-moves report both sides)."""
+    head = git.head_sha()
+    if head is None or head == base_sha:
+        return []
+    out: list[str] = []
+    for touched in git.changed_paths_between(base_sha, head):
+        candidate = touched
+        if touched.startswith(TRASH_PREFIX):
+            # strip `.trash/<id>/`
+            parts = touched.split("/", 2)
+            candidate = parts[2] if len(parts) == 3 else touched
+        if candidate not in allowed:
+            out.append(touched)
+    return out
+
+
+def _reconverge_after_revert(
+    allowed: frozenset[str], reverted_sha: str, author: str | None
+) -> None:
+    """Re-converge path-keyed metadata after an additive revert.
+
+    The revert restored file *content*; metadata mutated through the run's
+    lifecycle hooks (id tombstones/forwards, search index) needs pulling back
+    for the proposal's paths: restored ids re-bind (clearing any forward) and
+    live pages re-index. ACL/policy rows re-pointed toward now-removed trash
+    copies are left as orphans — the known-debris class the move machinery
+    already heals on collision."""
+    live = set(git.list_paths())
+    doc_ids.on_restored([path for path in sorted(allowed) if path in live])
+    for path in sorted(allowed):
+        if path in live and path.endswith(".md"):
+            notify.after_doc_write(
+                path, reverted_sha, ChangeKind.EDIT, author
+            )
+
+
+def _execute_agentic(p: dict[str, Any]) -> None:
+    """Apply via the LLM, then judge the run mechanically: scope violations or
+    a failed run revert additively and stale the proposal with the reason."""
+    proposal_id = p["id"]
+    author = _git_author(p["acting_user_id"])
+    allowed = frozenset(p["source_paths"] + p["target_paths"])
+    # Durable handles + pre-run anchor, both captured before anything mutates.
+    path_ids = {path: doc_ids.get_or_mint(path) for path in sorted(allowed)}
+    base_sha = git.head_sha()
+    if base_sha is None:
+        change_proposals.mark_stale(proposal_id, reason="empty wiki repository")
+        return
+
+    with trace_flow("automanage.agentic_execute", proposal_id=proposal_id, op=p["op"]):
+        outcome = automanage_apply.apply_proposal(p, author=author)
+
+    violations = _scope_violations(base_sha, allowed)
+    if violations or not outcome.ok:
+        reverted = git.revert_to(
+            base_sha,
+            f"automanage: revert rejected execution of proposal {proposal_id}",
+            author=author,
+        )
+        if reverted is not None:
+            _reconverge_after_revert(allowed, reverted, author)
+        reason = (
+            f"execution touched out-of-scope paths: {violations}"
+            if violations
+            else f"execution did not complete: {outcome.detail}"
+        )
+        change_proposals.mark_stale(proposal_id, reason=reason)
+        log.error(
+            "execute: proposal %s rejected (%s)%s",
+            proposal_id,
+            reason,
+            " — reverted" if reverted else "",
+        )
+        return
+
+    head = git.head_sha()
+    assert head is not None  # base_sha existed, so HEAD does
+    event_target = (p["target_paths"] or p["source_paths"])[0]
+    _finalize_applied(p, applied_sha=head, path_ids=path_ids, event_target=event_target)
+    log.info(
+        "execute: proposal %s applied agentically (%s) — %s",
+        proposal_id,
+        p["op"],
+        outcome.detail,
+    )
 
 
 def _execute_delete_empty_folder(p: dict[str, Any]) -> None:
