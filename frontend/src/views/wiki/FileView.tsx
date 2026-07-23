@@ -327,13 +327,11 @@ export function FileView({ path }: FileViewProps) {
       endOffset: sp.end_offset,
     }));
   }, [sourcesTabOpen, sourceSpans]);
-  const activateSource = useCallback(
-    (key: string) => {
-      const span = (sourceSpans ?? []).find((sp) => sourceKey(sp) === key);
-      if (span) coeditorRef.current?.scrollToOffset(span.start_offset);
-    },
-    [sourceSpans],
-  );
+  // Scrolls via the editor's live-mapped span, not the raw server offset,
+  // so a click after local edits lands on the moved text.
+  const activateSource = useCallback((key: string) => {
+    coeditorRef.current?.scrollToSource(key);
+  }, []);
   // Attribution runs both ways: hovering a card lights only that source's
   // spans, and a caret inside a span lights its card (the editor reports
   // caret-source ids against its live-mapped offsets).

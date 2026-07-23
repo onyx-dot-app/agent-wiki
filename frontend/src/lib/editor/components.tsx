@@ -374,6 +374,9 @@ interface CoeditorProps {
  * links). */
 export interface CoeditorHandle {
   scrollToOffset: (offset: number) => void;
+  /** Scroll to a source's first attributed span, read from the highlight
+   * field's live-mapped offsets so edits since the fetch are honored. */
+  scrollToSource: (id: string) => void;
   /** Doc-space top and height (px from the document's start) of the line
    * block holding a character offset. Stable for off-screen positions
    * (line-block geometry, not rendered coordinates). */
@@ -474,6 +477,20 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           v.dispatch({
             effects: EditorView.scrollIntoView(
               Math.max(0, Math.min(offset, v.state.doc.length)),
+              { y: "center" },
+            ),
+          });
+        },
+        scrollToSource: (id: string) => {
+          const v = view.current;
+          if (!v) return;
+          const target = v.state
+            .field(sourceHighlightsExt.field)
+            .targets.find((t) => t.id === id);
+          if (!target) return;
+          v.dispatch({
+            effects: EditorView.scrollIntoView(
+              Math.max(0, Math.min(target.startOffset, v.state.doc.length)),
               { y: "center" },
             ),
           });
@@ -676,6 +693,32 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           void doPush();
         }
         if (u.geometryChanged || u.docChanged) notifyLayout("geometry");
+        // Caret-to-source attribution against the field's live-mapped spans.
+        // Runs above the remote-op return and also on field-value changes,
+        // since remote edits and effect-only target swaps move or clear the
+        // spans under a parked caret.
+        const sourceField = sourceHighlightsExt.field;
+        if (
+          (u.selectionSet ||
+            u.docChanged ||
+            u.startState.field(sourceField) !== u.state.field(sourceField)) &&
+          onSourceCaretRef.current
+        ) {
+          const { from, to } = u.state.selection.main;
+          const ids: string[] = [];
+          for (const t of u.state.field(sourceField).targets) {
+            const hit =
+              from === to
+                ? from >= t.startOffset && from < t.endOffset
+                : from < t.endOffset && to > t.startOffset;
+            if (hit && !ids.includes(t.id)) ids.push(t.id);
+          }
+          const key = ids.join("\n");
+          if (key !== lastCaretIds.current) {
+            lastCaretIds.current = key;
+            onSourceCaretRef.current(ids);
+          }
+        }
         // Remote-applied transactions aren't local input — don't report them as
         // our caret/typing.
         if (applyingRemote.current) return;
@@ -701,24 +744,6 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
             draft,
             coords ? { x: coords.left, y: coords.top } : null,
           );
-        }
-        // Caret-to-source attribution against the field's live-mapped spans
-        // (empty unless the page is feeding source targets).
-        if ((u.selectionSet || u.docChanged) && onSourceCaretRef.current) {
-          const { from, to } = sel;
-          const ids: string[] = [];
-          for (const t of u.state.field(sourceHighlightsExt.field).targets) {
-            const hit =
-              from === to
-                ? from >= t.startOffset && from < t.endOffset
-                : from < t.endOffset && to > t.startOffset;
-            if (hit && !ids.includes(t.id)) ids.push(t.id);
-          }
-          const key = ids.join("\n");
-          if (key !== lastCaretIds.current) {
-            lastCaretIds.current = key;
-            onSourceCaretRef.current(ids);
-          }
         }
       });
 
