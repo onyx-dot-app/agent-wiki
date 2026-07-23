@@ -213,6 +213,17 @@ def _execute_agentic(p: dict[str, Any]) -> None:
     lost_targets = [t for t in p["target_paths"] if t not in live]
     if lost_targets:
         violations = violations + [f"target removed: {t}" for t in lost_targets]
+    # And when targets exist, a removed source must have *forwarded* its
+    # identity to a survivor — a plain trash leaves links dead-ending at a
+    # tombstone instead of the surviving page.
+    if p["target_paths"]:
+        for s in p["source_paths"]:
+            if s in live:
+                continue
+            sid = path_ids.get(s)
+            row = doc_ids.get(sid) if sid else None
+            if row is not None and row["forwarded_to"] is None:
+                violations = violations + [f"source removed without identity forward: {s}"]
     if violations or not outcome.ok:
         reverted = git.revert_to(
             base_sha,

@@ -265,3 +265,75 @@ def test_post_run_check_catches_a_removed_target(repo, monkeypatch):
     assert p is not None and p["status"] == "stale"
     assert "target removed" in (p["status_reason"] or "")
     assert wiki_git.read_file_opt("docs/kept.md") is not None  # reverted back
+
+
+def test_trash_page_refused_when_a_survivor_exists(repo, monkeypatch):
+    """With target paths present, removals must forward identity — the model
+    is steered to retire_page instead of a plain trash."""
+    pid = _merge_proposal()
+    assert auto_approve(pid, acting_user_id=AI_USER_ID)
+
+    _script(
+        monkeypatch,
+        [
+            CompletionResult(
+                tool_calls=[_tc("trash_page", path="docs/dup.md")]  # source, but no forward
+            ),
+            # The refusal steers the model to the right tool.
+            CompletionResult(
+                tool_calls=[
+                    _tc("retire_page", source="docs/dup.md", target="docs/kept.md")
+                ]
+            ),
+            CompletionResult(text="Retired with forwarding."),
+        ],
+    )
+    executor.execute(pid)
+
+    p = get(pid)
+    assert p is not None and p["status"] == "applied"
+    dup_id = None
+    from app.db.session import session
+    from sqlalchemy import text as _text
+    with session() as s:
+        dup_id = s.execute(
+            _text(
+                "select forwarded_to from wiki_doc_ids where path like '%docs/dup%' "
+                "and deleted_at is not null order by created_at desc limit 1"
+            )
+        ).scalar()
+    assert dup_id  # identity forwarded, not a dead tombstone
+
+
+def test_post_run_catches_unforwarded_source_removal(repo, monkeypatch):
+    """Bypass rail: a source that leaves the tree without a forward (while a
+    survivor exists) is a violation — reverted and staled."""
+    from app.models.wiki import PathMove
+    from app.wiki import notify, trash as wiki_trash
+
+    pid = _merge_proposal()
+    assert auto_approve(pid, acting_user_id=AI_USER_ID)
+
+    def rogue_dispatch(self, name, args):
+        dest = wiki_trash.trash_location(wiki_trash.new_trash_id(), "docs/dup.md")
+        sha, moves = wiki_git.move_path("docs/dup.md", dest, "rogue", author=None)
+        notify.after_doc_trashed(
+            moves, sha, None, root_move=PathMove(old="docs/dup.md", new=dest)
+        )
+        self.mutated = True
+        return {"ok": True}
+
+    monkeypatch.setattr(automanage_apply._ToolBox, "dispatch", rogue_dispatch)
+    _script(
+        monkeypatch,
+        [
+            CompletionResult(tool_calls=[_tc("write_page", path="docs/kept.md", body="x")]),
+            CompletionResult(text="done"),
+        ],
+    )
+    executor.execute(pid)
+
+    p = get(pid)
+    assert p is not None and p["status"] == "stale"
+    assert "without identity forward" in (p["status_reason"] or "")
+    assert wiki_git.read_file_opt("docs/dup.md") is not None  # reverted back

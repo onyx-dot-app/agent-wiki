@@ -197,6 +197,12 @@ class _ToolBox:
         return {"source": src, "dest": dst, "sha": sha}
 
     def trash_page(self, args: dict[str, Any]) -> Any:
+        if self._targets:
+            return {
+                "error": "this proposal has surviving target paths — a "
+                "removed page's identity must forward to the survivor; use "
+                "retire_page instead of trash_page"
+            }
         if err := self._check(consumes=(args["path"],)):
             return {"error": err}
         path = args["path"]
