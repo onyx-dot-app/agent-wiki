@@ -50,10 +50,14 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, Generator
 
+import redis as redis_lib
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
+# Imported as a module (not ``from app.config import CONFIG``) so every
+# read sees the live attribute — tests patch ``app.config.CONFIG``.
+import app.config
 from app.db.session import session
 
 log = logging.getLogger(__name__)
@@ -150,11 +154,7 @@ def get_redis() -> Any:
     with _redis_lock:
         if _redis_client is not None:
             return _redis_client
-        import redis as redis_lib
-
-        from app.config import CONFIG
-
-        _redis_client = redis_lib.from_url(CONFIG.redis_url, decode_responses=True)
+        _redis_client = redis_lib.from_url(app.config.CONFIG.redis_url, decode_responses=True)
         return _redis_client
 
 
@@ -174,24 +174,28 @@ def reset_redis_for_tests() -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _prefix() -> str:
+    return app.config.CONFIG.redis_key_prefix
+
+
 def _stream_key(name: str) -> str:
-    return f"queue:{name}"
+    return f"{_prefix()}queue:{name}"
 
 
 def _delay_key(name: str) -> str:
-    return f"queue:{name}:delay"
+    return f"{_prefix()}queue:{name}:delay"
 
 
 def _bodies_key(name: str) -> str:
-    return f"queue:{name}:bodies"
+    return f"{_prefix()}queue:{name}:bodies"
 
 
 def _counter_key(name: str) -> str:
-    return f"queue:{name}:msg_counter"
+    return f"{_prefix()}queue:{name}:msg_counter"
 
 
 def _sched_lock_key(name: str) -> str:
-    return f"queue:{name}:sched_lock"
+    return f"{_prefix()}queue:{name}:sched_lock"
 
 
 def _as_str(v: Any) -> str:

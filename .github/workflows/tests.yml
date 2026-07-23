@@ -31,13 +31,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Start Postgres
+        # Durability off: this database is thrown away with the runner, and
+        # the suite creates/drops a database per test — fsync latency on a
+        # shared runner disk otherwise dominates wall time and varies run
+        # to run.
         run: |
           docker run -d --name agent-wiki-pg \
             -e POSTGRES_USER=postgres \
             -e POSTGRES_PASSWORD=postgres \
             -e POSTGRES_DB=agent_wiki \
             -p 127.0.0.1:5432:5432 \
-            postgres:17
+            --shm-size=256mb \
+            postgres:17 \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
 
       - name: Start Redis
         run: |

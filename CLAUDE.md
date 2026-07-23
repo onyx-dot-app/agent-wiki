@@ -366,11 +366,13 @@ there.
   `tests/_auth.py:login_fastapi(client, user_id)` which mints a
   `SessionMiddleware`-compatible cookie.
 - Per-test isolation:
-  - the conftest creates a unique Postgres schema per test against
-    `TEST_DATABASE_URL` (default `postgresql://postgres:postgres@localhost:5432/agent_wiki_test`)
-    and points `CONFIG.database_url` at it via libpq's `options=-csearch_path=...`;
-    the schema is dropped on teardown. The test database itself must already
-    exist with `pg_textsearch` and `pgmq` installed.
+  - the conftest creates a unique Postgres database per test by cloning a
+    session-scoped template database that already has every migration
+    applied (`CREATE DATABASE … TEMPLATE …`, ~25ms flat — never a per-test
+    `alembic upgrade head`); the database is dropped on teardown. The
+    maintenance database named by `TEST_DATABASE_URL` (default
+    `postgresql://postgres:postgres@localhost:5432/agent_wiki_test`) must
+    already exist; template + clones are created beside it.
   - point `WIKI_DIR` at a tmp directory; `ensure_wiki_repo()` will init it.
 - **Mock at the seam, not the SDK.** Patch `app.llm.client.complete` to return
   a canned normalized dict. Never patch `anthropic.Anthropic` directly.
