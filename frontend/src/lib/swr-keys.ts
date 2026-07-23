@@ -17,6 +17,10 @@ export const SWR_KEYS = {
     `/wiki/update-health?path=${encodeURIComponent(path)}`,
   documentActivity: (path: string) =>
     `/wiki/file/activity?path=${encodeURIComponent(path)}`,
+  /** Tuple key: the head sha busts the cache on new commits even though the
+   * request URL only carries the path (the server always reads at HEAD). */
+  sourceSpans: (path: string, headSha: string) =>
+    ["/wiki/source-spans", path, headSha] as const,
   pageAcl: (path: string) => `/wiki/acl?path=${encodeURIComponent(path)}`,
   /** `usePathToId`'s cache key is a `[tag, path]` tuple — `tag` namespaces two
    * call sites resolving different concerns off the same `resolveIds`

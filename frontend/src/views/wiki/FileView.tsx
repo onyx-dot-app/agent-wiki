@@ -43,6 +43,7 @@ import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { sourceKey, SourcesPanel } from "@/components/wiki/SourcesPanel";
 import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
+import { SWR_KEYS } from "@/lib/swr-keys";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
@@ -303,12 +304,15 @@ export function FileView({ path }: FileViewProps) {
   const sourcesTabOpen = panelTab === "sources";
   const { data: sourceSpans } = useSWR(
     sourcesTabOpen && headSha && !viewingVersion
-      ? ["/wiki/source-spans", path, headSha]
+      ? SWR_KEYS.sourceSpans(path, headSha)
       : null,
     () =>
       apiFetch<SourceSpan[]>(
         `/wiki/source-spans?path=${encodeURIComponent(path)}`,
       ),
+    // Offsets are only valid for the doc revision they were fetched for, so
+    // a path or head change must blank the highlights, never reuse them.
+    { keepPreviousData: false },
   );
   const sourceHighlights = useMemo<AnchoredHighlightTarget[]>(() => {
     if (!sourcesTabOpen) return [];
