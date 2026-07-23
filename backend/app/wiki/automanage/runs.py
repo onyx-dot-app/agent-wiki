@@ -11,7 +11,7 @@ plain dicts, like ``app/wiki/change_proposals.py``.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -97,6 +97,29 @@ def mark_failed(run_id: str, *, error: str) -> None:
         )
     if not touched:
         raise ValueError(f"detection run {run_id!r} not found")
+
+
+# A ``running`` row older than this is a corpse (worker died mid-run without
+# marking failure) — it must not block sweeps forever.
+STUCK_RUN_MAX_AGE_HOURS = 2
+
+
+def running_sweep_exists() -> bool:
+    """True while a sweep run is genuinely in flight. Corpse rows — running
+    but older than ``STUCK_RUN_MAX_AGE_HOURS`` — don't count (and any real
+    sweep finishes in minutes, not hours)."""
+    cutoff = (
+        datetime.now(UTC) - timedelta(hours=STUCK_RUN_MAX_AGE_HOURS)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    with session() as s:
+        row = s.execute(
+            select(DetectionRun.id).where(
+                DetectionRun.trigger == TriggerKind.SWEEP.value,
+                DetectionRun.status == RunStatus.RUNNING.value,
+                DetectionRun.started_at >= cutoff,
+            )
+        ).first()
+        return row is not None
 
 
 def get(run_id: str) -> dict[str, Any] | None:
