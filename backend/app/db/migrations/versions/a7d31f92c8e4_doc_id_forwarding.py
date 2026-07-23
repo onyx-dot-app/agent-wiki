@@ -1,7 +1,7 @@
 """wiki_doc_ids.forwarded_to — retired ids resolve to the surviving document
 
 Revision ID: a7d31f92c8e4
-Revises: 5c4a9e1b7d38
+Revises: a9e2c7f4b1d6
 Create Date: 2026-07-22
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "a7d31f92c8e4"
-down_revision = "5c4a9e1b7d38"
+down_revision = "a9e2c7f4b1d6"
 branch_labels = None
 depends_on = None
 
