@@ -303,7 +303,10 @@ export function FileView({ path }: FileViewProps) {
 
   // Source-attributed spans light up in the doc while the Sources tab is
   // open (mock 1832:81274). Fetched lazily per head sha since the server
-  // remaps offsets to HEAD, so an old version never fetches.
+  // remaps offsets to HEAD, so an old version never fetches. The server
+  // always reads at its current HEAD, which can be ahead of this key:
+  // offsets apply best-effort, and the live session converges the local
+  // doc toward the state the server read, like comment offsets.
   const { data: sourceSpans } = useSWR(
     sourcesTabOpen && headSha && !viewingVersion
       ? SWR_KEYS.sourceSpans(path, headSha)
