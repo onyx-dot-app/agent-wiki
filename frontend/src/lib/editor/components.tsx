@@ -48,6 +48,10 @@ import {
   type CommentDraft,
   type CommentHighlightTarget,
 } from "@/lib/editor/comments";
+import {
+  sourceHighlights as sourceHighlightsExt,
+  type AnchoredHighlightTarget,
+} from "@/lib/editor/highlights";
 
 /** A remote peer's caret: a thin colored bar with a small name label above it. */
 class CaretWidget extends WidgetType {
@@ -79,6 +83,24 @@ class CaretWidget extends WidgetType {
 
 /** Dispatched to update the peer list in `peersField`. */
 const setPeersEffect = StateEffect.define<CoeditPeer[]>();
+
+/** Highlight ids whose spans contain a collapsed caret or intersect a
+ * selection, half-open at span ends so a caret just past a span misses. */
+function caretHitIds(
+  targets: AnchoredHighlightTarget[],
+  from: number,
+  to: number,
+): string[] {
+  const ids: string[] = [];
+  for (const t of targets) {
+    const hit =
+      from === to
+        ? from >= t.startOffset && from < t.endOffset
+        : from < t.endOffset && to > t.startOffset;
+    if (hit && !ids.includes(t.id)) ids.push(t.id);
+  }
+  return ids;
+}
 
 /** Build a `DecorationSet` from the current peer list: one selection highlight
  * per non-collapsed selection and one `CaretWidget` per peer head position.
@@ -157,9 +179,9 @@ const peersField = StateField.define<{
  * `--cm-gutter` custom property that the surrounding column sets (so the text
  * gutter tracks the page's responsive padding at every breakpoint), and it
  * uses a slim scrollbar with a transparent track. */
-// Either comment-highlight mark class, for selectors that must match both.
-const COMMENT_HIGHLIGHT =
-  ":is(.cm-comment-highlight, .cm-comment-highlight-active)";
+// Every anchored-highlight mark class, for selectors that must match all.
+const ANCHOR_HIGHLIGHT =
+  ":is(.cm-comment-highlight, .cm-comment-highlight-active, .cm-source-highlight, .cm-source-highlight-active)";
 
 const baseTheme = EditorView.theme({
   "&": {
@@ -266,24 +288,33 @@ const baseTheme = EditorView.theme({
   ".cm-comment-highlight-active": {
     backgroundColor: "var(--highlight-active)",
   },
+  // Source-attributed spans idle at the light amber, and the hovered
+  // card's spans jump to Highlight/Active (mock 1832:81274) so a reader
+  // can tell which highlight belongs to which source.
+  ".cm-source-highlight": {
+    backgroundColor: "var(--neon-amber-a30)",
+  },
+  ".cm-source-highlight-active": {
+    backgroundColor: "var(--highlight-active)",
+  },
   // Code marks nest inside highlight marks with an opaque tint that would
   // occlude the wrapping span's amber, so they repaint the highlight color
   // over their own background.
-  ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline":
+  ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline, .cm-source-highlight .cm-md-code-block, .cm-source-highlight .cm-md-code-inline":
     {
       backgroundImage:
         "linear-gradient(var(--neon-amber-a30), var(--neon-amber-a30))",
     },
-  ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline":
+  ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline, .cm-source-highlight-active .cm-md-code-block, .cm-source-highlight-active .cm-md-code-inline":
     {
       backgroundImage:
         "linear-gradient(var(--highlight-active), var(--highlight-active))",
     },
   // A highlight mark splits the line's block-display code span, and each
-  // piece being a block would break the line at the comment's boundaries.
+  // piece being a block would break the line at the highlight's boundaries.
   // Inline pieces keep the line whole and the amber hugging the text, the
   // same as highlights on plain content.
-  [`.cm-line:has(${COMMENT_HIGHLIGHT}) .cm-md-code-block`]: {
+  [`.cm-line:has(${ANCHOR_HIGHLIGHT}) .cm-md-code-block`]: {
     display: "inline",
     borderRadius: "0",
   },
@@ -340,6 +371,16 @@ interface CoeditorProps {
   commentHighlights?: CommentHighlightTarget[];
   /** Thread ids whose spans get the stronger (active) highlight. */
   activeCommentIds?: string[];
+  /** Fires with the thread ids whose spans contain the caret (or intersect
+   * the selection), deduped against the last report. */
+  onCommentCaret?: (ids: string[]) => void;
+  /** Source-attributed spans to highlight while the Sources tab is open. */
+  sourceHighlights?: AnchoredHighlightTarget[];
+  /** Source keys whose spans get the stronger (active) highlight. */
+  activeSourceIds?: string[];
+  /** Fires with the source ids whose spans contain the caret (or intersect
+   * the selection), deduped against the last report. */
+  onSourceCaret?: (ids: string[]) => void;
   /** Fires on every selection change with the current selection as a comment
    * draft (null if collapsed) plus its on-screen coordinates, for the caller
    * to position a floating "Comment" affordance. */
@@ -354,6 +395,13 @@ interface CoeditorProps {
  * links). */
 export interface CoeditorHandle {
   scrollToOffset: (offset: number) => void;
+  /** Scroll to a source's first attributed span, read from the highlight
+   * field's live-mapped offsets so edits since the fetch are honored. */
+  scrollToSource: (id: string) => void;
+  /** The source highlight field's live-mapped targets, for hosts that
+   * anchor UI to span positions (collapsed spans included, callers skip
+   * them). */
+  sourceTargets: () => AnchoredHighlightTarget[];
   /** Doc-space top and height (px from the document's start) of the line
    * block holding a character offset. Stable for off-screen positions
    * (line-block geometry, not rendered coordinates). */
@@ -404,6 +452,10 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       readOnly,
       commentHighlights,
       activeCommentIds,
+      onCommentCaret,
+      sourceHighlights,
+      activeSourceIds,
+      onSourceCaret,
       onSelectionForComment,
     },
     ref,
@@ -422,17 +474,29 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const getCaretSeqRef = useRef(getCaretSeq);
     const reportDocRef = useRef(reportDoc);
     const onSelectionForCommentRef = useRef(onSelectionForComment);
+    const onSourceCaretRef = useRef(onSourceCaret);
+    const onCommentCaretRef = useRef(onCommentCaret);
+    // Last caret reports per field, so selection churn inside one span is
+    // quiet.
+    const lastCaretIds = useRef("");
+    const lastCommentCaretIds = useRef("");
     const peersRef = useRef(peers);
     const commentHighlightsRef = useRef(commentHighlights);
     const activeCommentIdsRef = useRef(activeCommentIds);
+    const sourceHighlightsRef = useRef(sourceHighlights);
+    const activeSourceIdsRef = useRef(activeSourceIds);
     onSelRef.current = onSelectionChange;
     onCaretClearedRef.current = onCaretCleared;
     getCaretSeqRef.current = getCaretSeq;
     reportDocRef.current = reportDoc;
     onSelectionForCommentRef.current = onSelectionForComment;
+    onSourceCaretRef.current = onSourceCaret;
+    onCommentCaretRef.current = onCommentCaret;
     peersRef.current = peers;
     commentHighlightsRef.current = commentHighlights;
     activeCommentIdsRef.current = activeCommentIds;
+    sourceHighlightsRef.current = sourceHighlights;
+    activeSourceIdsRef.current = activeSourceIds;
 
     useImperativeHandle(
       ref,
@@ -443,6 +507,26 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           v.dispatch({
             effects: EditorView.scrollIntoView(
               Math.max(0, Math.min(offset, v.state.doc.length)),
+              { y: "center" },
+            ),
+          });
+        },
+        sourceTargets: () => {
+          const v = view.current;
+          return v ? v.state.field(sourceHighlightsExt.field).targets : [];
+        },
+        scrollToSource: (id: string) => {
+          const v = view.current;
+          if (!v) return;
+          // An edit can collapse a span to zero width, and a collapsed
+          // target paints nothing, so it can't be the scroll destination.
+          const target = v.state
+            .field(sourceHighlightsExt.field)
+            .targets.find((t) => t.id === id && t.startOffset < t.endOffset);
+          if (!target) return;
+          v.dispatch({
+            effects: EditorView.scrollIntoView(
+              Math.max(0, Math.min(target.startOffset, v.state.doc.length)),
               { y: "center" },
             ),
           });
@@ -645,6 +729,42 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           void doPush();
         }
         if (u.geometryChanged || u.docChanged) notifyLayout("geometry");
+        // Caret attribution against each highlight field's live-mapped
+        // spans. Runs above the remote-op return and also on field-value
+        // changes, since remote edits and effect-only target swaps move or
+        // clear the spans under a parked caret.
+        const reportCaret = (
+          field: typeof sourceHighlightsExt.field | typeof commentsField,
+          cb: ((ids: string[]) => void) | undefined,
+          last: { current: string },
+        ) => {
+          if (
+            !cb ||
+            !(
+              u.selectionSet ||
+              u.docChanged ||
+              u.startState.field(field) !== u.state.field(field)
+            )
+          )
+            return;
+          const { from, to } = u.state.selection.main;
+          const ids = caretHitIds(u.state.field(field).targets, from, to);
+          const key = ids.join("\n");
+          if (key !== last.current) {
+            last.current = key;
+            cb(ids);
+          }
+        };
+        reportCaret(
+          sourceHighlightsExt.field,
+          onSourceCaretRef.current,
+          lastCaretIds,
+        );
+        reportCaret(
+          commentsField,
+          onCommentCaretRef.current,
+          lastCommentCaretIds,
+        );
         // Remote-applied transactions aren't local input — don't report them as
         // our caret/typing.
         if (applyingRemote.current) return;
@@ -695,12 +815,17 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           placeholderExt(placeholder ?? ""),
           peersField,
           commentsField,
+          sourceHighlightsExt.field,
           baseTheme,
           updateListener,
         ],
       });
       v = new EditorView({ state, parent: host.current });
       view.current = v;
+      // A sentinel no ids-join can produce, so the fresh editor's first
+      // caret report always fires and clears any prior page's attribution.
+      lastCaretIds.current = "\0";
+      lastCommentCaretIds.current = "\0";
       // A fresh state starts with empty peer/highlight fields, and the
       // prop-tracking effects below only fire on identity change. Seed both.
       v.dispatch({
@@ -710,6 +835,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           setActiveCommentHighlightsEffect.of(
             activeCommentIdsRef.current ?? [],
           ),
+          sourceHighlightsExt.setTargets.of(sourceHighlightsRef.current ?? []),
+          sourceHighlightsExt.setActive.of(activeSourceIdsRef.current ?? []),
         ],
       });
       const onScroll = () => notifyLayout("scroll");
@@ -827,6 +954,20 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         effects: setActiveCommentHighlightsEffect.of(activeCommentIds ?? []),
       });
     }, [activeCommentIds]);
+
+    // Push source-attributed spans into the editor state.
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: sourceHighlightsExt.setTargets.of(sourceHighlights ?? []),
+      });
+    }, [sourceHighlights]);
+
+    // Hovered source keys ride their own effect, like comment actives.
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: sourceHighlightsExt.setActive.of(activeSourceIds ?? []),
+      });
+    }, [activeSourceIds]);
 
     // Reconfigure the read-only facets when the prop changes — they're baked
     // into the state at create time otherwise, and a `can_write` correction

@@ -1,77 +1,80 @@
 "use client";
 
-import { useState } from "react";
-import { Button, EndOfList, Tag, Text } from "@onyx-ai/opal/components";
-import { Section } from "@onyx-ai/opal/layouts";
-import { SvgExternalLink, SvgFileText, SvgGlobe } from "@onyx-ai/opal/icons";
+import { useEffect, useState, type RefObject } from "react";
 import {
-  SvgBraintrust,
-  SvgConfluence,
-  SvgGithub,
-  SvgGmail,
-  SvgGoogleDrive,
-  SvgHubspot,
-  SvgJira,
-  SvgLinear,
-  SvgNotion,
-  SvgSalesforce,
-  SvgSharepoint,
-  SvgSlack,
-  SvgTeams,
-  SvgZendesk,
-} from "@onyx-ai/opal/logos";
-import type { IconFunctionComponent } from "@onyx-ai/opal/types";
+  Button,
+  EndOfList,
+  SelectButton,
+  Tag,
+  Text,
+} from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
+import { SvgExternalLink } from "@onyx-ai/opal/icons";
 
+import type { CoeditorHandle } from "@/lib/editor/components";
+import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
 import { relativeTime } from "@/lib/time";
-import type { SourceRef, WriteProvenance } from "@/types";
+import { useIsMobile } from "@/lib/viewport";
+import type { SourceRef } from "@/types";
 
+import { SvgListLines } from "./icons";
 import { PanelSearchField } from "./PanelSearch";
+import { SourceAnchorRail } from "./SourceAnchorRail";
+import { sourceIcon, sourceKey, sourceTypeLabel } from "./sources";
 
 interface Props {
   sources: SourceRef[];
+  /** The page's highlight targets, retriggering chip layout in anchored
+   * mode when spans land or change. */
+  targets?: AnchoredHighlightTarget[];
+  /** The live editor, required by anchored mode to track doc positions. */
+  editorRef?: RefObject<CoeditorHandle | null>;
+  /** Anchored/list mode is page-owned: the page hides the editor's native
+   * scrollbar while anchored mode shows the viewport-edge one. */
+  listView: boolean;
+  onListViewChange: (v: boolean) => void;
+  /** Source keys whose cards light up (the caret sits in their spans). */
+  activeKeys?: string[];
+  /** Called with a card's source key to scroll the doc to that source's
+   * first span. */
+  onActivateSource?: (key: string) => void;
+  /** Fires with the hovered card's source key (null on leave), so the
+   * page can light that source's doc spans. */
+  onHoverSource?: (key: string | null) => void;
 }
 
-const SOURCE_ICONS: Record<string, IconFunctionComponent> = {
-  braintrust: SvgBraintrust,
-  confluence: SvgConfluence,
-  github: SvgGithub,
-  gmail: SvgGmail,
-  google_drive: SvgGoogleDrive,
-  hubspot: SvgHubspot,
-  jira: SvgJira,
-  linear: SvgLinear,
-  notion: SvgNotion,
-  salesforce: SvgSalesforce,
-  sharepoint: SvgSharepoint,
-  slack: SvgSlack,
-  teams: SvgTeams,
-  web: SvgGlobe,
-  zendesk: SvgZendesk,
-};
-
-function sourceIcon(type: string | null): IconFunctionComponent {
-  return (type && SOURCE_ICONS[type]) || SvgFileText;
+interface SourceCardProps {
+  source: SourceRef;
+  /** Lights the card while the caret sits in one of its spans. */
+  active?: boolean;
+  /** Scrolls the doc to this source's first attributed span. */
+  onActivate?: () => void;
+  /** Hover state, so the page can light this source's doc spans. */
+  onHoverChange?: (hovered: boolean) => void;
 }
 
-// "google_drive" → "Google Drive", for the connector chip.
-function sourceTypeLabel(type: string): string {
-  return type
-    .split(/[_-]/)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
-/** Stable card identity, mirroring the backend's dedupe key (document id,
- * falling back to url or title). */
-function sourceKey(s: WriteProvenance): string {
-  return s.source_document_id || s.source_url || s.source_title || "";
-}
-
-function SourceCard({ source }: { source: SourceRef }) {
+function SourceCard({
+  source,
+  active,
+  onActivate,
+  onHoverChange,
+}: SourceCardProps) {
   const Icon = sourceIcon(source.source_type);
   const url = source.source_url;
   return (
-    <div className="group/source w-full shrink-0 rounded-(--radius-12) p-1 hover:bg-(--background-tint-00)">
+    <div
+      data-source-key={sourceKey(source) || undefined}
+      // Same chrome as comment cards: rested tint with the flat shadow,
+      // hover and the caret-active state lift to white and the raised one.
+      className={`group/source w-full shrink-0 cursor-pointer rounded-(--radius-12) p-1 ${
+        active
+          ? "bg-(--background-tint-00) shadow-(--shadow-box-01)"
+          : "bg-(--background-tint-01) shadow-(--shadow-box-00) hover:bg-(--background-tint-00) hover:shadow-(--shadow-box-01)"
+      }`}
+      onClick={onActivate}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
+    >
       <div className="flex min-h-7 items-start gap-1 p-[2px]">
         <span className="flex size-6 shrink-0 items-center justify-center">
           <Icon size={16} />
@@ -82,7 +85,10 @@ function SourceCard({ source }: { source: SourceRef }) {
           </Text>
         </span>
         {url && (
-          <span className="invisible shrink-0 group-hover/source:visible">
+          <span
+            className="invisible shrink-0 group-hover/source:visible"
+            onClick={(e) => e.stopPropagation()}
+          >
             <Button
               icon={SvgExternalLink}
               size="md"
@@ -119,10 +125,30 @@ function SourceCard({ source }: { source: SourceRef }) {
 /**
  * Sources tab (mock 1837:103626): the ingested documents credited to this
  * page, previewing their content via the snippet captured at ingest when
- * one exists. Sources ride the page load, nothing else is fetched.
+ * one exists. Sources ride the page load, the panel itself fetches nothing.
  */
-export function SourcesPanel({ sources }: Props) {
+export function SourcesPanel({
+  sources,
+  targets,
+  editorRef,
+  listView,
+  onListViewChange,
+  activeKeys,
+  onActivateSource,
+  onHoverSource,
+}: Props) {
+  const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
+  const listMode = listView || isMobile || !editorRef;
+
+  // A caret landing in a span brings its card into view (list mode).
+  const firstActive = activeKeys?.[0];
+  useEffect(() => {
+    if (!firstActive || !listMode) return;
+    document
+      .querySelector(`[data-source-key="${CSS.escape(firstActive)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [firstActive, listMode]);
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -135,6 +161,58 @@ export function SourcesPanel({ sources }: Props) {
       )
     : sources;
 
+  const searchRow = (
+    <Section
+      flexDirection="row"
+      justifyContent="start"
+      alignItems="center"
+      height="fit"
+      gap={0.25}
+      className="shrink-0"
+    >
+      <PanelSearchField
+        value={query}
+        onChange={setQuery}
+        placeholder="Search sources…"
+      />
+      {!isMobile && editorRef && (
+        <SelectButton
+          icon={SvgListLines}
+          state={listView ? "selected" : "empty"}
+          tooltip={listView ? "Anchored view" : "List view"}
+          onClick={() => onListViewChange(!listView)}
+        />
+      )}
+    </Section>
+  );
+
+  if (!listMode) {
+    // Anchored mode (mock 1832:81274): only the search row is chromed,
+    // chips float on the page background tracking their doc spans.
+    return (
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        height="auto"
+        gap={0.25}
+        className="relative min-h-0 flex-1"
+      >
+        <div className="shrink-0 rounded-(--radius-12) border border-(--border-01) p-1">
+          {searchRow}
+        </div>
+        <SourceAnchorRail
+          sources={shown}
+          targets={targets ?? []}
+          editorRef={editorRef!}
+          activeKeys={activeKeys}
+          onHoverSource={onHoverSource}
+          onActivateSource={onActivateSource}
+          onShowAll={() => onListViewChange(true)}
+        />
+      </Section>
+    );
+  }
+
   return (
     <Section
       justifyContent="start"
@@ -144,20 +222,7 @@ export function SourcesPanel({ sources }: Props) {
       padding={0.25}
       className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01)"
     >
-      <Section
-        flexDirection="row"
-        justifyContent="start"
-        alignItems="center"
-        height="fit"
-        gap={0.25}
-        className="shrink-0"
-      >
-        <PanelSearchField
-          value={query}
-          onChange={setQuery}
-          placeholder="Search sources…"
-        />
-      </Section>
+      {searchRow}
       <Section
         justifyContent="start"
         alignItems="stretch"
@@ -182,13 +247,27 @@ export function SourcesPanel({ sources }: Props) {
           </div>
         )}
 
-        {shown.map((s, i) => (
-          // Rows with no identity fields keep distinct keys via the index.
-          <SourceCard
-            key={sourceKey(s) || `${s.last_updated}-${i}`}
-            source={s}
-          />
-        ))}
+        {shown.map((s, i) => {
+          const key = sourceKey(s);
+          return (
+            // Rows with no identity fields keep distinct keys via the index.
+            <SourceCard
+              key={key || `${s.last_updated}-${i}`}
+              source={s}
+              active={!!key && !!activeKeys?.includes(key)}
+              onActivate={
+                key && onActivateSource
+                  ? () => onActivateSource(key)
+                  : undefined
+              }
+              onHoverChange={
+                key && onHoverSource
+                  ? (h) => onHoverSource(h ? key : null)
+                  : undefined
+              }
+            />
+          );
+        })}
 
         {shown.length > 0 && (
           <div className="px-4 py-2">

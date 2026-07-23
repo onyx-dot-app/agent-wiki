@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import {
   Button,
   Divider,
@@ -40,7 +41,11 @@ import {
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
+import { EditorEdgeScrollbar } from "@/components/wiki/EditorEdgeScrollbar";
+import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
+import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
+import { SWR_KEYS } from "@/lib/swr-keys";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
@@ -92,6 +97,7 @@ import type {
   DocumentActivity,
   DocumentActivityResponse,
   SourceRef,
+  SourceSpan,
 } from "@/types";
 
 // Local shape for the /wiki/file API response — mirrored from page.tsx.
@@ -196,6 +202,8 @@ export function FileView({ path }: FileViewProps) {
   // also swaps the editor's native scrollbar for the viewport-edge one.
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentsListView, setCommentsListView] = useState(false);
+  // Same page-owned split for the Sources tab's anchored/list modes.
+  const [sourcesListView, setSourcesListView] = useState(false);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [selTool, setSelTool] = useState<{
@@ -262,15 +270,18 @@ export function FileView({ path }: FileViewProps) {
     void refreshComments();
   }, [refreshComments]);
 
+  const sourcesTabOpen = panelTab === "sources";
+
   // Comment thread spans to highlight in the editor. Cleared while viewing
-  // an old commit (DiffView, no live editor). The active/hovered ids ride a
-  // separate prop: the editor maps these offsets through local edits, and a
-  // hover or selection flip must not re-send the unmapped ones.
+  // an old commit (DiffView, no live editor) and while the Sources tab has
+  // the doc, so the two highlight families never mix. The active/hovered
+  // ids ride a separate prop: the editor maps these offsets through local
+  // edits, and a hover or selection flip must not re-send the unmapped ones.
   // Hovering a card lights its doc highlight like selection does (mock
   // 1855 annotation: "Hover highlight - match the hovered comment").
   const [hoveredCommentId, setHoveredCommentId] = useState<string | null>(null);
   const commentHighlights = useMemo<CommentHighlightTarget[]>(() => {
-    if (viewingVersion) return [];
+    if (viewingVersion || sourcesTabOpen) return [];
     return commentThreads
       .map((t) => t.root)
       .filter(
@@ -287,11 +298,55 @@ export function FileView({ path }: FileViewProps) {
         startOffset: r.start_offset as number,
         endOffset: r.end_offset as number,
       }));
-  }, [commentThreads, viewingVersion]);
+  }, [commentThreads, viewingVersion, sourcesTabOpen]);
   const activeCommentIds = useMemo(
     () =>
       [activeCommentId, hoveredCommentId].filter((id): id is string => !!id),
     [activeCommentId, hoveredCommentId],
+  );
+
+  // Source-attributed spans light up in the doc while the Sources tab is
+  // open (mock 1832:81274). Fetched lazily per head sha since the server
+  // remaps offsets to HEAD, so an old version never fetches. The server
+  // always reads at its current HEAD, which can be ahead of this key:
+  // offsets apply best-effort, and the live session converges the local
+  // doc toward the state the server read, like comment offsets.
+  const { data: sourceSpans } = useSWR(
+    sourcesTabOpen && headSha && !viewingVersion
+      ? SWR_KEYS.sourceSpans(path, headSha)
+      : null,
+    () =>
+      apiFetch<SourceSpan[]>(
+        `/wiki/source-spans?path=${encodeURIComponent(path)}`,
+      ),
+    // Offsets are only valid for the doc revision they were fetched for, so
+    // a path or head change must blank the highlights, never reuse them.
+    { keepPreviousData: false },
+  );
+  const sourceHighlights = useMemo<AnchoredHighlightTarget[]>(() => {
+    if (!sourcesTabOpen) return [];
+    return (sourceSpans ?? []).map((sp) => ({
+      id: sourceKey(sp),
+      startOffset: sp.start_offset,
+      endOffset: sp.end_offset,
+    }));
+  }, [sourcesTabOpen, sourceSpans]);
+  // Scrolls via the editor's live-mapped span, not the raw server offset,
+  // so a click after local edits lands on the moved text.
+  const activateSource = useCallback((key: string) => {
+    coeditorRef.current?.scrollToSource(key);
+  }, []);
+  // Attribution runs both ways: hovering a card lights only that source's
+  // spans, and a caret inside a span lights its card (the editor reports
+  // caret-source ids against its live-mapped offsets).
+  const [hoveredSourceKey, setHoveredSourceKey] = useState<string | null>(null);
+  const [caretSourceKeys, setCaretSourceKeys] = useState<string[]>([]);
+  const activeSourceIds = useMemo(
+    () =>
+      hoveredSourceKey && !caretSourceKeys.includes(hoveredSourceKey)
+        ? [hoveredSourceKey, ...caretSourceKeys]
+        : caretSourceKeys,
+    [hoveredSourceKey, caretSourceKeys],
   );
 
   // The doc area hosting the lane, measured at interaction time so the
@@ -368,14 +423,19 @@ export function FileView({ path }: FileViewProps) {
     !isMobile &&
     (marginThreadCount > 0 || commentDraft !== null);
 
-  // Anchored panel mode hides the editor's native scrollbar (it would sit
-  // at the doc/panel boundary) in favor of the panel's viewport-edge one.
-  const anchoredPanelActive =
-    !!coedit.session &&
-    !viewingVersion &&
-    panelTab === "comments" &&
-    !commentsListView &&
-    !isMobile;
+  // With any panel open on the live doc, the doc's scrollbar docks at the
+  // viewport edge (EditorEdgeScrollbar) and the native one hides, so tab
+  // switches never toggle the native bar's width inside the scroller.
+  const panelScrollDocked =
+    !!coedit.session && !viewingVersion && !isMobile && panelTab !== null;
+
+  // A caret inside a commented span focuses its thread in the panel (the
+  // panel's activeId effect scrolls the card into view), without the doc
+  // scroll a card click performs. Leaving every span clears the focus,
+  // matching the click-off collapse.
+  const handleCommentCaret = useCallback((ids: string[]) => {
+    setActiveCommentId(ids[0] ?? null);
+  }, []);
 
   // Select a thread (its span gets the orange highlight) and scroll the
   // editor to bring that span into view. Only an explicit click runs this —
@@ -983,7 +1043,16 @@ export function FileView({ path }: FileViewProps) {
       case "sources":
         return (
           <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
-            <SourcesPanel sources={sources} />
+            <SourcesPanel
+              sources={sources}
+              targets={sourceHighlights}
+              editorRef={viewingVersion ? undefined : coeditorRef}
+              listView={sourcesListView}
+              onListViewChange={setSourcesListView}
+              activeKeys={caretSourceKeys}
+              onActivateSource={viewingVersion ? undefined : activateSource}
+              onHoverSource={viewingVersion ? undefined : setHoveredSourceKey}
+            />
           </div>
         );
       case "watching":
@@ -1074,7 +1143,7 @@ export function FileView({ path }: FileViewProps) {
         ref={docRowRef}
         className={`@container relative flex min-h-0 min-w-0 flex-1 flex-col ${
           railActive ? "rail-reserved" : ""
-        } ${anchoredPanelActive ? "comments-anchored" : ""}`}
+        } ${panelScrollDocked ? "panel-anchored" : ""}`}
       >
         <DocTitle
           path={path}
@@ -1189,6 +1258,10 @@ export function FileView({ path }: FileViewProps) {
                       readOnly={!canWrite}
                       commentHighlights={commentHighlights}
                       activeCommentIds={activeCommentIds}
+                      onCommentCaret={handleCommentCaret}
+                      sourceHighlights={sourceHighlights}
+                      activeSourceIds={activeSourceIds}
+                      onSourceCaret={setCaretSourceKeys}
                       onSelectionForComment={handleSelectionForComment}
                       placeholder="Start typing, or pick a template above…"
                     />
@@ -1227,7 +1300,14 @@ export function FileView({ path }: FileViewProps) {
               rightHost?.el &&
               createPortal(
                 <DocPanel tab={panelTab} onTabChange={setPanelTab}>
-                  {panelBody}
+                  <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                    {panelBody}
+                    {/* One docked doc scrollbar for every tab, so switching
+                        tabs never toggles the native bar's width. */}
+                    {panelScrollDocked && (
+                      <EditorEdgeScrollbar editorRef={coeditorRef} />
+                    )}
+                  </div>
                 </DocPanel>,
                 rightHost.el,
               )}
