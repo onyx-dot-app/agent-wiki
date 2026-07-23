@@ -96,8 +96,12 @@ function SourceCard({
   return (
     <div
       data-source-key={sourceKey(source) || undefined}
-      className={`group/source w-full shrink-0 rounded-(--radius-12) p-1 hover:bg-(--background-tint-00) ${
-        active ? "bg-(--background-tint-00)" : ""
+      // Same chrome as comment cards: rested tint with the flat shadow,
+      // hover and the caret-active state lift to white and the raised one.
+      className={`group/source w-full shrink-0 cursor-pointer rounded-(--radius-12) p-1 ${
+        active
+          ? "bg-(--background-tint-00) shadow-(--shadow-box-01)"
+          : "bg-(--background-tint-01) shadow-(--shadow-box-00) hover:bg-(--background-tint-00) hover:shadow-(--shadow-box-01)"
       }`}
       onClick={onActivate}
       onMouseEnter={() => onHoverChange?.(true)}
