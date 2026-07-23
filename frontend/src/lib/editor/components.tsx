@@ -288,22 +288,28 @@ const baseTheme = EditorView.theme({
   ".cm-comment-highlight-active": {
     backgroundColor: "var(--highlight-active)",
   },
-  // Source-attributed spans idle at the light amber, and the hovered
-  // card's spans jump to Highlight/Active (mock 1832:81274) so a reader
-  // can tell which highlight belongs to which source.
+  // Sources sit on most lines of an ingested page, so idle spans wear the
+  // subtle tint and only the hovered or caret-focused source's spans jump
+  // to Highlight/Active. tint-02 stands in for the mock's de-emphasis
+  // mask (1837:103626), which has no Opal token, as its theme-aware twin.
   ".cm-source-highlight": {
-    backgroundColor: "var(--neon-amber-a30)",
+    backgroundColor: "var(--background-tint-02)",
   },
   ".cm-source-highlight-active": {
     backgroundColor: "var(--highlight-active)",
   },
   // Code marks nest inside highlight marks with an opaque tint that would
-  // occlude the wrapping span's amber, so they repaint the highlight color
+  // occlude the wrapping span's fill, so they repaint the highlight color
   // over their own background.
-  ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline, .cm-source-highlight .cm-md-code-block, .cm-source-highlight .cm-md-code-inline":
+  ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline":
     {
       backgroundImage:
         "linear-gradient(var(--neon-amber-a30), var(--neon-amber-a30))",
+    },
+  ".cm-source-highlight .cm-md-code-block, .cm-source-highlight .cm-md-code-inline":
+    {
+      backgroundImage:
+        "linear-gradient(var(--background-tint-02), var(--background-tint-02))",
     },
   ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline, .cm-source-highlight-active .cm-md-code-block, .cm-source-highlight-active .cm-md-code-inline":
     {
