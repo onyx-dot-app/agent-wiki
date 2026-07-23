@@ -87,10 +87,12 @@ def test_distinct_content_collision_proposes_rename(repo):
     d = drafts[0]
     assert d.op.value == "rename"
     # Survivor heuristic keeps "docs/Setup.md" (uppercase sorts first at equal
-    # depth/length); the loser gets a deconflicted name.
-    assert d.source_paths == ["docs/setup.md"]
-    assert d.target_paths == ["docs/setup-2.md"]
-    assert "docs/Setup.md" in d.summary
+    # depth/length); the loser + its deconflicted rename option are sources,
+    # the kept page is the target that must survive either outcome.
+    assert d.source_paths == ["docs/setup.md", "docs/setup-2.md"]
+    assert d.target_paths == ["docs/Setup.md"]
+    assert "rename" in d.summary and "merge" in d.summary
+    assert d.instruction and "move_page" in d.instruction and "retire_page" in d.instruction
     assert d.auto_approvable is False
 
 
@@ -109,7 +111,7 @@ def test_deconflicted_name_avoids_new_collisions(repo):
     (d,) = _CaseCollisionDetector().detect(
         _scope("n/Page.md", "n/page.md", "n/PAGE-2.md")
     )
-    assert d.target_paths == ["n/page-3.md"]  # -2 taken case-insensitively
+    assert d.source_paths[1] == "n/page-3.md"  # -2 taken case-insensitively
 
 
 def test_validate_tracks_the_premise(repo):
@@ -124,7 +126,7 @@ def test_validate_tracks_the_premise(repo):
 
     assert det.validate(proposal) is None
 
-    # Partner page removed → no collision left (plumbing removal).
+    # Kept page removed → no collision left (plumbing removal).
     subprocess.run(
         ["git", "update-index", "--force-remove", "v/Doc.md"],
         cwd=app.config.CONFIG.wiki_dir, check=True, capture_output=True,
@@ -149,6 +151,21 @@ def test_validate_tracks_the_premise(repo):
     assert reason is not None and "no longer exists" in reason
 
 
+def test_validate_stays_valid_when_pages_converge(repo):
+    """Pages that became identical while pending don't stale the proposal —
+    the applier's merge branch resolves them."""
+    _plumb_commit("c/Doc.md", _A)
+    _plumb_commit("c/doc.md", _B)
+    det = _CaseCollisionDetector()
+    (d,) = det.detect(_scope("c/Doc.md", "c/doc.md"))
+    proposal: dict[str, Any] = {
+        "source_paths": d.source_paths,
+        "target_paths": d.target_paths,
+    }
+    _plumb_commit("c/doc.md", _A)  # now byte-identical to the kept page
+    assert det.validate(proposal) is None
+
+
 @pytest.mark.skipif(
     _fs_case_insensitive(),
     reason="worktree cannot hold both casings on this filesystem — the very "
@@ -169,6 +186,7 @@ def test_rename_executes_end_to_end(repo, monkeypatch):
     assert len(pending) == 1  # the anchoring fix: draft not skipped
     pid = pending[0]["id"]
     assert pending[0]["detector"] == "case_collision"
+    assert pending[0]["target_paths"] == ["e/Notes.md"]
 
     turns = [
         CompletionResult(

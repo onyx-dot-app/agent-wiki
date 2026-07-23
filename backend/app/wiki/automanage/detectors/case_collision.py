@@ -6,17 +6,21 @@ both, but case-insensitive filesystems (macOS and Windows defaults) can
 materialize only one — a clone, backup restore, or export silently loses the
 other's working copy. Links and search get ambiguous for humans, too.
 
-The proposal is a **rename** of the non-canonical page (content preserved,
-hazard gone). If the colliding pages are *byte-identical* they're really one
-document — the body-duplicate detector's merge resolves the collision by
-retiring one — so identical groups are skipped here (precedence, mirroring
-the template-echo rule).
+The proposal consents to a **set of outcomes** and the applier — which
+reads both pages at execution time — chooses within it: genuinely distinct
+documents get a **rename** (content preserved, hazard gone); two versions of
+the same document get a **merge** into the kept page (unique content folded
+in, the loser retired with identity forwarding). Byte-identical groups are
+still skipped here — body-dup's merge already covers them exactly.
 
 The kept page is the same survivor heuristic as body-dup (shallowest, then
-shortest, then lexicographic); the rename target is the loser's path with a
-numeric suffix, chosen deterministically to avoid any further collision.
-Naming the kept page in the summary is audience-safe: this is a pairing
-detector, so the runner only pairs pages within one permission bucket.
+shortest, then lexicographic); the rename option's new name is the loser's
+path with a numeric suffix, chosen deterministically to avoid any further
+collision. It rides in ``source_paths`` so the rename branch stays inside
+the applier's path scope; ``target_paths`` carries the kept page (the side
+that must survive either outcome). Naming the kept page in the summary is
+audience-safe: this is a pairing detector, so the runner only pairs pages
+within one permission bucket.
 """
 from __future__ import annotations
 
@@ -80,18 +84,26 @@ class _CaseCollisionDetector:
                 drafts.append(
                     ProposalDraft(
                         op=ProposalOp.RENAME,
-                        source_paths=[loser],
-                        target_paths=[new_name],
+                        source_paths=[loser, new_name],
+                        target_paths=[kept],
                         summary=(
-                            f"Rename “{loser}” to “{new_name}” — its name "
-                            f"collides with “{kept}” on case-insensitive "
-                            "filesystems (macOS/Windows checkouts keep only "
-                            "one of them)"
+                            f"Resolve the name collision between “{loser}” "
+                            f"and “{kept}” (case-insensitive filesystems keep "
+                            f"only one) — rename it to “{new_name}”, or merge "
+                            "it into the kept page if they are two versions "
+                            "of the same document"
                         ),
                         instruction=(
-                            f"Rename {loser!r} to {new_name!r} with move_page "
-                            "— its path differs from a distinct page only by "
-                            "letter case. Do not modify any content."
+                            f"The paths {loser!r} and {kept!r} differ only by "
+                            "letter case — a hazard on case-insensitive "
+                            "filesystems. Read both pages and choose: if they "
+                            "are genuinely distinct documents, rename with "
+                            f"move_page({loser!r} -> {new_name!r}) and do not "
+                            "modify any content. If they are two versions of "
+                            "the same document (similar content AND purpose), "
+                            f"fold any unique content of {loser!r} into "
+                            f"{kept!r} with write_page, then "
+                            f"retire_page({loser!r} -> {kept!r})."
                         ),
                         auto_approvable=False,
                     )
@@ -99,27 +111,20 @@ class _CaseCollisionDetector:
         return drafts
 
     def validate(self, proposal: dict[str, Any]) -> str | None:
-        """Premise: the page still exists, still case-collides with another
-        live page of *different* content, and the rename target is still
-        free (case-insensitively)."""
-        loser = proposal["source_paths"][0]
-        new_name = proposal["target_paths"][0]
+        """Premise: the collision still exists and the rename option's name is
+        still free. Content equality is deliberately *not* re-checked — the
+        applier's merge branch handles pages that converged while pending."""
+        loser, new_name = proposal["source_paths"][:2]
+        kept = proposal["target_paths"][0]
         live = list(git.list_paths())
         if loser not in live:
             return f"{loser!r} no longer exists"
-        partners = [
-            p for p in live if p.lower() == loser.lower() and p != loser
-        ]
-        if not partners:
+        if kept not in live:
+            return f"{kept!r} no longer exists"
+        if kept.lower() != loser.lower():
             return "the name collision no longer exists"
-        blobs = dict(git.list_paths_with_blob_sha())
-        if all(blobs.get(p) == blobs.get(loser) for p in partners):
-            return (
-                "the colliding pages are now byte-identical — a duplicate "
-                "merge resolves this instead"
-            )
         if any(p.lower() == new_name.lower() for p in live):
-            return f"the rename target {new_name!r} is no longer free"
+            return f"the rename option {new_name!r} is no longer free"
         return None
 
 
