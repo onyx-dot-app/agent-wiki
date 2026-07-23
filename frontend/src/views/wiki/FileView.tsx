@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
+import useSWR from "swr";
 import {
   Button,
   Divider,
@@ -40,7 +41,8 @@ import {
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
-import { SourcesPanel } from "@/components/wiki/SourcesPanel";
+import { sourceKey, SourcesPanel } from "@/components/wiki/SourcesPanel";
+import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
@@ -92,6 +94,7 @@ import type {
   DocumentActivity,
   DocumentActivityResponse,
   SourceRef,
+  SourceSpan,
 } from "@/types";
 
 // Local shape for the /wiki/file API response — mirrored from page.tsx.
@@ -292,6 +295,35 @@ export function FileView({ path }: FileViewProps) {
     () =>
       [activeCommentId, hoveredCommentId].filter((id): id is string => !!id),
     [activeCommentId, hoveredCommentId],
+  );
+
+  // Source-attributed spans light up in the doc while the Sources tab is
+  // open (mock 1832:81274). Fetched lazily per head sha since the server
+  // remaps offsets to HEAD.
+  const sourcesTabOpen = panelTab === "sources";
+  const { data: sourceSpans } = useSWR(
+    sourcesTabOpen && headSha && !viewingVersion
+      ? ["/wiki/source-spans", path, headSha]
+      : null,
+    () =>
+      apiFetch<SourceSpan[]>(
+        `/wiki/source-spans?path=${encodeURIComponent(path)}`,
+      ),
+  );
+  const sourceHighlights = useMemo<AnchoredHighlightTarget[]>(() => {
+    if (!sourcesTabOpen) return [];
+    return (sourceSpans ?? []).map((sp) => ({
+      id: sourceKey(sp),
+      startOffset: sp.start_offset,
+      endOffset: sp.end_offset,
+    }));
+  }, [sourcesTabOpen, sourceSpans]);
+  const activateSource = useCallback(
+    (key: string) => {
+      const span = (sourceSpans ?? []).find((sp) => sourceKey(sp) === key);
+      if (span) coeditorRef.current?.scrollToOffset(span.start_offset);
+    },
+    [sourceSpans],
   );
 
   // The doc area hosting the lane, measured at interaction time so the
@@ -983,7 +1015,10 @@ export function FileView({ path }: FileViewProps) {
       case "sources":
         return (
           <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
-            <SourcesPanel sources={sources} />
+            <SourcesPanel
+              sources={sources}
+              onActivateSource={viewingVersion ? undefined : activateSource}
+            />
           </div>
         );
       case "watching":
@@ -1189,6 +1224,7 @@ export function FileView({ path }: FileViewProps) {
                       readOnly={!canWrite}
                       commentHighlights={commentHighlights}
                       activeCommentIds={activeCommentIds}
+                      sourceHighlights={sourceHighlights}
                       onSelectionForComment={handleSelectionForComment}
                       placeholder="Start typing, or pick a template above…"
                     />

@@ -29,6 +29,8 @@ import { PanelSearchField } from "./PanelSearch";
 
 interface Props {
   sources: SourceRef[];
+  /** Called with a card's source key to scroll the doc to its spans. */
+  onActivateSource?: (key: string) => void;
 }
 
 const SOURCE_ICONS: Record<string, IconFunctionComponent> = {
@@ -62,16 +64,26 @@ function sourceTypeLabel(type: string): string {
 }
 
 /** Stable card identity, mirroring the backend's dedupe key (document id,
- * falling back to url or title). */
-function sourceKey(s: WriteProvenance): string {
+ * falling back to url or title). Also joins a card to its doc spans. */
+export function sourceKey(s: WriteProvenance): string {
   return s.source_document_id || s.source_url || s.source_title || "";
 }
 
-function SourceCard({ source }: { source: SourceRef }) {
+function SourceCard({
+  source,
+  onActivate,
+}: {
+  source: SourceRef;
+  /** Scrolls the doc to this source's first attributed span. */
+  onActivate?: () => void;
+}) {
   const Icon = sourceIcon(source.source_type);
   const url = source.source_url;
   return (
-    <div className="group/source w-full shrink-0 rounded-(--radius-12) p-1 hover:bg-(--background-tint-00)">
+    <div
+      className="group/source w-full shrink-0 rounded-(--radius-12) p-1 hover:bg-(--background-tint-00)"
+      onClick={onActivate}
+    >
       <div className="flex min-h-7 items-start gap-1 p-[2px]">
         <span className="flex size-6 shrink-0 items-center justify-center">
           <Icon size={16} />
@@ -82,7 +94,10 @@ function SourceCard({ source }: { source: SourceRef }) {
           </Text>
         </span>
         {url && (
-          <span className="invisible shrink-0 group-hover/source:visible">
+          <span
+            className="invisible shrink-0 group-hover/source:visible"
+            onClick={(e) => e.stopPropagation()}
+          >
             <Button
               icon={SvgExternalLink}
               size="md"
@@ -121,7 +136,7 @@ function SourceCard({ source }: { source: SourceRef }) {
  * page, previewing their content via the snippet captured at ingest when
  * one exists. Sources ride the page load, nothing else is fetched.
  */
-export function SourcesPanel({ sources }: Props) {
+export function SourcesPanel({ sources, onActivateSource }: Props) {
   const [query, setQuery] = useState("");
 
   const q = query.trim().toLowerCase();
@@ -182,13 +197,21 @@ export function SourcesPanel({ sources }: Props) {
           </div>
         )}
 
-        {shown.map((s, i) => (
-          // Rows with no identity fields keep distinct keys via the index.
-          <SourceCard
-            key={sourceKey(s) || `${s.last_updated}-${i}`}
-            source={s}
-          />
-        ))}
+        {shown.map((s, i) => {
+          const key = sourceKey(s);
+          return (
+            // Rows with no identity fields keep distinct keys via the index.
+            <SourceCard
+              key={key || `${s.last_updated}-${i}`}
+              source={s}
+              onActivate={
+                key && onActivateSource
+                  ? () => onActivateSource(key)
+                  : undefined
+              }
+            />
+          );
+        })}
 
         {shown.length > 0 && (
           <div className="px-4 py-2">

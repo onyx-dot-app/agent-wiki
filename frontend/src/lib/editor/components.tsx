@@ -48,6 +48,10 @@ import {
   type CommentDraft,
   type CommentHighlightTarget,
 } from "@/lib/editor/comments";
+import {
+  sourceHighlights as sourceHighlightsExt,
+  type AnchoredHighlightTarget,
+} from "@/lib/editor/highlights";
 
 /** A remote peer's caret: a thin colored bar with a small name label above it. */
 class CaretWidget extends WidgetType {
@@ -157,9 +161,9 @@ const peersField = StateField.define<{
  * `--cm-gutter` custom property that the surrounding column sets (so the text
  * gutter tracks the page's responsive padding at every breakpoint), and it
  * uses a slim scrollbar with a transparent track. */
-// Either comment-highlight mark class, for selectors that must match both.
-const COMMENT_HIGHLIGHT =
-  ":is(.cm-comment-highlight, .cm-comment-highlight-active)";
+// Every anchored-highlight mark class, for selectors that must match all.
+const ANCHOR_HIGHLIGHT =
+  ":is(.cm-comment-highlight, .cm-comment-highlight-active, .cm-source-highlight)";
 
 const baseTheme = EditorView.theme({
   "&": {
@@ -266,6 +270,10 @@ const baseTheme = EditorView.theme({
   ".cm-comment-highlight-active": {
     backgroundColor: "var(--highlight-active)",
   },
+  // Source-attributed spans paint at Highlight/Active (mock 1832:81274).
+  ".cm-source-highlight": {
+    backgroundColor: "var(--highlight-active)",
+  },
   // Code marks nest inside highlight marks with an opaque tint that would
   // occlude the wrapping span's amber, so they repaint the highlight color
   // over their own background.
@@ -274,16 +282,16 @@ const baseTheme = EditorView.theme({
       backgroundImage:
         "linear-gradient(var(--neon-amber-a30), var(--neon-amber-a30))",
     },
-  ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline":
+  ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline, .cm-source-highlight .cm-md-code-block, .cm-source-highlight .cm-md-code-inline":
     {
       backgroundImage:
         "linear-gradient(var(--highlight-active), var(--highlight-active))",
     },
   // A highlight mark splits the line's block-display code span, and each
-  // piece being a block would break the line at the comment's boundaries.
+  // piece being a block would break the line at the highlight's boundaries.
   // Inline pieces keep the line whole and the amber hugging the text, the
   // same as highlights on plain content.
-  [`.cm-line:has(${COMMENT_HIGHLIGHT}) .cm-md-code-block`]: {
+  [`.cm-line:has(${ANCHOR_HIGHLIGHT}) .cm-md-code-block`]: {
     display: "inline",
     borderRadius: "0",
   },
@@ -340,6 +348,8 @@ interface CoeditorProps {
   commentHighlights?: CommentHighlightTarget[];
   /** Thread ids whose spans get the stronger (active) highlight. */
   activeCommentIds?: string[];
+  /** Source-attributed spans to highlight while the Sources tab is open. */
+  sourceHighlights?: AnchoredHighlightTarget[];
   /** Fires on every selection change with the current selection as a comment
    * draft (null if collapsed) plus its on-screen coordinates, for the caller
    * to position a floating "Comment" affordance. */
@@ -404,6 +414,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       readOnly,
       commentHighlights,
       activeCommentIds,
+      sourceHighlights,
       onSelectionForComment,
     },
     ref,
@@ -425,6 +436,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const peersRef = useRef(peers);
     const commentHighlightsRef = useRef(commentHighlights);
     const activeCommentIdsRef = useRef(activeCommentIds);
+    const sourceHighlightsRef = useRef(sourceHighlights);
     onSelRef.current = onSelectionChange;
     onCaretClearedRef.current = onCaretCleared;
     getCaretSeqRef.current = getCaretSeq;
@@ -433,6 +445,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     peersRef.current = peers;
     commentHighlightsRef.current = commentHighlights;
     activeCommentIdsRef.current = activeCommentIds;
+    sourceHighlightsRef.current = sourceHighlights;
 
     useImperativeHandle(
       ref,
@@ -695,6 +708,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           placeholderExt(placeholder ?? ""),
           peersField,
           commentsField,
+          sourceHighlightsExt.field,
           baseTheme,
           updateListener,
         ],
@@ -710,6 +724,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           setActiveCommentHighlightsEffect.of(
             activeCommentIdsRef.current ?? [],
           ),
+          sourceHighlightsExt.setTargets.of(sourceHighlightsRef.current ?? []),
         ],
       });
       const onScroll = () => notifyLayout("scroll");
@@ -827,6 +842,13 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         effects: setActiveCommentHighlightsEffect.of(activeCommentIds ?? []),
       });
     }, [activeCommentIds]);
+
+    // Push source-attributed spans into the editor state.
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: sourceHighlightsExt.setTargets.of(sourceHighlights ?? []),
+      });
+    }, [sourceHighlights]);
 
     // Reconfigure the read-only facets when the prop changes — they're baked
     // into the state at create time otherwise, and a `can_write` correction
