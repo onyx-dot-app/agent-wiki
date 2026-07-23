@@ -1,16 +1,14 @@
 /** Client for the live-session endpoint (`/api/coedit/ws`) — one WebSocket
- * per session, multiplexing what used to be 8 REST/SSE endpoints (`/join`,
- * `/leave`, `/op`, `/cursor`, `/checkpoint`, `/session`, `/ops`, `/stream`).
- * Pure transport swap: `sendOp`/`getOps` keep the exact signatures and
- * `Promise` shapes they had over HTTP (`components.tsx` imports them
- * directly and doesn't change), and the backend domain logic/message shapes
- * are unchanged — see `app/api/coedit.py`'s module docstring for the design.
+ * per session, multiplexing every message type (join, op, cursor,
+ * checkpoint, get_ops). `sendOp`/`getOps` keep the exact signatures and
+ * `Promise` shapes `components.tsx` imports directly, so that file doesn't
+ * need to change; the backend domain logic/message shapes are covered in
+ * `app/api/coedit.py`'s module docstring.
  *
- * There's no `leaveSession` anymore: the server treats any socket close
- * (explicit, network drop, or a killed tab) as the leave signal — more
- * reliable than the old client-initiated `fetch(..., {keepalive: true})`,
- * which depended on the client successfully transmitting during teardown.
- * `closeSession` is the equivalent — it just closes the connection.
+ * There's no explicit "leave" call: the server treats any socket close
+ * (explicit, network drop, or a killed tab) as the leave signal, which
+ * doesn't depend on the client successfully transmitting anything during
+ * teardown. `closeSession` is that close — it just closes the connection.
  *
  * Offsets are UTF-16 code units — which is exactly what JS string indexing and
  * `slice` use, so the ops interoperate with the server
@@ -47,10 +45,9 @@ function newRequestId(): string {
   return crypto.randomUUID();
 }
 
-// Maps a WS `*_result` frame's `error` string back onto the HTTP status the
-// old REST endpoints used for the same condition, so `ApiError`-checking
-// call sites (`components.tsx`'s `e.status === 409` 409-stale-version check,
-// specifically) don't need to change.
+// Maps a WS `*_result` frame's `error` string onto an HTTP-style status, so
+// `ApiError`-checking call sites (`components.tsx`'s `e.status === 409`
+// stale-version check, specifically) can keep checking a status code.
 const ERROR_STATUS: Record<string, number> = {
   stale_version: 409,
   invalid_op: 422,
@@ -76,15 +73,13 @@ function request<T>(
   const entry = sockets.get(sessionId);
   if (!entry || entry.ws.readyState !== WebSocket.OPEN) {
     // `components.tsx`'s CM6 collab layer retries a failed op unconditionally
-    // and immediately (`doPush`'s tail call) — under the old fetch()-based
-    // client that was harmless, since even a failing fetch takes real
-    // macrotask-level time (DNS/connect/handshake). A synchronous
-    // Promise.reject() here has no such delay, so a disconnected socket plus
-    // pending local edits produced an unbroken chain of microtasks with no
-    // yield to the browser's event loop — a real, reproduced main-thread
-    // freeze, not a hypothetical. Settling on a real macrotask tick (instead
-    // of synchronously) forces a yield between retries, which is enough to
-    // keep the tab responsive without touching that pre-existing retry logic.
+    // and immediately, with no backoff (`doPush`'s tail call) — so this must
+    // never settle synchronously. A same-tick Promise.reject() here, paired
+    // with that retry, produces an unbroken chain of microtasks with no
+    // yield to the browser's event loop: a real, reproduced main-thread
+    // freeze, not a hypothetical. Settling on a real macrotask tick instead
+    // forces a yield between retries, which is enough to keep the tab
+    // responsive without touching that retry logic.
     return new Promise<T>((_resolve, reject) => {
       setTimeout(() => reject(new ApiError(0, "not connected")), 0);
     });
@@ -100,11 +95,10 @@ function request<T>(
 }
 
 /** A joined session's snapshot plus `closed` — a promise that resolves once
- * the connection ends, for any reason. Mirrors the old `streamSession`
- * promise the reconnect loop awaited (which spanned the SSE connection's
- * whole lifetime) — here `connectSession`'s own promise settles at *join*,
- * not at connection-end, since the multiplexed WS also needs to hand back
- * the join snapshot immediately for the caller to mount the editor from. */
+ * the connection ends, for any reason. `connectSession`'s own promise
+ * settles at *join*, not at connection-end, since the caller needs the join
+ * snapshot immediately to mount the editor from; `closed` is the separate
+ * handle the reconnect loop awaits for the connection's whole lifetime. */
 export interface CoeditConnection extends CoeditSession {
   closed: Promise<{ code: number; expected: boolean }>;
 }
@@ -187,29 +181,30 @@ export function connectSession(
       }
       pending.clear();
       if (!joined) {
-        // The join handshake itself failed — mirrors the old client's
-        // "no read-only fallback" contract: surface it, don't retry silently.
-        reject(
-          event.code === 1008
-            ? new ApiError(403, "You don't have permission to edit this page.")
-            : new ApiError(0, "Failed to join the editing session."),
-        );
+        // The join handshake itself failed — surface it rather than retry
+        // silently (there's no read-only fallback to fall back to). No
+        // permission-specific message here: a pre-accept HTTP-level denial
+        // (401/403 from the backend's connect-time checks) always reports as
+        // the browser's generic close code 1006 — WebSocket close codes like
+        // 1008 only apply to a close the server sends *after* accepting,
+        // which a rejected handshake never reaches, so there's no reliable
+        // signal here to distinguish "forbidden" from any other failure.
+        reject(new ApiError(0, "Failed to join the editing session."));
         return;
       }
       resolveClosed?.({ code: event.code, expected: expectedClose });
     };
 
-    // Kept for symmetry with the old contract's error path, but onclose
-    // (which always follows an error per the WebSocket spec) does the real
-    // handling — this alone would give an unhelpful generic Event.
+    // A no-op: onclose (which always follows an error per the WebSocket
+    // spec) does the real handling — this event alone would only give an
+    // unhelpful generic Event with no useful failure detail.
     ws.onerror = () => {};
   });
 }
 
-/** Close the session's connection — the WS equivalent of the old
- * `leaveSession`. A no-op if already closed/never connected. Resolves
- * `closed` with `expected: true`, so the caller's reconnect loop knows not
- * to reconnect. */
+/** Close the session's connection. A no-op if already closed/never
+ * connected. Resolves `closed` with `expected: true`, so the caller's
+ * reconnect loop knows not to reconnect. */
 export function closeSession(sessionId: number): void {
   const entry = sockets.get(sessionId);
   if (!entry) return;
@@ -243,8 +238,8 @@ export async function sendOp(
 }
 
 /** Report the local caret/selection to the server so peers see live presence.
- * Fire-and-forget, matching the old client's swallowed-error handling —
- * a dropped ping self-heals on the next throttled send. Null anchor/head
+ * Fire-and-forget — a dropped ping self-heals on the next throttled send, so
+ * failures are silently swallowed rather than surfaced. Null anchor/head
  * clears the caret (editor blur / hidden tab) — peers drop it and presence
  * flips the sender to "viewing". `seq` is the caret epoch that orders
  * concurrent place/clear writes server-side. */

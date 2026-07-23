@@ -18,9 +18,9 @@
  * effect cleanup — driven by `enabled`/`path` changing or the component
  * unmounting, never by the caller invoking a function. There's no explicit
  * "leave" call: closing the connection *is* the leave signal, handled
- * server-side (see `app/api/coedit.py`'s module docstring) — more reliable
- * than the old design's client-initiated keepalive fetch on unload. The
- * *document* is owned by the editor via `@codemirror/collab` (see
+ * server-side (see `app/api/coedit.py`'s module docstring) — this doesn't
+ * depend on the client successfully transmitting anything during teardown.
+ * The *document* is owned by the editor via `@codemirror/collab` (see
  * `Coeditor`), not here — the hook just hands the editor what it needs to
  * run collab (`session` = id/clientId/start version+doc), forwards inbound
  * `op`/`resync` frames to it (`onServerFrame`), and keeps a read-only
@@ -460,11 +460,10 @@ export function useCoeditSession(opts: {
       // Connect (and reconnect on a drop) in a loop — the server never
       // pushes again on a dead connection, and without this loop the client
       // would only heal on a full page reload. Each attempt re-resolves the
-      // session by *path* (get-or-create server-side), so — unlike the old
-      // numeric-session_id-scoped stream — there's no separate "the session
-      // I had went stale" error to special-case; a reconnect either adopts
-      // the same still-open session or transparently gets a fresh one (see
-      // the session-id-changed branch below for that latter case).
+      // session by *path* (get-or-create server-side), so there's no "the
+      // session I had went stale" error to special-case; a reconnect either
+      // adopts the same still-open session or transparently gets a fresh one
+      // (see the session-id-changed branch below for that latter case).
       let firstConnect = true;
       while (!cancelled) {
         let snap;
@@ -589,13 +588,12 @@ export function useCoeditSession(opts: {
   //
   // The WS connection itself stays open while merely backgrounded (browsers
   // don't tear down a WebSocket on visibility change, only on actual
-  // navigation/close/sleep), so a checkpoint message here is exactly as
-  // reliable as it was over HTTP. `pagehide` (the tab actually closing) is
-  // the one case with no delivery guarantee either way — a `send()` racing
-  // an abrupt unload has no stronger guarantee than the old fetch without
-  // `keepalive` did — but the server's own disconnect-triggered forced
-  // checkpoint (see `app/api/coedit.py`) is the backstop for exactly that
-  // case, and it doesn't depend on the client transmitting anything at all.
+  // navigation/close/sleep), so a checkpoint message here reliably reaches
+  // the server. `pagehide` (the tab actually closing) is the one case with
+  // no delivery guarantee: a `send()` racing an abrupt unload can be lost.
+  // The server's own disconnect-triggered forced checkpoint (see
+  // `app/api/coedit.py`) is the backstop for exactly that case, and it
+  // doesn't depend on the client transmitting anything at all.
   useEffect(() => {
     if (!active) return;
     const checkpointNow = () => {

@@ -1,25 +1,21 @@
 """The page live-session channel — one WebSocket per session (cookie-authed
-humans). Pure transport swap from the old SSE-down + HTTP-POST-up protocol:
-same JSON message shapes, same domain logic (``app/wiki/coedit.py``), same
-broadcast layer (``app/wiki/coedit_channel.py``) — only the wire mechanism
-changed. See ``plans/coedit-websocket-transport.md`` (if present) or the
-originating conversation for the design rationale.
+humans), driving the same domain logic (``app/wiki/coedit.py``) and
+broadcast layer (``app/wiki/coedit_channel.py``) every message type in this
+module shares. See ``plans/coedit-websocket-transport.md`` (if present) or
+the originating conversation for the design rationale.
 
 A "co-edit session" is the page's *live session*: everyone viewing the page
 joins it (read-gated — presence + real-time updates), and editing is a
 capability inside it (``op``/``cursor``/``checkpoint`` messages are
-write-gated, re-checked on *every* message, not just at connect — mirrors
-the old per-POST ``require_can`` exactly, so a mid-session ACL change still
-takes effect). Presence labels editors vs viewers client-side from the live
-caret frames — a rendered caret IS the "editing" state; the server stores
-nothing for it.
+write-gated, re-checked on *every* message, not just at connect, so a
+mid-session ACL change takes effect immediately). Presence labels editors
+vs viewers client-side from the live caret frames — a rendered caret IS the
+"editing" state; the server stores nothing for it.
 
 No client-sent "leave" message: the server's disconnect handler (``finally``
 below) is the sole leave signal, firing on any connection loss — explicit
-close, network drop, or a killed tab's socket dying — which is *more*
-reliable than the old design's client-initiated ``fetch(..., {keepalive:
-true})`` on unload, since it never depends on the client successfully
-transmitting anything during teardown.
+close, network drop, or a killed tab's socket dying — which doesn't depend
+on the client successfully transmitting anything during teardown.
 """
 
 from __future__ import annotations
@@ -53,8 +49,7 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 # Idle silence before the send loop touches presence liveness + pings the
-# client — matches the old SSE heartbeat cadence, so proxies see the same
-# idle behavior either way.
+# client, so proxies don't consider the connection idle.
 _HEARTBEAT_SECONDS = 15.0
 
 
@@ -89,8 +84,8 @@ def _checkpoint_if_last_left(session_id: int) -> None:
 class _WsActionError(Exception):
     """Internal — a write/read re-check failed for one inbound message.
     Caught per-handler and turned into a correlated error reply so the
-    *connection* stays open (mirrors the old design: a single 403/404 on one
-    POST never killed the SSE stream either)."""
+    *connection* stays open — a rejected message is a per-message failure,
+    not a reason to tear down the whole session."""
 
     def __init__(self, error: str) -> None:
         self.error = error
@@ -161,9 +156,9 @@ def _handle_op(outbox: queue.Queue[dict[str, Any]], session_id: int, user: User,
 
 
 def _handle_cursor(session_id: int, user: User, raw: dict[str, Any]) -> None:
-    """Fire-and-forget — matches the old client's ``sendCursor(...).catch(()
-    => {})``: a rejected/failed cursor ping is silently dropped, never
-    surfaced, since the next throttled ping self-heals it."""
+    """Fire-and-forget: a rejected/failed cursor ping is silently dropped,
+    never surfaced to the client, since the next throttled ping self-heals
+    it (matches ``svc.ts``'s ``sendCursor``, which doesn't await a reply)."""
     msg = CursorMessage.model_validate(raw)
     try:
         _require_active(session_id, user, "write")
@@ -236,9 +231,9 @@ async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[dict[str, Any]], 
             # Every handler below makes blocking DB calls (require_can,
             # coedit.apply_op, ...) — offloaded to a thread so one session's
             # DB round-trip doesn't stall every other WS connection sharing
-            # this event loop. The old REST handlers got this for free (a
-            # plain `def` FastAPI route runs in a threadpool automatically);
-            # a sync call made *from inside* an `async def` route doesn't.
+            # this event loop. FastAPI only threadpools a plain `def` route
+            # automatically; a sync call made *from inside* an `async def`
+            # route (this one, since it's a WebSocket route) does not.
             if msg_type == "op":
                 await asyncio.to_thread(_handle_op, outbox, session_id, user, raw)
             elif msg_type == "cursor":
@@ -333,9 +328,17 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     """
     sess = await asyncio.to_thread(_connect_sync, path, user)
 
-    await websocket.accept()
-    conn = coedit_channel.connect(sess.id, user.id)
+    # `_connect_sync` already registered the participant (`coedit.join`)
+    # before returning, so from here on a disconnect — including one during
+    # `accept()` itself, which the client can trigger mid-handshake since
+    # `_connect_sync`'s git/DB work takes measurable time — must still reach
+    # `_disconnect_sync` to undo it. Otherwise the user is stuck as a
+    # phantom participant forever, which also blocks
+    # `_checkpoint_if_last_left` from ever firing for this session.
+    conn: coedit_channel.Connection | None = None
     try:
+        await websocket.accept()
+        conn = coedit_channel.connect(sess.id, user.id)
         participants = await asyncio.to_thread(_participants_out, sess.id)
         await websocket.send_json(
             JoinedFrame(
@@ -361,6 +364,7 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     except WebSocketDisconnect:
         pass
     finally:
-        coedit_channel.disconnect(conn.id)
+        if conn is not None:
+            coedit_channel.disconnect(conn.id)
         await asyncio.to_thread(_disconnect_sync, sess.id, user.id)
         log.info("coedit ws closed session=%s user=%s", sess.id, user.id)
