@@ -192,11 +192,16 @@ def resolve_doc_id(
 ) -> ResolveDocIdResponse:
     """Resolve a stable doc id to its current binding — the id-URL entry point.
 
+    A retired id (page merged into a survivor) forwards: resolution lands on
+    the surviving document, so old links keep working. Otherwise
     ``deleted_at`` set means the page/folder was trashed; ``path`` is where it
     lived, for the tombstone/restore surfaces. 404 for an unknown id."""
-    row = doc_ids.get(doc_id)
+    row = doc_ids.resolve(doc_id)
     if row is None:
         raise HTTPException(status_code=404, detail="unknown id")
+    # A forward landed us on the survivor — respond with *its* id so the
+    # client canonicalizes its URL to the live document.
+    doc_id = str(row["id"])
     # Stored paths are app-generated from validated values, but re-validate
     # before the ACL check so this endpoint matches every other read path.
     try:
