@@ -71,6 +71,21 @@ export interface CommentThreadView {
   replies: CommentView[];
 }
 
+/** Source facts shared by every provenance read (backend WriteProvenance). */
+export interface WriteProvenance {
+  source_document_id: string | null;
+  source_type: string | null;
+  source_url: string | null;
+  source_title: string | null;
+  /** Leading slice of the source document's content, captured at ingest. */
+  source_snippet: string | null;
+}
+
+/** One ingested document credited to a page (the Sources tab list). */
+export interface SourceRef extends WriteProvenance {
+  last_updated: string;
+}
+
 export interface DocumentActivityResponse {
   path: string;
   agents: DocumentActivity[];

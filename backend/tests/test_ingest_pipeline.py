@@ -546,3 +546,14 @@ def test_selector_drop_eval_logged(
     rows = _eval_rows("filtered_by_selector")
     assert len(rows) == 1
     assert rows[0]["wiki_path"] == "page.md"
+
+
+def test_source_snippet_collapses_whitespace_and_caps():
+    from app.tasks.wiki_update import _source_snippet
+
+    assert _source_snippet("  Hello\n\n  world\t twice  ") == "Hello world twice"
+    assert _source_snippet("") is None
+    assert _source_snippet(" \n\t ") is None
+    long = "word " * 200
+    capped = _source_snippet(long)
+    assert capped is not None and len(capped) == 500

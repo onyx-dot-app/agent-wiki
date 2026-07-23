@@ -251,6 +251,13 @@ def _current_user_id() -> str:
 _ = CONFIG
 
 
+def _source_snippet(content: str, cap: int = 500) -> str | None:
+    """Leading slice of the pushed content, whitespace-collapsed, for the
+    Sources tab preview."""
+    text = " ".join(content.split())
+    return text[:cap] or None
+
+
 @documents_queue.task()
 def process_pushed_document(push: dict[str, Any]) -> None:
     """Reconcile a connector-pushed document into the wiki (task entry point).
@@ -533,6 +540,7 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
                         source_type=source_type,
                         source_url=url or None,
                         source_title=title or None,
+                        source_snippet=_source_snippet(content),
                     ),
                 )
             except CommitMaxRetriesError:

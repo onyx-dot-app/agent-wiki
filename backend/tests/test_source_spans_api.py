@@ -42,7 +42,13 @@ def _seed_span(source: WriteProvenance) -> None:
 
 def test_source_spans_returns_spans_with_source(client):
     login_fastapi(client, seed_user("u1", email="u1@x.com", name="U"))
-    _seed_span(WriteProvenance(source_document_id="d1", source_title="Src One"))
+    _seed_span(
+        WriteProvenance(
+            source_document_id="d1",
+            source_title="Src One",
+            source_snippet="Alpha beta gamma from the source.",
+        )
+    )
     resp = client.get("/api/wiki/source-spans", params={"path": _PATH})
     assert resp.status_code == 200
     data = resp.json()
@@ -51,6 +57,7 @@ def test_source_spans_returns_spans_with_source(client):
     assert (span["start_offset"], span["end_offset"]) == (0, len(_BODY))
     assert span["source_document_id"] == "d1"
     assert span["source_title"] == "Src One"
+    assert span["source_snippet"] == "Alpha beta gamma from the source."
 
 
 def test_source_spans_empty_for_page_without_ingest(client):
