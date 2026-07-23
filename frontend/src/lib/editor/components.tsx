@@ -822,6 +822,10 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       });
       v = new EditorView({ state, parent: host.current });
       view.current = v;
+      // A sentinel no ids-join can produce, so the fresh editor's first
+      // caret report always fires and clears any prior page's attribution.
+      lastCaretIds.current = "\0";
+      lastCommentCaretIds.current = "\0";
       // A fresh state starts with empty peer/highlight fields, and the
       // prop-tracking effects below only fire on identity change. Seed both.
       v.dispatch({
