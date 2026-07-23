@@ -20,6 +20,7 @@ import {
   SvgChevronRight,
   SvgExternalLink,
   SvgDocFile,
+  SvgDownload,
   SvgFolder,
   SvgHistory,
   SvgMoreHorizontal,
@@ -90,7 +91,11 @@ import {
 } from "@/lib/templates";
 import { absoluteTime, longDateTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
-import { fetchFileDiff, fetchFileHistory } from "@/lib/wiki/svc";
+import {
+  downloadMarkdownExport,
+  fetchFileDiff,
+  fetchFileHistory,
+} from "@/lib/wiki/svc";
 import type { CommitInfo, FileDiffResponse } from "@/lib/wiki/types";
 import type {
   CommentThreadView,
@@ -984,6 +989,16 @@ export function FileView({ path }: FileViewProps) {
                 onClick={() => {
                   setMoreOpen(false);
                   void toggleHistory();
+                }}
+              />
+              <LineItemButton
+                title="Export as Markdown"
+                icon={SvgDownload}
+                sizePreset="main-ui"
+                variant="section"
+                onClick={() => {
+                  setMoreOpen(false);
+                  void downloadMarkdownExport(path);
                 }}
               />
             </PopoverMenu>
