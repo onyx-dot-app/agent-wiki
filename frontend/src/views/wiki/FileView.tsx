@@ -266,15 +266,18 @@ export function FileView({ path }: FileViewProps) {
     void refreshComments();
   }, [refreshComments]);
 
+  const sourcesTabOpen = panelTab === "sources";
+
   // Comment thread spans to highlight in the editor. Cleared while viewing
-  // an old commit (DiffView, no live editor). The active/hovered ids ride a
-  // separate prop: the editor maps these offsets through local edits, and a
-  // hover or selection flip must not re-send the unmapped ones.
+  // an old commit (DiffView, no live editor) and while the Sources tab has
+  // the doc, so the two highlight families never mix. The active/hovered
+  // ids ride a separate prop: the editor maps these offsets through local
+  // edits, and a hover or selection flip must not re-send the unmapped ones.
   // Hovering a card lights its doc highlight like selection does (mock
   // 1855 annotation: "Hover highlight - match the hovered comment").
   const [hoveredCommentId, setHoveredCommentId] = useState<string | null>(null);
   const commentHighlights = useMemo<CommentHighlightTarget[]>(() => {
-    if (viewingVersion) return [];
+    if (viewingVersion || sourcesTabOpen) return [];
     return commentThreads
       .map((t) => t.root)
       .filter(
@@ -291,7 +294,7 @@ export function FileView({ path }: FileViewProps) {
         startOffset: r.start_offset as number,
         endOffset: r.end_offset as number,
       }));
-  }, [commentThreads, viewingVersion]);
+  }, [commentThreads, viewingVersion, sourcesTabOpen]);
   const activeCommentIds = useMemo(
     () =>
       [activeCommentId, hoveredCommentId].filter((id): id is string => !!id),
@@ -301,7 +304,6 @@ export function FileView({ path }: FileViewProps) {
   // Source-attributed spans light up in the doc while the Sources tab is
   // open (mock 1832:81274). Fetched lazily per head sha since the server
   // remaps offsets to HEAD, so an old version never fetches.
-  const sourcesTabOpen = panelTab === "sources";
   const { data: sourceSpans } = useSWR(
     sourcesTabOpen && headSha && !viewingVersion
       ? SWR_KEYS.sourceSpans(path, headSha)
@@ -329,12 +331,17 @@ export function FileView({ path }: FileViewProps) {
     },
     [sourceSpans],
   );
-  // Hovering a card lights only that source's spans, attributing each
-  // highlight to its card.
+  // Attribution runs both ways: hovering a card lights only that source's
+  // spans, and a caret inside a span lights its card (the editor reports
+  // caret-source ids against its live-mapped offsets).
   const [hoveredSourceKey, setHoveredSourceKey] = useState<string | null>(null);
+  const [caretSourceKeys, setCaretSourceKeys] = useState<string[]>([]);
   const activeSourceIds = useMemo(
-    () => (hoveredSourceKey ? [hoveredSourceKey] : []),
-    [hoveredSourceKey],
+    () =>
+      hoveredSourceKey && !caretSourceKeys.includes(hoveredSourceKey)
+        ? [hoveredSourceKey, ...caretSourceKeys]
+        : caretSourceKeys,
+    [hoveredSourceKey, caretSourceKeys],
   );
 
   // The doc area hosting the lane, measured at interaction time so the
@@ -1028,6 +1035,7 @@ export function FileView({ path }: FileViewProps) {
           <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
             <SourcesPanel
               sources={sources}
+              activeKeys={caretSourceKeys}
               onActivateSource={viewingVersion ? undefined : activateSource}
               onHoverSource={viewingVersion ? undefined : setHoveredSourceKey}
             />
@@ -1238,6 +1246,7 @@ export function FileView({ path }: FileViewProps) {
                       activeCommentIds={activeCommentIds}
                       sourceHighlights={sourceHighlights}
                       activeSourceIds={activeSourceIds}
+                      onSourceCaret={setCaretSourceKeys}
                       onSelectionForComment={handleSelectionForComment}
                       placeholder="Start typing, or pick a template above…"
                     />

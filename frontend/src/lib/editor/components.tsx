@@ -357,6 +357,9 @@ interface CoeditorProps {
   sourceHighlights?: AnchoredHighlightTarget[];
   /** Source keys whose spans get the stronger (active) highlight. */
   activeSourceIds?: string[];
+  /** Fires with the source ids whose spans contain the caret (or intersect
+   * the selection), deduped against the last report. */
+  onSourceCaret?: (ids: string[]) => void;
   /** Fires on every selection change with the current selection as a comment
    * draft (null if collapsed) plus its on-screen coordinates, for the caller
    * to position a floating "Comment" affordance. */
@@ -423,6 +426,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       activeCommentIds,
       sourceHighlights,
       activeSourceIds,
+      onSourceCaret,
       onSelectionForComment,
     },
     ref,
@@ -441,6 +445,9 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const getCaretSeqRef = useRef(getCaretSeq);
     const reportDocRef = useRef(reportDoc);
     const onSelectionForCommentRef = useRef(onSelectionForComment);
+    const onSourceCaretRef = useRef(onSourceCaret);
+    // Last caret-source report, so selection churn inside one span is quiet.
+    const lastCaretIds = useRef("");
     const peersRef = useRef(peers);
     const commentHighlightsRef = useRef(commentHighlights);
     const activeCommentIdsRef = useRef(activeCommentIds);
@@ -451,6 +458,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     getCaretSeqRef.current = getCaretSeq;
     reportDocRef.current = reportDoc;
     onSelectionForCommentRef.current = onSelectionForComment;
+    onSourceCaretRef.current = onSourceCaret;
     peersRef.current = peers;
     commentHighlightsRef.current = commentHighlights;
     activeCommentIdsRef.current = activeCommentIds;
@@ -693,6 +701,24 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
             draft,
             coords ? { x: coords.left, y: coords.top } : null,
           );
+        }
+        // Caret-to-source attribution against the field's live-mapped spans
+        // (empty unless the page is feeding source targets).
+        if ((u.selectionSet || u.docChanged) && onSourceCaretRef.current) {
+          const { from, to } = sel;
+          const ids: string[] = [];
+          for (const t of u.state.field(sourceHighlightsExt.field).targets) {
+            const hit =
+              from === to
+                ? from >= t.startOffset && from < t.endOffset
+                : from < t.endOffset && to > t.startOffset;
+            if (hit && !ids.includes(t.id)) ids.push(t.id);
+          }
+          const key = ids.join("\n");
+          if (key !== lastCaretIds.current) {
+            lastCaretIds.current = key;
+            onSourceCaretRef.current(ids);
+          }
         }
       });
 

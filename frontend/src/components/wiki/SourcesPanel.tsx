@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, EndOfList, Tag, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 import { SvgExternalLink, SvgFileText, SvgGlobe } from "@onyx-ai/opal/icons";
@@ -29,6 +29,8 @@ import { PanelSearchField } from "./PanelSearch";
 
 interface Props {
   sources: SourceRef[];
+  /** Source keys whose cards light up (the caret sits in their spans). */
+  activeKeys?: string[];
   /** Called with a card's source key to scroll the doc to that source's
    * first span. */
   onActivateSource?: (key: string) => void;
@@ -75,18 +77,28 @@ export function sourceKey(s: WriteProvenance): string {
 
 interface SourceCardProps {
   source: SourceRef;
+  /** Lights the card while the caret sits in one of its spans. */
+  active?: boolean;
   /** Scrolls the doc to this source's first attributed span. */
   onActivate?: () => void;
   /** Hover state, so the page can light this source's doc spans. */
   onHoverChange?: (hovered: boolean) => void;
 }
 
-function SourceCard({ source, onActivate, onHoverChange }: SourceCardProps) {
+function SourceCard({
+  source,
+  active,
+  onActivate,
+  onHoverChange,
+}: SourceCardProps) {
   const Icon = sourceIcon(source.source_type);
   const url = source.source_url;
   return (
     <div
-      className="group/source w-full shrink-0 rounded-(--radius-12) p-1 hover:bg-(--background-tint-00)"
+      data-source-key={sourceKey(source) || undefined}
+      className={`group/source w-full shrink-0 rounded-(--radius-12) p-1 hover:bg-(--background-tint-00) ${
+        active ? "bg-(--background-tint-00)" : ""
+      }`}
       onClick={onActivate}
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
@@ -145,10 +157,20 @@ function SourceCard({ source, onActivate, onHoverChange }: SourceCardProps) {
  */
 export function SourcesPanel({
   sources,
+  activeKeys,
   onActivateSource,
   onHoverSource,
 }: Props) {
   const [query, setQuery] = useState("");
+
+  // A caret landing in a span brings its card into view.
+  const firstActive = activeKeys?.[0];
+  useEffect(() => {
+    if (!firstActive) return;
+    document
+      .querySelector(`[data-source-key="${CSS.escape(firstActive)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [firstActive]);
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -215,6 +237,7 @@ export function SourcesPanel({
             <SourceCard
               key={key || `${s.last_updated}-${i}`}
               source={s}
+              active={!!key && !!activeKeys?.includes(key)}
               onActivate={
                 key && onActivateSource
                   ? () => onActivateSource(key)
