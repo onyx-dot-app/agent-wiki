@@ -22,6 +22,30 @@ depends_on: str | None = None
 
 
 def upgrade() -> None:
+    # Databases from the check-then-insert era can hold several ``running``
+    # sweep rows (crashed workers never marked failure) — the unique index
+    # can't be created over them. Reconcile first: keep the newest, fail the
+    # rest, mirroring the runtime corpse failover. If the survivor is a live
+    # sweep, its own completion overwrites the status later; if it's a
+    # corpse, try_start_sweep's age cutoff clears it on the next sweep.
+    op.execute(
+        sa.text(
+            """
+            UPDATE detection_runs
+            SET status = 'failed',
+                error = 'superseded — duplicate running sweep reconciled by migration',
+                finished_at = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')
+            WHERE trigger = 'sweep'
+              AND status = 'running'
+              AND id <> (
+                    SELECT id FROM detection_runs
+                    WHERE trigger = 'sweep' AND status = 'running'
+                    ORDER BY started_at DESC, id DESC
+                    LIMIT 1
+              )
+            """
+        )
+    )
     op.create_index(
         "uq_detection_runs_single_running_sweep",
         "detection_runs",
