@@ -135,21 +135,21 @@ def _handle_op(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, u
             client_id=msg.client_id,
         )
     except _WsActionError as e:
-        outbox.put_nowait(OpResultFrame(request_id=msg.request_id, ok=False, error=e.error).model_dump())
+        outbox.put_nowait(OpResultFrame(request_id=msg.request_id, ok=False, error=e.error).model_dump(by_alias=True))
         return
     except ValueError:
         outbox.put_nowait(
-            OpResultFrame(request_id=msg.request_id, ok=False, error="invalid_op").model_dump()
+            OpResultFrame(request_id=msg.request_id, ok=False, error="invalid_op").model_dump(by_alias=True)
         )
         return
     if out is None:
         outbox.put_nowait(
-            OpResultFrame(request_id=msg.request_id, ok=False, error="stale_version").model_dump()
+            OpResultFrame(request_id=msg.request_id, ok=False, error="stale_version").model_dump(by_alias=True)
         )
         return
     coedit.touch(session_id, user.id, edited=True)
     outbox.put_nowait(
-        OpResultFrame(request_id=msg.request_id, ok=True, version=out.version).model_dump()
+        OpResultFrame(request_id=msg.request_id, ok=True, version=out.version).model_dump(by_alias=True)
     )
     # caret_seq rides the frame so peers render the author's caret at the
     # edit; None (cleared caret / legacy client) = no caret assertion.
@@ -191,10 +191,10 @@ def _handle_checkpoint(outbox: queue.Queue[coedit_channel.QueueItem], session_id
     try:
         _require_active(session_id, user, "write")
     except _WsActionError:
-        outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=False).model_dump())
+        outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=False).model_dump(by_alias=True))
         return
     checkpoint_coedit_session(session_id)
-    outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=True).model_dump())
+    outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=True).model_dump(by_alias=True))
 
 
 def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
@@ -205,7 +205,7 @@ def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: i
         outbox.put_nowait(
             OpsResultFrame(
                 request_id=msg.request_id, ok=False, error=e.error, current_head_version=0, ops=[]
-            ).model_dump()
+            ).model_dump(by_alias=True)
         )
         return
     # Head version + ops read as one consistent snapshot (see
@@ -227,7 +227,7 @@ def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: i
                 )
                 for r in result.ops
             ],
-        ).model_dump()
+        ).model_dump(by_alias=True)
     )
 
 
@@ -365,7 +365,7 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
                 version=sess.version,
                 base_sha=sess.base_sha,
                 participants=participants,
-            ).model_dump()
+            ).model_dump(by_alias=True)
         )
 
         recv_task = asyncio.create_task(_recv_loop(websocket, conn.queue, sess.id, user))

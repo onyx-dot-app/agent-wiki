@@ -224,10 +224,13 @@ def test_checkpoint_message_commits_buffer(client):
             _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
             result = _checkpoint(ws)
             assert result == {"type": "checkpoint_result", "request_id": "c", "ok": True}
+            # An explicit checkpoint doesn't close a session with an active
+            # participant — must assert this before the connection closes;
+            # disconnecting drops the last participant too, which (with an
+            # already-clean buffer) triggers its own close.
+            assert coedit.get_active_session(_PATH) is not None
 
     assert git.read_file(_PATH) == "hi world"
-    # An explicit checkpoint doesn't close a session with an active participant.
-    assert coedit.get_active_session(_PATH) is not None
     assert sid is not None
 
 
