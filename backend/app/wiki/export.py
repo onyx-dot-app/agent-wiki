@@ -30,9 +30,19 @@ _APP_ROUTE_PREFIX = "/app/wiki/"
 _LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)]+)\)")
 
 
+def _is_dot_metadata(path: str) -> bool:
+    """Any dot-prefixed component marks app metadata, never a wiki page —
+    even with a ``.md`` suffix (e.g. ``.metadata.md``, ``.meta/state.md``)."""
+    return any(part.startswith(".") for part in path.split("/"))
+
+
 def visible_md_paths(user: User, prefix: str = "") -> list[str]:
     """Tracked ``.md`` pages under ``prefix`` that ``user`` can read."""
-    md = [p for p in wiki_git.list_paths(prefix) if p.endswith(".md")]
+    md = [
+        p
+        for p in wiki_git.list_paths(prefix)
+        if p.endswith(".md") and not _is_dot_metadata(p)
+    ]
     return acl.filter_paths_in_python(user.id, user.is_admin, md)
 
 

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.wiki import acl
+from app.wiki import git as wiki_git
 from app.wiki.export import content_disposition, rewrite_links
 
 from tests._auth import login_fastapi
@@ -113,6 +114,18 @@ def test_export_whole_wiki_zip(tmp_repo):
     assert resp.status_code == 200
     assert 'filename="wiki-export.zip"' in resp.headers["content-disposition"]
     assert {"a.md", "deep/b.md"} <= _zip_names(resp)
+
+
+def test_export_zip_excludes_dot_metadata_pages(tmp_repo):
+    user = seed_user()
+    client = _client(user)
+    client.put("/api/wiki/file", json={"path": "team/x.md", "body": "# X\n"})
+    # Dot paths bypass the page-write API; commit them like app metadata does.
+    wiki_git.commit_file("team/.metadata.md", "meta\n", "seed metadata")
+    wiki_git.commit_file("team/.meta/state.md", "state\n", "seed state")
+
+    resp = client.get("/api/wiki/export", params={"path": "team"})
+    assert _zip_names(resp) == {"team/x.md"}
 
 
 def test_export_zip_drops_unreadable_pages(tmp_repo):
