@@ -299,7 +299,7 @@ export function FileView({ path }: FileViewProps) {
 
   // Source-attributed spans light up in the doc while the Sources tab is
   // open (mock 1832:81274). Fetched lazily per head sha since the server
-  // remaps offsets to HEAD.
+  // remaps offsets to HEAD, so an old version never fetches.
   const sourcesTabOpen = panelTab === "sources";
   const { data: sourceSpans } = useSWR(
     sourcesTabOpen && headSha && !viewingVersion

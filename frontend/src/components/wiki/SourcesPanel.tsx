@@ -29,7 +29,8 @@ import { PanelSearchField } from "./PanelSearch";
 
 interface Props {
   sources: SourceRef[];
-  /** Called with a card's source key to scroll the doc to its spans. */
+  /** Called with a card's source key to scroll the doc to that source's
+   * first span. */
   onActivateSource?: (key: string) => void;
 }
 
@@ -69,14 +70,13 @@ export function sourceKey(s: WriteProvenance): string {
   return s.source_document_id || s.source_url || s.source_title || "";
 }
 
-function SourceCard({
-  source,
-  onActivate,
-}: {
+interface SourceCardProps {
   source: SourceRef;
   /** Scrolls the doc to this source's first attributed span. */
   onActivate?: () => void;
-}) {
+}
+
+function SourceCard({ source, onActivate }: SourceCardProps) {
   const Icon = sourceIcon(source.source_type);
   const url = source.source_url;
   return (
@@ -134,7 +134,7 @@ function SourceCard({
 /**
  * Sources tab (mock 1837:103626): the ingested documents credited to this
  * page, previewing their content via the snippet captured at ingest when
- * one exists. Sources ride the page load, nothing else is fetched.
+ * one exists. Sources ride the page load, the panel itself fetches nothing.
  */
 export function SourcesPanel({ sources, onActivateSource }: Props) {
   const [query, setQuery] = useState("");
