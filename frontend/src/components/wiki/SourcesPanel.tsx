@@ -5,10 +5,12 @@ import { Button, EndOfList, Tag, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 import { SvgExternalLink, SvgFileText, SvgGlobe } from "@onyx-ai/opal/icons";
 import {
+  SvgBraintrust,
   SvgConfluence,
   SvgGithub,
   SvgGmail,
   SvgGoogleDrive,
+  SvgHubspot,
   SvgJira,
   SvgLinear,
   SvgNotion,
@@ -30,10 +32,12 @@ interface Props {
 }
 
 const SOURCE_ICONS: Record<string, IconFunctionComponent> = {
+  braintrust: SvgBraintrust,
   confluence: SvgConfluence,
   github: SvgGithub,
   gmail: SvgGmail,
   google_drive: SvgGoogleDrive,
+  hubspot: SvgHubspot,
   jira: SvgJira,
   linear: SvgLinear,
   notion: SvgNotion,
