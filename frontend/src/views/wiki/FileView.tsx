@@ -1099,7 +1099,7 @@ export function FileView({ path }: FileViewProps) {
           </div>
         )}
 
-        {loading && <LoadingSpinner />}
+        {loading && <LoadingSpinner center />}
 
         {!loading && !error && (
           <>
