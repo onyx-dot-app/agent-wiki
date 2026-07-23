@@ -75,21 +75,16 @@ def _resolve_management(drafts: list[ProposalDraft]) -> dict[str, bool | None]:
 def _base_shas(
     source_paths: list[str], target_paths: list[str]
 ) -> dict[str, str] | None:
-    """Drift anchors. Sources must have history (can't anchor → skip the
-    draft). Targets are anchored only when they exist — a merge target is a
-    live page whose state matters to the premise; a rename/move target is a
-    brand-new path with no history to anchor."""
+    """Drift anchors: every affected path that has history gets one. Paths
+    without history are reserved/new names (a rename option, a move
+    destination) — nothing to anchor. A draft none of whose paths can be
+    anchored has no drift protection at all → skip it."""
     shas: dict[str, str] = {}
-    for p in source_paths:
-        meta = git.last_commit_meta_for_path(p)
-        if meta is None:
-            return None
-        shas[p] = meta[0]
-    for p in target_paths:
+    for p in source_paths + target_paths:
         meta = git.last_commit_meta_for_path(p)
         if meta is not None:
             shas[p] = meta[0]
-    return shas
+    return shas or None
 
 
 def _partition_by_audience(scope: Scope) -> list[Scope]:

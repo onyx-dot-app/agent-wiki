@@ -16,7 +16,11 @@ import pytest
 
 import app.config
 
+from app.auth.users import AI_USER_ID
 from app.llm.agents import automanage_apply
+from app.models.wiki import PathMove
+from app.wiki import notify
+from app.wiki.automanage import executor
 from app.llm.client import CompletionResult, ToolCall
 from app.tasks.queues import automanage_nearline_queue
 from app.wiki import doc_ids
@@ -25,7 +29,11 @@ from app.wiki.automanage import review, runner
 from app.wiki.automanage.detectors.base import Scope, TriggerKind
 from app.wiki.automanage.detectors.case_collision import _CaseCollisionDetector
 from app.wiki.change_proposals import (
+    ProposalCreatedVia,
+    ProposalOp,
     ProposalStatus,
+    auto_approve,
+    create,
     get as get_proposal,
     list_by_status,
 )
@@ -216,3 +224,54 @@ def test_rename_executes_end_to_end(repo, monkeypatch):
     assert resolved is not None
     assert resolved["path"] == "e/notes-2.md"  # id moved with the page
     assert resolved["deleted_at"] is None
+
+
+def test_move_that_rewrites_content_is_reverted(repo, monkeypatch):
+    """A rename is structural consent: the moved page's content must arrive
+    unchanged. A run that moves AND rewrites is reverted and staled — an edit
+    can't ride in on a rename approval. (Non-colliding fixture so it runs on
+    any filesystem.)"""
+    wiki_git.commit_file("m/page.md", _A, "seed", author=None)
+    pid = create(
+        op=ProposalOp.RENAME,
+        source_paths=["m/page.md", "m/page-renamed.md"],
+        target_paths=["m/anchor.md"],
+        base_shas={"m/page.md": wiki_git.head_sha() or ""},
+        summary="rename with a smuggled edit",
+        created_via=ProposalCreatedVia.SWEEP,
+    )["id"]
+    wiki_git.commit_file("m/anchor.md", "# anchor\n" + "z" * 130, "seed", author=None)
+
+    def rogue_dispatch(self, name, args):
+        # Move AND rewrite: the body arriving at the new path differs.
+        sha, moves = wiki_git.move_path(
+            "m/page.md", "m/page-renamed.md", "move", author=None
+        )
+        notify.after_path_move(
+            moves, sha, None,
+            root_move=PathMove(old="m/page.md", new="m/page-renamed.md"),
+        )
+        wiki_git.commit_file(
+            "m/page-renamed.md", _A + "\nsmuggled edit\n", "edit", author=None
+        )
+        self.mutated = True
+        return {"ok": True}
+
+    monkeypatch.setattr(automanage_apply._ToolBox, "dispatch", rogue_dispatch)
+    turns = [
+        CompletionResult(
+            tool_calls=[ToolCall(id="t1", name="move_page", arguments={
+                "source": "m/page.md", "dest": "m/page-renamed.md"})]
+        ),
+        CompletionResult(text="done"),
+    ]
+    monkeypatch.setattr(
+        automanage_apply.client, "complete", lambda messages, **kw: turns.pop(0)
+    )
+    auto_approve(pid, acting_user_id=AI_USER_ID)
+    executor.execute(pid)
+
+    p = get_proposal(pid)
+    assert p is not None and p["status"] == "stale"
+    assert "must preserve content" in (p["status_reason"] or "")
+    assert wiki_git.read_file_opt("m/page.md") == _A  # reverted home, intact

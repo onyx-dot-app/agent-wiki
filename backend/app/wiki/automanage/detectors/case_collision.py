@@ -21,6 +21,12 @@ the applier's path scope; ``target_paths`` carries the kept page (the side
 that must survive either outcome). Naming the kept page in the summary is
 audience-safe: this is a pairing detector, so the runner only pairs pages
 within one permission bucket.
+
+Accepted blind spot: a collision *across* audiences (the two casings have
+different readers) is never paired — a proposal naming both would leak a
+restricted page's existence, the exact thing partitioning prevents. Those
+collisions wait for the design's covering-approver pairing rule (route the
+proposal to users who can read and write both sides).
 """
 from __future__ import annotations
 
