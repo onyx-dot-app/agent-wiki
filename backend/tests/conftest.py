@@ -41,14 +41,27 @@ from urllib.parse import urlsplit, urlunsplit
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("PUBLIC_BASE_URL", "http://testserver")
 
+import bcrypt
 import psycopg
 import pytest
+from alembic import command
+from alembic.config import Config as AlembicConfig
 from psycopg import sql
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from app.config import Config
+from app.db import comment_fts as _comment_fts
+from app.db import fts as _fts
+from app.db.models import Base
+from app.db.session import (
+    _sa_url,  # pyright: ignore[reportPrivateUsage]
+    reset_engine_for_tests,
+)
 from app.mcp_server import session as _mcp_session
 from app.realtime import bus as _bus
-from app.tasks.queue import reset_redis_for_tests
+from app.tasks.queue import get_redis, reset_redis_for_tests
+from app.wiki.git import ensure_wiki_repo
 
 # --------------------------------------------------------------------------- #
 # OpenSearch availability check (runs once at collection time)                #
@@ -94,8 +107,6 @@ def _fast_bcrypt():
     ~165ms. That matters because MCP bearer auth verifies on every
     request. Patched at the ``bcrypt`` module so callers that imported
     ``hash_password`` by value are covered as well."""
-    import bcrypt
-
     orig_gensalt = bcrypt.gensalt
     mp = pytest.MonkeyPatch()
     mp.setattr(bcrypt, "gensalt", lambda rounds=12, prefix=b"2b": orig_gensalt(4, prefix))
@@ -140,11 +151,6 @@ def _migrations_fingerprint() -> str:
     migrated schema could differ. Compiled DDL — not source files —
     because the physical schema also depends on code imported by
     models.py (custom column types, server defaults, …)."""
-    from sqlalchemy.dialects import postgresql
-    from sqlalchemy.schema import CreateIndex, CreateTable
-
-    from app.db.models import Base
-
     h = hashlib.sha256()
     for p in sorted((_MIGRATIONS_DIR / "versions").glob("*.py")):
         h.update(p.name.encode())
@@ -164,11 +170,6 @@ def _upgrade_to_head(url: str) -> None:
     an explicit URL instead of reading ``CONFIG`` (which isn't patched yet
     at session-fixture time). ``env.py`` uses a NullPool engine, so no
     connection outlives this call — required for the RENAME below."""
-    from alembic import command
-    from alembic.config import Config as AlembicConfig
-
-    from app.db.session import _sa_url  # pyright: ignore[reportPrivateUsage]
-
     cfg = AlembicConfig()
     cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
     cfg.attributes["db_url"] = _sa_url(url)
@@ -317,8 +318,6 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
     monkeypatch.setattr("app.api.craft.CONFIG", cfg)
 
     # Reset the lazy OpenSearch client so it re-reads CONFIG on next use.
-    from app.db import fts as _fts
-
     _fts.reset_client_for_tests()
 
     # Same for the lazy Redis client — otherwise a client cached against the
@@ -326,8 +325,6 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
     reset_redis_for_tests()
 
     # Each test rebuilds the engine so it points at the new database.
-    from app.db.session import reset_engine_for_tests
-
     reset_engine_for_tests()
 
     yield cfg
@@ -335,8 +332,6 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
     # Delete this test's queue keys while CONFIG still points at the test
     # broker — accumulated streams would otherwise trip the queue-size cap
     # after enough runs.
-    from app.tasks.queue import get_redis
-
     try:
         r = get_redis()
         keys = list(r.scan_iter(match=f"{dbname}:*"))
@@ -346,12 +341,8 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
         pass
 
     reset_engine_for_tests()
-    from app.db import fts as _fts
-
     if _opensearch_up:
         _fts.drop_index_for_tests()  # delete the per-test index
-        from app.db import comment_fts as _comment_fts
-
         _comment_fts.drop_index_for_tests()  # and the per-test comment index
     _fts.reset_client_for_tests()
     reset_redis_for_tests()
@@ -378,8 +369,6 @@ def tmp_repo(tmp_db, tmp_config, monkeypatch):
     """Tmp DB + an initialized wiki git repo for tests that touch the filesystem."""
     monkeypatch.setattr("app.wiki.git.CONFIG", tmp_config)
     monkeypatch.setattr("app.wiki.filesystem.CONFIG", tmp_config)
-
-    from app.wiki.git import ensure_wiki_repo
 
     ensure_wiki_repo()
     return tmp_db
