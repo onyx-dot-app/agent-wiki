@@ -19,7 +19,9 @@ from typing import Any
 import pytest
 
 from app.auth.users import AI_USER_ID
+from app.db import fts
 from app.llm.client import CompletionResult, ToolCall
+from app.tasks.queues import lightweight_maintenance_queue
 from app.wiki import acl, doc_ids
 from app.wiki import git as wiki_git
 from app.llm.agents import automanage_apply
@@ -32,6 +34,7 @@ from app.wiki.change_proposals import (
     get,
 )
 from tests._seed import list_events, seed_user
+from tests.conftest import needs_opensearch
 
 
 @pytest.fixture
@@ -339,14 +342,11 @@ def test_post_run_catches_unforwarded_source_removal(repo, monkeypatch):
     assert wiki_git.read_file_opt("docs/dup.md") is not None  # reverted back
 
 
-def test_revert_replays_a_completed_move_in_reverse(repo, monkeypatch):
-    """A run that lands one move and then fails must not strand the move's
-    metadata fan-out: the revert replays ``after_path_move`` in reverse, so
-    the doc id, owner row, and search index all point at the source again
-    and nothing references the removed destination."""
-    from app.db import fts
-    from app.tasks.queues import lightweight_maintenance_queue
-
+def _run_reverted_move(monkeypatch) -> tuple[int, str, str]:
+    """Shared setup for the reverse-replay tests: a scripted run lands one
+    move, then gives up — forcing the revert path with the move's fan-out
+    (id re-key, owner re-point, FTS) already applied. Returns
+    ``(proposal_id, page_doc_id, owner_user_id)``."""
     wiki_git.commit_file("wrap/inner/a.md", "# A\n\nBody.\n", "seed", author=None)
     owner = seed_user(uid="own", email="own@x.com")
     acl.set_owner("wrap/inner/a.md", owner)
@@ -370,15 +370,23 @@ def test_revert_replays_a_completed_move_in_reverse(repo, monkeypatch):
                     _tc("move_page", source="wrap/inner/a.md", dest="wrap/a.md")
                 ]
             ),
-            # …then the model gives up, forcing the revert path with the
-            # move's fan-out (id re-key, owner re-point, FTS) already applied.
+            # …then the model gives up.
             CompletionResult(text="CANNOT APPLY: cannot finish"),
         ],
     )
     # Immediate mode so the queued reindex tasks run inline — the FTS
-    # assertions below check real index state, not queue contents.
+    # companion test checks real index state, not queue contents.
     with lightweight_maintenance_queue.immediate_mode():
         executor.execute(pid)
+    return pid, page_id, owner
+
+
+def test_revert_replays_a_completed_move_in_reverse(repo, monkeypatch):
+    """A run that lands one move and then fails must not strand the move's
+    metadata fan-out: the revert replays ``after_path_move`` in reverse, so
+    the doc id and owner row point at the source again and nothing
+    references the removed destination."""
+    pid, page_id, owner = _run_reverted_move(monkeypatch)
 
     p = get(pid)
     assert p is not None and p["status"] == "stale"
@@ -389,6 +397,14 @@ def test_revert_replays_a_completed_move_in_reverse(repo, monkeypatch):
     assert row["deleted_at"] is None
     assert acl.get_owner("wrap/inner/a.md") == owner  # owner row followed back
     assert acl.get_owner("wrap/a.md") is None
+
+
+@needs_opensearch
+def test_revert_replay_reconverges_the_search_index(repo, monkeypatch):
+    """The reverse replay's FTS leg: the source is re-indexed and the removed
+    destination yields no search hit."""
+    _run_reverted_move(monkeypatch)
+
     hit_paths = {h.path for h in fts.search("Body", is_admin=True)}
     assert "wrap/inner/a.md" in hit_paths  # source re-indexed
     assert "wrap/a.md" not in hit_paths  # no search hit on a removed page
