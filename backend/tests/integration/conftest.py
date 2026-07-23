@@ -57,7 +57,6 @@ from app.llm.client import CompletionResult
 from app.tasks.queues import QUEUES
 from tests._auth import login_fastapi
 
-
 # --------------------------------------------------------------------------- #
 # Background-work isolation                                                   #
 # --------------------------------------------------------------------------- #
