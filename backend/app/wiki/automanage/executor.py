@@ -53,6 +53,7 @@ SUPPORTED_OPS: frozenset[str] = frozenset(
         ProposalOp.MERGE.value,
         ProposalOp.DELETE_PAGE.value,
         ProposalOp.RENAME.value,
+        ProposalOp.MOVE.value,
     }
 )
 
