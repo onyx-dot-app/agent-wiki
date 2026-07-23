@@ -1,7 +1,11 @@
 """Template-echo detector — mechanical, no LLM.
 
 A page whose body is still byte-identical to the template it was created from
-is a page nobody ever filled in. After a grace window (someone may be about
+is a page nobody ever filled in. Equality implies provenance here because the
+product's creation flows are template-driven (the new-doc picker and
+write_doc(template_id) both instantiate a template, Blank included); the
+one template-free path — ingestion — writes connector content that never
+matches a template skeleton. After a grace window (someone may be about
 to write), it proposes ``delete_page``: removal, not merge — an untouched
 template instance has no unique content worth consolidating.
 
