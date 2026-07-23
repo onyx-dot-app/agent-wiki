@@ -40,6 +40,7 @@ import {
 } from "@/components/wiki/VersionHistoryList";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
+import { AnnotationTickRail } from "@/components/wiki/AnnotationTickRail";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { EditorEdgeScrollbar } from "@/components/wiki/EditorEdgeScrollbar";
 import { sourceKey } from "@/components/wiki/sources";
@@ -1329,6 +1330,17 @@ export function FileView({ path }: FileViewProps) {
             run={runMargin}
             onSubmitDraft={(body) => void submitMarginDraft(body)}
             onCancelDraft={() => setCommentDraft(null)}
+          />
+        )}
+        {panelScrollDocked && (
+          <AnnotationTickRail
+            editorRef={coeditorRef}
+            commentTargets={commentHighlights}
+            sourceTargets={sourceHighlights}
+            activeCommentIds={activeCommentIds}
+            activeSourceIds={activeSourceIds}
+            onPickComment={activateComment}
+            onPickSource={activateSource}
           />
         )}
       </div>

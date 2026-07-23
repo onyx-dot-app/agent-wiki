@@ -402,6 +402,9 @@ export interface CoeditorHandle {
    * anchor UI to span positions (collapsed spans included, callers skip
    * them). */
   sourceTargets: () => AnchoredHighlightTarget[];
+  /** The comment highlight field's live-mapped targets, same contract as
+   * `sourceTargets`. */
+  commentTargets: () => AnchoredHighlightTarget[];
   /** Doc-space top and height (px from the document's start) of the line
    * block holding a character offset. Stable for off-screen positions
    * (line-block geometry, not rendered coordinates). */
@@ -514,6 +517,10 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         sourceTargets: () => {
           const v = view.current;
           return v ? v.state.field(sourceHighlightsExt.field).targets : [];
+        },
+        commentTargets: () => {
+          const v = view.current;
+          return v ? v.state.field(commentsField).targets : [];
         },
         scrollToSource: (id: string) => {
           const v = view.current;
