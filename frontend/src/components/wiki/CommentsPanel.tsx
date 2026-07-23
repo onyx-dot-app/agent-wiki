@@ -18,7 +18,6 @@ import type { CommentThreadView } from "@/types";
 
 import { CommentMarginRail } from "./CommentMarginRail";
 import { SvgListLines } from "./icons";
-import { EditorEdgeScrollbar } from "./EditorEdgeScrollbar";
 import { PanelSearchField } from "./PanelSearch";
 import { NewCommentComposer, ThreadCard } from "./commentCards";
 
@@ -238,7 +237,6 @@ export function CommentsPanel({
           onSubmitDraft={(body) => void submitDraft(body)}
           onCancelDraft={onDraftConsumed}
         />
-        <EditorEdgeScrollbar editorRef={editorRef!} />
       </Section>
     );
   }

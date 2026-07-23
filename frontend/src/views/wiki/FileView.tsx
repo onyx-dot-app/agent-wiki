@@ -41,6 +41,7 @@ import {
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
+import { EditorEdgeScrollbar } from "@/components/wiki/EditorEdgeScrollbar";
 import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
 import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
@@ -422,14 +423,11 @@ export function FileView({ path }: FileViewProps) {
     !isMobile &&
     (marginThreadCount > 0 || commentDraft !== null);
 
-  // Anchored panel mode hides the editor's native scrollbar (it would sit
-  // at the doc/panel boundary) in favor of the panel's viewport-edge one.
-  const anchoredPanelActive =
-    !!coedit.session &&
-    !viewingVersion &&
-    !isMobile &&
-    ((panelTab === "comments" && !commentsListView) ||
-      (panelTab === "sources" && !sourcesListView));
+  // With any panel open on the live doc, the doc's scrollbar docks at the
+  // viewport edge (EditorEdgeScrollbar) and the native one hides, so tab
+  // switches never toggle the native bar's width inside the scroller.
+  const panelScrollDocked =
+    !!coedit.session && !viewingVersion && !isMobile && panelTab !== null;
 
   // Select a thread (its span gets the orange highlight) and scroll the
   // editor to bring that span into view. Only an explicit click runs this —
@@ -1137,7 +1135,7 @@ export function FileView({ path }: FileViewProps) {
         ref={docRowRef}
         className={`@container relative flex min-h-0 min-w-0 flex-1 flex-col ${
           railActive ? "rail-reserved" : ""
-        } ${anchoredPanelActive ? "panel-anchored" : ""}`}
+        } ${panelScrollDocked ? "panel-anchored" : ""}`}
       >
         <DocTitle
           path={path}
@@ -1293,7 +1291,14 @@ export function FileView({ path }: FileViewProps) {
               rightHost?.el &&
               createPortal(
                 <DocPanel tab={panelTab} onTabChange={setPanelTab}>
-                  {panelBody}
+                  <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                    {panelBody}
+                    {/* One docked doc scrollbar for every tab, so switching
+                        tabs never toggles the native bar's width. */}
+                    {panelScrollDocked && (
+                      <EditorEdgeScrollbar editorRef={coeditorRef} />
+                    )}
+                  </div>
                 </DocPanel>,
                 rightHost.el,
               )}

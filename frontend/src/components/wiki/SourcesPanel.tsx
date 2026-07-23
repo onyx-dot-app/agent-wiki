@@ -16,7 +16,6 @@ import { relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import type { SourceRef, SourceSpan } from "@/types";
 
-import { EditorEdgeScrollbar } from "./EditorEdgeScrollbar";
 import { SvgListLines } from "./icons";
 import { PanelSearchField } from "./PanelSearch";
 import { SourceAnchorRail } from "./SourceAnchorRail";
@@ -208,7 +207,6 @@ export function SourcesPanel({
           onActivateSource={onActivateSource}
           onShowAll={() => onListViewChange(true)}
         />
-        <EditorEdgeScrollbar editorRef={editorRef!} />
       </Section>
     );
   }
