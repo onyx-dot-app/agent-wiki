@@ -141,10 +141,10 @@ def test_unsupported_op_draft_is_skipped_not_persisted(repo, monkeypatch):
     """Emit safety: a detector landing ahead of its op's executor degrades to a
     loud skip — the draft never becomes a proposal row."""
     draft = ProposalDraft(
-        op=ProposalOp.MERGE,  # valid ledger op, but no executor yet
+        op=ProposalOp.SPLIT,  # valid ledger op, outside the policy allowlist
         source_paths=["team/plan.md"],
         target_paths=["old/notes.md"],
-        summary="Merge plan into notes",
+        summary="Split plan into notes",
     )
     monkeypatch.setattr(runner, "DETECTORS", [_StubDetector([draft])])
 

@@ -105,13 +105,14 @@ def test_approve_recovers_stuck_approved(repo):
 
 
 def _mk_unsupported(path: str) -> int:
-    """A proposal whose op has no executor yet (merge is a valid ledger op)."""
+    """A proposal whose op is outside the policy allowlist (split is a valid
+    ledger op with no producer)."""
     return create_proposal(
-        op=ProposalOp.MERGE,
+        op=ProposalOp.SPLIT,
         source_paths=[path],
         target_paths=["kept.md"],
         base_shas={path: "0" * 40},
-        summary=f"Merge “{path}” into “kept.md”",
+        summary=f"Split “{path}” into “kept.md”",
         created_via=ProposalCreatedVia.SWEEP,
     )["id"]
 

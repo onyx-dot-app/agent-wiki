@@ -401,6 +401,50 @@ def _numstat_by_sha(rel_path: str, limit: int) -> dict[str, tuple[int, int]]:
     return stats
 
 
+def head_sha() -> str | None:
+    """SHA of the repo HEAD, or None on an empty repo."""
+    out = _run(["rev-parse", "--verify", "HEAD"], check=False).stdout.strip()
+    return out or None
+
+
+def changed_paths_between(base_sha: str, tip_sha: str) -> list[str]:
+    """Paths touched by any commit in ``base_sha..tip_sha`` (name-only diff of
+    the endpoints — renames/moves report both sides)."""
+    out = _run(["diff", "--name-only", base_sha, tip_sha]).stdout
+    return [p for p in out.splitlines() if p.strip()]
+
+
+def revert_to(base_sha: str, message: str, author: str | None = None) -> str | None:
+    """Additively restore the working tree to ``base_sha``'s state in one new
+    commit — the history-preserving undo for everything after ``base_sha``.
+
+    Not ``reset --hard`` (history must stay additive): the commits being
+    undone remain in history; a new commit lands whose tree equals
+    ``base_sha``'s. Returns the revert commit's SHA, or ``None`` when HEAD is
+    already at ``base_sha`` (nothing to revert).
+    """
+    env_args = ["--author", author] if author else []
+    with commit_lock():
+        head = _run(["rev-parse", "--verify", "HEAD"]).stdout.strip()
+        if head == base_sha:
+            return None
+        # checkout <base> -- . restores tracked content; deletions since base
+        # need the index reset too, so restore both index and worktree.
+        _run(["checkout", base_sha, "--", "."])
+        # Files created after base_sha aren't touched by checkout — remove
+        # anything tracked now that didn't exist at base.
+        base_files = set(
+            _run(["ls-tree", "-r", "--name-only", base_sha]).stdout.splitlines()
+        )
+        now_files = set(_run(["ls-files"]).stdout.splitlines())
+        for extra in sorted(now_files - base_files):
+            _run(["rm", "-f", "--", extra])
+        _run(["commit", "-m", message, *env_args])
+        sha = _run(["rev-parse", "HEAD"]).stdout.strip()
+    log.info("revert_to %s sha=%s", base_sha[:8], sha[:8])
+    return sha
+
+
 def head_sha_for_path(rel_path: str) -> str | None:
     """SHA of the most recent commit that touched ``rel_path``, or None."""
     out = _run(["log", "-n1", "--pretty=format:%H", "--", rel_path], check=False).stdout.strip()
