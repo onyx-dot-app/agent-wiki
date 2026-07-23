@@ -70,11 +70,13 @@ def _resolve_management(drafts: list[ProposalDraft]) -> dict[str, bool | None]:
     return update_policy.resolve_ai_management_for_paths(paths)
 
 
-def _base_shas(source_paths: list[str]) -> dict[str, str] | None:
-    """Drift anchor per source path: the last commit that touched it. Returns
-    None if any source has no history (can't anchor → skip the draft)."""
+def _base_shas(paths: list[str]) -> dict[str, str] | None:
+    """Drift anchor per affected path (sources *and* targets): the last commit
+    that touched it — a content-bearing op's premise involves the target as
+    much as the sources. Returns None if any path has no history (can't
+    anchor → skip the draft)."""
     shas: dict[str, str] = {}
-    for p in source_paths:
+    for p in paths:
         meta = git.last_commit_meta_for_path(p)
         if meta is None:
             return None
@@ -148,7 +150,7 @@ def run_detection(
                     )
                     capped = True
                     break
-                base_shas = _base_shas(draft.source_paths)
+                base_shas = _base_shas(draft_paths)
                 if base_shas is None:
                     continue
                 proposal = create_proposal(
@@ -158,6 +160,7 @@ def run_detection(
                     base_shas=base_shas,
                     summary=draft.summary,
                     created_via=created_via,
+                    detector=detector.name,
                     proposed_bodies=draft.proposed_bodies,
                     run_id=run_id,
                     # Audience snapshot at emit time — staleness re-checks can

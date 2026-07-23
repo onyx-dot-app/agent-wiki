@@ -1369,6 +1369,10 @@ class ChangeProposal(Base):
     # structural-only ops leave it null.
     instruction: Mapped[str | None] = mapped_column(Text)
     created_via: Mapped[str] = mapped_column(Text, nullable=False)
+    # Which detector authored this proposal — execution dispatches the
+    # premise re-validation (`Detector.validate`) back to it. NULL for rows
+    # that predate the column or arrive outside the detector pipeline.
+    detector: Mapped[str | None] = mapped_column(Text)
     # Correlates all proposals from one sweep run (batched notifications).
     run_id: Mapped[str | None] = mapped_column(Text)
     # Who the operation would execute as (delegation auto-apply), and the

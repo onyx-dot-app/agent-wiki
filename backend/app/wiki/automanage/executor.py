@@ -31,6 +31,7 @@ from app.models.wiki import ChangeKind, PathMove
 from app.wiki import change_proposals, doc_ids, git, notify, trash
 from app.llm.agents import automanage_apply
 from app.wiki.automanage import fingerprint, settings
+from app.wiki.automanage.detectors import DETECTORS_BY_NAME
 from app.wiki.change_proposals import ProposalOp, ProposalStatus
 from app.wiki.filesystem import TRASH_PREFIX
 from app.tracing import trace_flow
@@ -104,6 +105,24 @@ def execute(proposal_id: int) -> None:
             log.info(
                 "execute: proposal %s stale — audience fingerprint drifted",
                 proposal_id,
+            )
+            return
+    # Premise re-validation, dispatched to the detector that authored the
+    # proposal: approval can be days old, and only the author knows what
+    # "still valid" means (still empty; still byte-identical; ...). Premise-
+    # based rather than sha-based on purpose — an edit that doesn't break the
+    # premise (the same fix applied to both copies of a duplicate) keeps the
+    # proposal valid. Rows without a detector (predate the column, or created
+    # outside the detector pipeline) skip this gate.
+    detector = DETECTORS_BY_NAME.get(p.get("detector") or "")
+    if detector is not None:
+        invalid = detector.validate(p)
+        if invalid is not None:
+            change_proposals.mark_stale(proposal_id, reason=invalid)
+            log.info(
+                "execute: proposal %s stale — premise no longer holds (%s)",
+                proposal_id,
+                invalid,
             )
             return
     op = p["op"]
