@@ -200,6 +200,8 @@ export function FileView({ path }: FileViewProps) {
   // also swaps the editor's native scrollbar for the viewport-edge one.
   const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
   const [commentsListView, setCommentsListView] = useState(false);
+  // Same page-owned split for the Sources tab's anchored/list modes.
+  const [sourcesListView, setSourcesListView] = useState(false);
   const [commentThreads, setCommentThreads] = useState<CommentThreadView[]>([]);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [selTool, setSelTool] = useState<{
@@ -424,9 +426,9 @@ export function FileView({ path }: FileViewProps) {
   const anchoredPanelActive =
     !!coedit.session &&
     !viewingVersion &&
-    panelTab === "comments" &&
-    !commentsListView &&
-    !isMobile;
+    !isMobile &&
+    ((panelTab === "comments" && !commentsListView) ||
+      (panelTab === "sources" && !sourcesListView));
 
   // Select a thread (its span gets the orange highlight) and scroll the
   // editor to bring that span into view. Only an explicit click runs this —
@@ -1036,6 +1038,10 @@ export function FileView({ path }: FileViewProps) {
           <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
             <SourcesPanel
               sources={sources}
+              spans={sourceSpans}
+              editorRef={viewingVersion ? undefined : coeditorRef}
+              listView={sourcesListView}
+              onListViewChange={setSourcesListView}
               activeKeys={caretSourceKeys}
               onActivateSource={viewingVersion ? undefined : activateSource}
               onHoverSource={viewingVersion ? undefined : setHoveredSourceKey}

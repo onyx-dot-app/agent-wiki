@@ -1,7 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Button, EndOfList, Tag, Text } from "@onyx-ai/opal/components";
+import { useEffect, useState, type RefObject } from "react";
+import {
+  Button,
+  EndOfList,
+  SelectButton,
+  Tag,
+  Text,
+} from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 import { SvgExternalLink, SvgFileText, SvgGlobe } from "@onyx-ai/opal/icons";
 import {
@@ -22,13 +28,26 @@ import {
 } from "@onyx-ai/opal/logos";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
+import type { CoeditorHandle } from "@/lib/editor/components";
 import { relativeTime } from "@/lib/time";
-import type { SourceRef, WriteProvenance } from "@/types";
+import { useIsMobile } from "@/lib/viewport";
+import type { SourceRef, SourceSpan, WriteProvenance } from "@/types";
 
+import { EditorEdgeScrollbar } from "./EditorEdgeScrollbar";
+import { SvgListLines } from "./icons";
 import { PanelSearchField } from "./PanelSearch";
+import { SourceAnchorRail } from "./SourceAnchorRail";
 
 interface Props {
   sources: SourceRef[];
+  /** Attributed spans, anchoring the chips in anchored mode. */
+  spans?: SourceSpan[];
+  /** The live editor, required by anchored mode to track doc positions. */
+  editorRef?: RefObject<CoeditorHandle | null>;
+  /** Anchored/list mode is page-owned: the page hides the editor's native
+   * scrollbar while anchored mode shows the viewport-edge one. */
+  listView: boolean;
+  onListViewChange: (v: boolean) => void;
   /** Source keys whose cards light up (the caret sits in their spans). */
   activeKeys?: string[];
   /** Called with a card's source key to scroll the doc to that source's
@@ -57,12 +76,12 @@ const SOURCE_ICONS: Record<string, IconFunctionComponent> = {
   zendesk: SvgZendesk,
 };
 
-function sourceIcon(type: string | null): IconFunctionComponent {
+export function sourceIcon(type: string | null): IconFunctionComponent {
   return (type && SOURCE_ICONS[type]) || SvgFileText;
 }
 
 // "google_drive" → "Google Drive", for the connector chip.
-function sourceTypeLabel(type: string): string {
+export function sourceTypeLabel(type: string): string {
   return type
     .split(/[_-]/)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -161,20 +180,26 @@ function SourceCard({
  */
 export function SourcesPanel({
   sources,
+  spans,
+  editorRef,
+  listView,
+  onListViewChange,
   activeKeys,
   onActivateSource,
   onHoverSource,
 }: Props) {
+  const isMobile = useIsMobile();
   const [query, setQuery] = useState("");
+  const listMode = listView || isMobile || !editorRef;
 
-  // A caret landing in a span brings its card into view.
+  // A caret landing in a span brings its card into view (list mode).
   const firstActive = activeKeys?.[0];
   useEffect(() => {
-    if (!firstActive) return;
+    if (!firstActive || !listMode) return;
     document
       .querySelector(`[data-source-key="${CSS.escape(firstActive)}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [firstActive]);
+  }, [firstActive, listMode]);
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -187,6 +212,59 @@ export function SourcesPanel({
       )
     : sources;
 
+  const searchRow = (
+    <Section
+      flexDirection="row"
+      justifyContent="start"
+      alignItems="center"
+      height="fit"
+      gap={0.25}
+      className="shrink-0"
+    >
+      <PanelSearchField
+        value={query}
+        onChange={setQuery}
+        placeholder="Search sources…"
+      />
+      {!isMobile && editorRef && (
+        <SelectButton
+          icon={SvgListLines}
+          state={listView ? "selected" : "empty"}
+          tooltip={listView ? "Anchored view" : "List view"}
+          onClick={() => onListViewChange(!listView)}
+        />
+      )}
+    </Section>
+  );
+
+  if (!listMode) {
+    // Anchored mode (mock 1832:81274): only the search row is chromed,
+    // chips float on the page background tracking their doc spans.
+    return (
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        height="auto"
+        gap={0.25}
+        className="relative min-h-0 flex-1"
+      >
+        <div className="shrink-0 rounded-(--radius-12) border border-(--border-01) p-1">
+          {searchRow}
+        </div>
+        <SourceAnchorRail
+          sources={shown}
+          spans={spans ?? []}
+          editorRef={editorRef!}
+          activeKeys={activeKeys}
+          onHoverSource={onHoverSource}
+          onActivateSource={onActivateSource}
+          onShowAll={() => onListViewChange(true)}
+        />
+        <EditorEdgeScrollbar editorRef={editorRef!} />
+      </Section>
+    );
+  }
+
   return (
     <Section
       justifyContent="start"
@@ -196,20 +274,7 @@ export function SourcesPanel({
       padding={0.25}
       className="min-h-0 flex-1 overflow-clip rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01)"
     >
-      <Section
-        flexDirection="row"
-        justifyContent="start"
-        alignItems="center"
-        height="fit"
-        gap={0.25}
-        className="shrink-0"
-      >
-        <PanelSearchField
-          value={query}
-          onChange={setQuery}
-          placeholder="Search sources…"
-        />
-      </Section>
+      {searchRow}
       <Section
         justifyContent="start"
         alignItems="stretch"
