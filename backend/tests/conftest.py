@@ -99,10 +99,15 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _MIGRATIONS_DIR = _BACKEND_DIR / "app" / "db" / "migrations"
 
 _TEMPLATE_PREFIX = "agent_wiki_test_tmpl_"
-# Arbitrary advisory-lock key serializing template builds across xdist
-# workers. Advisory locks are scoped to the database the connection is on,
-# and every worker takes this one on the maintenance DB (_BASE_URL).
-_TEMPLATE_LOCK_KEY = 913_027_554
+# Arbitrary advisory-lock keys, both taken on the maintenance DB
+# (_BASE_URL — advisory locks are scoped to the database the connection is
+# on). BUILD serializes template builds across xdist workers. USE is held
+# *shared* by every live test session for as long as it may clone its
+# template, and taken exclusively (non-blocking) before dropping stale
+# templates — so cleanup skips whenever an overlapping run on another
+# checkout might still clone from an older template.
+_TEMPLATE_BUILD_LOCK_KEY = 913_027_554
+_TEMPLATE_USE_LOCK_KEY = 913_027_555
 
 
 def _with_dbname(url: str, dbname: str) -> str:
@@ -111,14 +116,26 @@ def _with_dbname(url: str, dbname: str) -> str:
 
 
 def _migrations_fingerprint() -> str:
-    """Hash the migration sources (+ models.py, which the bootstrap
-    migration materializes via ``create_all``) so the template database
-    is rebuilt whenever the migrated schema could differ."""
+    """Hash the migration sources plus the compiled DDL of the ORM
+    metadata (which the bootstrap migration materializes via
+    ``create_all``) so the template database is rebuilt whenever the
+    migrated schema could differ. Compiled DDL — not source files —
+    because the physical schema also depends on code imported by
+    models.py (custom column types, server defaults, …)."""
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateIndex, CreateTable
+
+    from app.db.models import Base
+
     h = hashlib.sha256()
     for p in sorted((_MIGRATIONS_DIR / "versions").glob("*.py")):
         h.update(p.name.encode())
         h.update(p.read_bytes())
-    h.update((_BACKEND_DIR / "app" / "db" / "models.py").read_bytes())
+    dialect = postgresql.dialect()
+    for table in sorted(Base.metadata.tables.values(), key=lambda t: t.name):
+        h.update(str(CreateTable(table).compile(dialect=dialect)).encode())
+        for index in sorted(table.indexes, key=lambda i: i.name or ""):
+            h.update(str(CreateIndex(index).compile(dialect=dialect)).encode())
     return h.hexdigest()[:12]
 
 
@@ -141,49 +158,81 @@ def _upgrade_to_head(url: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def _template_db() -> str:
-    """Ensure the migrated template database exists; return its name.
+def _template_db():
+    """Ensure the migrated template database exists; yield its name.
 
-    Runs once per xdist worker. The first worker to take the advisory lock
+    Runs once per xdist worker. The first worker to take the build lock
     builds the template under a ``_bld`` scratch name and atomically
     RENAMEs it into place, so a crashed build can never be mistaken for a
-    finished template; the rest see it exists and move on."""
+    finished template; the rest see it exists and move on.
+
+    ``guard`` holds the shared USE lock for the whole session (released
+    when the connection closes). It is acquired inside the BUILD critical
+    section, so a concurrent run's cleanup can never observe this
+    session's template as unreferenced between the existence check and
+    the shared-lock grab."""
     name = f"{_TEMPLATE_PREFIX}{_migrations_fingerprint()}"
-    with psycopg.connect(_BASE_URL, autocommit=True) as conn:
-        conn.execute("SELECT pg_advisory_lock(%s)", (_TEMPLATE_LOCK_KEY,))
-        try:
-            row = conn.execute(
-                "SELECT 1 FROM pg_database WHERE datname = %s", (name,)
-            ).fetchone()
-            if row:
-                return name
-            stale = conn.execute(
-                "SELECT datname FROM pg_database WHERE datname LIKE %s",
-                (_TEMPLATE_PREFIX + "%",),
-            ).fetchall()
-            for (datname,) in stale:
-                try:
+    guard = psycopg.connect(_BASE_URL, autocommit=True)
+    try:
+        with psycopg.connect(_BASE_URL, autocommit=True) as conn:
+            conn.execute("SELECT pg_advisory_lock(%s)", (_TEMPLATE_BUILD_LOCK_KEY,))
+            try:
+                row = conn.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s", (name,)
+                ).fetchone()
+                if not row:
+                    _drop_stale_templates(conn, keep=name)
+                    bld = f"{name}_bld"
                     conn.execute(
-                        sql.SQL("DROP DATABASE {}").format(sql.Identifier(datname))
+                        sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                            sql.Identifier(bld)
+                        )
                     )
-                except psycopg.Error:
-                    pass  # in use by a concurrent run on an older checkout
-            bld = f"{name}_bld"
-            conn.execute(
-                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
-                    sql.Identifier(bld)
+                    conn.execute(
+                        sql.SQL("CREATE DATABASE {}").format(sql.Identifier(bld))
+                    )
+                    _upgrade_to_head(_with_dbname(_BASE_URL, bld))
+                    conn.execute(
+                        sql.SQL("ALTER DATABASE {} RENAME TO {}").format(
+                            sql.Identifier(bld), sql.Identifier(name)
+                        )
+                    )
+                guard.execute(
+                    "SELECT pg_advisory_lock_shared(%s)", (_TEMPLATE_USE_LOCK_KEY,)
                 )
-            )
-            conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(bld)))
-            _upgrade_to_head(_with_dbname(_BASE_URL, bld))
-            conn.execute(
-                sql.SQL("ALTER DATABASE {} RENAME TO {}").format(
-                    sql.Identifier(bld), sql.Identifier(name)
+            finally:
+                conn.execute(
+                    "SELECT pg_advisory_unlock(%s)", (_TEMPLATE_BUILD_LOCK_KEY,)
                 )
-            )
-        finally:
-            conn.execute("SELECT pg_advisory_unlock(%s)", (_TEMPLATE_LOCK_KEY,))
-    return name
+        yield name
+    finally:
+        guard.close()
+
+
+def _drop_stale_templates(conn: psycopg.Connection, *, keep: str) -> None:
+    """Drop templates built from older migration sets — but only if no
+    live session anywhere still holds the shared USE lock, since an
+    overlapping run on another checkout may yet clone from one of them.
+    Skipped templates get cleaned by a later run that overlaps nothing."""
+    row = conn.execute(
+        "SELECT pg_try_advisory_lock(%s)", (_TEMPLATE_USE_LOCK_KEY,)
+    ).fetchone()
+    if not (row and row[0]):
+        return
+    try:
+        stale = conn.execute(
+            "SELECT datname FROM pg_database WHERE datname LIKE %s AND datname != %s",
+            (_TEMPLATE_PREFIX + "%", keep),
+        ).fetchall()
+        for (datname,) in stale:
+            try:
+                conn.execute(
+                    sql.SQL("DROP DATABASE {}").format(sql.Identifier(datname))
+                )
+            except psycopg.Error:
+                pass  # e.g. a clone in flight; a later run gets it
+    finally:
+        conn.execute("SELECT pg_advisory_unlock(%s)", (_TEMPLATE_USE_LOCK_KEY,))
 
 
 @pytest.fixture
