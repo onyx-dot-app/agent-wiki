@@ -1,5 +1,8 @@
 """The agentic proposal applier — one LLM-driven execution path for every op.
 
+Lives with the other LLM agents; the automanage executor (its only caller)
+owns the pre-gates and the post-run scope check/revert.
+
 Op-specific knowledge lives in the *proposal* (op label, paths, summary,
 instruction, ``proposed_bodies`` preview), not in per-op executor code: the
 model reads the approved intent and applies it against the wiki's *current*

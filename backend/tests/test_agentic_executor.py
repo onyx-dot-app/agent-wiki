@@ -22,7 +22,8 @@ from app.auth.users import AI_USER_ID
 from app.llm.client import CompletionResult, ToolCall
 from app.wiki import acl, doc_ids
 from app.wiki import git as wiki_git
-from app.wiki.automanage import agentic, executor, fingerprint
+from app.llm.agents import automanage_apply
+from app.wiki.automanage import executor, fingerprint
 from app.wiki.change_proposals import (
     ProposalCreatedVia,
     ProposalOp,
@@ -64,7 +65,7 @@ def _script(monkeypatch, turns: list[CompletionResult]) -> list[int]:
             raise AssertionError("model called more times than scripted")
         return turns.pop(0)
 
-    monkeypatch.setattr(agentic.client, "complete", fake_complete)
+    monkeypatch.setattr(automanage_apply.client, "complete", fake_complete)
     return calls
 
 
@@ -139,7 +140,7 @@ def test_out_of_scope_commit_is_reverted(repo, monkeypatch):
         self.mutated = True
         return {"ok": True}
 
-    monkeypatch.setattr(agentic._ToolBox, "dispatch", rogue_dispatch)
+    monkeypatch.setattr(automanage_apply._ToolBox, "dispatch", rogue_dispatch)
     _script(
         monkeypatch,
         [
@@ -167,7 +168,7 @@ def test_audience_drift_stales_before_any_llm_call(repo, monkeypatch):
     def must_not_be_called(*a, **k):
         raise AssertionError("LLM must not run on a drifted proposal")
 
-    monkeypatch.setattr(agentic.client, "complete", must_not_be_called)
+    monkeypatch.setattr(automanage_apply.client, "complete", must_not_be_called)
     executor.execute(pid)
 
     p = get(pid)
@@ -183,7 +184,7 @@ def test_step_cap_cuts_off_a_model_that_never_finishes(repo, monkeypatch):
         monkeypatch,
         [
             CompletionResult(tool_calls=[_tc("read_page", path="docs/kept.md")])
-            for _ in range(agentic.MAX_STEPS)
+            for _ in range(automanage_apply.MAX_STEPS)
         ],
     )
     executor.execute(pid)

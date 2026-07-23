@@ -3,9 +3,9 @@
 Detection only *emits* proposals; this is the only place that acts on one.
 Two execution paths:
 
-- ``delete_empty_folder`` keeps its **deterministic** branch (predates the
-  agentic model): trash-move exactly like `DELETE /wiki/file`, losslessly
-  restorable, re-validated (still empty, else stale).
+- ``delete_empty_folder`` keeps its **deterministic** branch: trash-move
+  exactly like `DELETE /wiki/file`, losslessly restorable, re-validated
+  (still empty, else stale).
 - Every other allowed op goes through the **agentic applier**
   (``agentic.apply_proposal``): the LLM applies the approved intent against
   current wiki state with bounded tools. The rails live here — pre-gates
@@ -29,8 +29,10 @@ from app.db.models import Event
 from app.db.session import session
 from app.models.wiki import ChangeKind, PathMove
 from app.wiki import change_proposals, doc_ids, git, notify, trash
-from app.wiki.automanage import agentic, fingerprint, settings
+from app.llm.agents import automanage_apply
+from app.wiki.automanage import fingerprint, settings
 from app.wiki.change_proposals import ProposalOp, ProposalStatus
+from app.wiki.filesystem import TRASH_PREFIX
 from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
@@ -121,7 +123,7 @@ def _scope_violations(base_sha: str, allowed: frozenset[str]) -> list[str]:
     out: list[str] = []
     for touched in git.changed_paths_between(base_sha, head):
         candidate = touched
-        if touched.startswith(".trash/"):
+        if touched.startswith(TRASH_PREFIX):
             # strip `.trash/<id>/`
             parts = touched.split("/", 2)
             candidate = parts[2] if len(parts) == 3 else touched
@@ -164,7 +166,7 @@ def _execute_agentic(p: dict[str, Any]) -> None:
         return
 
     with trace_flow("automanage.agentic_execute", proposal_id=proposal_id, op=p["op"]):
-        outcome = agentic.apply_proposal(p, author=author)
+        outcome = automanage_apply.apply_proposal(p, author=author)
 
     violations = _scope_violations(base_sha, allowed)
     if violations or not outcome.ok:
