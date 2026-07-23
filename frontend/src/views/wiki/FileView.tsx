@@ -41,7 +41,8 @@ import {
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
-import { sourceKey, SourcesPanel } from "@/components/wiki/SourcesPanel";
+import { sourceKey } from "@/components/wiki/sources";
+import { SourcesPanel } from "@/components/wiki/SourcesPanel";
 import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
 import { SWR_KEYS } from "@/lib/swr-keys";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
@@ -1136,7 +1137,7 @@ export function FileView({ path }: FileViewProps) {
         ref={docRowRef}
         className={`@container relative flex min-h-0 min-w-0 flex-1 flex-col ${
           railActive ? "rail-reserved" : ""
-        } ${anchoredPanelActive ? "comments-anchored" : ""}`}
+        } ${anchoredPanelActive ? "panel-anchored" : ""}`}
       >
         <DocTitle
           path={path}

@@ -14,7 +14,7 @@ import type { CoeditorHandle } from "@/lib/editor/components";
 import { relativeTime } from "@/lib/time";
 import type { SourceRef, SourceSpan } from "@/types";
 
-import { sourceIcon, sourceKey, sourceTypeLabel } from "./SourcesPanel";
+import { sourceIcon, sourceKey, sourceTypeLabel } from "./sources";
 
 const ROW_HEIGHT = 32;
 const ROW_GAP = 4;
@@ -29,6 +29,11 @@ const MAX_CHIPS = 2;
 interface RailSource {
   key: string;
   source: SourceRef;
+}
+
+interface ChipRow {
+  top: number;
+  items: RailSource[];
 }
 
 /** One source's chip: connector icon in a white box plus the title, dark
@@ -201,7 +206,7 @@ export function SourceAnchorRail({
   /** Overflow chips hand off to the list view. */
   onShowAll?: () => void;
 }) {
-  const [rows, setRows] = useState<{ top: number; items: RailSource[] }[]>([]);
+  const [rows, setRows] = useState<ChipRow[]>([]);
   const [pinnedKey, setPinnedKey] = useState<string | null>(null);
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -243,7 +248,7 @@ export function SourceAnchorRail({
     anchored.sort((a, b) => a.want - b.want);
     // Sources within a row height of the cluster's start share its row,
     // later rows push down on collision.
-    const next: { top: number; items: RailSource[] }[] = [];
+    const next: ChipRow[] = [];
     let cursor = 0;
     for (const { rail, want } of anchored) {
       const last = next[next.length - 1];
@@ -297,6 +302,7 @@ export function SourceAnchorRail({
     setHoveredKey(key);
     onHoverSource?.(key);
   };
+  const isOpen = (key: string) => key === pinnedKey || key === hoveredKey;
 
   return (
     <div
@@ -312,9 +318,7 @@ export function SourceAnchorRail({
         {rows.map((row) => {
           const shown = row.items.slice(0, MAX_CHIPS);
           const hidden = row.items.slice(MAX_CHIPS);
-          const rowLit = row.items.some(
-            (it) => it.key === hoveredKey || it.key === pinnedKey,
-          );
+          const rowLit = row.items.some((it) => isOpen(it.key));
           return (
             <div
               key={row.items[0]!.key}
@@ -324,7 +328,7 @@ export function SourceAnchorRail({
               style={{ top: row.top }}
             >
               {shown.map(({ key, source }, i) => {
-                const open = key === pinnedKey || key === hoveredKey;
+                const open = isOpen(key);
                 return (
                   <span
                     key={key}

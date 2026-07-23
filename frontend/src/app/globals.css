@@ -420,10 +420,10 @@ body {
 /* Anchored comments panel: the editor's native scrollbar would sit at the
    doc/panel boundary, so it hides in favor of the panel's viewport-edge
    scrollbar (EditorEdgeScrollbar). */
-.comments-anchored .cm-scroller {
+.panel-anchored .cm-scroller {
   scrollbar-width: none;
 }
-.comments-anchored .cm-scroller::-webkit-scrollbar {
+.panel-anchored .cm-scroller::-webkit-scrollbar {
   display: none;
 }
 

@@ -204,7 +204,7 @@ export function CommentsPanel({
 
   if (!listMode) {
     // Anchored mode (mock 1855). The doc's scrollbar renders at the
-    // viewport edge, the page hides the native one (comments-anchored).
+    // viewport edge, the page hides the native one (panel-anchored).
     return (
       <Section
         justifyContent="start"
