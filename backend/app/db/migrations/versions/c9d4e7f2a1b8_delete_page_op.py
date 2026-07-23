@@ -31,6 +31,11 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint("change_proposals_op_check", "change_proposals", type_="check")
+    # Rows the narrower constraint can't represent must go first, or the
+    # constraint creation fails against its own table. A downgrade drops the
+    # op kind, so its proposals (a ledger of an op that no longer exists) go
+    # with it.
+    op.execute("DELETE FROM change_proposals WHERE op = 'delete_page'")
     op.create_check_constraint(
         "change_proposals_op_check", "change_proposals", f"op IN ({_OPS})"
     )
