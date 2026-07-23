@@ -75,7 +75,19 @@ function request<T>(
 ): Promise<T> {
   const entry = sockets.get(sessionId);
   if (!entry || entry.ws.readyState !== WebSocket.OPEN) {
-    return Promise.reject(new ApiError(0, "not connected"));
+    // `components.tsx`'s CM6 collab layer retries a failed op unconditionally
+    // and immediately (`doPush`'s tail call) — under the old fetch()-based
+    // client that was harmless, since even a failing fetch takes real
+    // macrotask-level time (DNS/connect/handshake). A synchronous
+    // Promise.reject() here has no such delay, so a disconnected socket plus
+    // pending local edits produced an unbroken chain of microtasks with no
+    // yield to the browser's event loop — a real, reproduced main-thread
+    // freeze, not a hypothetical. Settling on a real macrotask tick (instead
+    // of synchronously) forces a yield between retries, which is enough to
+    // keep the tab responsive without touching that pre-existing retry logic.
+    return new Promise<T>((_resolve, reject) => {
+      setTimeout(() => reject(new ApiError(0, "not connected")), 0);
+    });
   }
   const requestId = newRequestId();
   return new Promise<T>((resolve, reject) => {
