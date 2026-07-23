@@ -72,6 +72,16 @@ const STATUS_LABEL: Record<string, string> = {
   applying: "Applying…",
 };
 
+/** The full operation, spelled out: which paths go away, which survives.
+ * The summary alone truncates on long paths — a reviewer deciding a merge
+ * must see both sides, so ops with a target always render this detail. */
+function operationDetail(p: Proposal): string | undefined {
+  if (p.target_paths.length === 0) return undefined;
+  const retire = p.source_paths.map((s) => `“${s}”`).join(", ");
+  const keep = p.target_paths.map((t) => `“${t}”`).join(", ");
+  return `Keeps ${keep} — retires ${retire} (restorable from Trash; links to it will point at the surviving page).`;
+}
+
 function ProposalRow({
   proposal,
   onActioned,
@@ -148,9 +158,11 @@ function ProposalRow({
       sizePreset="main-ui"
       variant="section"
       title={proposal.summary}
-      titleMaxLines={1}
+      titleMaxLines={2}
       auxIcon={outcome === "error" ? "error" : undefined}
-      description={outcome === "error" ? (error ?? undefined) : undefined}
+      description={
+        outcome === "error" ? (error ?? undefined) : operationDetail(proposal)
+      }
       rightChildren={
         TERMINAL.includes(outcome) ? (
           <Text
