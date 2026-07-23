@@ -4,6 +4,14 @@ broadcast layer (``app/wiki/coedit_channel.py``) every message type in this
 module shares. See ``plans/coedit-websocket-transport.md`` (if present) or
 the originating conversation for the design rationale.
 
+The first ``asyncio`` in this backend, scoped deliberately: ``async`` here
+covers connection lifecycle only (accept, the recv/send loops, task
+orchestration) — every ``_connect_sync``/``_disconnect_sync``/``_handle_*``
+helper below is a plain sync function, run via ``asyncio.to_thread`` from
+the loops, with no idea it's being called from an async context at all. See
+CLAUDE.md's "WebSocket routes" rule before adding another route like this
+one.
+
 A "co-edit session" is the page's *live session*: everyone viewing the page
 joins it (read-gated — presence + real-time updates), and editing is a
 capability inside it (``op``/``cursor``/``checkpoint`` messages are
