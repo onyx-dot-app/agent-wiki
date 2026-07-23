@@ -110,7 +110,7 @@ def _require_active(session_id: int, user: User, action: str) -> coedit.SessionR
     return sess
 
 
-def _handle_op(outbox: queue.Queue[dict[str, Any]], session_id: int, user: User, raw: dict[str, Any]) -> None:
+def _handle_op(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
     """All handlers below enqueue onto ``outbox`` (the connection's own
     ``coedit_channel`` queue) rather than calling ``websocket.send_json``
     directly. Found the hard way (a real test failure, not a hypothetical):
@@ -186,7 +186,7 @@ def _handle_cursor(session_id: int, user: User, raw: dict[str, Any]) -> None:
     )
 
 
-def _handle_checkpoint(outbox: queue.Queue[dict[str, Any]], session_id: int, user: User, raw: dict[str, Any]) -> None:
+def _handle_checkpoint(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
     msg = CheckpointMessage.model_validate(raw)
     try:
         _require_active(session_id, user, "write")
@@ -197,7 +197,7 @@ def _handle_checkpoint(outbox: queue.Queue[dict[str, Any]], session_id: int, use
     outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=True).model_dump())
 
 
-def _handle_get_ops(outbox: queue.Queue[dict[str, Any]], session_id: int, user: User, raw: dict[str, Any]) -> None:
+def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
     msg = GetOpsMessage.model_validate(raw)
     try:
         sess = _require_active(session_id, user, "read")
@@ -231,7 +231,7 @@ def _handle_get_ops(outbox: queue.Queue[dict[str, Any]], session_id: int, user: 
     )
 
 
-async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[dict[str, Any]], session_id: int, user: User) -> None:
+async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User) -> None:
     while True:
         raw = await websocket.receive_json()
         msg_type = raw.get("type")
@@ -281,6 +281,16 @@ async def _send_loop(
     idle_elapsed = 0.0
     while True:
         frame = await asyncio.to_thread(coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS)
+        if frame is coedit_channel.CLOSE_SIGNAL:
+            # ws()'s teardown path pushed this via coedit_channel.wake() right
+            # before cancelling this task — reachable here (not just via
+            # cancellation) because there's a real race between the two: this
+            # drain call may already have picked up the signal as an ordinary
+            # queue item before the asyncio-level cancellation is delivered.
+            # Either path ends the loop; this one just does it without
+            # waiting on a CancelledError that might arrive after the value
+            # already did.
+            return
         if frame is None:
             idle_elapsed += _SEND_LOOP_POLL_SECONDS
             if idle_elapsed >= _HEARTBEAT_SECONDS:
@@ -363,6 +373,15 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED
         )
+        # Wake a still-blocked drain() *before* cancelling it: cancelling
+        # send_task only stops the asyncio Task watching the thread, not the
+        # already-dispatched OS thread itself — queue.Queue.get(timeout=...)
+        # has no cancellation hook, so without this it just keeps blocking,
+        # doing nothing, until its own timeout expires (see
+        # coedit_channel.wake's docstring). Pushing CLOSE_SIGNAL is what
+        # actually unblocks that thread immediately, same as a real frame
+        # arriving would.
+        coedit_channel.wake(conn.id)
         for t in pending:
             t.cancel()
         for t in done:
