@@ -449,10 +449,15 @@ def list_paths_with_blob_sha(prefix: str = "") -> list[tuple[str, str]]:
     """``(path, blob_sha)`` for every tracked file under ``prefix`` at HEAD
     (excluding the hidden ``.trash/``). The blob sha is git's content hash —
     equal shas mean byte-identical file contents, which is what the exact
-    duplicate detector groups on."""
+    duplicate detector groups on.
+
+    An empty repo (no HEAD yet) legitimately has no tracked files; any other
+    ``ls-tree`` failure raises, so a sweep records a failed run instead of
+    silently reporting a duplicate-free wiki."""
+    if head_sha() is None:
+        return []
     out = _run(
         ["ls-tree", "-r", "HEAD", "--format=%(objectname) %(path)", prefix or "."],
-        check=False,
     ).stdout
     pairs: list[tuple[str, str]] = []
     for line in out.splitlines():
