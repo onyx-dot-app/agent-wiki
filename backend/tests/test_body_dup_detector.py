@@ -9,17 +9,19 @@ from __future__ import annotations
 
 import pytest
 
-from app.wiki import acl, update_policy
-from app.wiki import git as wiki_git
 from app.llm.agents import automanage_apply
 from app.tasks.queues import automanage_nearline_queue
+from app.wiki import acl, update_policy
+from app.wiki import git as wiki_git
 from app.wiki.automanage import review, runner
 from app.wiki.automanage.detectors.base import Scope, TriggerKind
 from app.wiki.automanage.detectors.body_dup import _BodyDupDetector
 from app.wiki.change_proposals import (
     ProposalStatus,
-    get as get_proposal,
     list_by_status,
+)
+from app.wiki.change_proposals import (
+    get as get_proposal,
 )
 from tests._seed import seed_user
 

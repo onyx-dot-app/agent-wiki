@@ -28,16 +28,17 @@ import logging
 from typing import Any
 
 from app.auth.users import AI_USER_ID
-from app.wiki import git
-from app.wiki import update_policy
+from app.wiki import git, update_policy
 from app.wiki.automanage import executor, fingerprint, review, runs, settings
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
     ProposalCreatedVia,
     ProposalStatus,
-    create as create_proposal,
     taken_dedupe_keys,
+)
+from app.wiki.change_proposals import (
+    create as create_proposal,
 )
 
 log = logging.getLogger(__name__)
@@ -217,10 +218,9 @@ def run_detection(
                     draft.auto_approvable
                     and draft_paths
                     and all(mgmt.get(p) is True for p in draft_paths)
+                ) and not review.auto_approve(
+                    proposal["id"], acting_user_id=AI_USER_ID
                 ):
-                    if not review.auto_approve(
-                        proposal["id"], acting_user_id=AI_USER_ID
-                    ):
                         # Shouldn't happen for a just-created proposal; if a race
                         # transitioned it out of pending, it stays pending (a
                         # human can still action it) — surface the anomaly loudly.

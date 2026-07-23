@@ -27,14 +27,14 @@ from typing import Any
 from app.auth import users
 from app.db.models import Event
 from app.db.session import session
-from app.models.wiki import ChangeKind, PathMove
-from app.wiki import change_proposals, doc_ids, git, notify, trash
 from app.llm.agents import automanage_apply
+from app.models.wiki import ChangeKind, PathMove
+from app.tracing import trace_flow
+from app.wiki import change_proposals, doc_ids, git, notify, trash
 from app.wiki.automanage import fingerprint, settings
 from app.wiki.automanage.detectors import DETECTORS_BY_NAME
 from app.wiki.change_proposals import ProposalOp, ProposalStatus
 from app.wiki.filesystem import TRASH_PREFIX
-from app.tracing import trace_flow
 
 log = logging.getLogger(__name__)
 

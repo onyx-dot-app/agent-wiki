@@ -14,9 +14,9 @@ import re
 import subprocess
 import tempfile
 import time
-from contextlib import contextmanager
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -114,12 +114,9 @@ def commit_lock() -> Generator[None]:
     """
     lock_path = Path(CONFIG.wiki_dir) / ".git" / "wiki-commit.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    f = open(lock_path, "a")
-    try:
+    with open(lock_path, "a") as f:  # closing the descriptor releases the flock
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         yield
-    finally:
-        f.close()  # closing the descriptor releases the flock
 
 
 def commit_file(
@@ -534,7 +531,7 @@ def ingest_update_times_24h(rel_path: str) -> list[int]:
     out when an over-cap page drops back under the cap (the oldest updates age
     out of the 24h window)."""
     since = (
-        datetime.now(timezone.utc) - timedelta(hours=_INGEST_WINDOW_HOURS)
+        datetime.now(UTC) - timedelta(hours=_INGEST_WINDOW_HOURS)
     ).isoformat()
     out = _run(
         [
@@ -672,12 +669,12 @@ def paths_authored_by(author_email: str, limit: int = 50) -> list[tuple[str, str
     out = _run(
         [
             "log",
-            "--max-count=%d" % (limit * 20),
+            f"--max-count={limit * 20}",
             # --author is a regex; escape so metachars in an email (".", "+")
             # match literally and can't pull in or skip the wrong author.
-            "--author=%s" % re.escape(author_email),
+            f"--author={re.escape(author_email)}",
             "--name-only",
-            "--pretty=format:%s%%aI" % sep,
+            f"--pretty=format:{sep}%aI",
         ],
         check=False,
     ).stdout
