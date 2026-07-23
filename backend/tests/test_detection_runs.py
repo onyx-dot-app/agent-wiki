@@ -47,9 +47,25 @@ def test_list_recent_newest_first(tmp_db):
     from app.db.models import DetectionRun
     from app.db.session import session
 
+    # `completed` status: two simultaneous *running* sweep rows are outlawed
+    # by the partial unique index backing atomic sweep-slot acquisition.
     with session() as s:
-        s.add(DetectionRun(id="older", trigger="sweep", started_at="2026-07-16 10:00:00"))
-        s.add(DetectionRun(id="newer", trigger="sweep", started_at="2026-07-16 11:00:00"))
+        s.add(
+            DetectionRun(
+                id="older",
+                trigger="sweep",
+                status="completed",
+                started_at="2026-07-16 10:00:00",
+            )
+        )
+        s.add(
+            DetectionRun(
+                id="newer",
+                trigger="sweep",
+                status="completed",
+                started_at="2026-07-16 11:00:00",
+            )
+        )
     ids = [r["id"] for r in runs.list_recent()]
     assert ids.index("newer") < ids.index("older")
 
