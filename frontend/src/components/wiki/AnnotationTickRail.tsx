@@ -11,14 +11,12 @@ import {
 import type { CoeditorHandle } from "@/lib/editor/components";
 import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
 
-// A tick per annotated region, deduped when two regions land within one
-// slot of each other on the strip.
+// Min px between shown ticks, closer regions collapse into one.
 const TICK_SLOT = 12;
 
 interface Tick {
   kind: "comment" | "source";
   id: string;
-  offset: number;
   /** Content fraction of the doc, 0..1. */
   fraction: number;
 }
@@ -28,8 +26,8 @@ interface Tick {
  * line per commented or source-attributed region at its proportional doc
  * position, the active region's tick heavier (Weight/Bar/Medium,
  * Border/05) than the rest (Weight/Bar/Small, Border/02). Clicking a tick
- * scrolls to and activates its region. Reads whichever highlight field is
- * populated, which the tabs keep mutually exclusive.
+ * scrolls to and activates its region. Reads both live-mapped highlight
+ * fields and shows a tick for every populated target.
  */
 export function AnnotationTickRail({
   editorRef,
@@ -52,17 +50,14 @@ export function AnnotationTickRail({
 }) {
   const [ticks, setTicks] = useState<Tick[]>([]);
   const [trackH, setTrackH] = useState(0);
-  const trackRef = useRef<HTMLDivElement | null>(null);
   const rafId = useRef(0);
 
-  // The slot collapse needs the strip's real height, measured after mount
-  // and on resize (reading it during render sees 0 on the first
-  // tick-bearing pass, before the strip exists).
+  // The slot collapse needs the strip's real px height, which only exists
+  // after the first tick-bearing render (measured on mount and resize).
   const trackObserver = useRef<ResizeObserver | null>(null);
   const measureTrack = useCallback((el: HTMLDivElement | null) => {
     trackObserver.current?.disconnect();
     trackObserver.current = null;
-    trackRef.current = el;
     if (!el) return;
     setTrackH(el.clientHeight);
     const ro = new ResizeObserver(() => setTrackH(el.clientHeight));
@@ -92,7 +87,6 @@ export function AnnotationTickRail({
         next.push({
           kind,
           id: t.id,
-          offset: t.startOffset,
           fraction: Math.min(1, Math.max(0, line.top / sh)),
         });
       }
@@ -110,9 +104,10 @@ export function AnnotationTickRail({
       cancelAnimationFrame(rafId.current);
       rafId.current = requestAnimationFrame(relayout);
     };
-    // Synchronous first pass, rAF is throttled in occluded tabs. Ticks are
-    // content-fraction positioned, so plain scrolling never moves them.
+    // Synchronous first pass, rAF is throttled in occluded tabs.
     relayout();
+    // Ticks are content-fraction positioned, so plain scrolling never
+    // moves them and only geometry changes matter.
     const unsub = editor.subscribeLayout((kind) => {
       if (kind === "geometry") scheduled();
     });
