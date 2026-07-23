@@ -113,9 +113,24 @@ def execute(proposal_id: int) -> None:
     # based rather than sha-based on purpose — an edit that doesn't break the
     # premise (the same fix applied to both copies of a duplicate) keeps the
     # proposal valid. Rows without a detector (predate the column, or created
-    # outside the detector pipeline) skip this gate.
-    detector = DETECTORS_BY_NAME.get(p.get("detector") or "")
-    if detector is not None:
+    # outside the detector pipeline) skip this gate; a *stamped* row whose
+    # detector is unknown (renamed/removed, mixed-version worker) fails
+    # closed — its premise can't be re-validated, so it must not execute.
+    detector_name = p.get("detector")
+    if detector_name is not None:
+        detector = DETECTORS_BY_NAME.get(detector_name)
+        if detector is None:
+            change_proposals.mark_stale(
+                proposal_id,
+                reason=f"authoring detector {detector_name!r} is unknown — "
+                "premise cannot be re-validated",
+            )
+            log.error(
+                "execute: proposal %s stale — unknown detector %r",
+                proposal_id,
+                detector_name,
+            )
+            return
         invalid = detector.validate(p)
         if invalid is not None:
             change_proposals.mark_stale(proposal_id, reason=invalid)

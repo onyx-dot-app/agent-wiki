@@ -117,3 +117,21 @@ def test_unstamped_proposal_skips_the_gate_and_executes(repo):
     p = get_proposal(pid)
     assert p is not None
     assert p["status"] == "applied"  # executed normally without the gate
+
+
+def test_unknown_detector_fails_closed(repo, monkeypatch):
+    """A *stamped* proposal whose detector no longer exists (renamed/removed,
+    mixed-version worker) must not execute — the premise can't be re-checked."""
+    runner.run_sweep(triggered_by_user_id=None)
+    p = _pending_one()
+    monkeypatch.delitem(executor.DETECTORS_BY_NAME, "empty_folder")
+
+    uid = seed_user(uid="rv", email="rv@x.com")
+    with automanage_nearline_queue.immediate_mode():
+        review.approve(p["id"], user_id=uid)
+
+    refreshed = get_proposal(p["id"])
+    assert refreshed is not None
+    assert refreshed["status"] == "stale"
+    assert "unknown" in (refreshed["status_reason"] or "")
+    assert "hollow/.gitkeep" in wiki_git.list_paths()  # nothing executed
