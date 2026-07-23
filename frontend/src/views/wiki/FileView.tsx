@@ -329,6 +329,13 @@ export function FileView({ path }: FileViewProps) {
     },
     [sourceSpans],
   );
+  // Hovering a card lights only that source's spans, attributing each
+  // highlight to its card.
+  const [hoveredSourceKey, setHoveredSourceKey] = useState<string | null>(null);
+  const activeSourceIds = useMemo(
+    () => (hoveredSourceKey ? [hoveredSourceKey] : []),
+    [hoveredSourceKey],
+  );
 
   // The doc area hosting the lane, measured at interaction time so the
   // panel fallback keys off the same width as the lane's container query.
@@ -1022,6 +1029,7 @@ export function FileView({ path }: FileViewProps) {
             <SourcesPanel
               sources={sources}
               onActivateSource={viewingVersion ? undefined : activateSource}
+              onHoverSource={viewingVersion ? undefined : setHoveredSourceKey}
             />
           </div>
         );
@@ -1229,6 +1237,7 @@ export function FileView({ path }: FileViewProps) {
                       commentHighlights={commentHighlights}
                       activeCommentIds={activeCommentIds}
                       sourceHighlights={sourceHighlights}
+                      activeSourceIds={activeSourceIds}
                       onSelectionForComment={handleSelectionForComment}
                       placeholder="Start typing, or pick a template above…"
                     />

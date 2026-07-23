@@ -163,7 +163,7 @@ const peersField = StateField.define<{
  * uses a slim scrollbar with a transparent track. */
 // Every anchored-highlight mark class, for selectors that must match all.
 const ANCHOR_HIGHLIGHT =
-  ":is(.cm-comment-highlight, .cm-comment-highlight-active, .cm-source-highlight)";
+  ":is(.cm-comment-highlight, .cm-comment-highlight-active, .cm-source-highlight, .cm-source-highlight-active)";
 
 const baseTheme = EditorView.theme({
   "&": {
@@ -270,19 +270,24 @@ const baseTheme = EditorView.theme({
   ".cm-comment-highlight-active": {
     backgroundColor: "var(--highlight-active)",
   },
-  // Source-attributed spans paint at Highlight/Active (mock 1832:81274).
+  // Source-attributed spans idle at the light amber, and the hovered
+  // card's spans jump to Highlight/Active (mock 1832:81274) so a reader
+  // can tell which highlight belongs to which source.
   ".cm-source-highlight": {
+    backgroundColor: "var(--neon-amber-a30)",
+  },
+  ".cm-source-highlight-active": {
     backgroundColor: "var(--highlight-active)",
   },
   // Code marks nest inside highlight marks with an opaque tint that would
   // occlude the wrapping span's amber, so they repaint the highlight color
   // over their own background.
-  ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline":
+  ".cm-comment-highlight .cm-md-code-block, .cm-comment-highlight .cm-md-code-inline, .cm-source-highlight .cm-md-code-block, .cm-source-highlight .cm-md-code-inline":
     {
       backgroundImage:
         "linear-gradient(var(--neon-amber-a30), var(--neon-amber-a30))",
     },
-  ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline, .cm-source-highlight .cm-md-code-block, .cm-source-highlight .cm-md-code-inline":
+  ".cm-comment-highlight-active .cm-md-code-block, .cm-comment-highlight-active .cm-md-code-inline, .cm-source-highlight-active .cm-md-code-block, .cm-source-highlight-active .cm-md-code-inline":
     {
       backgroundImage:
         "linear-gradient(var(--highlight-active), var(--highlight-active))",
@@ -350,6 +355,8 @@ interface CoeditorProps {
   activeCommentIds?: string[];
   /** Source-attributed spans to highlight while the Sources tab is open. */
   sourceHighlights?: AnchoredHighlightTarget[];
+  /** Source keys whose spans get the stronger (active) highlight. */
+  activeSourceIds?: string[];
   /** Fires on every selection change with the current selection as a comment
    * draft (null if collapsed) plus its on-screen coordinates, for the caller
    * to position a floating "Comment" affordance. */
@@ -415,6 +422,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       commentHighlights,
       activeCommentIds,
       sourceHighlights,
+      activeSourceIds,
       onSelectionForComment,
     },
     ref,
@@ -437,6 +445,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     const commentHighlightsRef = useRef(commentHighlights);
     const activeCommentIdsRef = useRef(activeCommentIds);
     const sourceHighlightsRef = useRef(sourceHighlights);
+    const activeSourceIdsRef = useRef(activeSourceIds);
     onSelRef.current = onSelectionChange;
     onCaretClearedRef.current = onCaretCleared;
     getCaretSeqRef.current = getCaretSeq;
@@ -446,6 +455,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
     commentHighlightsRef.current = commentHighlights;
     activeCommentIdsRef.current = activeCommentIds;
     sourceHighlightsRef.current = sourceHighlights;
+    activeSourceIdsRef.current = activeSourceIds;
 
     useImperativeHandle(
       ref,
@@ -725,6 +735,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
             activeCommentIdsRef.current ?? [],
           ),
           sourceHighlightsExt.setTargets.of(sourceHighlightsRef.current ?? []),
+          sourceHighlightsExt.setActive.of(activeSourceIdsRef.current ?? []),
         ],
       });
       const onScroll = () => notifyLayout("scroll");
@@ -849,6 +860,13 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         effects: sourceHighlightsExt.setTargets.of(sourceHighlights ?? []),
       });
     }, [sourceHighlights]);
+
+    // Hovered source keys ride their own effect, like comment actives.
+    useEffect(() => {
+      view.current?.dispatch({
+        effects: sourceHighlightsExt.setActive.of(activeSourceIds ?? []),
+      });
+    }, [activeSourceIds]);
 
     // Reconfigure the read-only facets when the prop changes — they're baked
     // into the state at create time otherwise, and a `can_write` correction

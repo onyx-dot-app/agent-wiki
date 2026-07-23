@@ -90,9 +90,7 @@ export const commentHighlights = anchoredHighlightField({
   active: "cm-comment-highlight-active",
 });
 
-// The sources view paints every attributed span at Highlight/Active (mock
-// 1832:81274), so the active class never differs from idle.
 export const sourceHighlights = anchoredHighlightField({
   idle: "cm-source-highlight",
-  active: "cm-source-highlight",
+  active: "cm-source-highlight-active",
 });

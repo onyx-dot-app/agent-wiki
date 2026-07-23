@@ -32,6 +32,9 @@ interface Props {
   /** Called with a card's source key to scroll the doc to that source's
    * first span. */
   onActivateSource?: (key: string) => void;
+  /** Fires with the hovered card's source key (null on leave), so the
+   * page can light that source's doc spans. */
+  onHoverSource?: (key: string | null) => void;
 }
 
 const SOURCE_ICONS: Record<string, IconFunctionComponent> = {
@@ -74,15 +77,19 @@ interface SourceCardProps {
   source: SourceRef;
   /** Scrolls the doc to this source's first attributed span. */
   onActivate?: () => void;
+  /** Hover state, so the page can light this source's doc spans. */
+  onHoverChange?: (hovered: boolean) => void;
 }
 
-function SourceCard({ source, onActivate }: SourceCardProps) {
+function SourceCard({ source, onActivate, onHoverChange }: SourceCardProps) {
   const Icon = sourceIcon(source.source_type);
   const url = source.source_url;
   return (
     <div
       className="group/source w-full shrink-0 rounded-(--radius-12) p-1 hover:bg-(--background-tint-00)"
       onClick={onActivate}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
     >
       <div className="flex min-h-7 items-start gap-1 p-[2px]">
         <span className="flex size-6 shrink-0 items-center justify-center">
@@ -136,7 +143,11 @@ function SourceCard({ source, onActivate }: SourceCardProps) {
  * page, previewing their content via the snippet captured at ingest when
  * one exists. Sources ride the page load, the panel itself fetches nothing.
  */
-export function SourcesPanel({ sources, onActivateSource }: Props) {
+export function SourcesPanel({
+  sources,
+  onActivateSource,
+  onHoverSource,
+}: Props) {
   const [query, setQuery] = useState("");
 
   const q = query.trim().toLowerCase();
@@ -207,6 +218,11 @@ export function SourcesPanel({ sources, onActivateSource }: Props) {
               onActivate={
                 key && onActivateSource
                   ? () => onActivateSource(key)
+                  : undefined
+              }
+              onHoverChange={
+                key && onHoverSource
+                  ? (h) => onHoverSource(h ? key : null)
                   : undefined
               }
             />
