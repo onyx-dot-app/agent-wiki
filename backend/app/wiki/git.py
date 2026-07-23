@@ -445,6 +445,23 @@ def revert_to(base_sha: str, message: str, author: str | None = None) -> str | N
     return sha
 
 
+def list_paths_with_blob_sha(prefix: str = "") -> list[tuple[str, str]]:
+    """``(path, blob_sha)`` for every tracked file under ``prefix`` at HEAD
+    (excluding the hidden ``.trash/``). The blob sha is git's content hash —
+    equal shas mean byte-identical file contents, which is what the exact
+    duplicate detector groups on."""
+    out = _run(
+        ["ls-tree", "-r", "HEAD", "--format=%(objectname) %(path)", prefix or "."],
+        check=False,
+    ).stdout
+    pairs: list[tuple[str, str]] = []
+    for line in out.splitlines():
+        sha, _, path = line.partition(" ")
+        if path and not path.startswith(TRASH_PREFIX):
+            pairs.append((path, sha))
+    return pairs
+
+
 def head_sha_for_path(rel_path: str) -> str | None:
     """SHA of the most recent commit that touched ``rel_path``, or None."""
     out = _run(["log", "-n1", "--pretty=format:%H", "--", rel_path], check=False).stdout.strip()

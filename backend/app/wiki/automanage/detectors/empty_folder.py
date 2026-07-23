@@ -86,6 +86,7 @@ def _empty_long_enough(empty_since_iso: str, now: datetime, min_age_days: int) -
 
 class _EmptyFolderDetector:
     name = "empty_folder"
+    pairs_paths = False  # single-path op; sees the whole scope
 
     def __init__(self, *, min_age_days: int = EMPTY_FOLDER_MIN_AGE_DAYS) -> None:
         self.min_age_days = min_age_days

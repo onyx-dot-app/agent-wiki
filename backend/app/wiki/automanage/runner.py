@@ -16,10 +16,11 @@ Guardrails applied to every draft:
 - **Per-run cap** — stop emitting past ``MAX_PROPOSALS_PER_RUN`` and log the
   truncation, so one run can't flood the queue.
 
-Permission-fingerprint partitioning (the pairing-time boundary in the design)
-is a duplicate/misplacement concern — the empty-folder detector proposes on a
-single path and never pairs across a visibility boundary, so it isn't exercised
-yet; the ACL fingerprint on the proposal is left null until that lands.
+Permission-fingerprint partitioning: detectors marked ``pairs_paths`` receive
+one same-audience bucket of pages at a time (``_partition_by_audience``), so
+pages with different audiences are never named together in one proposal.
+Single-path detectors (empty-folder) see the whole scope. Every emitted
+proposal is stamped with the combined audience fingerprint of its path-set.
 """
 from __future__ import annotations
 
@@ -84,6 +85,28 @@ def _base_shas(paths: list[str]) -> dict[str, str] | None:
     return shas
 
 
+def _partition_by_audience(scope: Scope) -> list[Scope]:
+    """Split a scope into same-audience sub-scopes for pairing detectors.
+
+    Only ``.md`` pages are fingerprinted and bucketed (pairing techniques
+    compare page content; markers like ``.gitkeep`` never pair). Buckets of a
+    single page are dropped — nothing to pair. Most wikis are default-public,
+    so this usually returns one big bucket and the partition costs one batched
+    fingerprint pass."""
+    pages = [p for p in scope.paths if p.endswith(".md")]
+    if not pages:
+        return []
+    fps = fingerprint.fingerprints_for_paths(pages)
+    by_fp: dict[str, list[str]] = {}
+    for path in pages:
+        by_fp.setdefault(fps[path], []).append(path)
+    return [
+        scope.model_copy(update={"paths": tuple(sorted(group))})
+        for _, group in sorted(by_fp.items())
+        if len(group) > 1
+    ]
+
+
 def run_detection(
     *, trigger: TriggerKind, triggered_by_user_id: str | None, paths: list[str]
 ) -> dict[str, Any]:
@@ -113,12 +136,23 @@ def run_detection(
         taken = taken_dedupe_keys(_BLOCKING_STATUSES)
         emitted = 0
         capped = False
+        # Pairing detectors compare pages against each other; feeding them one
+        # permission bucket at a time means pages with different audiences are
+        # never mentioned in one proposal (which alone would leak a restricted
+        # page's existence to whoever sees the review surface). Buckets are
+        # computed once per run and only when a pairing detector will run.
+        buckets: list[Scope] | None = None
         for detector in DETECTORS:
             if capped:
                 break
             if not detector.applicable(trigger):
                 continue
-            drafts = detector.detect(scope)
+            if getattr(detector, "pairs_paths", False):
+                if buckets is None:
+                    buckets = _partition_by_audience(scope)
+                drafts = [d for sub in buckets for d in detector.detect(sub)]
+            else:
+                drafts = detector.detect(scope)
             # One policy query per detector, not one per path per draft.
             mgmt = _resolve_management(drafts)
             for draft in drafts:
@@ -161,6 +195,7 @@ def run_detection(
                     summary=draft.summary,
                     created_via=created_via,
                     detector=detector.name,
+                    instruction=draft.instruction,
                     proposed_bodies=draft.proposed_bodies,
                     run_id=run_id,
                     # Audience snapshot at emit time — staleness re-checks can
