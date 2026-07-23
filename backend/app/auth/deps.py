@@ -16,7 +16,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
-from fastapi import Depends, HTTPException, Request
+from typing import Any
+
+from fastapi import Depends, HTTPException, Request, WebSocket
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -36,11 +38,12 @@ def user_epoch(user_id: str) -> int:
     return int((row or {}).get("session_epoch") or 0)
 
 
-def current_user(request: Request) -> User | None:
-    """Resolve the active user from the session cookie. Returns
-    ``None`` when there is no cookie, the signature is invalid, the
-    user row has been deleted, or the account is deactivated."""
-    user_id = request.session.get("user_id")
+def _resolve_user(sess: dict[str, Any]) -> User | None:
+    """Shared session-cookie -> ``User`` resolution, against a plain
+    ``dict``-like session mapping — ``Request.session`` and
+    ``WebSocket.session`` are both Starlette ``SessionMiddleware`` reads of
+    the exact same signed cookie, so one resolver covers both transports."""
+    user_id = sess.get("user_id")
     if not isinstance(user_id, str) or not user_id:
         return None
     row = users_repo.get_by_id(user_id)
@@ -51,7 +54,7 @@ def current_user(request: Request) -> User | None:
         return None
     # Sessions minted before a password change carry an older epoch (or none,
     # for pre-epoch cookies against a bumped account) and stop authenticating.
-    if int(request.session.get("session_epoch") or 0) != int(row["session_epoch"] or 0):
+    if int(sess.get("session_epoch") or 0) != int(row["session_epoch"] or 0):
         return None
     return User(
         id=row["id"],
@@ -61,7 +64,31 @@ def current_user(request: Request) -> User | None:
     )
 
 
+def current_user(request: Request) -> User | None:
+    """Resolve the active user from the session cookie. Returns
+    ``None`` when there is no cookie, the signature is invalid, the
+    user row has been deleted, or the account is deactivated."""
+    return _resolve_user(request.session)
+
+
 def require_user(user: User | None = Depends(current_user)) -> User:
+    if user is None:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return user
+
+
+def current_user_ws(websocket: WebSocket) -> User | None:
+    """WebSocket-flavored ``current_user`` — same cookie, same resolver."""
+    return _resolve_user(websocket.session)
+
+
+def require_user_ws(user: User | None = Depends(current_user_ws)) -> User:
+    """Raises before the handshake completes on a missing/invalid session.
+    Verified directly (not assumed): an ``HTTPException`` raised while
+    FastAPI solves a websocket route's dependencies produces a clean HTTP
+    denial response *before* the upgrade — the client sees a normal 401,
+    the connection never opens — the same outcome ``require_user`` gives an
+    HTTP caller, not a raw dropped socket."""
     if user is None:
         raise HTTPException(status_code=401, detail="unauthorized")
     return user

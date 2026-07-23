@@ -69,6 +69,23 @@ export async function apiFetchBlob(
   return res.blob();
 }
 
+/** Resolves `path` against `BASE` the same way {@link apiFetch} does, but as
+ * a `ws://`/`wss://` URL for a `new WebSocket(...)` caller. Kept here (not in
+ * the coedit-specific client) so `BASE`'s resolution logic — relative vs. an
+ * absolute `NEXT_PUBLIC_API_BASE` override — lives in exactly one place. */
+export function apiSocketUrl(path: string): string {
+  const isAbsolute = /^https?:\/\//i.test(BASE);
+  if (isAbsolute) {
+    return `${BASE}${path}`.replace(/^http/, "ws");
+  }
+  const proto =
+    typeof window !== "undefined" && window.location.protocol === "https:"
+      ? "wss"
+      : "ws";
+  const host = typeof window !== "undefined" ? window.location.host : "";
+  return `${proto}://${host}${BASE}${path}`;
+}
+
 /** SSE-style streaming POST. Parses ``data: {...json}\n\n`` frames and
  * dispatches them through ``onEvent``. Pre-stream HTTP errors come back as
  * ``ApiError`` (matching ``apiFetch``). The promise resolves when the server

@@ -1,16 +1,19 @@
-"""Live channel for co-editing — the SSE-down + POST-up transport.
+"""Live channel for co-editing — transport-agnostic pub/sub, currently fed by
+one ``WebSocket`` per session (``app/api/coedit.py``).
 
-Browser clients open one SSE connection per co-edit session (cookie-authed) and
+Browser clients open one connection per co-edit session (cookie-authed) and
 the server pushes session frames (e.g. presence) to every connection in the
 session. Cross-process delivery rides the shared realtime bus
 (``app/realtime/bus.py``, Postgres LISTEN/NOTIFY) under a ``coedit`` payload
 kind, so participants connected to different app servers still see each other.
 
-One thread per connection with a thread-safe ``queue.Queue``, mirroring the MCP
-pubsub's sync ``_queues`` / ``drain_blocking`` path. Connection state is
-in-process and ephemeral — nothing here is persisted; durable
-session/participant state lives in ``app/wiki/coedit.py``. Frames are plain
-JSON-serializable dicts.
+One thread-safe ``queue.Queue`` per connection, mirroring the MCP pubsub's
+sync ``_queues`` / ``drain_blocking`` path — the module here has no opinion on
+how a connection drains its queue (a WS route's send loop calls ``drain`` in
+a thread today; it was an SSE generator's blocking read before that). Frames
+are plain JSON-serializable dicts either way. Connection state is in-process
+and ephemeral — nothing here is persisted; durable session/participant state
+lives in ``app/wiki/coedit.py``.
 
 See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 """

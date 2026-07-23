@@ -1,37 +1,49 @@
-"""The page live-session channel — SSE down, HTTP POST up (cookie-authed humans).
+"""The page live-session channel — one WebSocket per session (cookie-authed
+humans). Pure transport swap from the old SSE-down + HTTP-POST-up protocol:
+same JSON message shapes, same domain logic (``app/wiki/coedit.py``), same
+broadcast layer (``app/wiki/coedit_channel.py``) — only the wire mechanism
+changed. See ``plans/coedit-websocket-transport.md`` (if present) or the
+originating conversation for the design rationale.
 
 A "co-edit session" is the page's *live session*: everyone viewing the page
 joins it (read-gated — presence + real-time updates), and editing is a
-capability inside it (`/op`/`/cursor` are write-gated). Presence labels
-editors vs viewers client-side from the live caret frames — a rendered caret
-IS the "editing" state; the server stores nothing for it.
+capability inside it (``op``/``cursor``/``checkpoint`` messages are
+write-gated, re-checked on *every* message, not just at connect — mirrors
+the old per-POST ``require_can`` exactly, so a mid-session ACL change still
+takes effect). Presence labels editors vs viewers client-side from the live
+caret frames — a rendered caret IS the "editing" state; the server stores
+nothing for it.
 
-Thin HTTP layer: gate by page permission, drive the ``app/wiki/coedit.py`` store
-and the ``app/wiki/coedit_channel.py`` broadcast layer. The SSE stream is a
-plain sync generator, one threadpool thread per open connection.
+No client-sent "leave" message: the server's disconnect handler (``finally``
+below) is the sole leave signal, firing on any connection loss — explicit
+close, network drop, or a killed tab's socket dying — which is *more*
+reliable than the old design's client-initiated ``fetch(..., {keepalive:
+true})`` on unload, since it never depends on the client successfully
+transmitting anything during teardown.
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
-from collections.abc import Iterator
+import queue
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
-from app.auth import User, require_can
-from app.auth.deps import require_user
+from app.auth import PermissionDenied, User, require_can
+from app.auth.deps import require_user_ws
 from app.models.coedit import (
-    CheckpointRequest,
-    CursorRequest,
-    JoinRequest,
-    JoinResponse,
-    LeaveRequest,
-    OpRequest,
-    OpResponse,
-    OpsResponse,
+    CheckpointMessage,
+    CheckpointResultFrame,
+    CursorMessage,
+    GetOpsMessage,
+    JoinedFrame,
+    OpMessage,
     Operation,
+    OpResultFrame,
+    OpsResultFrame,
     ParticipantOut,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session
@@ -40,8 +52,10 @@ from app.wiki import coedit, coedit_channel, git
 router = APIRouter()
 log = logging.getLogger(__name__)
 
-# Matches the MCP SSE cadence so proxies see the same idle behavior.
-_SSE_HEARTBEAT_SECONDS = 15.0
+# Idle silence before the send loop touches presence liveness + pings the
+# client — matches the old SSE heartbeat cadence, so proxies see the same
+# idle behavior either way.
+_HEARTBEAT_SECONDS = 15.0
 
 
 def _participants_out(session_id: int) -> list[ParticipantOut]:
@@ -55,32 +69,6 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
         )
         for p in coedit.list_participants(session_id)
     ]
-
-
-@router.post("/join")
-def join(req: JoinRequest, user: User = Depends(require_user)) -> JoinResponse:
-    """Open (or join) the live session for a page and return its buffer.
-
-    Joining is opening the page — presence + the live op stream — so it
-    requires only read; *writing* is gated at ``/op``/``/cursor``. A
-    participant who never places a caret shows as "viewing" in presence
-    (the label derives client-side from live caret frames). A fresh session
-    is seeded from the page's current HEAD; an already-open session is
-    adopted as-is (its live buffer wins).
-    """
-    require_can("read", req.path, user)
-    head = git.head_sha_for_path(req.path)
-    initial = git.read_file_opt(req.path) or ""
-    sess = coedit.open_session(req.path, base_sha=head, initial_buffer=initial)
-    coedit.join(sess.id, user.id)
-    coedit_channel.broadcast_presence(sess.id)
-    return JoinResponse(
-        session_id=sess.id,
-        buffer=sess.buffer_text,
-        version=sess.version,
-        base_sha=sess.base_sha,
-        participants=_participants_out(sess.id),
-    )
 
 
 def _checkpoint_if_last_left(session_id: int) -> None:
@@ -98,202 +86,259 @@ def _checkpoint_if_last_left(session_id: int) -> None:
         log.exception("coedit: checkpoint enqueue failed on last-leave for session %s", session_id)
 
 
-@router.post("/leave")
-def leave(req: LeaveRequest, user: User = Depends(require_user)) -> dict[str, bool]:
-    """Explicitly leave a session (e.g. closing the editor)."""
-    coedit.leave(req.session_id, user.id)
-    coedit_channel.broadcast_presence(req.session_id)
-    _checkpoint_if_last_left(req.session_id)
-    return {"ok": True}
+class _WsActionError(Exception):
+    """Internal — a write/read re-check failed for one inbound message.
+    Caught per-handler and turned into a correlated error reply so the
+    *connection* stays open (mirrors the old design: a single 403/404 on one
+    POST never killed the SSE stream either)."""
+
+    def __init__(self, error: str) -> None:
+        self.error = error
 
 
 def _require_active(session_id: int, user: User, action: str) -> coedit.SessionRow:
     sess = coedit.get_session(session_id)
     if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
-        raise HTTPException(status_code=404, detail="no active session")
-    require_can(action, sess.path, user)
+        raise _WsActionError("no_active_session")
+    try:
+        require_can(action, sess.path, user)
+    except PermissionDenied:
+        raise _WsActionError("forbidden") from None
     return sess
 
 
-@router.post("/op")
-def op(req: OpRequest, user: User = Depends(require_user)) -> OpResponse:
-    """Apply an edit op to the session buffer and broadcast it.
-
-    409 if ``base_version`` is stale (the client re-syncs via GET /session and
-    re-applies); 422 if the op is out of bounds / overlapping.
+def _handle_op(outbox: queue.Queue[dict[str, Any]], session_id: int, user: User, raw: dict[str, Any]) -> None:
+    """All handlers below enqueue onto ``outbox`` (the connection's own
+    ``coedit_channel`` queue) rather than calling ``websocket.send_json``
+    directly. Found the hard way (a real test failure, not a hypothetical):
+    ``_send_loop`` is *already* draining this queue and writing to the same
+    socket concurrently with the recv loop — two tasks both calling
+    ``send_json`` on one ``WebSocket`` races (and can interleave/corrupt)
+    the frame writes, and there's no ordering guarantee between a direct
+    reply and a same-op broadcast echo landing first. Routing everything
+    through the one queue makes ``_send_loop`` the sole writer, and
+    enqueueing the reply *before* triggering the broadcast (see the ``op``
+    case) makes the ordering deterministic: a sender always sees their own
+    ``op_result`` before its broadcast echo, not racing it.
     """
-    _require_active(req.session_id, user, "write")
+    msg = OpMessage.model_validate(raw)
     try:
+        _require_active(session_id, user, "write")
         out = coedit.apply_op(
-            req.session_id,
-            base_version=req.base_version,
-            changes=req.changes,
+            session_id,
+            base_version=msg.base_version,
+            changes=msg.changes,
             author_user_id=user.id,
-            client_id=req.client_id,
+            client_id=msg.client_id,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from e
+    except _WsActionError as e:
+        outbox.put_nowait(OpResultFrame(request_id=msg.request_id, ok=False, error=e.error).model_dump())
+        return
+    except ValueError:
+        outbox.put_nowait(
+            OpResultFrame(request_id=msg.request_id, ok=False, error="invalid_op").model_dump()
+        )
+        return
     if out is None:
-        raise HTTPException(status_code=409, detail="stale base_version; re-sync and retry")
-    coedit.touch(req.session_id, user.id, edited=True)
+        outbox.put_nowait(
+            OpResultFrame(request_id=msg.request_id, ok=False, error="stale_version").model_dump()
+        )
+        return
+    coedit.touch(session_id, user.id, edited=True)
+    outbox.put_nowait(
+        OpResultFrame(request_id=msg.request_id, ok=True, version=out.version).model_dump()
+    )
     # caret_seq rides the frame so peers render the author's caret at the
     # edit; None (cleared caret / legacy client) = no caret assertion.
     coedit_channel.broadcast_op(
-        req.session_id,
+        session_id,
         out.version,
-        req.changes,
+        msg.changes,
         user.id,
-        client_id=req.client_id,
-        caret_seq=req.caret_seq,
+        client_id=msg.client_id,
+        caret_seq=msg.caret_seq,
     )
-    return OpResponse(version=out.version)
 
 
-@router.post("/cursor")
-def cursor(req: CursorRequest, user: User = Depends(require_user)) -> dict[str, bool]:
-    """Broadcast the caller's live cursor/selection to the session.
-
-    A null anchor/head clears the caret (the editor lost focus / the tab went
-    hidden) — peers drop it and presence flips the sender to "viewing".
-    High-frequency + throttled client-side; deliberately does not touch the DB
-    (no last_seen write — the SSE heartbeat covers liveness; no caret state —
-    a rendered caret IS the editing state, so nothing needs persisting).
-    ``seq`` (the client caret epoch) rides the frame so peers drop reordered
-    stale frames.
-    """
-    _require_active(req.session_id, user, "write")
-    cleared = req.anchor is None or req.head is None
+def _handle_cursor(session_id: int, user: User, raw: dict[str, Any]) -> None:
+    """Fire-and-forget — matches the old client's ``sendCursor(...).catch(()
+    => {})``: a rejected/failed cursor ping is silently dropped, never
+    surfaced, since the next throttled ping self-heals it."""
+    msg = CursorMessage.model_validate(raw)
+    try:
+        _require_active(session_id, user, "write")
+    except _WsActionError:
+        return
+    cleared = msg.anchor is None or msg.head is None
     coedit_channel.broadcast_cursor(
-        req.session_id,
+        session_id,
         user_id=user.id,
         # Match list_participants' SQL COALESCE(name, email) exactly — substitute
         # only on NULL, not on "" — so a peer's caret label and roster name agree.
         user_display=user.name if user.name is not None else user.email,
-        anchor=None if cleared else req.anchor,
-        head=None if cleared else req.head,
-        typing=req.typing and not cleared,
-        seq=req.seq,
-    )
-    return {"ok": True}
-
-
-@router.post("/checkpoint")
-def checkpoint(req: CheckpointRequest, user: User = Depends(require_user)) -> dict[str, bool]:
-    """Explicit save: enqueue a checkpoint of the session's buffer to git.
-
-    Async (the commit + any merge run on the worker), so this returns once
-    queued rather than blocking on the git write.
-    """
-    _require_active(req.session_id, user, "write")
-    checkpoint_coedit_session(req.session_id)
-    return {"queued": True}
-
-
-@router.get("/session")
-def session_state(session_id: int, user: User = Depends(require_user)) -> JoinResponse:
-    """Current buffer + version + roster — a read-only snapshot for a client to
-    re-sync after a stale op or a `resync` frame (no join side effects)."""
-    sess = _require_active(session_id, user, "read")
-    return JoinResponse(
-        session_id=sess.id,
-        buffer=sess.buffer_text,
-        version=sess.version,
-        base_sha=sess.base_sha,
-        participants=_participants_out(sess.id),
+        anchor=None if cleared else msg.anchor,
+        head=None if cleared else msg.head,
+        typing=msg.typing and not cleared,
+        seq=msg.seq,
     )
 
 
-@router.get("/ops")
-def ops(
-    session_id: int, since_version: int, user: User = Depends(require_user)
-) -> OpsResponse:
-    """Ops applied after ``since_version`` (oldest first) + the current head
-    version. Lets a client rebase its unconfirmed edits after a stale op (409),
-    a reconnect, or a big-op ``resync`` — replaying the exact missed changes
-    rather than replacing the buffer. Read-only; no join side effects."""
-    sess = _require_active(session_id, user, "read")
+def _handle_checkpoint(outbox: queue.Queue[dict[str, Any]], session_id: int, user: User, raw: dict[str, Any]) -> None:
+    msg = CheckpointMessage.model_validate(raw)
+    try:
+        _require_active(session_id, user, "write")
+    except _WsActionError:
+        outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=False).model_dump())
+        return
+    checkpoint_coedit_session(session_id)
+    outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=True).model_dump())
+
+
+def _handle_get_ops(outbox: queue.Queue[dict[str, Any]], session_id: int, user: User, raw: dict[str, Any]) -> None:
+    msg = GetOpsMessage.model_validate(raw)
+    try:
+        sess = _require_active(session_id, user, "read")
+    except _WsActionError as e:
+        outbox.put_nowait(
+            OpsResultFrame(
+                request_id=msg.request_id, ok=False, error=e.error, current_head_version=0, ops=[]
+            ).model_dump()
+        )
+        return
     # Head version + ops read as one consistent snapshot (see
     # ops_since_with_head), so a concurrent op can't desync them.
-    result = coedit.ops_since_with_head(session_id, since_version)
-    return OpsResponse(
-        session_id=session_id,
-        current_head_version=(
-            result.head_version if result.head_version is not None else sess.version
-        ),
-        ops=[
-            Operation(
-                version=r.seq,
-                author=r.author_user_id,
-                client_id=r.client_id,
-                changes=[coedit.Change.model_validate(c) for c in r.changes],
-            )
-            for r in result.ops
-        ],
+    result = coedit.ops_since_with_head(session_id, msg.since_version)
+    outbox.put_nowait(
+        OpsResultFrame(
+            request_id=msg.request_id,
+            ok=True,
+            current_head_version=(
+                result.head_version if result.head_version is not None else sess.version
+            ),
+            ops=[
+                Operation(
+                    version=r.seq,
+                    author=r.author_user_id,
+                    client_id=r.client_id,
+                    changes=[coedit.Change.model_validate(c) for c in r.changes],
+                )
+                for r in result.ops
+            ],
+        ).model_dump()
     )
 
 
-@router.get("/stream")
-def stream(session_id: int, user: User = Depends(require_user)) -> StreamingResponse:
-    """Long-lived SSE stream of session frames (presence).
-
-    A plain sync generator: it blocks on the connection's queue, emitting a
-    keepalive every ``_SSE_HEARTBEAT_SECONDS`` of silence. The connection is the
-    presence heartbeat — each keepalive refreshes ``last_seen_at``. When the
-    client disconnects, Starlette closes the generator (``GeneratorExit`` at the
-    next yield, at most one heartbeat later), and the ``finally`` block fires
-    ``leave`` once the user's last connection for the session closes.
-    """
-    sess = coedit.get_session(session_id)
-    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
-        raise HTTPException(status_code=404, detail="no active session")
-    # Opening the stream makes the user a session participant (roster +
-    # heartbeat), which is page-open presence, not edit intent — so it
-    # requires read, symmetric with POST /join. Writes stay gated at /op.
-    require_can("read", sess.path, user)
-
-    coedit.join(session_id, user.id)
-    # Announce the new participant to existing connections *before* registering
-    # this one — otherwise the broadcast lands in our own queue and gen() would
-    # emit it on top of the inline initial roster below (a duplicate frame).
-    coedit_channel.broadcast_presence(session_id)
-    conn = coedit_channel.connect(session_id, user.id)
-
-    def gen() -> Iterator[bytes]:
+async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[dict[str, Any]], session_id: int, user: User) -> None:
+    while True:
+        raw = await websocket.receive_json()
+        msg_type = raw.get("type")
         try:
-            # Prime the stream with the current roster so a joiner doesn't wait
-            # for the next change to render presence.
-            yield _sse(
-                {
-                    "type": "presence",
-                    "session_id": session_id,
-                    "participants": [
-                        p.model_dump() for p in coedit.list_participants(session_id)
-                    ],
-                }
-            )
-            while True:
-                frame = coedit_channel.drain(conn.queue, _SSE_HEARTBEAT_SECONDS)
-                if frame is None:
-                    coedit.touch(session_id, user.id)
-                    yield b": keepalive\n\n"
-                    continue
-                yield _sse(frame)
-        finally:
-            coedit_channel.disconnect(conn.id)
-            # Only mark the user gone when their last connection closes, so a
-            # second tab doesn't evict them.
-            if not coedit_channel.user_still_connected(session_id, user.id):
-                coedit.leave(session_id, user.id)
-                coedit_channel.broadcast_presence(session_id)
-                _checkpoint_if_last_left(session_id)
-            log.info("coedit sse closed session=%s user=%s", session_id, user.id)
-
-    return StreamingResponse(
-        gen(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
-    )
+            # Every handler below makes blocking DB calls (require_can,
+            # coedit.apply_op, ...) — offloaded to a thread so one session's
+            # DB round-trip doesn't stall every other WS connection sharing
+            # this event loop. The old REST handlers got this for free (a
+            # plain `def` FastAPI route runs in a threadpool automatically);
+            # a sync call made *from inside* an `async def` route doesn't.
+            if msg_type == "op":
+                await asyncio.to_thread(_handle_op, outbox, session_id, user, raw)
+            elif msg_type == "cursor":
+                await asyncio.to_thread(_handle_cursor, session_id, user, raw)
+            elif msg_type == "checkpoint":
+                await asyncio.to_thread(_handle_checkpoint, outbox, session_id, user, raw)
+            elif msg_type == "get_ops":
+                await asyncio.to_thread(_handle_get_ops, outbox, session_id, user, raw)
+            else:
+                log.warning("coedit ws: unknown message type %r", msg_type)
+        except ValidationError:
+            log.warning("coedit ws: malformed %r message", msg_type)
 
 
-def _sse(frame: dict[str, object]) -> bytes:
-    return f"data: {json.dumps(frame)}\n\n".encode("utf-8")
+async def _send_loop(
+    websocket: WebSocket, conn: coedit_channel.Connection, session_id: int, user_id: str
+) -> None:
+    while True:
+        # coedit_channel.drain blocks synchronously on a queue.Queue — offload
+        # to a thread so it doesn't stall the event loop the recv side shares.
+        frame = await asyncio.to_thread(coedit_channel.drain, conn.queue, _HEARTBEAT_SECONDS)
+        if frame is None:
+            await asyncio.to_thread(coedit.touch, session_id, user_id)
+            await websocket.send_json({"type": "ping"})
+            continue
+        await websocket.send_json(frame)
+
+
+def _connect_sync(path: str, user: User) -> coedit.SessionRow:
+    """The whole pre-accept handshake's DB/git work, bundled into one
+    thread hop. ``require_can`` must run (and be free to raise
+    ``PermissionDenied``) before ``websocket.accept()`` — verified directly
+    that an exception raised here still reaches the app's registered
+    exception handler and produces a clean denial response pre-upgrade, the
+    same as it does from a plain ``async def`` route body; offloading to a
+    thread via ``asyncio.to_thread`` doesn't change that propagation."""
+    require_can("read", path, user)
+    head = git.head_sha_for_path(path)
+    initial = git.read_file_opt(path) or ""
+    sess = coedit.open_session(path, base_sha=head, initial_buffer=initial)
+    coedit.join(sess.id, user.id)
+    # Announce the new participant to existing connections *before*
+    # registering this one — otherwise the broadcast lands in our own queue
+    # and the send loop would emit it on top of the inline `joined` frame
+    # sent right after (a duplicate).
+    coedit_channel.broadcast_presence(sess.id)
+    return sess
+
+
+def _disconnect_sync(session_id: int, user_id: str) -> None:
+    # Only mark the user gone when their last connection closes, so a
+    # second tab doesn't evict them.
+    if not coedit_channel.user_still_connected(session_id, user_id):
+        coedit.leave(session_id, user_id)
+        coedit_channel.broadcast_presence(session_id)
+        _checkpoint_if_last_left(session_id)
+
+
+@router.websocket("/ws")
+async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_ws)) -> None:
+    """``path`` is a query param (``?path=...``), not a URL segment — this
+    app owns both ends of the connection URL, so there's no need for
+    ``y-websocket``'s ``serverUrl/roomname`` convention.
+
+    Joining is opening the page — presence + the live op stream — so
+    connecting requires only read; *writing* (``op``/``cursor``/
+    ``checkpoint``) is gated per-message inside the recv loop. A fresh
+    session is seeded from the page's current HEAD; an already-open session
+    is adopted as-is (its live buffer wins) — see ``coedit.open_session``.
+    """
+    sess = await asyncio.to_thread(_connect_sync, path, user)
+
+    await websocket.accept()
+    conn = coedit_channel.connect(sess.id, user.id)
+    try:
+        participants = await asyncio.to_thread(_participants_out, sess.id)
+        await websocket.send_json(
+            JoinedFrame(
+                session_id=sess.id,
+                buffer=sess.buffer_text,
+                version=sess.version,
+                base_sha=sess.base_sha,
+                participants=participants,
+            ).model_dump()
+        )
+
+        recv_task = asyncio.create_task(_recv_loop(websocket, conn.queue, sess.id, user))
+        send_task = asyncio.create_task(_send_loop(websocket, conn, sess.id, user.id))
+        done, pending = await asyncio.wait(
+            {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for t in pending:
+            t.cancel()
+        for t in done:
+            exc = t.exception()
+            if exc is not None and not isinstance(exc, WebSocketDisconnect):
+                raise exc
+    except WebSocketDisconnect:
+        pass
+    finally:
+        coedit_channel.disconnect(conn.id)
+        await asyncio.to_thread(_disconnect_sync, sess.id, user.id)
+        log.info("coedit ws closed session=%s user=%s", sess.id, user.id)
