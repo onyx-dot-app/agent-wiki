@@ -255,7 +255,17 @@ def run_detection(
 
 def run_sweep(*, triggered_by_user_id: str | None) -> dict[str, Any]:
     """Whole-space sweep — the admin-triggered trigger. Scope is every tracked
-    path so folder-subtree detectors (empty-folder) see complete subtrees."""
+    path so folder-subtree detectors (empty-folder) see complete subtrees.
+
+    **Singleton:** while a sweep is already running, another one is skipped —
+    two concurrent whole-space scans emit the same drafts into the same dedup
+    window and double every detector's cost for nothing. The manual trigger
+    stays available (this skips *overlap*, it doesn't rate-limit); a stuck
+    ``running`` corpse row stops blocking after ``STUCK_RUN_MAX_AGE_HOURS``.
+    """
+    if runs.running_sweep_exists():
+        log.info("sweep skipped — another sweep is already running")
+        return {"run_id": None, "paths_scanned": 0, "proposals_emitted": 0, "skipped": "sweep already running"}
     return run_detection(
         trigger=TriggerKind.SWEEP,
         triggered_by_user_id=triggered_by_user_id,
