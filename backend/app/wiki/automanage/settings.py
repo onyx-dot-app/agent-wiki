@@ -11,7 +11,7 @@ where the per-page opt-ins left off.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -33,7 +33,7 @@ class AIManagementSettings(BaseModel):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def get() -> AIManagementSettings:

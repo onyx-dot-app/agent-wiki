@@ -21,8 +21,10 @@ from app.wiki.change_proposals import (
     ProposalOp,
     ProposalStatus,
     create,
-    get as get_proposal,
     list_by_status,
+)
+from app.wiki.change_proposals import (
+    get as get_proposal,
 )
 from tests._seed import seed_user
 

@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from datetime import datetime, timedelta, timezone
 
 from app.wiki import git
 from app.wiki.automanage.detectors.base import (
@@ -86,6 +86,7 @@ def _empty_long_enough(empty_since_iso: str, now: datetime, min_age_days: int) -
 
 class _EmptyFolderDetector:
     name = "empty_folder"
+    pairs_paths = False  # single-path op; sees the whole scope
 
     def __init__(self, *, min_age_days: int = EMPTY_FOLDER_MIN_AGE_DAYS) -> None:
         self.min_age_days = min_age_days
@@ -98,7 +99,7 @@ class _EmptyFolderDetector:
     def detect(self, scope: Scope) -> list[ProposalDraft]:
         if not self.applicable(scope.trigger):
             return []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         drafts: list[ProposalDraft] = []
         for folder in _maximal_empty_folders(scope.paths):
             meta = git.last_commit_meta_for_path(folder)

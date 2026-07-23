@@ -80,6 +80,7 @@ class ProposalDraft(BaseModel):
     source_paths: list[str]
     target_paths: list[str] = Field(default_factory=list)
     summary: str
+    instruction: str | None = None
     proposed_bodies: dict[str, str] | None = None
     auto_approvable: bool = True
 
@@ -100,6 +101,11 @@ class Detector(Protocol):
     """
 
     name: str
+    # Pairing detectors (True) compare pages against each other, so the runner
+    # feeds them one permission bucket at a time — pages with different
+    # audiences are never mentioned in one proposal. Single-path detectors
+    # leave the default (False) and see the whole scope.
+    pairs_paths: bool = False
 
     def applicable(self, trigger: TriggerKind) -> bool:
         """Which matrix cells this detector fills — whether it should run under

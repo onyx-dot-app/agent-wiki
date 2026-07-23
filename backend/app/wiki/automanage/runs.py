@@ -11,7 +11,7 @@ plain dicts, like ``app/wiki/change_proposals.py``.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -31,7 +31,7 @@ class RunStatus(str, Enum):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _to_dict(row: DetectionRun) -> dict[str, Any]:
