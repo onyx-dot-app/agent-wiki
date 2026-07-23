@@ -12,9 +12,10 @@ import { Section } from "@onyx-ai/opal/layouts";
 import { SvgExternalLink } from "@onyx-ai/opal/icons";
 
 import type { CoeditorHandle } from "@/lib/editor/components";
+import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
 import { relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
-import type { SourceRef, SourceSpan } from "@/types";
+import type { SourceRef } from "@/types";
 
 import { SvgListLines } from "./icons";
 import { PanelSearchField } from "./PanelSearch";
@@ -23,8 +24,9 @@ import { sourceIcon, sourceKey, sourceTypeLabel } from "./sources";
 
 interface Props {
   sources: SourceRef[];
-  /** Attributed spans, anchoring the chips in anchored mode. */
-  spans?: SourceSpan[];
+  /** The page's highlight targets, retriggering chip layout in anchored
+   * mode when spans land or change. */
+  targets?: AnchoredHighlightTarget[];
   /** The live editor, required by anchored mode to track doc positions. */
   editorRef?: RefObject<CoeditorHandle | null>;
   /** Anchored/list mode is page-owned: the page hides the editor's native
@@ -127,7 +129,7 @@ function SourceCard({
  */
 export function SourcesPanel({
   sources,
-  spans,
+  targets,
   editorRef,
   listView,
   onListViewChange,
@@ -200,7 +202,7 @@ export function SourcesPanel({
         </div>
         <SourceAnchorRail
           sources={shown}
-          spans={spans ?? []}
+          targets={targets ?? []}
           editorRef={editorRef!}
           activeKeys={activeKeys}
           onHoverSource={onHoverSource}

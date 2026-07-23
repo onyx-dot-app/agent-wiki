@@ -11,8 +11,9 @@ import { Button, Tag, Text } from "@onyx-ai/opal/components";
 import { SvgExternalLink } from "@onyx-ai/opal/icons";
 
 import type { CoeditorHandle } from "@/lib/editor/components";
+import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
 import { relativeTime } from "@/lib/time";
-import type { SourceRef, SourceSpan } from "@/types";
+import type { SourceRef } from "@/types";
 
 import { sourceIcon, sourceKey, sourceTypeLabel } from "./sources";
 
@@ -189,7 +190,7 @@ function MoreChip({
  */
 export function SourceAnchorRail({
   sources,
-  spans,
+  targets,
   editorRef,
   activeKeys,
   onHoverSource,
@@ -197,7 +198,9 @@ export function SourceAnchorRail({
   onShowAll,
 }: {
   sources: SourceRef[];
-  spans: SourceSpan[];
+  /** The page's current highlight targets. Anchoring reads the editor's
+   * live-mapped copies, this prop retriggers layout when they land. */
+  targets: AnchoredHighlightTarget[];
   editorRef: RefObject<CoeditorHandle | null>;
   /** Source keys whose chips render dark (the caret sits in their spans). */
   activeKeys?: string[];
@@ -226,12 +229,13 @@ export function SourceAnchorRail({
   const relayout = useCallback(() => {
     const editor = editorRef.current;
     if (!editor) return;
-    // First span per source is its anchor, spans arrive ordered by offset.
+    // Anchors come from the editor's live-mapped targets so chips ride
+    // local and remote edits like the highlights do. First surviving
+    // target per source wins, targets arrive ordered by offset.
     const anchorOffsets = new Map<string, number>();
-    for (const sp of spans) {
-      const key = sourceKey(sp);
-      if (key && !anchorOffsets.has(key))
-        anchorOffsets.set(key, sp.start_offset);
+    for (const t of editor.sourceTargets()) {
+      if (t.id && t.startOffset < t.endOffset && !anchorOffsets.has(t.id))
+        anchorOffsets.set(t.id, t.startOffset);
     }
     const anchored: { rail: RailSource; want: number }[] = [];
     for (const s of sources) {
@@ -264,7 +268,7 @@ export function SourceAnchorRail({
     const railTop = rootRef.current?.getBoundingClientRect().top ?? 0;
     originStatic.current = editor.scrollerTop() - railTop;
     syncScroll();
-  }, [sources, spans, editorRef, syncScroll]);
+  }, [sources, targets, editorRef, syncScroll]);
 
   useEffect(() => {
     const editor = editorRef.current;

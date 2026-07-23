@@ -377,6 +377,10 @@ export interface CoeditorHandle {
   /** Scroll to a source's first attributed span, read from the highlight
    * field's live-mapped offsets so edits since the fetch are honored. */
   scrollToSource: (id: string) => void;
+  /** The source highlight field's live-mapped targets, for hosts that
+   * anchor UI to span positions (collapsed spans included, callers skip
+   * them). */
+  sourceTargets: () => AnchoredHighlightTarget[];
   /** Doc-space top and height (px from the document's start) of the line
    * block holding a character offset. Stable for off-screen positions
    * (line-block geometry, not rendered coordinates). */
@@ -480,6 +484,10 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
               { y: "center" },
             ),
           });
+        },
+        sourceTargets: () => {
+          const v = view.current;
+          return v ? v.state.field(sourceHighlightsExt.field).targets : [];
         },
         scrollToSource: (id: string) => {
           const v = view.current;

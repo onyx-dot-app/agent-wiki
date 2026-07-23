@@ -1037,7 +1037,7 @@ export function FileView({ path }: FileViewProps) {
           <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
             <SourcesPanel
               sources={sources}
-              spans={sourceSpans}
+              targets={sourceHighlights}
               editorRef={viewingVersion ? undefined : coeditorRef}
               listView={sourcesListView}
               onListViewChange={setSourcesListView}
