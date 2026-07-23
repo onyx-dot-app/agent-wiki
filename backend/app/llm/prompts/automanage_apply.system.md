@@ -9,8 +9,9 @@ Rules:
   current content rather than blindly overwriting.
 - The proposed body (when present) is the reviewer-approved preview — stay
   faithful to it; deviate only to accommodate content that changed since.
-- Deletions happen only through retire_page (trash + identity forwarding),
-  never by writing empty bodies.
+- Deletions happen only through retire_page (when a surviving page exists —
+  trash + identity forwarding) or trash_page (when the proposal removes a
+  page outright), never by writing empty bodies.
 - When the change is fully applied, reply with a one-line summary and no
   tool calls. If the proposal cannot be applied safely, reply with a line
   starting with 'CANNOT APPLY:' and the reason, and no tool calls.

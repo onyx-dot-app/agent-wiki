@@ -48,7 +48,11 @@ EVENT_AUTOMANAGE_APPLIED = "automanage.applied"
 # gate on which proposals we let exist). The emit/approve layers check it, so
 # widening it is a deliberate one-line decision per op.
 SUPPORTED_OPS: frozenset[str] = frozenset(
-    {ProposalOp.DELETE_EMPTY_FOLDER.value, ProposalOp.MERGE.value}
+    {
+        ProposalOp.DELETE_EMPTY_FOLDER.value,
+        ProposalOp.MERGE.value,
+        ProposalOp.DELETE_PAGE.value,
+    }
 )
 
 
@@ -203,6 +207,23 @@ def _execute_agentic(p: dict[str, Any]) -> None:
         outcome = automanage_apply.apply_proposal(p, author=author)
 
     violations = _scope_violations(base_sha, allowed)
+    # Targets are the surviving side of any op by schema semantics — a run
+    # that removed one (however it managed to) is invalid regardless of op.
+    live = set(git.list_paths())
+    lost_targets = [t for t in p["target_paths"] if t not in live]
+    if lost_targets:
+        violations = violations + [f"target removed: {t}" for t in lost_targets]
+    # And when targets exist, a removed source must have *forwarded* its
+    # identity to a survivor — a plain trash leaves links dead-ending at a
+    # tombstone instead of the surviving page.
+    if p["target_paths"]:
+        for s in p["source_paths"]:
+            if s in live:
+                continue
+            sid = path_ids.get(s)
+            row = doc_ids.get(sid) if sid else None
+            if row is not None and row["forwarded_to"] is None:
+                violations = violations + [f"source removed without identity forward: {s}"]
     if violations or not outcome.ok:
         reverted = git.revert_to(
             base_sha,

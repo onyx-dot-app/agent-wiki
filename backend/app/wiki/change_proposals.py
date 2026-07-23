@@ -14,7 +14,7 @@ row and returns ``False``).
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -34,6 +34,7 @@ class ProposalOp(str, Enum):
     SPLIT = "split"
     CREATE_FOLDER = "create_folder"
     DELETE_EMPTY_FOLDER = "delete_empty_folder"
+    DELETE_PAGE = "delete_page"
 
 
 class ProposalStatus(str, Enum):
@@ -60,7 +61,7 @@ class ProposalCreatedVia(str, Enum):
 
 def _now() -> str:
     """UTC timestamp matching the ``YYYY-MM-DD HH:MM:SS`` column format."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _to_dict(row: ChangeProposal) -> dict[str, Any]:
@@ -119,7 +120,10 @@ def create(
     """
     if not source_paths and op is not ProposalOp.CREATE_FOLDER:
         raise ValueError(f"source_paths required for op {op.value!r}")
-    if not target_paths and op is not ProposalOp.DELETE_EMPTY_FOLDER:
+    if not target_paths and op not in (
+        ProposalOp.DELETE_EMPTY_FOLDER,
+        ProposalOp.DELETE_PAGE,
+    ):
         raise ValueError(f"target_paths required for op {op.value!r}")
     now = _now()
     with session() as s:
