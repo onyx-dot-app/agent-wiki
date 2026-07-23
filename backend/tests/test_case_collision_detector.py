@@ -275,3 +275,22 @@ def test_move_that_rewrites_content_is_reverted(repo, monkeypatch):
     assert p is not None and p["status"] == "stale"
     assert "must preserve content" in (p["status_reason"] or "")
     assert wiki_git.read_file_opt("m/page.md") == _A  # reverted home, intact
+
+
+def test_file_read_falls_back_to_git_when_worktree_misses(repo):
+    """A page git has must not 404 just because the worktree copy is missing
+    (case-collision on a case-insensitive host, crashed mid-move). The live
+    read serves HEAD on a worktree miss."""
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+    from tests._auth import login_fastapi
+
+    _plumb_commit("wt/miss.md", _A)  # in git, never materialized on disk
+    client = TestClient(create_app())
+    uid = seed_user(uid="rd", email="rd@x.com", is_admin=True)
+    login_fastapi(client, uid)
+
+    r = client.get("/api/wiki/file", params={"path": "wt/miss.md"})
+    assert r.status_code == 200
+    assert r.json()["body"] == _A
