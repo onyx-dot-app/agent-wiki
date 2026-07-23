@@ -96,25 +96,21 @@ class WriteProvenance(BaseModel):
     source_type: str | None = None
     source_url: str | None = None
     source_title: str | None = None
+    # Leading slice of the pushed document's content, for source previews.
+    source_snippet: str | None = None
 
 
-class Attribution(BaseModel):
+class Attribution(WriteProvenance):
     """Structured provenance for one commit, resolved ledger-first with a git
     author-string parse as the fallback for any commit with no ledger row.
 
-    ``person`` and ``agent`` describe a human or agent write, ``source_*`` an
-    ingestion write.
+    ``person`` and ``agent`` describe a human or agent write, the inherited
+    ``source_*`` facts an ingestion write.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     actor_kind: ActorKind
     person: str | None = None
     agent: str | None = None
-    source_document_id: str | None = None
-    source_type: str | None = None
-    source_url: str | None = None
-    source_title: str | None = None
 
 
 class SourceRef(WriteProvenance):

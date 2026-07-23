@@ -33,6 +33,7 @@ _LEDGER_COLUMNS = (
     "source_type",
     "source_url",
     "source_title",
+    "source_snippet",
     "created_at",
 )
 
@@ -171,6 +172,7 @@ def live_spans_for_doc(doc_path: str, anchor_sha: str) -> list[dict[str, Any]]:
                 ProvenanceLedger.source_type,
                 ProvenanceLedger.source_url,
                 ProvenanceLedger.source_title,
+                ProvenanceLedger.source_snippet,
             )
             .join(ProvenanceLedger, ProvenanceLedger.id == SourceRange.provenance_id)
             .where(

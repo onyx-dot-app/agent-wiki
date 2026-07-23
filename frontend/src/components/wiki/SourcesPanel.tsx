@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import useSWR from "swr";
+import { useState } from "react";
 import { Button, EndOfList, Tag, Text } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 import { SvgExternalLink, SvgFileText, SvgGlobe } from "@onyx-ai/opal/icons";
@@ -21,18 +20,12 @@ import {
 } from "@onyx-ai/opal/logos";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
-import { apiFetch } from "@/lib/api";
 import { relativeTime } from "@/lib/time";
-import type { SourceRef, SourceSpan, WriteProvenance } from "@/types";
+import type { SourceRef, WriteProvenance } from "@/types";
 
 import { PanelSearchField } from "./PanelSearch";
 
 interface Props {
-  path: string;
-  headSha: string | null;
-  /** Page body as served by /wiki/file. It can drift from HEAD (live
-   * co-edit buffer, stale load), so span-offset snippets are best-effort. */
-  body: string;
   sources: SourceRef[];
 }
 
@@ -64,19 +57,13 @@ function sourceTypeLabel(type: string): string {
     .join(" ");
 }
 
-/** Identity used to join a source to its spans, mirroring the backend's
- * dedupe key (document id, falling back to url or title). */
+/** Stable card identity, mirroring the backend's dedupe key (document id,
+ * falling back to url or title). */
 function sourceKey(s: WriteProvenance): string {
   return s.source_document_id ?? s.source_url ?? s.source_title ?? "";
 }
 
-function SourceCard({
-  source,
-  snippet,
-}: {
-  source: SourceRef;
-  snippet: string | undefined;
-}) {
+function SourceCard({ source }: { source: SourceRef }) {
   const Icon = sourceIcon(source.source_type);
   const url = source.source_url;
   return (
@@ -113,10 +100,10 @@ function SourceCard({
             </Text>
           </span>
         </div>
-        {snippet && (
+        {source.source_snippet && (
           <span className="px-1">
             <Text font="secondary-body" color="text-03" maxLines={3}>
-              {snippet}
+              {source.source_snippet}
             </Text>
           </span>
         )}
@@ -127,46 +114,16 @@ function SourceCard({
 
 /**
  * Sources tab (mock 1837:103626): the ingested documents credited to this
- * page, each with the slice of page content its spans cover as a snippet.
- * Sources come with the page load, spans are fetched per head sha since
- * the offsets are remapped to HEAD server-side.
+ * page, each previewing its own content via the snippet captured at ingest.
+ * Sources ride the page load, nothing else is fetched.
  */
-export function SourcesPanel({ path, headSha, body, sources }: Props) {
+export function SourcesPanel({ sources }: Props) {
   const [query, setQuery] = useState("");
-
-  const { data: spans } = useSWR(
-    headSha ? ["/wiki/source-spans", path, headSha] : null,
-    () =>
-      apiFetch<SourceSpan[]>(
-        `/wiki/source-spans?path=${encodeURIComponent(path)}`,
-      ),
-  );
-
-  // First live span per source, as the card's content preview. Spans arrive
-  // ordered by offset, so the preview is the topmost credited slice.
-  const snippets = useMemo(() => {
-    const out = new Map<string, string>();
-    for (const sp of spans ?? []) {
-      const key = sourceKey(sp);
-      if (!key || out.has(key)) continue;
-      const text = body
-        .slice(sp.start_offset, sp.end_offset)
-        .replace(/\s+/g, " ")
-        .trim();
-      if (text) out.set(key, text.slice(0, 280));
-    }
-    return out;
-  }, [spans, body]);
 
   const q = query.trim().toLowerCase();
   const shown = q
     ? sources.filter((s) =>
-        [
-          s.source_title,
-          s.source_url,
-          s.source_type,
-          snippets.get(sourceKey(s)),
-        ]
+        [s.source_title, s.source_url, s.source_type, s.source_snippet]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
@@ -222,11 +179,7 @@ export function SourcesPanel({ path, headSha, body, sources }: Props) {
         )}
 
         {shown.map((s) => (
-          <SourceCard
-            key={sourceKey(s) || s.last_updated}
-            source={s}
-            snippet={snippets.get(sourceKey(s))}
-          />
+          <SourceCard key={sourceKey(s) || s.last_updated} source={s} />
         ))}
 
         {shown.length > 0 && (

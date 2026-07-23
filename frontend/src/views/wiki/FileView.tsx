@@ -983,12 +983,7 @@ export function FileView({ path }: FileViewProps) {
       case "sources":
         return (
           <div className="flex min-h-0 flex-1 flex-col px-2 py-1">
-            <SourcesPanel
-              path={path}
-              headSha={headSha}
-              body={body}
-              sources={sources}
-            />
+            <SourcesPanel sources={sources} />
           </div>
         );
       case "watching":
