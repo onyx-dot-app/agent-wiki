@@ -361,9 +361,17 @@ def get_document_by_path(
                 body = current
     else:
         abs_path = filesystem.absolute(rel)
-        if not abs_path.is_file():
-            raise HTTPException(status_code=404, detail="not found")
-        body = abs_path.read_text()
+        if abs_path.is_file():
+            body = abs_path.read_text()
+        else:
+            # Worktree miss with git as source of truth: serve HEAD. The two
+            # only diverge in edge states — a case-collision on a
+            # case-insensitive filesystem materializes one casing, a crashed
+            # mid-move strands a file — and a page git has must not 404.
+            fallback = wiki_git.read_file_opt(rel)
+            if fallback is None:
+                raise HTTPException(status_code=404, detail="not found")
+            body = fallback
     # Page-level (current HEAD), so both live reads share them.
     return GetDocumentResponse(
         path=rel,

@@ -72,18 +72,19 @@ def _resolve_management(drafts: list[ProposalDraft]) -> dict[str, bool | None]:
     return update_policy.resolve_ai_management_for_paths(paths)
 
 
-def _base_shas(paths: list[str]) -> dict[str, str] | None:
-    """Drift anchor per affected path (sources *and* targets): the last commit
-    that touched it — a content-bearing op's premise involves the target as
-    much as the sources. Returns None if any path has no history (can't
-    anchor → skip the draft)."""
+def _base_shas(
+    source_paths: list[str], target_paths: list[str]
+) -> dict[str, str] | None:
+    """Drift anchors: every affected path that has history gets one. Paths
+    without history are reserved/new names (a rename option, a move
+    destination) — nothing to anchor. A draft none of whose paths can be
+    anchored has no drift protection at all → skip it."""
     shas: dict[str, str] = {}
-    for p in paths:
+    for p in source_paths + target_paths:
         meta = git.last_commit_meta_for_path(p)
-        if meta is None:
-            return None
-        shas[p] = meta[0]
-    return shas
+        if meta is not None:
+            shas[p] = meta[0]
+    return shas or None
 
 
 def _partition_by_audience(scope: Scope) -> list[Scope]:
@@ -185,7 +186,7 @@ def run_detection(
                     )
                     capped = True
                     break
-                base_shas = _base_shas(draft_paths)
+                base_shas = _base_shas(draft.source_paths, draft.target_paths)
                 if base_shas is None:
                     continue
                 proposal = create_proposal(

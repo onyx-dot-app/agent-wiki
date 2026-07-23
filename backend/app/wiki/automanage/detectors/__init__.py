@@ -7,7 +7,12 @@ filters by ``applicable(trigger)``, and feeds each the trigger-built ``Scope``
 """
 from __future__ import annotations
 
-from app.wiki.automanage.detectors import body_dup, empty_folder, template_echo
+from app.wiki.automanage.detectors import (
+    body_dup,
+    case_collision,
+    empty_folder,
+    template_echo,
+)
 from app.wiki.automanage.detectors.base import (
     Detector,
     ProposalDraft,
@@ -19,6 +24,7 @@ DETECTORS: list[Detector] = [
     empty_folder.DETECTOR,
     body_dup.DETECTOR,
     template_echo.DETECTOR,
+    case_collision.DETECTOR,
 ]
 
 # Validation dispatch: a proposal records which detector authored it, and the

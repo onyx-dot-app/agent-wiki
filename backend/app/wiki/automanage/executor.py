@@ -52,6 +52,7 @@ SUPPORTED_OPS: frozenset[str] = frozenset(
         ProposalOp.DELETE_EMPTY_FOLDER.value,
         ProposalOp.MERGE.value,
         ProposalOp.DELETE_PAGE.value,
+        ProposalOp.RENAME.value,
     }
 )
 
@@ -197,7 +198,16 @@ def _execute_agentic(p: dict[str, Any]) -> None:
     author = _git_author(p["acting_user_id"])
     allowed = frozenset(p["source_paths"] + p["target_paths"])
     # Durable handles + pre-run anchor, both captured before anything mutates.
-    path_ids = {path: doc_ids.get_or_mint(path) for path in sorted(allowed)}
+    # Only *tracked* paths get ids minted: a reserved name (a rename option
+    # that doesn't exist yet) must not acquire a live id row — the real page's
+    # id re-keys onto that path when the move happens, and a pre-minted row
+    # there violates the one-live-row-per-path index.
+    tracked = set(git.list_paths())
+    path_ids = {
+        path: doc_ids.get_or_mint(path)
+        for path in sorted(allowed)
+        if path in tracked
+    }
     base_sha = git.head_sha()
     if base_sha is None:
         change_proposals.mark_stale(proposal_id, reason="empty wiki repository")
@@ -213,17 +223,40 @@ def _execute_agentic(p: dict[str, Any]) -> None:
     lost_targets = [t for t in p["target_paths"] if t not in live]
     if lost_targets:
         violations = violations + [f"target removed: {t}" for t in lost_targets]
-    # And when targets exist, a removed source must have *forwarded* its
-    # identity to a survivor — a plain trash leaves links dead-ending at a
-    # tombstone instead of the surviving page.
+    # And when targets exist, a removed source must keep its identity: a
+    # *moved* id is still live at its new path (identity intact); a
+    # *tombstoned* id must forward to a survivor — a plain trash leaves links
+    # dead-ending at a tombstone instead of the surviving page. A move also
+    # preserves *content* by definition — a rename that rewrote the body
+    # would smuggle an edit through a purely structural consent.
     if p["target_paths"]:
         for s in p["source_paths"]:
             if s in live:
                 continue
             sid = path_ids.get(s)
             row = doc_ids.get(sid) if sid else None
-            if row is not None and row["forwarded_to"] is None:
+            if row is None:
+                continue
+            if row["deleted_at"] is not None and row["forwarded_to"] is None:
                 violations = violations + [f"source removed without identity forward: {s}"]
+            elif row["deleted_at"] is None and row["path"] not in (s, None):
+                anchors: dict[str, str] = p["base_shas"] or {}
+                anchor = anchors.get(s)
+                moved_body = git.read_file_opt(str(row["path"]))
+                base_body = (
+                    git.read_file_opt(s, ref=anchor)
+                    if anchor is not None
+                    else None
+                )
+                if (
+                    anchor is not None
+                    and moved_body is not None
+                    and base_body is not None
+                    and moved_body != base_body
+                ):
+                    violations = violations + [
+                        f"move must preserve content: {s} -> {row['path']}"
+                    ]
     if violations or not outcome.ok:
         reverted = git.revert_to(
             base_sha,
