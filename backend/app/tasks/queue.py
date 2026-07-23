@@ -174,24 +174,32 @@ def reset_redis_for_tests() -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _prefix() -> str:
+    # Read through the module so the per-test CONFIG patch is seen; a
+    # from-import here would freeze the boot-time value.
+    import app.config
+
+    return app.config.CONFIG.redis_key_prefix
+
+
 def _stream_key(name: str) -> str:
-    return f"queue:{name}"
+    return f"{_prefix()}queue:{name}"
 
 
 def _delay_key(name: str) -> str:
-    return f"queue:{name}:delay"
+    return f"{_prefix()}queue:{name}:delay"
 
 
 def _bodies_key(name: str) -> str:
-    return f"queue:{name}:bodies"
+    return f"{_prefix()}queue:{name}:bodies"
 
 
 def _counter_key(name: str) -> str:
-    return f"queue:{name}:msg_counter"
+    return f"{_prefix()}queue:{name}:msg_counter"
 
 
 def _sched_lock_key(name: str) -> str:
-    return f"queue:{name}:sched_lock"
+    return f"{_prefix()}queue:{name}:sched_lock"
 
 
 def _as_str(v: Any) -> str:

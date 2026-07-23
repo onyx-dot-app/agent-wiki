@@ -33,6 +33,10 @@ class Config(BaseModel):
     wiki_dir: str
     database_url: str
     redis_url: str
+    # Prepended to every Redis key the task queues create. Empty in
+    # production (one Redis per deployment); tests set a per-test value so
+    # queue state is isolated the same way the per-test database is.
+    redis_key_prefix: str = ""
     opensearch_url: str
     opensearch_index: str
     max_queue_size: int

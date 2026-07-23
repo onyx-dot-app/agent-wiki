@@ -85,6 +85,24 @@ _BASE_URL = os.environ.get(
 )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _fast_bcrypt():
+    """Generate bcrypt salts at cost 4 instead of the production default.
+
+    ``checkpw`` reads the work factor out of the hash itself, so every
+    verification of a test-minted hash gets cheap too — ~1ms instead of
+    ~165ms. That matters because MCP bearer auth verifies on every
+    request. Patched at the ``bcrypt`` module so callers that imported
+    ``hash_password`` by value are covered as well."""
+    import bcrypt
+
+    orig_gensalt = bcrypt.gensalt
+    mp = pytest.MonkeyPatch()
+    mp.setattr(bcrypt, "gensalt", lambda rounds=12, prefix=b"2b": orig_gensalt(4, prefix))
+    yield
+    mp.undo()
+
+
 @pytest.fixture(autouse=True)
 def _reset_mcp_state():
     """Module-level pubsub/session state lives in process memory and can
@@ -256,6 +274,10 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
         wiki_dir=str(wiki_dir),
         database_url=_with_dbname(_BASE_URL, dbname),
         redis_url=os.environ.get("TEST_REDIS_URL", "redis://localhost:6380/1"),
+        # Queue keys share one Redis across tests and xdist workers; the
+        # prefix keeps each test's streams private (and lets teardown
+        # delete them — nothing drains queues in tests).
+        redis_key_prefix=f"{dbname}:",
         opensearch_url=_TEST_OPENSEARCH_URL,
         opensearch_index=f"wiki-docs-test-{dbname}",  # isolated per test
         max_queue_size=1000,
@@ -309,6 +331,19 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
     reset_engine_for_tests()
 
     yield cfg
+
+    # Delete this test's queue keys while CONFIG still points at the test
+    # broker — accumulated streams would otherwise trip the queue-size cap
+    # after enough runs.
+    from app.tasks.queue import get_redis
+
+    try:
+        r = get_redis()
+        keys = list(r.scan_iter(match=f"{dbname}:*"))
+        if keys:
+            r.delete(*keys)
+    except Exception:  # noqa: BLE001 — teardown; a dead broker shouldn't mask the test result
+        pass
 
     reset_engine_for_tests()
     from app.db import fts as _fts
