@@ -1400,7 +1400,7 @@ class ChangeProposal(Base):
     __table_args__ = (
         CheckConstraint(
             "op IN ('move', 'rename', 'merge', 'split', 'create_folder', "
-            "'delete_empty_folder')",
+            "'delete_empty_folder', 'delete_page')",
             name="change_proposals_op_check",
         ),
         CheckConstraint(

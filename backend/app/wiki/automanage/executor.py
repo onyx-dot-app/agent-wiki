@@ -48,7 +48,11 @@ EVENT_AUTOMANAGE_APPLIED = "automanage.applied"
 # gate on which proposals we let exist). The emit/approve layers check it, so
 # widening it is a deliberate one-line decision per op.
 SUPPORTED_OPS: frozenset[str] = frozenset(
-    {ProposalOp.DELETE_EMPTY_FOLDER.value, ProposalOp.MERGE.value}
+    {
+        ProposalOp.DELETE_EMPTY_FOLDER.value,
+        ProposalOp.MERGE.value,
+        ProposalOp.DELETE_PAGE.value,
+    }
 )
 
 

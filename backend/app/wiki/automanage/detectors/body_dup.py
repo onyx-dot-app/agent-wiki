@@ -30,6 +30,7 @@ from typing import Any
 
 from app.wiki import git
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
+from app.wiki.automanage.detectors.template_echo import template_body_blob_shas
 from app.wiki.change_proposals import ProposalOp
 
 log = logging.getLogger(__name__)
@@ -61,9 +62,14 @@ class _BodyDupDetector:
             if path in in_scope:
                 by_blob[blob].append(path)
 
+        # Precedence: a duplicate group whose shared body is a template body
+        # is a group of untouched template instances — every member should be
+        # *removed* (template-echo's job), not merged into each other. Merging
+        # would consolidate onto a page with no unique content.
+        echo_blobs = set(template_body_blob_shas())
         drafts: list[ProposalDraft] = []
         for blob, paths in sorted(by_blob.items()):
-            if len(paths) < 2:
+            if len(paths) < 2 or blob in echo_blobs:
                 continue
             body = git.read_file_opt(paths[0])
             if body is None or len(body.encode()) < self._min_bytes:

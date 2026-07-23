@@ -34,7 +34,7 @@ from pydantic import BaseModel, ConfigDict
 from app.llm import client
 from app.llm.prompts import load_prompt
 from app.models.wiki import ChangeKind, PathMove
-from app.wiki import git, notify, retire
+from app.wiki import git, notify, retire, trash
 from app.wiki.filesystem import safe_rel_path
 
 log = logging.getLogger(__name__)
@@ -84,6 +84,16 @@ def _tools() -> list[dict[str, Any]]:
                 "type": "object",
                 "properties": {"source": path_prop, "dest": path_prop},
                 "required": ["source", "dest"],
+            },
+        },
+        {
+            "name": "trash_page",
+            "description": "Remove one of the proposal's pages outright: "
+            "trash-move (restorable), no surviving page to forward to.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"path": path_prop},
+                "required": ["path"],
             },
         },
         {
@@ -166,6 +176,20 @@ class _ToolBox:
         )
         self.mutated = True
         return {"source": src, "dest": dst, "sha": sha}
+
+    def trash_page(self, args: dict[str, Any]) -> Any:
+        if err := self._check(args["path"]):
+            return {"error": err}
+        path = args["path"]
+        dest = trash.trash_location(trash.new_trash_id(), path)
+        sha, moves = git.move_path(
+            path, dest, trash.trash_commit_message(path), author=self._author
+        )
+        notify.after_doc_trashed(
+            moves, sha, self._author, root_move=PathMove(old=path, new=dest)
+        )
+        self.mutated = True
+        return {"trashed": path, "sha": sha}
 
     def retire_page(self, args: dict[str, Any]) -> Any:
         if err := self._check(args["source"], args["target"]):
