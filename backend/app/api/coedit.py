@@ -253,17 +253,39 @@ async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[dict[str, Any]], 
             log.warning("coedit ws: malformed %r message", msg_type)
 
 
+# How often _send_loop's blocking drain call returns to check for
+# cancellation. Short on purpose: asyncio.to_thread cancellation only
+# unblocks the *awaiting* coroutine, not the underlying OS thread still
+# parked in queue.Queue.get(timeout=...) — found the hard way, in
+# production, not just in theory. Every disconnect (a WS closes, we
+# reconnect) cancels this task; with a long timeout, the orphaned thread
+# lingers for up to that long, still holding a slot in the shared default
+# thread pool every asyncio.to_thread call in the process draws from. Under
+# frequent reconnects, orphaned threads accumulate faster than they drain,
+# eventually exhausting the pool — at which point *every* asyncio.to_thread
+# call across the whole backend (new connects, every op/cursor/checkpoint
+# message, for every session) queues for a free worker. That reads as "the
+# whole app froze," and can plausibly cause more disconnects itself (a
+# starved event loop can miss uvicorn's own ping/pong window and get
+# closed as unresponsive) — a self-reinforcing spiral. Bounding the poll to
+# ~1s bounds any orphaned thread's worst case to ~1s instead of 15.
+_SEND_LOOP_POLL_SECONDS = 1.0
+
+
 async def _send_loop(
     websocket: WebSocket, conn: coedit_channel.Connection, session_id: int, user_id: str
 ) -> None:
+    idle_elapsed = 0.0
     while True:
-        # coedit_channel.drain blocks synchronously on a queue.Queue — offload
-        # to a thread so it doesn't stall the event loop the recv side shares.
-        frame = await asyncio.to_thread(coedit_channel.drain, conn.queue, _HEARTBEAT_SECONDS)
+        frame = await asyncio.to_thread(coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS)
         if frame is None:
-            await asyncio.to_thread(coedit.touch, session_id, user_id)
-            await websocket.send_json({"type": "ping"})
+            idle_elapsed += _SEND_LOOP_POLL_SECONDS
+            if idle_elapsed >= _HEARTBEAT_SECONDS:
+                idle_elapsed = 0.0
+                await asyncio.to_thread(coedit.touch, session_id, user_id)
+                await websocket.send_json({"type": "ping"})
             continue
+        idle_elapsed = 0.0
         await websocket.send_json(frame)
 
 
