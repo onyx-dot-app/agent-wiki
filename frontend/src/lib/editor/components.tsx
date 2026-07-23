@@ -484,9 +484,11 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         scrollToSource: (id: string) => {
           const v = view.current;
           if (!v) return;
+          // An edit can collapse a span to zero width, and a collapsed
+          // target paints nothing, so it can't be the scroll destination.
           const target = v.state
             .field(sourceHighlightsExt.field)
-            .targets.find((t) => t.id === id);
+            .targets.find((t) => t.id === id && t.startOffset < t.endOffset);
           if (!target) return;
           v.dispatch({
             effects: EditorView.scrollIntoView(
