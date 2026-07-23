@@ -46,7 +46,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Callable, Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -54,7 +55,6 @@ from fastapi.testclient import TestClient
 
 from app.llm.client import CompletionResult
 from app.tasks.queues import QUEUES
-
 from tests._auth import login_fastapi
 
 

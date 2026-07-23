@@ -19,9 +19,10 @@ every repo to take a session argument. Revisit when we have a use case.
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, cast
+from typing import cast
 
 from sqlalchemy import Engine, Executable, create_engine, text
 from sqlalchemy.engine import CursorResult

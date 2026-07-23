@@ -46,8 +46,8 @@ import pytest
 from psycopg import sql
 
 from app.config import Config
-from app.realtime import bus as _bus
 from app.mcp_server import session as _mcp_session
+from app.realtime import bus as _bus
 from app.tasks.queue import reset_redis_for_tests
 
 # --------------------------------------------------------------------------- #
@@ -61,7 +61,7 @@ def _check_opensearch() -> bool:
     try:
         urllib.request.urlopen(f"{_TEST_OPENSEARCH_URL}/_cluster/health", timeout=2)
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 — any failure at all means "not reachable"
         return False
 
 
