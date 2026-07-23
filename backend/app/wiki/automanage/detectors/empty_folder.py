@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from typing import Any
 from datetime import datetime, timedelta, timezone
 
 from app.wiki import git
@@ -114,6 +115,17 @@ class _EmptyFolderDetector:
                 )
             )
         return drafts
+
+    def validate(self, proposal: dict[str, Any]) -> str | None:
+        """Premise: the folder is still empty (only ``.gitkeep`` markers)."""
+        folder = proposal["source_paths"][0]
+        under = list(git.list_paths(folder))
+        still_empty = bool(under) and all(
+            p.rsplit("/", 1)[-1] == _GITKEEP for p in under
+        )
+        if not still_empty:
+            return f"{folder!r} is no longer an empty folder"
+        return None
 
 
 DETECTOR = _EmptyFolderDetector()

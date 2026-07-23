@@ -21,7 +21,7 @@ module-level ``DETECTOR``, registered in ``__init__.py``.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -108,4 +108,14 @@ class Detector(Protocol):
 
     def detect(self, scope: Scope) -> list[ProposalDraft]:
         """Find candidates in ``scope`` and return drafts. Pure."""
+        ...
+
+    def validate(self, proposal: dict[str, Any]) -> str | None:
+        """Re-check the proposal's *premise* against current wiki state —
+        called by the executor before applying, because approval can be days
+        old and only the author knows what "still valid" means. Returns
+        ``None`` while the premise holds, else a human-readable stale reason.
+        Premise-based, not sha-based: an edit to an affected page that doesn't
+        break the premise (e.g. the same fix applied to both copies of a
+        duplicate) keeps the proposal valid."""
         ...

@@ -19,8 +19,13 @@ DETECTORS: list[Detector] = [
     empty_folder.DETECTOR,
 ]
 
+# Validation dispatch: a proposal records which detector authored it, and the
+# executor routes the premise re-check back to that detector.
+DETECTORS_BY_NAME: dict[str, Detector] = {d.name: d for d in DETECTORS}
+
 __all__ = [
     "DETECTORS",
+    "DETECTORS_BY_NAME",
     "Detector",
     "ProposalDraft",
     "Scope",
