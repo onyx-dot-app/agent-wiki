@@ -395,9 +395,10 @@ interface CoeditorProps {
  * links). */
 export interface CoeditorHandle {
   scrollToOffset: (offset: number) => void;
-  /** Scroll to a source's first attributed span, read from the highlight
-   * field's live-mapped offsets so edits since the fetch are honored. */
-  scrollToSource: (id: string) => void;
+  /** Scroll to the nth attributed span of a source (default the first),
+   * read from the highlight field's live-mapped offsets so edits since
+   * the fetch are honored. */
+  scrollToSource: (id: string, nth?: number) => void;
   /** The source highlight field's live-mapped targets, for hosts that
    * anchor UI to span positions (collapsed spans included, callers skip
    * them). */
@@ -522,14 +523,17 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
           const v = view.current;
           return v ? v.state.field(commentsField).targets : [];
         },
-        scrollToSource: (id: string) => {
+        scrollToSource: (id: string, nth = 0) => {
           const v = view.current;
           if (!v) return;
           // An edit can collapse a span to zero width, and a collapsed
           // target paints nothing, so it can't be the scroll destination.
-          const target = v.state
+          const spans = v.state
             .field(sourceHighlightsExt.field)
-            .targets.find((t) => t.id === id && t.startOffset < t.endOffset);
+            .targets.filter((t) => t.id === id && t.startOffset < t.endOffset);
+          // A span collapsing can strand a caller's nth, land on the last
+          // surviving span rather than dead-clicking.
+          const target = spans[Math.min(nth, spans.length - 1)];
           if (!target) return;
           v.dispatch({
             effects: EditorView.scrollIntoView(

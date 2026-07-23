@@ -17,6 +17,9 @@ const TICK_SLOT = 12;
 interface Tick {
   kind: "comment" | "source";
   id: string;
+  /** Occurrence index among this id's surviving spans, a source cited in
+   * several regions gets a tick per region. */
+  nth: number;
   /** Content fraction of the doc, 0..1. */
   fraction: number;
 }
@@ -46,7 +49,8 @@ export function AnnotationTickRail({
   activeCommentIds?: string[];
   activeSourceIds?: string[];
   onPickComment?: (id: string) => void;
-  onPickSource?: (key: string) => void;
+  /** nth picks the clicked region among the source's spans. */
+  onPickSource?: (key: string, nth: number) => void;
 }) {
   const [ticks, setTicks] = useState<Tick[]>([]);
   const [trackH, setTrackH] = useState(0);
@@ -70,23 +74,26 @@ export function AnnotationTickRail({
     if (!editor) return;
     const sh = editor.scrollHeight();
     if (sh <= 0) return;
-    // First surviving span per id, from the live-mapped fields so ticks
-    // ride edits like the highlights do.
+    // Every surviving span from the live-mapped fields, so ticks ride
+    // edits like the highlights do.
     const next: Tick[] = [];
-    const seen = new Set<string>();
+    const occurrences = new Map<string, number>();
     const collect = (
       targets: AnchoredHighlightTarget[],
       kind: Tick["kind"],
     ) => {
       for (const t of targets) {
+        if (!t.id || t.startOffset >= t.endOffset) continue;
+        // nth counts surviving spans, mirroring scrollToSource's filter.
         const key = `${kind}:${t.id}`;
-        if (!t.id || t.startOffset >= t.endOffset || seen.has(key)) continue;
+        const nth = occurrences.get(key) ?? 0;
+        occurrences.set(key, nth + 1);
         const line = editor.anchorLine(t.startOffset);
         if (!line) continue;
-        seen.add(key);
         next.push({
           kind,
           id: t.id,
+          nth,
           fraction: Math.min(1, Math.max(0, line.top / sh)),
         });
       }
@@ -150,13 +157,15 @@ export function AnnotationTickRail({
       {shown.map((t) => (
         // raw-ok: no Opal control renders a 2px proportional minimap tick
         <button
-          key={`${t.kind}:${t.id}`}
+          key={`${t.kind}:${t.id}:${t.nth}`}
           type="button"
           aria-label={t.kind === "comment" ? "Comment" : "Source"}
           className="pointer-events-auto absolute inset-x-[2px] flex h-2 cursor-pointer items-center"
           style={{ top: `calc(${t.fraction * 100}% - 4px)` }}
           onClick={() =>
-            t.kind === "comment" ? onPickComment?.(t.id) : onPickSource?.(t.id)
+            t.kind === "comment"
+              ? onPickComment?.(t.id)
+              : onPickSource?.(t.id, t.nth)
           }
         >
           <span
