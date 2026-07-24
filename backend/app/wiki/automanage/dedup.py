@@ -3,12 +3,12 @@
 The dedup component answers one question for every detected draft: *have we
 already asked this?* Its unit is the **finding**, identified by
 
-    finding_key = (detector, op, the touched pages by stable doc id,
+    dedup_key = (detector, op, the touched pages by stable doc id,
                    the detector's premise)
 
 and its content-free prefix, the **subject**
 
-    subject_key = (detector, op, the touched pages by stable doc id)
+    cooldown_key = (detector, op, the touched pages by stable doc id)
 
 Doc ids (not paths) make identity rename/move-proof; paths that don't exist
 yet — a rename's reserved destination — fall back to a case-folded path term
@@ -87,8 +87,8 @@ class DedupDecision(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     action: DedupAction
-    finding_key: str
-    subject_key: str
+    dedup_key: str
+    cooldown_key: str
     # The row that decided a REVIVE / SKIP_* outcome, when one exists.
     existing_id: int | None = None
 
@@ -134,20 +134,20 @@ class Deduper:
             if self._exists(p)
         }
 
-    def subject_key(self, detector: str, draft: ProposalDraft) -> str:
+    def cooldown_key(self, detector: str, draft: ProposalDraft) -> str:
         terms = sorted(
             {self._id_term(p) for p in draft.source_paths + draft.target_paths}
         )
         return f"{detector}|{draft.op.value}|{','.join(terms)}"
 
-    def finding_key(self, detector: str, draft: ProposalDraft) -> str:
-        return f"{self.subject_key(detector, draft)}|{draft.premise or ''}"
+    def dedup_key(self, detector: str, draft: ProposalDraft) -> str:
+        return f"{self.cooldown_key(detector, draft)}|{draft.premise or ''}"
 
     def decide(self, detector: str, draft: ProposalDraft) -> DedupDecision:
-        subject = self.subject_key(detector, draft)
+        subject = self.cooldown_key(detector, draft)
         finding = f"{subject}|{draft.premise or ''}"
 
-        row = change_proposals.latest_by_finding_key(finding)
+        row = change_proposals.latest_by_dedup_key(finding)
         if row is not None:
             status = row["status"]
             if status in _LIVE_STATUSES:
@@ -166,14 +166,14 @@ class Deduper:
                 action = DedupAction.SKIP_LIVE
             return DedupDecision(
                 action=action,
-                finding_key=finding,
-                subject_key=subject,
+                dedup_key=finding,
+                cooldown_key=subject,
                 existing_id=row["id"],
             )
 
         # New premise on a subject a human recently declined: stay quiet for
         # the cooldown window, then ask normally.
-        rejected = change_proposals.latest_rejection_for_subject(subject)
+        rejected = change_proposals.latest_rejection_for_cooldown_key(subject)
         if rejected is not None:
             rejected_id, rejected_at = rejected
             try:
@@ -185,11 +185,11 @@ class Deduper:
             if ts is not None and datetime.now(UTC) - ts < self._cooldown:
                 return DedupDecision(
                     action=DedupAction.SKIP_COOLDOWN,
-                    finding_key=finding,
-                    subject_key=subject,
+                    dedup_key=finding,
+                    cooldown_key=subject,
                     existing_id=rejected_id,
                 )
 
         return DedupDecision(
-            action=DedupAction.CREATE, finding_key=finding, subject_key=subject
+            action=DedupAction.CREATE, dedup_key=finding, cooldown_key=subject
         )

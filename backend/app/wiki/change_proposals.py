@@ -85,8 +85,8 @@ def _to_dict(row: ChangeProposal) -> dict[str, Any]:
         "doc_ids": row.doc_ids,
         "emit_count": row.emit_count,
         "last_emitted_at": row.last_emitted_at,
-        "finding_key": row.finding_key,
-        "subject_key": row.subject_key,
+        "dedup_key": row.dedup_key,
+        "cooldown_key": row.cooldown_key,
         "status_reason": row.status_reason,
         "applied_sha": row.applied_sha,
         "created_at": row.created_at,
@@ -111,8 +111,8 @@ def create(
     acl_fingerprint_before: str | None = None,
     acl_fingerprint_after: str | None = None,
     expires_at: str | None = None,
-    finding_key: str | None = None,
-    subject_key: str | None = None,
+    dedup_key: str | None = None,
+    cooldown_key: str | None = None,
     doc_ids: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Insert a ``pending`` proposal and return it.
@@ -150,8 +150,8 @@ def create(
             acting_user_id=acting_user_id,
             acl_fingerprint_before=acl_fingerprint_before,
             acl_fingerprint_after=acl_fingerprint_after,
-            finding_key=finding_key,
-            subject_key=subject_key,
+            dedup_key=dedup_key,
+            cooldown_key=cooldown_key,
             doc_ids=doc_ids,
             last_emitted_at=now,
             created_at=now,
@@ -198,29 +198,29 @@ def list_for_run(run_id: str) -> list[dict[str, Any]]:
         return [_to_dict(r) for r in rows]
 
 
-def latest_by_finding_key(finding_key: str) -> dict[str, Any] | None:
-    """The newest proposal row carrying ``finding_key`` — the row that
+def latest_by_dedup_key(dedup_key: str) -> dict[str, Any] | None:
+    """The newest proposal row carrying ``dedup_key`` — the row that
     represents this finding (see ``automanage/dedup.py``). Newest by id: a
     finding should only ever have one row, but if history ever holds more
     (e.g. rows minted before a bug fix), the latest one speaks for it."""
     with session() as s:
         row = s.scalars(
             select(ChangeProposal)
-            .where(ChangeProposal.finding_key == finding_key)
+            .where(ChangeProposal.dedup_key == dedup_key)
             .order_by(ChangeProposal.id.desc())
             .limit(1)
         ).first()
         return _to_dict(row) if row is not None else None
 
 
-def latest_rejection_for_subject(subject_key: str) -> tuple[int, str] | None:
+def latest_rejection_for_cooldown_key(cooldown_key: str) -> tuple[int, str] | None:
     """``(id, updated_at)`` of the most recent *rejected* row on
-    ``subject_key`` — what the post-rejection cooldown is measured from."""
+    ``cooldown_key`` — what the post-rejection cooldown is measured from."""
     with session() as s:
         row = s.execute(
             select(ChangeProposal.id, ChangeProposal.updated_at)
             .where(
-                ChangeProposal.subject_key == subject_key,
+                ChangeProposal.cooldown_key == cooldown_key,
                 ChangeProposal.status == ProposalStatus.REJECTED.value,
             )
             .order_by(ChangeProposal.updated_at.desc(), ChangeProposal.id.desc())
@@ -283,7 +283,7 @@ def taken_dedupe_keys(statuses: tuple[ProposalStatus, ...]) -> set[str]:
     in-flight, already-applied, or human-rejected change; ``expired``/``stale``
     are intentionally omitted so a timed-out or drifted proposal can recur.
 
-    Key format matches ``ProposalDraft.dedupe_key`` in the detector seam."""
+    Key format matches ``ProposalDraft.legacy_dedupe_key`` in the detector seam."""
     with session() as s:
         # Project only the three columns the key needs — full rows would
         # deserialize proposed_bodies / base_shas we immediately discard.

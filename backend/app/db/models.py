@@ -1371,11 +1371,11 @@ class ChangeProposal(Base):
     # regenerates. NULL for pure-structural ops (move/rename/folder ops).
     proposed_bodies: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Layer-1 dedup identity (see the Dedup design page + automanage/dedup.py):
-    # finding_key = (detector, op, doc-id set, detector premise) — one finding,
-    # one row for life; subject_key is its content-free prefix, the unit the
+    # dedup_key = (detector, op, doc-id set, detector premise) — one finding,
+    # one row for life; cooldown_key is its content-free prefix, the unit the
     # post-rejection cooldown quiets. Null on rows predating the columns.
-    finding_key: Mapped[str | None] = mapped_column(Text)
-    subject_key: Mapped[str | None] = mapped_column(Text)
+    dedup_key: Mapped[str | None] = mapped_column(Text)
+    cooldown_key: Mapped[str | None] = mapped_column(Text)
     # How many times this finding has been emitted (1 on create, +1 per
     # revival) and when last. Revival otherwise erases its own history —
     # "keeps coming back" is a signal reviewers and detector-precision
@@ -1434,8 +1434,8 @@ class ChangeProposal(Base):
             name="change_proposals_created_via_check",
         ),
         Index("idx_change_proposals_status", "status", "created_at"),
-        Index("idx_change_proposals_finding_key", "finding_key"),
-        Index("idx_change_proposals_subject_key", "subject_key"),
+        Index("idx_change_proposals_dedup_key", "dedup_key"),
+        Index("idx_change_proposals_cooldown_key", "cooldown_key"),
     )
 
 

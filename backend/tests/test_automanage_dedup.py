@@ -56,8 +56,8 @@ def _persist(decision: dedup.DedupDecision, draft: ProposalDraft) -> int:
         summary=draft.summary,
         created_via=ProposalCreatedVia.SWEEP,
         detector="body_dup",
-        finding_key=decision.finding_key,
-        subject_key=decision.subject_key,
+        dedup_key=decision.dedup_key,
+        cooldown_key=decision.cooldown_key,
     )["id"]
 
 
@@ -75,7 +75,7 @@ def test_new_finding_creates_then_carries(repo):
 def test_identity_survives_renames(repo):
     """Doc-id keying: the same pages at new paths are the same finding."""
     d = _deduper()
-    key_before = d.finding_key("body_dup", _draft())
+    key_before = d.dedup_key("body_dup", _draft())
 
     _sha, moves = wiki_git.move_path("docs/b.md", "guides/b.md", "mv", author=None)
     doc_ids.on_path_moved(moves, root_move=PathMove(old="docs/b.md", new="guides/b.md"))
@@ -87,7 +87,7 @@ def test_identity_survives_renames(repo):
         summary="merge b into a",
         premise="blob1",
     )
-    key_after = _deduper().finding_key("body_dup", moved)
+    key_after = _deduper().dedup_key("body_dup", moved)
     assert key_after == key_before
 
 
@@ -99,7 +99,7 @@ def test_reserved_names_fall_back_to_casefolded_path(repo):
         target_paths=["docs/a.md"],
         summary="rename option",
     )
-    assert "path:docs/b-2.md" in d.finding_key("case_collision", draft)
+    assert "path:docs/b-2.md" in d.dedup_key("case_collision", draft)
 
 
 def test_rejected_finding_never_returns(repo):

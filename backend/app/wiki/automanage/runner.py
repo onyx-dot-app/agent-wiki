@@ -159,7 +159,7 @@ def run_detection(
     try:
         scope = Scope(trigger=trigger, paths=tuple(paths), run_id=run_id)
         # Legacy belt: path-based keys still block for rows that predate
-        # finding_key. The Deduper (doc-id + premise identity, revival,
+        # dedup_key. The Deduper (doc-id + premise identity, revival,
         # subject cooldown) is the real gate — see automanage/dedup.py.
         taken = taken_dedupe_keys(_BLOCKING_STATUSES)
         deduper = dedup.Deduper(paths)
@@ -197,10 +197,10 @@ def run_detection(
                         run_id,
                         detector.name,
                         draft.op.value,
-                        draft.dedupe_key,
+                        draft.legacy_dedupe_key,
                     )
                     continue
-                if draft.dedupe_key in taken:
+                if draft.legacy_dedupe_key in taken:
                     continue
                 if any(mgmt.get(p) is False for p in draft_paths):
                     continue  # explicitly hands-off scope
@@ -249,7 +249,7 @@ def run_detection(
                         "detection run %s: revived proposal %s (%s)",
                         run_id,
                         decision.existing_id,
-                        decision.finding_key,
+                        decision.dedup_key,
                     )
                 else:
                     proposal = create_proposal(
@@ -264,11 +264,11 @@ def run_detection(
                         proposed_bodies=draft.proposed_bodies,
                         run_id=run_id,
                         acl_fingerprint_before=acl_fp,
-                        finding_key=decision.finding_key,
-                        subject_key=decision.subject_key,
+                        dedup_key=decision.dedup_key,
+                        cooldown_key=decision.cooldown_key,
                         doc_ids=resolution,
                     )
-                taken.add(draft.dedupe_key)
+                taken.add(draft.legacy_dedupe_key)
                 emitted += 1
                 # Whole operation inside an AI-managed scope → auto-apply as the
                 # AI system user (no human queue). Otherwise it waits for a
@@ -291,7 +291,7 @@ def run_detection(
                             "proposal %s (%s); left pending",
                             run_id,
                             proposal["id"],
-                            draft.dedupe_key,
+                            draft.legacy_dedupe_key,
                         )
         runs.mark_completed(
             run_id, paths_scanned=len(paths), proposals_emitted=emitted
