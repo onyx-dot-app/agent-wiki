@@ -323,7 +323,9 @@ function PolicyPopover({
         >
           <Switch
             checked={allowed}
-            disabled={!canWrite}
+            // Held until the policy loads: toggling against the null
+            // default would persist a wrong explicit override.
+            disabled={!canWrite || !policy}
             onCheckedChange={() => void toggle()}
           />
         </InputHorizontal>
@@ -375,11 +377,23 @@ export function PresenceAvatars({
       ...typing,
     ]);
     const caretByUser = new Map(peers.map((p) => [p.user_id, p.head]));
-    const writingAgents = new Map(
-      agents
-        .filter((a) => a.activity === "wrote")
-        .map((a) => [a.user_id, a.agent_name]),
-    );
+    // One agent summary per user: a user can hold a row per agent, and any
+    // writing agent outranks read rows for the badge and the state.
+    const agentPresence = new Map<
+      string,
+      { display: string; agentName: string | null; writing: boolean }
+    >();
+    for (const a of agents) {
+      const cur = agentPresence.get(a.user_id);
+      const writing = a.activity === "wrote";
+      if (!cur || (writing && !cur.writing)) {
+        agentPresence.set(a.user_id, {
+          display: a.owner_display,
+          agentName: a.agent_name,
+          writing,
+        });
+      }
+    }
     const entry = (
       userId: string,
       display: string,
@@ -397,30 +411,25 @@ export function PresenceAvatars({
     });
     const roster = participants
       .filter((p) => p.user_id !== myUserId)
-      .map((p, i) =>
+      .map((p, i) => {
         // A writing agent makes its user an editor even with an idle caret.
-        entry(
+        const presence = agentPresence.get(p.user_id);
+        return entry(
           p.user_id,
           p.user_display,
           i,
-          editingIds.has(p.user_id) || writingAgents.has(p.user_id),
-          writingAgents.get(p.user_id) ?? null,
-        ),
-      );
+          editingIds.has(p.user_id) || !!presence?.writing,
+          presence?.agentName ?? null,
+        );
+      });
     // Agents register as the user they act for, so a user whose agent is
     // active stays in the stack even without a browser session.
     const seated = new Set(roster.map((e) => e.userId));
-    for (const a of agents) {
-      if (a.user_id === myUserId || seated.has(a.user_id)) continue;
-      seated.add(a.user_id);
+    for (const [userId, p] of agentPresence) {
+      if (userId === myUserId || seated.has(userId)) continue;
+      seated.add(userId);
       roster.push(
-        entry(
-          a.user_id,
-          a.owner_display,
-          roster.length,
-          a.activity === "wrote",
-          a.agent_name,
-        ),
+        entry(userId, p.display, roster.length, p.writing, p.agentName),
       );
     }
     return roster;
