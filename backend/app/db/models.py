@@ -1461,6 +1461,15 @@ class DetectionRun(Base):
             name="detection_runs_status_check",
         ),
         Index("idx_detection_runs_status", "status", "started_at"),
+        # At most one live sweep row — what makes sweep-slot acquisition an
+        # atomic guarded INSERT instead of check-then-insert (see
+        # ``automanage/runs.py:try_start_sweep``).
+        Index(
+            "uq_detection_runs_single_running_sweep",
+            "trigger",
+            unique=True,
+            postgresql_where=text("status = 'running' AND trigger = 'sweep'"),
+        ),
     )
 
 
