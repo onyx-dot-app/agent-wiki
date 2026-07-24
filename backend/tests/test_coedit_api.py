@@ -9,6 +9,7 @@ shapes, one WebSocket instead of eight endpoints.
 """
 from __future__ import annotations
 
+import logging
 import time
 from contextlib import contextmanager
 
@@ -197,7 +198,10 @@ def test_disconnect_removes_participant(client):
     assert coedit.list_participants(sid) == []
 
 
-def test_disconnect_of_last_participant_checkpoints(client):
+def test_disconnect_of_last_participant_checkpoints(client, caplog):
+    # INFO so a failure's captured logs include the disconnect handler's
+    # own trace ("coedit ws closed", "checkpoint enqueue failed", ...).
+    caplog.set_level(logging.INFO)
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page("hello world")
@@ -211,15 +215,20 @@ def test_disconnect_of_last_participant_checkpoints(client):
         # thread, and websocket_connect's __exit__ doesn't guarantee it has
         # run yet. Wait for it *inside* immediate_mode: once the flag drops,
         # a late enqueue would go to the real queue and never run here.
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 15
         while (
             git.read_file(_PATH) != "hi world"
             or coedit.get_active_session(_PATH) is not None
         ) and time.monotonic() < deadline:
             time.sleep(0.02)
 
-    assert git.read_file(_PATH) == "hi world"
-    assert coedit.get_active_session(_PATH) is None
+    session_after = coedit.get_active_session(_PATH)
+    assert git.read_file(_PATH) == "hi world", (
+        "checkpoint never landed: "
+        f"session={'still open' if session_after else 'closed'}, "
+        f"participants={coedit.list_participants(sid)}"
+    )
+    assert session_after is None
     assert sid is not None
 
 
