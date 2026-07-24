@@ -120,10 +120,18 @@ class _StubPageDetector:
                         f"Remove stub page “{path}” — no real content after "
                         f"{self.min_age_days}+ days"
                     ),
+                    # State the premise exactly: "at most a few words",
+                    # not "title/scaffolding only" — a tiny page whose bytes
+                    # are all body text is still a stub, and the applier
+                    # shouldn't re-litigate the reviewer's judgment over a
+                    # wording mismatch (premise drift is validate()'s job,
+                    # re-checked before the applier ever runs).
                     instruction=(
-                        f"The page {path!r} is a placeholder that never got "
-                        "content (nothing beyond a title/scaffolding). Remove "
-                        "it with trash_page (restorable). Do not write any "
+                        f"The page {path!r} is a stub: at most a few words "
+                        "of content, unchanged long enough to be abandoned. "
+                        "A reviewer approved its removal and a validation "
+                        "step has re-confirmed it is still a stub. Remove it "
+                        "with trash_page (restorable). Do not write any "
                         "content."
                     ),
                     auto_approvable=False,
