@@ -37,6 +37,7 @@ from app.api import (
     email_verify,
     events,
     health,
+    images,
     installer,
     launchers,
     llm,
@@ -242,6 +243,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_sessions.router, prefix="/api/agent-sessions")
     app.include_router(triggers.router, prefix="/api/triggers")
     app.include_router(automanage.router, prefix="/api/automanage")
+    app.include_router(images.router, prefix="/api/wiki/images")
     app.include_router(wiki.router, prefix="/api/wiki")
     app.include_router(coedit.router, prefix="/api/coedit")
     app.include_router(comments.router, prefix="/api/comments")
