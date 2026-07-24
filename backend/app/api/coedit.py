@@ -31,7 +31,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
-import threading
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -327,10 +326,13 @@ def _connect_sync(path: str, user: User) -> coedit.SessionRow:
 def _disconnect_sync(session_id: int, user_id: str) -> None:
     # Only mark the user gone when their last connection closes, so a
     # second tab doesn't evict them.
-    if not coedit_channel.user_still_connected(session_id, user_id):
+    still = coedit_channel.user_still_connected(session_id, user_id)
+    log.info("coedit leave session=%s user=%s still_connected=%s", session_id, user_id, still)
+    if not still:
         coedit.leave(session_id, user_id)
         coedit_channel.broadcast_presence(session_id)
         _checkpoint_if_last_left(session_id)
+        log.info("coedit leave done session=%s", session_id)
 
 
 @router.websocket("/ws")
@@ -374,6 +376,11 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED
         )
+        log.info(
+            "coedit ws wait returned session=%s done=%s",
+            sess.id,
+            [("recv" if t is recv_task else "send") for t in done],
+        )
         # Wake a still-blocked drain() *before* cancelling it: cancelling
         # send_task only stops the asyncio Task watching the thread, not the
         # already-dispatched OS thread itself — queue.Queue.get(timeout=...)
@@ -394,23 +401,11 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     finally:
         if conn is not None:
             coedit_channel.disconnect(conn.id)
-        # The disconnect handler IS the leave signal (no client message), so
-        # it must survive this task being *cancelled* — server shutdown, or
-        # the test portal tearing down the connection. Inside a cancelled
-        # task every `await` re-raises CancelledError instead of completing,
-        # which silently drops the leave: a phantom participant forever, and
-        # a dirty buffer that never gets its last-leave checkpoint. Detect
-        # the in-flight cancellation up front and hand the leave to a plain
-        # thread no cancellation can touch; the normal disconnect path keeps
-        # awaiting so the leave is recorded before the handler returns.
         task = asyncio.current_task()
-        if task is not None and task.cancelling():
-            threading.Thread(
-                target=_disconnect_sync,
-                args=(sess.id, user.id),
-                name=f"coedit-leave-{sess.id}",
-                daemon=False,
-            ).start()
-        else:
-            await asyncio.to_thread(_disconnect_sync, sess.id, user.id)
+        log.info(
+            "coedit ws finally session=%s cancelling=%s",
+            sess.id,
+            task.cancelling() if task is not None else "?",
+        )
+        await asyncio.to_thread(_disconnect_sync, sess.id, user.id)
         log.info("coedit ws closed session=%s user=%s", sess.id, user.id)

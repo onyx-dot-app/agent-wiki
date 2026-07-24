@@ -9,6 +9,7 @@ shapes, one WebSocket instead of eight endpoints.
 """
 from __future__ import annotations
 
+import logging
 import time
 from contextlib import contextmanager
 
@@ -196,7 +197,8 @@ def test_op_stamps_last_edited_at(client):
         assert me and me[0].last_edited_at is not None
 
 
-def test_disconnect_removes_participant(client):
+def test_disconnect_removes_participant(client, caplog):
+    caplog.set_level(logging.INFO)
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page()
@@ -209,7 +211,8 @@ def test_disconnect_removes_participant(client):
     assert coedit.list_participants(sid) == []
 
 
-def test_disconnect_of_last_participant_checkpoints(client):
+def test_disconnect_of_last_participant_checkpoints(client, caplog):
+    caplog.set_level(logging.INFO)
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page("hello world")
