@@ -12,6 +12,8 @@ from enum import Enum
 
 from pydantic import BaseModel, Field
 
+from app.models.coedit import LiveAnchor
+
 
 class CommentScope(str, Enum):
     """What a comment is attached to."""
@@ -90,6 +92,15 @@ class CommentView(BaseModel):
     resolved_at: str | None
     created_at: str
     updated_at: str
+    # Set only when the page has an active live co-edit session and the
+    # anchor (already current as of HEAD via app/wiki/anchor_remap.py)
+    # could be re-resolved against that session's live, uncommitted doc —
+    # see app/wiki/coedit_ws.py:resolve_live_spans. None when there's no
+    # live session, the comment is PAGE-scoped, or the live-doc resolution
+    # itself orphaned (the frontend then falls back to not highlighting
+    # this comment in the editor, same as any other orphaned anchor).
+    live_start: LiveAnchor | None = None
+    live_end: LiveAnchor | None = None
 
 
 class CommentThreadView(BaseModel):

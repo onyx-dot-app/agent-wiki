@@ -7,6 +7,8 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models.coedit import LiveAnchor
+
 
 class ChangeKind(str, Enum):
     CREATE = "create"
@@ -129,6 +131,11 @@ class SourceSpan(WriteProvenance):
 
     start_offset: int
     end_offset: int
+    # Set only when the page has an active live co-edit session — see
+    # CommentView's identically-named fields and
+    # app/wiki/coedit_ws.py:resolve_live_spans.
+    live_start: LiveAnchor | None = None
+    live_end: LiveAnchor | None = None
 
 
 class CommitMaxRetriesError(Exception):

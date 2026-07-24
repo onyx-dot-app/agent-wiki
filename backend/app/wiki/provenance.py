@@ -23,6 +23,7 @@ from typing import Any
 from app.auth.users import UserKind
 from app.db import provenance as repo
 from app.models.wiki import ActorKind, Attribution, SourceRef, SourceSpan, WriteProvenance
+from app.wiki import coedit, coedit_ws
 from app.wiki import git as wiki_git, provenance_remap
 from app.wiki.constants import INGEST_AUTHOR
 
@@ -221,7 +222,15 @@ def content_spans_for_path(doc_path: str) -> list[SourceSpan]:
     in-document highlighting. Stale spans are remapped to HEAD first, and only
     spans anchored at HEAD are returned, so every offset lines up with the
     page's current body. A remap hiccup degrades to fewer highlights, never a
-    failed read or a misplaced one."""
+    failed read or a misplaced one.
+
+    When the page has an active live co-edit session, each span is
+    additionally (best-effort) re-resolved against that session's live,
+    uncommitted doc — same mechanism and same "degrades to fewer highlights,
+    never a bad one" posture as the HEAD remap above. See
+    ``app/wiki/coedit_ws.py:resolve_live_spans`` / ``CommentView``'s
+    identically-named fields for the shared design.
+    """
     head_sha = wiki_git.head_sha_for_path(doc_path)
     if head_sha is None:
         return []
@@ -229,4 +238,19 @@ def content_spans_for_path(doc_path: str) -> list[SourceSpan]:
         provenance_remap.remap_source_ranges(doc_path)
     except Exception:
         log.exception("source range remap failed for %s", doc_path)
-    return [SourceSpan(**row) for row in repo.live_spans_for_doc(doc_path, head_sha)]
+    spans = [SourceSpan(**row) for row in repo.live_spans_for_doc(doc_path, head_sha)]
+
+    sess = coedit.get_active_session(doc_path)
+    if sess is None or not spans:
+        return spans
+    try:
+        results = coedit_ws.resolve_live_spans(
+            sess.id, doc_path, head_sha, [(s.start_offset, s.end_offset) for s in spans]
+        )
+    except Exception:
+        log.exception("live-anchor resolution failed for %s", doc_path)
+        return spans
+    return [
+        s.model_copy(update={"live_start": r[0], "live_end": r[1]}) if r is not None else s
+        for s, r in zip(spans, results)
+    ]

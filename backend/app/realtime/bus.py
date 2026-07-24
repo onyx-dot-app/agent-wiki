@@ -7,9 +7,11 @@ in-process at publish time, so re-publishing the echo would duplicate it.
 
 Consumers register one handler per ``kind`` (``register``); the listener routes
 each incoming payload to the matching handler. This keeps the bus
-transport-agnostic — it knows nothing about its consumers. Today those are the
-MCP pubsub (``app/mcp_server/pubsub.py``) and the co-edit channel
-(``app/wiki/coedit_channel.py``).
+transport-agnostic — it knows nothing about its consumers. Today that's the
+MCP pubsub (``app/mcp_server/pubsub.py``). The co-edit live doc
+(``app/wiki/coedit_ws.py``) does *not* use this bus — its Yjs rooms are
+single-process only (a client connects to whichever app process it lands on;
+the same constraint the prior SSE-based transport already had).
 
 Raw ``LISTEN``/``NOTIFY`` is one of the few sanctioned raw-SQL sites (the ORM
 can't express it), alongside ``app/db/fts.py`` and ``app/tasks/queue.py``.

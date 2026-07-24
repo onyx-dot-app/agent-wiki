@@ -57,6 +57,7 @@ from app.auth import PermissionDenied
 from app.auth.deps import CurrentUserMiddleware
 import app.config as _app_config
 from app.db import comment_fts
+from app.wiki import coedit_ws
 from app.wiki import comments as _comments_repo
 from app.metrics import setup_prometheus
 from app.realtime import bus
@@ -181,13 +182,19 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     triggers_reconcile.reconcile_legacy_slack_triggers()
     triggers_repo.rebuild_from_filesystem()
     schedule_all_pending_cleanups()
-    # Cross-process realtime bus: the worker process commits docs, the web
-    # process owns the SSE stream — Postgres LISTEN/NOTIFY ferries events
-    # (MCP doc/job updates, co-edit frames) between them.
+    # Cross-process realtime bus: worker processes commit docs, this web
+    # process holds the co-edit live docs — Postgres LISTEN/NOTIFY ferries
+    # events (MCP doc/job updates, co-edit live-rebase checkpoints) between
+    # them.
     bus.start_listener()
+    # Co-edit live-doc persistence worker + idle/overdue checkpoint scan +
+    # the live-rebase bus handler (coedit_ws.start registers it against the
+    # already-started listener above).
+    coedit_ws.start()
 
     yield
 
+    coedit_ws.stop()
     bus.stop_listener()
 
 

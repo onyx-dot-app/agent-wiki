@@ -1,20 +1,21 @@
-"""Live-session store — the Postgres editing buffer.
+"""Live-session store — the Postgres record of a page's live Yjs doc.
 
 The DB is the source of truth for an in-progress *live* edit. There is **one
 active session per page** (path-keyed); everyone viewing the page joins it
 (the session is the page's live channel — participants include pure viewers;
 presence labels editors client-side from their live caret frames, which never
-touch this store), and its editors converge on a single server-authoritative
-``buffer_text`` + monotonic ``version``.
+touch this store), and its editors converge on a shared ``pycrdt`` CRDT doc
+held in memory by whichever process's ``app/wiki/coedit_ws.py`` room owns it.
 
 This module is the *storage* seam only: get-or-create a session, join/leave/
-touch participants, and compare-and-swap the buffer. The op/patch channel and
-the checkpoint-to-git path (3-way merge through ``commit_and_fan_out``) build on
-top of these primitives and live elsewhere. ``base_sha`` is the HEAD the buffer
-was last checkpointed against — the merge base for that future checkpoint.
+touch participants, and persist/replay the Yjs update log. The live-doc room
+and the checkpoint-to-git path (3-way merge through ``commit_and_fan_out``)
+build on top of these primitives and live elsewhere. ``base_sha`` is the HEAD
+the doc was last checkpointed against — the merge base for that future
+checkpoint.
 
 Git stays the source of truth for *committed* pages; this store only holds the
-unsaved buffer. See
+unsaved live doc. See
 ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 """
 
@@ -25,13 +26,12 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
+from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User
 from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
 
@@ -71,28 +71,13 @@ class SessionRow(BaseModel):
 
     id: int
     path: str
-    buffer_text: str
-    version: int
-    checkpointed_version: int
+    ydoc_seq: int
+    ydoc_checkpointed_seq: int
     base_sha: str | None
     status: str
     created_at: str
     updated_at: str
     last_checkpoint_at: str | None
-
-
-class RebaseWrite(BaseModel):
-    """Outcome of a successful ``rebase_onto`` (a raced CAS returns ``None``).
-
-    ``changed`` is False when the buffer already equalled the merged text — only
-    ``base_sha`` (and, if checkpointed, ``checkpointed_version``) advanced, no
-    version bump. ``session`` is the post-write row.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    session: SessionRow
-    changed: bool
 
 
 class ParticipantRow(BaseModel):
@@ -111,9 +96,8 @@ def _session_row(s: CoeditSession) -> SessionRow:
     return SessionRow(
         id=s.id,
         path=s.path,
-        buffer_text=s.buffer_text,
-        version=s.version,
-        checkpointed_version=s.checkpointed_version,
+        ydoc_seq=s.ydoc_seq,
+        ydoc_checkpointed_seq=s.ydoc_checkpointed_seq,
         base_sha=s.base_sha,
         status=s.status,
         created_at=s.created_at,
@@ -176,13 +160,16 @@ def get_session(session_id: int) -> SessionRow | None:
         return _session_row(row) if row is not None else None
 
 
-def open_session(path: str, *, base_sha: str | None, initial_buffer: str = "") -> SessionRow:
+def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     """Get-or-create the active session for ``path``.
 
-    Returns the existing active session if one is open (``base_sha`` /
-    ``initial_buffer`` are ignored then — the live buffer wins). Otherwise
-    creates a fresh session seeded from the page's HEAD. Concurrent opens race
-    on the partial unique index; the loser re-reads the winner's row.
+    Returns the existing active session if one is open (``base_sha`` is
+    ignored then — the live doc wins; whoever holds/rebuilds the room seeds
+    it from Postgres, not from this call). Otherwise creates a fresh session
+    row; the room itself seeds the actual Yjs doc from the page's HEAD on
+    first connect (see ``app/wiki/coedit_ws.py:_build_doc``). Concurrent
+    opens race on the partial unique index; the loser re-reads the winner's
+    row.
     """
     with session() as s:
         existing = s.scalar(
@@ -199,8 +186,6 @@ def open_session(path: str, *, base_sha: str | None, initial_buffer: str = "") -
         now = _iso(_now())
         fresh = CoeditSession(
             path=path,
-            buffer_text=initial_buffer,
-            version=0,
             base_sha=base_sha,
             status=SessionStatus.ACTIVE.value,
             created_at=now,
@@ -223,299 +208,125 @@ def open_session(path: str, *, base_sha: str | None, initial_buffer: str = "") -
         return _session_row(fresh)
 
 
-def set_buffer(session_id: int, *, base_version: int, buffer_text: str) -> SessionRow | None:
-    """Compare-and-swap the buffer.
+# --------------------------------------------------------------------------- #
+# Yjs live-doc store — the append-only update log + snapshot behind a         #
+# session's shared pycrdt doc. A WS session reuses the same CoeditSession row #
+# (path, status, base_sha, participants, checkpoint lock all carry over       #
+# unchanged) but persists its live doc through ydoc_snapshot/ydoc_seq/        #
+# ydoc_checkpointed_seq and CoeditUpdate instead of a flat buffer. See        #
+# app/wiki/coedit_ws.py for the in-memory room that holds the live Doc        #
+# between checkpoints.                                                        #
+# --------------------------------------------------------------------------- #
 
-    Bumps ``version`` and replaces ``buffer_text`` only if ``base_version``
-    still matches the session's current version (and the session is active).
-    Returns the updated row, or ``None`` if the session is gone/closed or the
-    version moved underneath the caller (stale — the caller must rebase its
-    patch onto the current buffer and retry).
 
-    The compare and the swap are a single conditional ``UPDATE`` so they are
-    atomic: two concurrent callers based on the same version can't both win
-    (the version predicate is re-checked inside the write, not in Python), so
-    there is no lost-update window.
-    """
-    now = _iso(_now())
+class YdocState(BaseModel):
+    """A session's persisted Yjs state — what a process needs to reconstruct
+    (or catch up) the live doc without necessarily having it in memory."""
+
+    snapshot: bytes | None  # None: no WS session has ever used this page
+    seq: int
+    checkpointed_seq: int
+    base_sha: str | None
+
+
+def get_ydoc_state(session_id: int) -> YdocState | None:
+    """The session's persisted Yjs state, or ``None`` if the session doesn't
+    exist. Used when a room needs to be (re)built in a process that doesn't
+    already hold the live doc in memory — see ``coedit_ws.get_or_create_room``."""
     with session() as s:
-        sess = s.scalars(
-            update(CoeditSession)
-            .where(
-                CoeditSession.id == session_id,
-                CoeditSession.version == base_version,
-                CoeditSession.status == SessionStatus.ACTIVE.value,
-            )
-            .values(buffer_text=buffer_text, version=base_version + 1, updated_at=now)
-            .returning(CoeditSession)
-            .execution_options(synchronize_session=False)
-        ).one_or_none()
-        return _session_row(sess) if sess is not None else None
-
-
-class Change(BaseModel):
-    """One range-replacement edit: replace the half-open range ``[from, to)``
-    with ``insert``. Offsets are **UTF-16 code units** (JS / CodeMirror string
-    positions). ``from`` is a Python keyword, so the field is ``from_`` aliased
-    to ``from`` on the wire. This is the shared op shape — the HTTP request
-    model (`app/models/coedit.py`) reuses it so FastAPI validates the body."""
-
-    model_config = ConfigDict(populate_by_name=True, frozen=True)
-
-    from_: int = Field(alias="from", ge=0)
-    to: int = Field(ge=0)
-    insert: str = ""
-
-
-class OpRow(BaseModel):
-    """One logged edit op from `coedit_ops`."""
-
-    seq: int  # the session version this op produced
-    author_user_id: str
-    client_id: str | None  # the connection that produced it (collab); may be None
-    base_version: int
-    changes: list[dict[str, Any]]
-    created_at: str
-
-
-class OpsSince(BaseModel):
-    """Return of ``ops_since_with_head``: the session's current head version and
-    the logged ops in ``(after_version, head]``, read as one snapshot."""
-
-    head_version: int | None  # None if the session no longer exists
-    ops: list[OpRow]
-
-
-def _apply_changes(text: str, changes: list[Change]) -> str:
-    """Apply range-replacement ``changes`` to ``text``.
-
-    Structural validity (fields present, ``from``/``to`` are ints ``≥ 0``) is
-    guaranteed by the ``Change`` type; this enforces the *semantic* rules that
-    need the buffer: each range in-bounds, ranges non-overlapping, and no
-    surrogate-pair split. Changes apply right-to-left (highest ``from`` first)
-    so an earlier change's length delta never shifts a later change's offsets.
-
-    **Offsets are UTF-16 code units** (JS / CodeMirror positions; an astral char
-    like an emoji counts as 2), so we slice in UTF-16 space, not Python code
-    points — otherwise a document with an emoji would slice at the wrong place.
-    Raises ``ValueError`` on an out-of-bounds range, overlapping ranges, or a
-    range that splits a surrogate pair.
-    """
-    # 2 bytes per UTF-16 code unit → unit offset N is byte offset 2N.
-    buf = bytearray(text.encode("utf-16-le"))
-    n_units = len(buf) // 2
-
-    # Validate bounds + non-overlap up front — overlapping ranges would apply
-    # onto an already-mutated buffer and silently corrupt it.
-    ordered = sorted(changes, key=lambda c: (c.from_, c.to))
-    prev_to = 0
-    for c in ordered:
-        if not (0 <= c.from_ <= c.to <= n_units):
-            raise ValueError(f"change range [{c.from_},{c.to}) out of bounds for length {n_units}")
-        if c.from_ < prev_to:
-            raise ValueError(f"overlapping change: [{c.from_},{c.to}) intrudes on a prior range ending at {prev_to}")
-        prev_to = c.to
-
-    for c in reversed(ordered):
-        buf[2 * c.from_ : 2 * c.to] = c.insert.encode("utf-16-le")
-    try:
-        return bytes(buf).decode("utf-16-le")
-    except UnicodeDecodeError as e:
-        raise ValueError("change split a UTF-16 surrogate pair") from e
-
-
-def rebase_onto(
-    session_id: int,
-    *,
-    base_version: int,
-    merged_text: str,
-    new_base_sha: str,
-    checkpointed: bool,
-) -> RebaseWrite | None:
-    """Rebase the session buffer onto an external commit under a version CAS.
-
-    Shared by live-rebase (a clean inbound agent commit folded in;
-    ``checkpointed=False``) and the checkpoint sync (the committed AI-merged
-    result written back; ``checkpointed=True``). This is **not** a co-edit op —
-    an agent's change never enters the session op stream / ``coedit_ops``; it's a
-    buffer resync driven by a git commit. Participants are told to refetch (a
-    ``resync`` frame), not sent an op.
-
-    Returns a ``RebaseWrite``; ``changed`` is False when the buffer already
-    equals ``merged_text`` (only ``base_sha`` / ``checkpointed_version`` advance,
-    no version bump). When it differs, the buffer is replaced and ``version``
-    bumps so any stale in-flight human op is rejected. Returns ``None`` if a
-    concurrent op moved the version (caller falls back).
-    """
-    now = _iso(_now())
-    with session() as s:
-        # Read the buffer at exactly base_version under the CAS to decide whether
-        # it changed (the version predicate guarantees it hasn't moved since).
-        current = s.execute(
-            select(CoeditSession.buffer_text).where(
-                CoeditSession.id == session_id,
-                CoeditSession.version == base_version,
-                CoeditSession.status == SessionStatus.ACTIVE.value,
-            )
-        ).scalar_one_or_none()
-        if current is None:
-            return None
-        changed = merged_text != current
-        new_version = base_version + 1 if changed else base_version
-        values: dict[str, Any] = {"base_sha": new_base_sha, "updated_at": now}
-        if changed:
-            values["buffer_text"] = merged_text
-            values["version"] = new_version
-        if checkpointed:
-            values["checkpointed_version"] = new_version
-            values["last_checkpoint_at"] = now
-        row = s.scalars(
-            update(CoeditSession)
-            .where(
-                CoeditSession.id == session_id,
-                CoeditSession.version == base_version,
-                CoeditSession.status == SessionStatus.ACTIVE.value,
-            )
-            .values(**values)
-            .returning(CoeditSession)
-            .execution_options(synchronize_session=False)
-        ).one_or_none()
+        row = s.get(CoeditSession, session_id)
         if row is None:
             return None
-        return RebaseWrite(session=_session_row(row), changed=changed)
+        return YdocState(
+            snapshot=row.ydoc_snapshot,
+            seq=row.ydoc_seq,
+            checkpointed_seq=row.ydoc_checkpointed_seq,
+            base_sha=row.base_sha,
+        )
 
 
-def apply_op(
-    session_id: int,
-    *,
-    base_version: int,
-    changes: list[Change],
-    author_user_id: str,
-    client_id: str | None = None,
-) -> SessionRow | None:
-    """Apply an edit op to the buffer and log it, atomically.
+def append_ydoc_update(
+    session_id: int, *, update_bytes: bytes, author_user_id: str | None
+) -> int:
+    """Log one raw Yjs update and bump ``ydoc_seq``. Returns the new seq.
 
-    Applies ``changes`` to the buffer as of ``base_version`` and compare-and-
-    swaps the version to ``base_version + 1`` — so if another op landed first
-    this returns ``None`` (stale; the caller must re-sync and re-apply). On
-    success, appends a `coedit_ops` row in the same transaction. Raises
-    ``ValueError`` if a change is out of bounds for the current buffer.
+    This never re-derives or validates document content — the live doc in
+    the room's memory is already authoritative (pycrdt applied the update
+    before this is called); this is purely the durability/catch-up log. A
+    process crash between "room applied it" and this call loses at most one
+    update, recoverable by any peer that stays connected re-syncing a
+    reconnecting client via the room's own Yjs sync protocol, not this log.
     """
     now = _iso(_now())
     with session() as s:
-        # Read the buffer at exactly base_version (also confirms active). If the
-        # version has moved, the caller is stale — nothing to apply onto.
-        current = s.execute(
-            select(CoeditSession.buffer_text).where(
-                CoeditSession.id == session_id,
-                CoeditSession.status == SessionStatus.ACTIVE.value,
-                CoeditSession.version == base_version,
-            )
-        ).scalar_one_or_none()
-        if current is None:
-            return None
-        new_buffer = _apply_changes(current, changes)
-        new_version = base_version + 1
-        # Re-check the version inside the write (CAS) to close the gap between
-        # the read above and this update.
-        row = s.scalars(
+        new_seq = s.scalars(
             update(CoeditSession)
-            .where(
-                CoeditSession.id == session_id,
-                CoeditSession.version == base_version,
-                CoeditSession.status == SessionStatus.ACTIVE.value,
-            )
-            .values(buffer_text=new_buffer, version=new_version, updated_at=now)
-            .returning(CoeditSession)
+            .where(CoeditSession.id == session_id)
+            .values(ydoc_seq=CoeditSession.ydoc_seq + 1, updated_at=now)
+            .returning(CoeditSession.ydoc_seq)
             .execution_options(synchronize_session=False)
-        ).one_or_none()
-        if row is None:
-            return None
+        ).one()
         s.add(
-            CoeditOp(
+            CoeditUpdate(
                 session_id=session_id,
-                seq=new_version,
+                seq=new_seq,
                 author_user_id=author_user_id,
-                base_version=base_version,
-                client_id=client_id,
-                op_payload={"changes": [c.model_dump(by_alias=True) for c in changes]},
+                update_bytes=update_bytes,
             )
         )
-        return _session_row(row)
+        return new_seq
 
 
-def ops_since_with_head(session_id: int, after_version: int) -> OpsSince:
-    """The session's current version and its logged ops in ``(after_version,
-    head]`` (oldest first), read consistently — for a reconnecting client to
-    catch up / rebase. ``head_version`` is None if the session is gone.
-
-    Reads ``version`` first, then bounds the op query to ``seq <= version``, so
-    an op committing mid-read can't make the two disagree (it's excluded from
-    both): the returned ops always match the returned head, without needing a
-    stricter isolation level. Head can still exceed the last op's seq — a
-    live-rebase bumps the version without logging an op — which correctly
-    signals the client to full-resync rather than replay across the gap.
-    """
+def ydoc_updates_since(session_id: int, after_seq: int) -> list[bytes]:
+    """Raw update blobs in ``(after_seq, head]``, oldest first — replayed onto
+    ``ydoc_snapshot`` to reconstruct the live doc when a process doesn't
+    already hold it in memory."""
     with session() as s:
-        version = s.scalar(
-            select(CoeditSession.version).where(CoeditSession.id == session_id)
-        )
-        if version is None:
-            return OpsSince(head_version=None, ops=[])
-        rows = s.scalars(
-            select(CoeditOp)
-            .where(
-                CoeditOp.session_id == session_id,
-                CoeditOp.seq > after_version,
-                CoeditOp.seq <= version,
-            )
-            .order_by(CoeditOp.seq.asc())
-        ).all()
-        return OpsSince(
-            head_version=version,
-            ops=[
-                OpRow(
-                    seq=o.seq,
-                    author_user_id=o.author_user_id,
-                    client_id=o.client_id,
-                    base_version=o.base_version,
-                    changes=list(o.op_payload.get("changes", [])),
-                    created_at=o.created_at,
-                )
-                for o in rows
-            ],
+        return list(
+            s.scalars(
+                select(CoeditUpdate.update_bytes)
+                .where(CoeditUpdate.session_id == session_id, CoeditUpdate.seq > after_seq)
+                .order_by(CoeditUpdate.seq.asc())
+            ).all()
         )
 
 
-def mark_checkpointed(session_id: int, *, base_sha: str, version: int) -> None:
-    """Record that the buffer at ``version`` was committed to git at ``base_sha``.
+def checkpoint_ydoc(session_id: int, *, snapshot: bytes, base_sha: str, seq: int) -> bool:
+    """Persist a full snapshot as of ``seq`` and mark the session checkpointed
+    through it. Conditional on ``ydoc_checkpointed_seq < seq`` (mirrors the
+    old OT-era ``mark_checkpointed``) so a slow in-flight checkpoint can't
+    regress the watermark past a faster concurrent one. Returns whether the
+    row advanced.
 
-    Advancing ``checkpointed_version`` to ``version`` is what marks the session
-    clean — a later edit bumps ``version`` past it, making it dirty again.
-    Conditional UPDATE (only advances) so a slow in-flight checkpoint can't
-    regress the watermark past what a faster concurrent one already recorded.
+    Once persisted, ``CoeditUpdate`` rows at or before ``seq`` are redundant
+    for catch-up (the snapshot already encodes them) but are left in place —
+    they're an append-only audit trail, not a rolling buffer; pruning is a
+    future cleanup task, not a v1 concern.
     """
     with session() as s:
-        s.execute(
+        updated = s.scalars(
             update(CoeditSession)
             .where(
                 CoeditSession.id == session_id,
-                CoeditSession.checkpointed_version < version,
+                CoeditSession.ydoc_checkpointed_seq < seq,
             )
             .values(
+                ydoc_snapshot=snapshot,
+                ydoc_checkpointed_seq=seq,
                 base_sha=base_sha,
-                checkpointed_version=version,
                 last_checkpoint_at=_iso(_now()),
             )
+            .returning(CoeditSession.id)
             .execution_options(synchronize_session=False)
-        )
+        ).one_or_none()
+        return updated is not None
 
 
-def sessions_due_for_checkpoint(
+def sessions_due_for_ydoc_checkpoint(
     *, idle_seconds: int, max_interval_seconds: int
 ) -> list[SessionRow]:
     """Active, *dirty* sessions the periodic worker should checkpoint: either
-    idle (no edit for ``idle_seconds``) or overdue (not committed within
+    idle (no update for ``idle_seconds``) or overdue (not committed within
     ``max_interval_seconds``, or never). All three compared columns
     (``updated_at``, ``last_checkpoint_at``, ``created_at``) are written in
     ``_iso`` format, so the lexicographic string comparisons are well-ordered.
@@ -528,7 +339,7 @@ def sessions_due_for_checkpoint(
             select(CoeditSession)
             .where(
                 CoeditSession.status == SessionStatus.ACTIVE.value,
-                CoeditSession.version > CoeditSession.checkpointed_version,
+                CoeditSession.ydoc_seq > CoeditSession.ydoc_checkpointed_seq,
                 or_(
                     # settled: no edit for ``idle_seconds``
                     CoeditSession.updated_at <= idle_cutoff,
@@ -545,18 +356,6 @@ def sessions_due_for_checkpoint(
             .order_by(CoeditSession.updated_at.asc())
         ).all()
         return [_session_row(r) for r in rows]
-
-
-def last_op_author(session_id: int) -> str | None:
-    """The user who applied the most recent op (highest seq), or None if the
-    session has no logged ops yet. Used to attribute a checkpoint commit."""
-    with session() as s:
-        return s.scalars(
-            select(CoeditOp.author_user_id)
-            .where(CoeditOp.session_id == session_id)
-            .order_by(CoeditOp.seq.desc())
-            .limit(1)
-        ).first()
 
 
 def close_session(session_id: int) -> None:
@@ -603,7 +402,7 @@ def on_path_moved(moves: list[PathMove]) -> None:
                         )
                     )
                     if dest is not None:
-                        if dest.version != dest.checkpointed_version:
+                        if dest.ydoc_seq != dest.ydoc_checkpointed_seq:
                             log.warning(
                                 "coedit on_path_moved: superseding young dirty "
                                 "session %s at %r; its buffer stays in the "
@@ -631,15 +430,15 @@ def on_path_moved(moves: list[PathMove]) -> None:
 
 
 def close_if_clean(session_id: int) -> bool:
-    """Close the session only if it's clean (``version == checkpointed_version``).
-    Returns True if it closed.
+    """Close the session only if it's clean (``ydoc_seq ==
+    ydoc_checkpointed_seq``). Returns True if it closed.
 
-    Atomic, to avoid orphaning a late edit: after a checkpoint commits, an op can
-    still land (the session is ``active`` until this runs) and re-dirty the
-    buffer. The conditional ``UPDATE`` closes only when nothing new arrived — if
-    an op bumped ``version`` in the window, it matches no row and the session
-    stays active, so the periodic scan re-checkpoints the new edit rather than
-    sealing it in a closed session.
+    Atomic, to avoid orphaning a late edit: after a checkpoint commits, an
+    update can still land (the session is ``active`` until this runs) and
+    re-dirty the doc. The conditional ``UPDATE`` closes only when nothing new
+    arrived — if an update bumped ``ydoc_seq`` in the window, it matches no
+    row and the session stays active, so the periodic scan re-checkpoints the
+    new edit rather than sealing it in a closed session.
     """
     with session() as s:
         closed = s.scalars(
@@ -647,7 +446,7 @@ def close_if_clean(session_id: int) -> bool:
             .where(
                 CoeditSession.id == session_id,
                 CoeditSession.status == SessionStatus.ACTIVE.value,
-                CoeditSession.version == CoeditSession.checkpointed_version,
+                CoeditSession.ydoc_seq == CoeditSession.ydoc_checkpointed_seq,
             )
             .values(status=SessionStatus.CLOSED.value, updated_at=_iso(_now()))
             .returning(CoeditSession.id)
@@ -657,13 +456,13 @@ def close_if_clean(session_id: int) -> bool:
 
 
 def purge_viewer_sessions(limit: int = 500) -> int:
-    """Delete closed sessions that never received an edit op. Returns the count.
+    """Delete closed sessions that never received an edit. Returns the count.
 
-    With join-on-landing, every page view mints a session whose buffer is a
-    full copy of the page — a closed ``version == 0`` row carries no ops, no
-    participants (removed on leave; FK cascade catches stragglers), and nothing
-    the op-log or checkpoint dedupe ever references, so it is pure dead weight.
-    Runs against *closed* rows only: deleting at the close point instead would
+    With join-on-landing, every page view mints a session — a closed
+    ``ydoc_seq == 0`` row carries no updates, no participants (removed on
+    leave; FK cascade catches stragglers), and nothing the update log or
+    checkpoint dedupe ever references, so it is pure dead weight. Runs
+    against *closed* rows only: deleting at the close point instead would
     race a concurrent join into an FK violation, while a closed session is a
     soft state joins already tolerate. Bounded so the periodic scan stays
     cheap; the backlog drains across successive runs.
@@ -673,8 +472,8 @@ def purge_viewer_sessions(limit: int = 500) -> int:
             select(CoeditSession.id)
             .where(
                 CoeditSession.status == SessionStatus.CLOSED.value,
-                CoeditSession.version == 0,
-                CoeditSession.checkpointed_version == 0,
+                CoeditSession.ydoc_seq == 0,
+                CoeditSession.ydoc_checkpointed_seq == 0,
             )
             .limit(limit)
         ).all()

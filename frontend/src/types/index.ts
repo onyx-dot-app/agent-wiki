@@ -45,6 +45,16 @@ export type CommentScope = "inline" | "page";
 export type CommentAuthorKind = "user" | "agent";
 export type CommentStatus = "open" | "resolved" | "orphaned";
 
+/** A resolved position in a page's live co-edit doc — see
+ * `app/wiki/coedit_ws.py:resolve_live_spans` / `frontend/src/lib/editor/
+ * highlights.ts`. Block-relative, not a flat offset: the block id is the
+ * only thing guaranteed stable between the live doc and whatever commit a
+ * comment/source span was anchored against. */
+export interface LiveAnchor {
+  block_id: string;
+  block_offset: number;
+}
+
 export interface CommentView {
   id: string;
   doc_path: string;
@@ -64,6 +74,10 @@ export interface CommentView {
   resolved_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Set only when the page has an active live co-edit session — see
+   * `LiveAnchor`. */
+  live_start: LiveAnchor | null;
+  live_end: LiveAnchor | null;
 }
 
 export interface CommentThreadView {
@@ -91,6 +105,8 @@ export interface SourceRef extends WriteProvenance {
 export interface SourceSpan extends WriteProvenance {
   start_offset: number;
   end_offset: number;
+  live_start: LiveAnchor | null;
+  live_end: LiveAnchor | null;
 }
 
 export interface DocumentActivityResponse {

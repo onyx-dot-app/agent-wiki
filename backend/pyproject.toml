@@ -35,6 +35,7 @@ dependencies = [
     "onnxruntime>=1.17", # in-process relevance scoring (two-tower ONNX); no torch
     "markdown-it-py>=3.0", # markdown <-> Yjs codec block parsing (app/wiki/markdown_blocks.py)
     "pycrdt>=0.14",         # Python Yjs CRDT implementation — coedit live doc
+    "pycrdt-websocket>=0.16", # Yjs sync-protocol WS relay (YRoom/WebsocketServer)
 ]
 
 [project.optional-dependencies]
@@ -152,6 +153,31 @@ reportReturnType = "none"
 reportAssignmentType = "none"
 reportUnnecessaryComparison = "none"
 reportUnnecessaryContains = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/coedit_ws.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownLambdaType = "none"
+reportMissingTypeArgument = "none"
+reportAttributeAccessIssue = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/coedit_checkpoint.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeArgument = "none"
+reportAttributeAccessIssue = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "app/api/coedit.py"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnnecessaryComparison = "none"
 
 [tool.uv]
 # Some transitive deps (e.g. greenlet) publish releases missing Linux wheels;

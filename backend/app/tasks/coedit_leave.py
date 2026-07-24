@@ -7,54 +7,44 @@ handler returns. But when the endpoint task is being **cancelled** (server
 shutdown; the test portal tearing down a connection), an awaited executor
 item can be discarded before any pool worker picks it up — cancelling a
 not-yet-started future removes it from the executor queue — and the leave
-would silently never run: a phantom participant forever, and a dirty buffer
-that never gets its last-leave checkpoint. For that path the handler
-enqueues :func:`leave_coedit_session` instead: a synchronous Redis send that
-no cancellation can touch, durable across the shutdown that caused it.
+would silently never run: a phantom participant forever. For that path the
+handler enqueues :func:`leave_coedit_session` instead: a synchronous Redis
+send that no cancellation can touch, durable across the shutdown that
+caused it.
+
+Unlike the OT-era version of this module, ``leave_coedit_session`` does
+*not* also attempt a last-leave checkpoint here — a Yjs checkpoint needs the
+live ``Doc``, which only exists in whichever process's room registry
+(``app/wiki/coedit_ws.py``) holds it, and this queued task may run on a
+different one entirely. The normal (non-cancelled) path handles its own
+last-leave checkpoint inline in ``app/api/coedit.py``'s ``ws()``, where the
+live ``Doc``/tracker are already in scope; the cancelled-fallback path
+leaves a dirty session to the periodic scan (``coedit_ws._scan_loop``, a
+~300s idle backstop) rather than force a checkpoint from a process that
+doesn't hold the room.
 
 ``record_leave`` is idempotent on purpose — cancellation can land *after*
 the awaited executor item was already picked up, so the queued fallback may
-be a second run: the participant delete is delete-if-exists, the presence
-broadcast is harmless, and the checkpoint no-ops on a clean buffer.
+be a second run: the participant delete is delete-if-exists.
 """
 
 from __future__ import annotations
 
-import logging
-
-from app.tasks.coedit_checkpoint import checkpoint_coedit_session
 from app.tasks.queues import coedit_queue
-from app.wiki import coedit, coedit_channel
-
-log = logging.getLogger(__name__)
+from app.wiki import coedit, coedit_ws
 
 
-def record_leave(session_id: int, user_id: str) -> None:
-    """Mark ``user_id`` gone from ``session_id`` and checkpoint if they were
-    the last one out. Only acts when their last connection has closed, so a
-    second tab doesn't evict them. Idempotent (see module docstring)."""
-    if coedit_channel.user_still_connected(session_id, user_id):
+def record_leave(session_id: int, user_id: str, path: str) -> None:
+    """Mark ``user_id`` gone from ``session_id``. Only acts when their last
+    connection to ``path`` has closed, so a second tab doesn't evict them.
+    Idempotent (see module docstring)."""
+    if coedit_ws.user_still_connected(path, user_id):
         return
     coedit.leave(session_id, user_id)
-    coedit_channel.broadcast_presence(session_id)
-    if coedit.list_participants(session_id):
-        return
-    # Best-effort: the participant row is already gone, so a failed enqueue
-    # (e.g. a full queue) must not fail the leave. The periodic scan is the
-    # backstop — the session is dirty, so it's recovered once idle.
-    try:
-        checkpoint_coedit_session(session_id)
-    except Exception:
-        log.exception(
-            "coedit: checkpoint enqueue failed on last-leave for session %s",
-            session_id,
-        )
 
 
 @coedit_queue.task()
-def leave_coedit_session(session_id: int, user_id: str) -> None:
+def leave_coedit_session(session_id: int, user_id: str, path: str) -> None:
     """Queued leave — the WS handler's fallback when its own task is being
-    cancelled. On a worker the channel registry is empty, so the
-    still-connected guard in :func:`record_leave` never mistakes another
-    process's connections for this user's."""
-    record_leave(session_id, user_id)
+    cancelled. See module docstring for why this doesn't also checkpoint."""
+    record_leave(session_id, user_id, path)
