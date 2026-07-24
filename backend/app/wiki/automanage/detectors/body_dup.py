@@ -93,6 +93,10 @@ class _BodyDupDetector:
                         "any content."
                     ),
                     proposed_bodies={survivor: body},
+                    # Identity premise: the shared content. The same pages
+                    # becoming identical again with *different* content is a
+                    # new ask, not a recurrence of a rejected one.
+                    premise=blob,
                     # Merges wait for a human until the agentic applier has
                     # earned auto-apply with reliability data.
                     auto_approvable=False,

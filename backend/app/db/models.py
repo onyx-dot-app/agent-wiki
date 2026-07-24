@@ -1363,6 +1363,12 @@ class ChangeProposal(Base):
     # execution applies while the base SHAs still match; drift goes stale and
     # regenerates. NULL for pure-structural ops (move/rename/folder ops).
     proposed_bodies: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Layer-1 dedup identity (see the Dedup design page + automanage/dedup.py):
+    # finding_key = (detector, op, doc-id set, detector premise) — one finding,
+    # one row for life; subject_key is its content-free prefix, the unit the
+    # post-rejection cooldown quiets. Null on rows predating the columns.
+    finding_key: Mapped[str | None] = mapped_column(Text)
+    subject_key: Mapped[str | None] = mapped_column(Text)
     # Human-facing one-liner for the queue card ("why this proposal").
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     # NL instruction for the content step (e.g. how to merge two bodies);
@@ -1413,6 +1419,8 @@ class ChangeProposal(Base):
             name="change_proposals_created_via_check",
         ),
         Index("idx_change_proposals_status", "status", "created_at"),
+        Index("idx_change_proposals_finding_key", "finding_key"),
+        Index("idx_change_proposals_subject_key", "subject_key"),
     )
 
 

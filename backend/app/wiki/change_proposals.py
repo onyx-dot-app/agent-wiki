@@ -82,6 +82,8 @@ def _to_dict(row: ChangeProposal) -> dict[str, Any]:
         "run_id": row.run_id,
         "acting_user_id": row.acting_user_id,
         "reviewed_by_user_id": row.reviewed_by_user_id,
+        "finding_key": row.finding_key,
+        "subject_key": row.subject_key,
         "status_reason": row.status_reason,
         "applied_sha": row.applied_sha,
         "created_at": row.created_at,
@@ -106,6 +108,8 @@ def create(
     acl_fingerprint_before: str | None = None,
     acl_fingerprint_after: str | None = None,
     expires_at: str | None = None,
+    finding_key: str | None = None,
+    subject_key: str | None = None,
 ) -> dict[str, Any]:
     """Insert a ``pending`` proposal and return it.
 
@@ -142,6 +146,8 @@ def create(
             acting_user_id=acting_user_id,
             acl_fingerprint_before=acl_fingerprint_before,
             acl_fingerprint_after=acl_fingerprint_after,
+            finding_key=finding_key,
+            subject_key=subject_key,
             created_at=now,
             updated_at=now,
             expires_at=expires_at,
@@ -184,6 +190,80 @@ def list_for_run(run_id: str) -> list[dict[str, Any]]:
             .order_by(ChangeProposal.id.asc())
         ).all()
         return [_to_dict(r) for r in rows]
+
+
+def latest_by_finding_key(finding_key: str) -> dict[str, Any] | None:
+    """The newest proposal row carrying ``finding_key`` — the row that
+    represents this finding (see ``automanage/dedup.py``). Newest by id: a
+    finding should only ever have one row, but if history ever holds more
+    (e.g. rows minted before a bug fix), the latest one speaks for it."""
+    with session() as s:
+        row = s.scalars(
+            select(ChangeProposal)
+            .where(ChangeProposal.finding_key == finding_key)
+            .order_by(ChangeProposal.id.desc())
+            .limit(1)
+        ).first()
+        return _to_dict(row) if row is not None else None
+
+
+def latest_rejection_for_subject(subject_key: str) -> tuple[int, str] | None:
+    """``(id, updated_at)`` of the most recent *rejected* row on
+    ``subject_key`` — what the post-rejection cooldown is measured from."""
+    with session() as s:
+        row = s.execute(
+            select(ChangeProposal.id, ChangeProposal.updated_at)
+            .where(
+                ChangeProposal.subject_key == subject_key,
+                ChangeProposal.status == ProposalStatus.REJECTED.value,
+            )
+            .order_by(ChangeProposal.updated_at.desc(), ChangeProposal.id.desc())
+            .limit(1)
+        ).first()
+        return (row[0], row[1]) if row is not None else None
+
+
+def revive(
+    proposal_id: int,
+    *,
+    base_shas: dict[str, str],
+    summary: str,
+    run_id: str | None,
+    acl_fingerprint_before: str | None,
+    instruction: str | None = None,
+    proposed_bodies: dict[str, str] | None = None,
+    expires_at: str | None = None,
+) -> bool:
+    """``stale | expired → pending`` — the same finding was re-detected, so
+    its row returns to the queue with refreshed anchors instead of a sibling
+    row being minted (one finding = one row for life; notification and
+    impression history ride the id). A stale-from-approved row revives to
+    *pending*, not approved — the world drifted since that consent."""
+    now = _now()
+    with session() as s:
+        touched = execute_dml(
+            s,
+            update(ChangeProposal)
+            .where(
+                ChangeProposal.id == proposal_id,
+                ChangeProposal.status.in_(
+                    [ProposalStatus.STALE.value, ProposalStatus.EXPIRED.value]
+                ),
+            )
+            .values(
+                status=ProposalStatus.PENDING.value,
+                status_reason=None,
+                base_shas=base_shas,
+                summary=summary,
+                instruction=instruction,
+                proposed_bodies=proposed_bodies,
+                run_id=run_id,
+                acl_fingerprint_before=acl_fingerprint_before,
+                expires_at=expires_at,
+                updated_at=now,
+            ),
+        )
+    return touched > 0
 
 
 def taken_dedupe_keys(statuses: tuple[ProposalStatus, ...]) -> set[str]:

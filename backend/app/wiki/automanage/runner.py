@@ -29,7 +29,7 @@ from typing import Any
 
 from app.auth.users import AI_USER_ID
 from app.wiki import git, update_policy
-from app.wiki.automanage import executor, fingerprint, review, runs, settings
+from app.wiki.automanage import dedup, executor, fingerprint, review, runs, settings
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
@@ -39,6 +39,12 @@ from app.wiki.change_proposals import (
 )
 from app.wiki.change_proposals import (
     create as create_proposal,
+)
+from app.wiki.change_proposals import (
+    get as get_proposal,
+)
+from app.wiki.change_proposals import (
+    revive as change_proposals_revive,
 )
 
 log = logging.getLogger(__name__)
@@ -152,7 +158,11 @@ def run_detection(
         )
     try:
         scope = Scope(trigger=trigger, paths=tuple(paths), run_id=run_id)
+        # Legacy belt: path-based keys still block for rows that predate
+        # finding_key. The Deduper (doc-id + premise identity, revival,
+        # subject cooldown) is the real gate — see automanage/dedup.py.
         taken = taken_dedupe_keys(_BLOCKING_STATUSES)
+        deduper = dedup.Deduper(paths)
         emitted = 0
         capped = False
         # Pairing detectors compare pages against each other; feeding them one
@@ -194,6 +204,12 @@ def run_detection(
                     continue
                 if any(mgmt.get(p) is False for p in draft_paths):
                     continue  # explicitly hands-off scope
+                decision = deduper.decide(detector.name, draft)
+                if decision.action not in (
+                    dedup.DedupAction.CREATE,
+                    dedup.DedupAction.REVIVE,
+                ):
+                    continue  # carried / rejected-forever / subject cooldown
                 if emitted >= MAX_PROPOSALS_PER_RUN:
                     log.warning(
                         "detection run %s hit per-run cap (%d); "
@@ -206,24 +222,49 @@ def run_detection(
                 base_shas = _base_shas(draft.source_paths, draft.target_paths)
                 if base_shas is None:
                     continue
-                proposal = create_proposal(
-                    op=draft.op,
-                    source_paths=draft.source_paths,
-                    target_paths=draft.target_paths,
-                    base_shas=base_shas,
-                    summary=draft.summary,
-                    created_via=created_via,
-                    detector=detector.name,
-                    instruction=draft.instruction,
-                    proposed_bodies=draft.proposed_bodies,
-                    run_id=run_id,
-                    # Audience snapshot at emit time — staleness re-checks can
-                    # notice a permission change (e.g. group-membership drift)
-                    # between proposal and execution.
-                    acl_fingerprint_before=fingerprint.combined_fingerprint(
-                        draft_paths
-                    ),
-                )
+                # Audience snapshot at emit time — staleness re-checks can
+                # notice a permission change (e.g. group-membership drift)
+                # between proposal and execution.
+                acl_fp = fingerprint.combined_fingerprint(draft_paths)
+                if decision.action is dedup.DedupAction.REVIVE:
+                    assert decision.existing_id is not None
+                    if not change_proposals_revive(
+                        decision.existing_id,
+                        base_shas=base_shas,
+                        summary=draft.summary,
+                        instruction=draft.instruction,
+                        proposed_bodies=draft.proposed_bodies,
+                        run_id=run_id,
+                        acl_fingerprint_before=acl_fp,
+                    ):
+                        # A race moved the row out of stale/expired since the
+                        # decision — whatever won represents the finding now.
+                        continue
+                    proposal = get_proposal(decision.existing_id)
+                    if proposal is None:
+                        continue
+                    log.info(
+                        "detection run %s: revived proposal %s (%s)",
+                        run_id,
+                        decision.existing_id,
+                        decision.finding_key,
+                    )
+                else:
+                    proposal = create_proposal(
+                        op=draft.op,
+                        source_paths=draft.source_paths,
+                        target_paths=draft.target_paths,
+                        base_shas=base_shas,
+                        summary=draft.summary,
+                        created_via=created_via,
+                        detector=detector.name,
+                        instruction=draft.instruction,
+                        proposed_bodies=draft.proposed_bodies,
+                        run_id=run_id,
+                        acl_fingerprint_before=acl_fp,
+                        finding_key=decision.finding_key,
+                        subject_key=decision.subject_key,
+                    )
                 taken.add(draft.dedupe_key)
                 emitted += 1
                 # Whole operation inside an AI-managed scope → auto-apply as the
