@@ -213,22 +213,24 @@ function RunHistory() {
   if (sweeps.length === 0) return null;
 
   return (
-    <div className="flex w-full flex-col gap-2">
-      <ContentAction
-        sizePreset="main-ui"
-        variant="section"
-        icon={SvgClock}
-        title="Recent sweeps"
-        description="What the last detection runs scanned and proposed."
-      />
-      <Table
-        data={sweeps.slice(0, 20)}
-        columns={runColumns}
-        getRowId={(r) => r.id}
-        variant="rows"
-        size="md"
-      />
-    </div>
+    <Card rounding="lg" padding="sm">
+      <div className="flex w-full flex-col gap-2">
+        <ContentAction
+          sizePreset="main-ui"
+          variant="section"
+          icon={SvgClock}
+          title="Recent sweeps"
+          description="What the last detection runs scanned and proposed."
+        />
+        <Table
+          data={sweeps.slice(0, 20)}
+          columns={runColumns}
+          getRowId={(r) => r.id}
+          variant="rows"
+          size="md"
+        />
+      </div>
+    </Card>
   );
 }
 
