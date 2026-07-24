@@ -36,6 +36,20 @@ def upgrade() -> None:
             "change_proposals",
             sa.Column("doc_ids", postgresql.JSONB(astext_type=sa.Text())),
         )
+    if not _has_column("change_proposals", "emit_count"):
+        op.add_column(
+            "change_proposals",
+            sa.Column(
+                "emit_count",
+                sa.Integer(),
+                nullable=False,
+                server_default=sa.text("1"),
+            ),
+        )
+    if not _has_column("change_proposals", "last_emitted_at"):
+        op.add_column(
+            "change_proposals", sa.Column("last_emitted_at", sa.Text())
+        )
     if not _has_column("change_proposals", "subject_key"):
         op.add_column("change_proposals", sa.Column("subject_key", sa.Text()))
     op.create_index(
@@ -66,3 +80,5 @@ def downgrade() -> None:
     op.drop_column("change_proposals", "subject_key")
     op.drop_column("change_proposals", "finding_key")
     op.drop_column("change_proposals", "doc_ids")
+    op.drop_column("change_proposals", "emit_count")
+    op.drop_column("change_proposals", "last_emitted_at")
