@@ -1128,6 +1128,7 @@ def file_activity(
         path=rel,
         agents=[
             ActivityRowView(
+                user_id=r.user_id,
                 owner_display=r.owner_display,
                 agent_name=r.agent_name,
                 activity=r.activity,
