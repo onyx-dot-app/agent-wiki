@@ -27,6 +27,7 @@ import {
 import type { IconProps } from "@onyx-ai/opal/types";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 
+import { toast } from "@/hooks/useToast";
 import {
   getUpdatePolicy,
   patchUpdatePolicy,
@@ -75,6 +76,8 @@ interface PresenceEntry {
 
 interface PresenceAvatarsProps {
   path: string;
+  /** Whether the current user may edit this page (policy writes gate on it). */
+  canWrite: boolean;
   participants: CoeditParticipant[];
   peers: CoeditPeer[];
   typing: string[];
@@ -161,7 +164,7 @@ function PresenceCard({
           </Text>
           {entry.agentName && (
             <Text font="secondary-body" color="text-03" as="p" nowrap>
-              {`Editing with ${entry.agentName}`}
+              {`${entry.editing ? "Editing" : "Viewing"} with ${entry.agentName}`}
             </Text>
           )}
         </span>
@@ -272,13 +275,20 @@ function AnchoredPanel({
 
 interface PolicyPopoverProps {
   path: string;
+  /** The policy PATCH is write-gated, so read-only viewers get a
+   * disabled switch instead of a doomed request. */
+  canWrite: boolean;
   onOpenUpdatesPanel?: () => void;
 }
 
 /** The Auto popover (mock 1929:362227 "Policy Panel"): the AI Auto-Edits
  * switch and the page's update instruction, both live on the update
  * policy the full panel edits. */
-function PolicyPopover({ path, onOpenUpdatesPanel }: PolicyPopoverProps) {
+function PolicyPopover({
+  path,
+  canWrite,
+  onOpenUpdatesPanel,
+}: PolicyPopoverProps) {
   const [policy, setPolicy] = useState<EffectivePolicy | null>(null);
   useEffect(() => {
     let alive = true;
@@ -295,8 +305,11 @@ function PolicyPopover({ path, onOpenUpdatesPanel }: PolicyPopoverProps) {
     setPolicy((p) => (p ? { ...p, ai_management_allowed: !allowed } : p));
     try {
       await patchUpdatePolicy(path, { ai_management_allowed: !allowed });
-    } catch {
+    } catch (e) {
       setPolicy((p) => (p ? { ...p, ai_management_allowed: allowed } : p));
+      toast.error(
+        e instanceof Error ? e.message : "Couldn't update the page's policy",
+      );
     }
   };
 
@@ -308,7 +321,11 @@ function PolicyPopover({ path, onOpenUpdatesPanel }: PolicyPopoverProps) {
           title="AI Auto-Edits"
           description="Let AI update/organize this page on its own."
         >
-          <Switch checked={allowed} onCheckedChange={() => void toggle()} />
+          <Switch
+            checked={allowed}
+            disabled={!canWrite}
+            onCheckedChange={() => void toggle()}
+          />
         </InputHorizontal>
       </div>
       <Divider />
@@ -342,6 +359,7 @@ function PolicyPopover({ path, onOpenUpdatesPanel }: PolicyPopoverProps) {
  */
 export function PresenceAvatars({
   path,
+  canWrite,
   participants,
   peers,
   typing,
@@ -357,22 +375,55 @@ export function PresenceAvatars({
       ...typing,
     ]);
     const caretByUser = new Map(peers.map((p) => [p.user_id, p.head]));
-    const agentByUser = new Map(
+    const writingAgents = new Map(
       agents
         .filter((a) => a.activity === "wrote")
         .map((a) => [a.user_id, a.agent_name]),
     );
-    return participants
+    const entry = (
+      userId: string,
+      display: string,
+      i: number,
+      editing: boolean,
+      agentName: string | null,
+    ): PresenceEntry => ({
+      userId,
+      display,
+      initial: (display.trim().charAt(0) || "?").toUpperCase(),
+      color: USER_COLORS[i % USER_COLORS.length],
+      editing,
+      agentName,
+      caretHead: caretByUser.get(userId) ?? null,
+    });
+    const roster = participants
       .filter((p) => p.user_id !== myUserId)
-      .map((p, i) => ({
-        userId: p.user_id,
-        display: p.user_display,
-        initial: (p.user_display.trim().charAt(0) || "?").toUpperCase(),
-        color: USER_COLORS[i % USER_COLORS.length],
-        editing: editingIds.has(p.user_id),
-        agentName: agentByUser.get(p.user_id) ?? null,
-        caretHead: caretByUser.get(p.user_id) ?? null,
-      }));
+      .map((p, i) =>
+        // A writing agent makes its user an editor even with an idle caret.
+        entry(
+          p.user_id,
+          p.user_display,
+          i,
+          editingIds.has(p.user_id) || writingAgents.has(p.user_id),
+          writingAgents.get(p.user_id) ?? null,
+        ),
+      );
+    // Agents register as the user they act for, so a user whose agent is
+    // active stays in the stack even without a browser session.
+    const seated = new Set(roster.map((e) => e.userId));
+    for (const a of agents) {
+      if (a.user_id === myUserId || seated.has(a.user_id)) continue;
+      seated.add(a.user_id);
+      roster.push(
+        entry(
+          a.user_id,
+          a.owner_display,
+          roster.length,
+          a.activity === "wrote",
+          a.agent_name,
+        ),
+      );
+    }
+    return roster;
   }, [participants, peers, typing, myUserId, agents]);
 
   const shown = entries.slice(0, MAX_CHIPS);
@@ -512,7 +563,11 @@ export function PresenceAvatars({
           anchor={clusterRef.current}
           onDismiss={() => setAutoOpen(false)}
         >
-          <PolicyPopover path={path} onOpenUpdatesPanel={onOpenUpdatesPanel} />
+          <PolicyPopover
+            path={path}
+            canWrite={canWrite}
+            onOpenUpdatesPanel={onOpenUpdatesPanel}
+          />
         </AnchoredPanel>
       )}
     </div>

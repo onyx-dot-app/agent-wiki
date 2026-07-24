@@ -957,6 +957,7 @@ export function FileView({ path }: FileViewProps) {
         {!viewingVersion && !isMobile && (
           <PresenceAvatars
             path={path}
+            canWrite={canWrite}
             participants={coedit.participants}
             peers={coedit.peers}
             typing={coedit.typing}
