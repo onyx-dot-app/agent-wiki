@@ -17,7 +17,6 @@ import {
   Switch,
   Tag,
   Text,
-  Tooltip,
 } from "@onyx-ai/opal/components";
 import { InputHorizontal, Section } from "@onyx-ai/opal/layouts";
 import {
@@ -32,6 +31,7 @@ import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { SvgAnthropic, SvgOpenai } from "@onyx-ai/opal/logos";
 
 import { toast } from "@/hooks/useToast";
+import { OrganizeComingSoonRow } from "@/components/wiki/UpdatePolicyPanel";
 import {
   getUpdatePolicy,
   patchUpdatePolicy,
@@ -131,7 +131,7 @@ interface AvatarCircleProps {
   size: "main-content" | "main-ui" | "secondary";
 }
 
-/** The identity-colored 1px ring: Opal's avatar circles carry no color
+/** The identity-colored ring: Opal's avatar circles carry no color
  * prop, so the ring overlays without touching the primitive's box. */
 function IdentityRing({ color }: { color: string }) {
   return (
@@ -185,12 +185,12 @@ function PresenceCard({
 }: PresenceCardProps) {
   const edits = commits.slice(0, 3);
   const scrollable = entry.editing && entry.caretHead !== null;
-  // Unmapped agent names get a subtitle but no badge; gating the slot on
+  // Unmapped agent names get a subtitle but no badge. Gating the slot on
   // the glyph keeps the title row from holding a blank 16px box.
   const hasBadge = !!agentGlyph(entry.agentName);
   return (
-    // Mock card chrome: ONE white surface holds the title row and the
-    // Recent Edits list together (mock 2079:381324).
+    // Mock card chrome: a single white surface wraps the title row and
+    // the Recent Edits list (mock 2079:381324).
     <Section
       gap={0}
       justifyContent="start"
@@ -220,8 +220,8 @@ function PresenceCard({
           height="fit"
           className="shrink-0 px-[2px]"
         >
-          {/* 16px slots hold the 20px circles, so the badge tucks over
-              the chip's corner exactly like the header stack. */}
+          {/* 16px slots under the 20px circles give the avatar/badge
+              pair the header stack's 4px overlap. */}
           <Section
             flexDirection="row"
             alignItems="center"
@@ -370,9 +370,7 @@ function AnchoredPanel({
       onPointerEnter={hover?.onEnter}
       onPointerLeave={hover?.onLeave}
     >
-      <Section gap={0} justifyContent="start" alignItems="stretch" height="fit">
-        {children}
-      </Section>
+      {children}
     </div>,
     document.body,
   );
@@ -386,8 +384,8 @@ interface PolicyPopoverProps {
   onOpenUpdatesPanel?: () => void;
 }
 
-/** The Auto popover (mock 1929:362227 "Policy Panel"): the AI Auto-Edits
- * switch and the page's update instruction, both live on the update
+/** The Auto popover (mock 1929:362227 "Policy Panel"): the AI auto-edit
+ * toggles and the page's update instruction, all live on the update
  * policy the full panel edits. */
 function PolicyPopover({
   path,
@@ -416,18 +414,17 @@ function PolicyPopover({
   const loaded = policy?.forPath === path ? policy.effective : null;
 
   const allowed = !!loaded?.ai_management_allowed;
-  const updating = !loaded?.ingestion_auto_update_disabled;
-  const patchField = async (
-    patch: Partial<EffectivePolicy>,
-    revert: Partial<EffectivePolicy>,
-  ) => {
+  const autoUpdateDisabled = !!loaded?.ingestion_auto_update_disabled;
+  const patchField = async (patch: Partial<EffectivePolicy>) => {
     if (!loaded) return;
     setSaving(true);
     setPolicy({ forPath: path, effective: { ...loaded, ...patch } });
     try {
       await patchUpdatePolicy(path, patch);
     } catch (e) {
-      setPolicy({ forPath: path, effective: { ...loaded, ...revert } });
+      // The pre-patch snapshot is still in `loaded`; putting it back
+      // rolls the optimistic write off.
+      setPolicy({ forPath: path, effective: loaded });
       toast.error(
         e instanceof Error ? e.message : "Couldn't update the page's policy",
       );
@@ -457,10 +454,7 @@ function PolicyPopover({
             // save is in flight (a second click would race the PATCH).
             disabled={!canWrite || !loaded || saving}
             onCheckedChange={() =>
-              void patchField(
-                { ai_management_allowed: !allowed },
-                { ai_management_allowed: allowed },
-              )
+              void patchField({ ai_management_allowed: !allowed })
             }
           />
         </InputHorizontal>
@@ -477,28 +471,16 @@ function PolicyPopover({
               description="Periodically scan ingested data sources to add relevant new information."
             >
               <Switch
-                checked={updating}
+                checked={!autoUpdateDisabled}
                 disabled={!canWrite || !loaded || saving}
                 onCheckedChange={() =>
-                  void patchField(
-                    { ingestion_auto_update_disabled: updating },
-                    { ingestion_auto_update_disabled: !updating },
-                  )
+                  void patchField({
+                    ingestion_auto_update_disabled: !autoUpdateDisabled,
+                  })
                 }
               />
             </InputHorizontal>
-            <InputHorizontal
-              title="Organize"
-              description="Reorganize, move, and/or merge content in this page when needed."
-            >
-              <Tooltip tooltip="Coming soon" side="left">
-                {/* The span keeps hover alive: a disabled control swallows
-                    pointer events, so the tooltip would never fire on it. */}
-                <span className="inline-flex">
-                  <Switch checked={false} disabled />
-                </span>
-              </Tooltip>
-            </InputHorizontal>
+            <OrganizeComingSoonRow kind="page" />
           </Section>
         )}
       </Section>
@@ -654,9 +636,8 @@ export function PresenceAvatars({
 
   const hovered = entries.find((e) => e.userId === hoverId);
 
-  // The Auto ring matches the page's warning level (mock annotation
-  // "Match warning level"), sharing the policy panel's predicate: amber
-  // near the threshold, warning at the cap, the calm blue otherwise.
+  // Ring color tracks the page's update-warn level (mock annotation
+  // "Match warning level").
   const { health } = useUpdateHealth(path);
   const warnLevel = updateWarnLevel(health);
 
@@ -715,7 +696,7 @@ export function PresenceAvatars({
               onPointerLeave={closeSoon}
             >
               <AvatarCircle entry={e} size="main-content" />
-              {e.agentName && (
+              {agentGlyph(e.agentName) && (
                 <Section
                   gap={0}
                   width="fit"
@@ -738,7 +719,7 @@ export function PresenceAvatars({
           />
         </Section>
       )}
-      {/* raw-ok: the Auto trigger is the mock's blue-ringed avatar circle, not a standard icon button */}
+      {/* raw-ok: the Auto trigger is the mock's ringed avatar circle, not a standard icon button */}
       <button
         type="button"
         aria-label="AI auto-edits"

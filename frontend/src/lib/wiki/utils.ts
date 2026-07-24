@@ -2,10 +2,9 @@ import type { CommitAgent, CommitAuthor, UpdateHealth } from "@/lib/wiki/types";
 
 export type UpdateWarnLevel = "over" | "near" | null;
 
-/** The page's auto-update warning level: "over" once the hard daily cap is
- * hit, "near" once activity crosses the alert threshold. Drives both the
- * policy panel's history-card chrome and the header Auto ring, so the two
- * surfaces can't disagree. */
+/** The page's auto-update warning level: "over" once the 24h cap is hit,
+ * "near" once activity reaches the alert threshold. Single predicate so
+ * every surface rendering update-health chrome agrees. */
 export function updateWarnLevel(
   health: UpdateHealth | null | undefined,
 ): UpdateWarnLevel {
