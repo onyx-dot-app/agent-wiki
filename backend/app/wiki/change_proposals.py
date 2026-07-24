@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 
 from app.db.models import ChangeProposal
 from app.db.session import execute_dml, session
@@ -195,87 +195,6 @@ def list_for_run(run_id: str) -> list[dict[str, Any]]:
         return [_to_dict(r) for r in rows]
 
 
-def latest_by_dedup_key(dedup_key: str) -> dict[str, Any] | None:
-    """The newest proposal row carrying ``dedup_key`` — the row that
-    represents this finding (see ``automanage/dedup.py``). Newest by id: a
-    finding should only ever have one row, but if history ever holds more
-    (e.g. rows minted before a bug fix), the latest one speaks for it."""
-    with session() as s:
-        row = s.scalars(
-            select(ChangeProposal)
-            .where(ChangeProposal.dedup_key == dedup_key)
-            .order_by(ChangeProposal.id.desc())
-            .limit(1)
-        ).first()
-        return _to_dict(row) if row is not None else None
-
-
-def latest_rejection_with_dedup_prefix(prefix: str) -> tuple[int, str] | None:
-    """``(id, updated_at)`` of the most recent *rejected* row whose
-    ``dedup_key`` starts with ``prefix`` — the cooldown scope is the key's
-    content-free prefix (everything before the premise), so no separate
-    column is stored. ``starts_with`` is exact byte-prefix semantics —
-    immune to LIKE-metacharacter issues in path fallback terms."""
-    with session() as s:
-        row = s.execute(
-            select(ChangeProposal.id, ChangeProposal.updated_at)
-            .where(
-                func.starts_with(ChangeProposal.dedup_key, prefix),
-                ChangeProposal.status == ProposalStatus.REJECTED.value,
-            )
-            .order_by(ChangeProposal.updated_at.desc(), ChangeProposal.id.desc())
-            .limit(1)
-        ).first()
-        return (row[0], row[1]) if row is not None else None
-
-
-def revive(
-    proposal_id: int,
-    *,
-    base_shas: dict[str, str],
-    summary: str,
-    run_id: str | None,
-    acl_fingerprint_before: str | None,
-    instruction: str | None = None,
-    proposed_bodies: dict[str, str] | None = None,
-    expires_at: str | None = None,
-    doc_ids: dict[str, str] | None = None,
-) -> bool:
-    """``stale | expired → pending`` — the same finding was re-detected, so
-    its row returns to the queue with refreshed anchors instead of a sibling
-    row being minted (one finding = one row for life; notification and
-    impression history ride the id). A stale-from-approved row revives to
-    *pending*, not approved — the world drifted since that consent."""
-    now = _now()
-    with session() as s:
-        touched = execute_dml(
-            s,
-            update(ChangeProposal)
-            .where(
-                ChangeProposal.id == proposal_id,
-                ChangeProposal.status.in_(
-                    [ProposalStatus.STALE.value, ProposalStatus.EXPIRED.value]
-                ),
-            )
-            .values(
-                status=ProposalStatus.PENDING.value,
-                status_reason=None,
-                base_shas=base_shas,
-                summary=summary,
-                instruction=instruction,
-                proposed_bodies=proposed_bodies,
-                run_id=run_id,
-                acl_fingerprint_before=acl_fingerprint_before,
-                expires_at=expires_at,
-                doc_ids=doc_ids,
-                revive_count=ChangeProposal.revive_count + 1,
-                last_emitted_at=now,
-                updated_at=now,
-            ),
-        )
-    return touched > 0
-
-
 def taken_dedupe_keys(statuses: tuple[ProposalStatus, ...]) -> set[str]:
     """Dedupe keys (``op`` + sorted source+target path-set) of every proposal
     currently in one of ``statuses`` — the detection runner's do-not-re-propose
@@ -283,7 +202,7 @@ def taken_dedupe_keys(statuses: tuple[ProposalStatus, ...]) -> set[str]:
     in-flight, already-applied, or human-rejected change; ``expired``/``stale``
     are intentionally omitted so a timed-out or drifted proposal can recur.
 
-    Key format matches ``ProposalDraft.legacy_dedupe_key`` in the detector seam."""
+    Key format matches ``ProposalDraft.dedupe_key`` in the detector seam."""
     with session() as s:
         # Project only the three columns the key needs — full rows would
         # deserialize proposed_bodies / base_shas we immediately discard.
