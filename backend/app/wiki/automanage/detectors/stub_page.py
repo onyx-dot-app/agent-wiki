@@ -140,15 +140,19 @@ class _StubPageDetector:
         return drafts
 
     def validate(self, proposal: dict[str, Any]) -> str | None:
-        """Premise: the page still has no real content. Someone writing even
-        a sentence since approval clears the floor and stales the proposal;
-        scaffolding-only shuffles keep it valid."""
+        """Premise: the page still has no real content **and** is still
+        quiet. Someone writing even a sentence since approval clears the
+        floor; an edit that stays tiny still restarts the quiet window —
+        activity is activity, and the detector re-proposes once the page
+        has settled again."""
         path = proposal["source_paths"][0]
         body = git.read_file_opt(path)
         if body is None:
             return f"{path!r} no longer exists"
         if not self._is_stub(body):
             return f"“{path}” has content now — no longer a stub"
+        if not _old_enough(path, datetime.now(UTC), self.min_age_days):
+            return f"“{path}” was edited recently — the quiet window restarted"
         return None
 
 

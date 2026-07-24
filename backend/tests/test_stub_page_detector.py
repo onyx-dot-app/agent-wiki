@@ -114,7 +114,12 @@ def test_validate_holds_across_scaffolding_shuffles(repo):
 
     _seed("proj/notes.md", "## Notes\n\n---\n\n### Later\n")  # still no content
 
-    assert _StubPageDetector().validate(p) is None
+    # Still a stub, but the edit restarted the quiet window — an
+    # age-agnostic validator would trash a page someone touched today.
+    reason = _StubPageDetector().validate(p)
+    assert reason is not None and "quiet window" in reason
+    # With the window elapsed (age gate disabled), the premise holds.
+    assert _StubPageDetector(min_age_days=0).validate(p) is None
 
 
 def test_validate_stales_when_the_page_is_gone(repo):
