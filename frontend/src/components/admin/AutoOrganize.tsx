@@ -2,9 +2,21 @@
 
 import { useEffect, useState } from "react";
 
-import { Button, Card, Switch, Text } from "@onyx-ai/opal/components";
-import { SvgSliders } from "@onyx-ai/opal/icons";
-import { ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
+import {
+  Button,
+  Card,
+  Switch,
+  Table,
+  Text,
+  createTableColumns,
+} from "@onyx-ai/opal/components";
+import {
+  SvgAlertCircle,
+  SvgCheckCircle,
+  SvgClock,
+  SvgSliders,
+} from "@onyx-ai/opal/icons";
+import { Content, ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
 
 import {
   type AutoOrganizeSchedule,
@@ -97,48 +109,102 @@ export function AutoOrganize() {
   );
 }
 
-/** UTC second-granular DB text ("YYYY-MM-DD HH:MM:SS") → local display. */
+/** UTC second-granular DB text ("YYYY-MM-DD HH:MM:SS") → local display,
+ * short form ("Jul 24, 9:25 AM"). */
 function runTime(ts: string): string {
   const d = new Date(ts.replace(" ", "T") + "Z");
-  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
-const RUN_STATUS_LABEL: Record<string, string> = {
-  running: "Running…",
-  completed: "Completed",
-  failed: "Failed",
-};
+const RUN_STATUS_ICON = {
+  completed: SvgCheckCircle,
+  failed: SvgAlertCircle,
+} as const;
+
+function startedCell(_value: string, row: DetectionRun) {
+  return (
+    <Content
+      sizePreset="main-ui"
+      variant="section"
+      title={runTime(row.started_at)}
+      description={row.triggered_by_user_id === null ? "System" : "Manual"}
+    />
+  );
+}
+
+function resultCell(_value: number, row: DetectionRun) {
+  if (row.status === "running") {
+    return (
+      <Text font="main-ui-body" color="text-03">
+        Running…
+      </Text>
+    );
+  }
+  if (row.status === "failed") {
+    return (
+      <Text font="main-ui-body" color="status-error-05">
+        {row.error ?? "Failed"}
+      </Text>
+    );
+  }
+  return (
+    <Content
+      sizePreset="main-ui"
+      variant="section"
+      title={`${row.proposals_emitted} proposal${row.proposals_emitted === 1 ? "" : "s"}`}
+      description={`${row.paths_scanned} pages scanned`}
+    />
+  );
+}
+
+const runColumns = (() => {
+  const tc = createTableColumns<DetectionRun>();
+  return [
+    tc.qualifier({
+      content: "icon",
+      getContent: (row) =>
+        RUN_STATUS_ICON[row.status as "completed" | "failed"] ?? SvgClock,
+    }),
+    tc.column("started_at", {
+      header: "Started",
+      weight: 20,
+      enableSorting: false,
+      cell: startedCell,
+    }),
+    tc.column("proposals_emitted", {
+      header: "Result",
+      weight: 30,
+      enableSorting: false,
+      cell: resultCell,
+    }),
+  ];
+})();
 
 function RunHistory() {
   const { runs } = useDetectionRuns(false);
   if (runs.length === 0) return null;
 
   return (
-    <Card padding="xs" rounding="md" border="solid" background="heavy">
-      <div className="flex w-full flex-col gap-1 p-1">
-        <Text font="main-content-emphasis" color="text-04">
-          Recent sweeps
-        </Text>
-        {runs.slice(0, 8).map((r) => (
-          <div
-            key={r.id}
-            className="flex w-full items-baseline justify-between gap-2"
-          >
-            <Text font="secondary-body" color="text-03">
-              {`${runTime(r.started_at)} · ${r.triggered_by_user_id === null ? "scheduled" : "manual"}`}
-            </Text>
-            <Text
-              font="secondary-body"
-              color={r.status === "failed" ? "status-error-05" : "text-04"}
-            >
-              {r.status === "completed"
-                ? `${r.proposals_emitted} proposal${r.proposals_emitted === 1 ? "" : "s"} · ${r.paths_scanned} paths`
-                : (RUN_STATUS_LABEL[r.status] ?? r.status)}
-            </Text>
-          </div>
-        ))}
-      </div>
-    </Card>
+    <div className="flex w-full flex-col gap-2">
+      <ContentAction
+        sizePreset="main-ui"
+        variant="section"
+        icon={SvgClock}
+        title="Recent sweeps"
+        description="What the last detection runs scanned and proposed."
+      />
+      <Table
+        data={runs.slice(0, 10)}
+        columns={runColumns}
+        getRowId={(r) => r.id}
+      />
+    </div>
   );
 }
 
