@@ -9,7 +9,6 @@ shapes, one WebSocket instead of eight endpoints.
 """
 from __future__ import annotations
 
-import logging
 import time
 from contextlib import contextmanager
 
@@ -197,22 +196,23 @@ def test_op_stamps_last_edited_at(client):
         assert me and me[0].last_edited_at is not None
 
 
-def test_disconnect_removes_participant(client, caplog):
-    caplog.set_level(logging.INFO)
+def test_disconnect_removes_participant(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page()
 
-    with _ws(client) as (_ws_conn, joined):
-        sid = joined["session_id"]
-        assert len(coedit.list_participants(sid)) == 1
+    # immediate_mode: if teardown takes the cancellation path, the leave is
+    # enqueued — inline mode runs it here instead of on a worker.
+    with coedit_queue.immediate_mode():
+        with _ws(client) as (_ws_conn, joined):
+            sid = joined["session_id"]
+            assert len(coedit.list_participants(sid)) == 1
 
-    _wait_for(lambda: coedit.list_participants(sid) == [])
+        _wait_for(lambda: coedit.list_participants(sid) == [])
     assert coedit.list_participants(sid) == []
 
 
-def test_disconnect_of_last_participant_checkpoints(client, caplog):
-    caplog.set_level(logging.INFO)
+def test_disconnect_of_last_participant_checkpoints(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page("hello world")
