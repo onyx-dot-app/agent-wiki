@@ -1,16 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { Button, Card, Switch, Text } from "@onyx-ai/opal/components";
-import { SvgSliders } from "@onyx-ai/opal/icons";
+import {
+  Button,
+  Card,
+  Switch,
+  Table,
+  Text,
+  createTableColumns,
+} from "@onyx-ai/opal/components";
+import { SvgClock, SvgSliders } from "@onyx-ai/opal/icons";
 import { ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
 
 import {
   type AutoOrganizeSchedule,
+  type DetectionRun,
+  sweepRuns,
   triggerSweep,
   updateAutoOrganizeSettings,
   useAutoOrganizeSettings,
+  useDetectionRuns,
 } from "@/lib/autoOrganize";
 
 export function AutoOrganize() {
@@ -89,7 +99,138 @@ export function AutoOrganize() {
       </Card>
 
       <SweepControl disabled={!enabled} />
+
+      <RunHistory />
     </div>
+  );
+}
+
+/** UTC second-granular DB text ("YYYY-MM-DD HH:MM:SS") → local display,
+ * short form ("Jul 24, 9:25 AM"). */
+function runTime(ts: string): string {
+  const d = new Date(ts.replace(" ", "T") + "Z");
+  if (Number.isNaN(d.getTime())) return ts;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function startedCell(_value: string, row: DetectionRun) {
+  return (
+    <Text font="main-ui-body" color="text-04">
+      {runTime(row.started_at)}
+    </Text>
+  );
+}
+
+function triggerCell(_value: string | null, row: DetectionRun) {
+  return (
+    <Text font="main-ui-body" color="text-03">
+      {row.triggered_by_user_id === null ? "Scheduled" : "Manual"}
+    </Text>
+  );
+}
+
+function proposalsCell(_value: number, row: DetectionRun) {
+  if (row.status !== "completed") {
+    return (
+      <Text font="main-ui-body" color="text-02">
+        —
+      </Text>
+    );
+  }
+  return (
+    <Text font="main-ui-body" color="text-04">
+      {`${row.proposals_emitted} proposal${row.proposals_emitted === 1 ? "" : "s"}`}
+    </Text>
+  );
+}
+
+function scannedCell(_value: number, row: DetectionRun) {
+  return (
+    <Text font="main-ui-body" color="text-03">
+      {row.status === "completed" ? `${row.paths_scanned} pages` : "—"}
+    </Text>
+  );
+}
+
+function statusCell(_value: string, row: DetectionRun) {
+  if (row.status === "failed") {
+    return (
+      <Text font="main-ui-body" color="status-error-05">
+        {row.error ?? "Failed"}
+      </Text>
+    );
+  }
+  return (
+    <Text font="main-ui-body" color="text-03">
+      {row.status === "running" ? "Running…" : "Completed"}
+    </Text>
+  );
+}
+
+const runColumns = (() => {
+  const tc = createTableColumns<DetectionRun>();
+  return [
+    tc.column("started_at", {
+      header: "Started",
+      weight: 20,
+      enableSorting: false,
+      cell: startedCell,
+    }),
+    tc.column("triggered_by_user_id", {
+      header: "Trigger",
+      weight: 14,
+      enableSorting: false,
+      cell: triggerCell,
+    }),
+    tc.column("proposals_emitted", {
+      header: "Proposals",
+      weight: 18,
+      enableSorting: false,
+      cell: proposalsCell,
+    }),
+    tc.column("paths_scanned", {
+      header: "Scanned",
+      weight: 16,
+      enableSorting: false,
+      cell: scannedCell,
+    }),
+    tc.column("status", {
+      header: "Status",
+      weight: 12,
+      enableSorting: false,
+      cell: statusCell,
+    }),
+  ];
+})();
+
+function RunHistory() {
+  const { sweeps } = useDetectionRuns(false);
+  if (sweeps.length === 0) return null;
+
+  return (
+    <Card rounding="lg" padding="sm">
+      <div className="flex w-full flex-col gap-2">
+        <ContentAction
+          sizePreset="main-ui"
+          variant="section"
+          icon={SvgClock}
+          title="Recent sweeps"
+          description="What the last detection runs scanned and proposed."
+        />
+        <Table
+          data={sweeps.slice(0, 20)}
+          columns={runColumns}
+          getRowId={(r) => r.id}
+          variant="rows"
+          size="md"
+        />
+      </div>
+    </Card>
   );
 }
 
@@ -130,22 +271,60 @@ function ScheduleSelector({
 
 function SweepControl({ disabled }: { disabled: boolean }) {
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The run id at the top of the history when the sweep was requested — the
+  // request only *enqueues*, so the new run appears (and finishes) on its own
+  // schedule; we watch the history until a different id lands and completes.
+  const [watchFrom, setWatchFrom] = useState<string | null>(null);
+  const watching = watchFrom !== null;
+  const { sweeps, refresh } = useDetectionRuns(watching);
+
+  const latest = sweeps[0];
+  const newRun =
+    watching && latest && latest.id !== watchFrom ? latest : undefined;
+  const [lastFinished, setLastFinished] = useState<DetectionRun | null>(null);
+  useEffect(() => {
+    // Terminal state on the watched run — capture the outcome, stop polling.
+    if (newRun && newRun.status !== "running") {
+      setLastFinished(newRun);
+      setWatchFrom(null);
+    }
+  }, [newRun]);
 
   async function run() {
     setBusy(true);
     setError(null);
-    setNote(null);
+    setLastFinished(null);
     try {
+      // Snapshot the top-of-history from an *awaited authoritative fetch*
+      // before enqueueing, so the new run is recognized by id. Reading the
+      // possibly-unloaded cache instead would snapshot "" while history
+      // exists — and the first pre-existing terminal run to arrive would
+      // masquerade as the new sweep. After this await, "" can only mean
+      // the history is verifiably empty (any sweep row IS the new one).
+      const fresh = await refresh();
+      setWatchFrom(sweepRuns(fresh?.runs ?? [])[0]?.id ?? "");
       await triggerSweep();
-      setNote("Sweep started.");
+      void refresh();
     } catch (e) {
+      setWatchFrom(null);
       setError(e instanceof Error ? e.message : "failed to start sweep");
     } finally {
       setBusy(false);
     }
   }
+
+  const note = watching
+    ? newRun
+      ? "Sweep running…"
+      : "Sweep queued…"
+    : lastFinished
+      ? lastFinished.status === "completed"
+        ? `Sweep finished — ${lastFinished.proposals_emitted} proposal${
+            lastFinished.proposals_emitted === 1 ? "" : "s"
+          } from ${lastFinished.paths_scanned} paths.`
+        : `Sweep failed${lastFinished.error ? `: ${lastFinished.error}` : "."}`
+      : null;
 
   return (
     <Card padding="xs" rounding="md" border="solid" background="heavy">

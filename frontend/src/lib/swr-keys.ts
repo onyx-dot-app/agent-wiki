@@ -45,6 +45,7 @@ export const SWR_KEYS = {
 
   // ── Auto Organize ─────────────────────────────────────────────────────
   autoOrganizeSettings: "/automanage/settings",
+  automanageRuns: "/automanage/runs",
   automanageProposals: (path: string) =>
     `/automanage/proposals?path=${encodeURIComponent(path)}`,
 

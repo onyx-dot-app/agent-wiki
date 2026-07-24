@@ -41,6 +41,44 @@ export function updateAutoOrganizeSettings(patch: {
   });
 }
 
+/** One detection run — the sweep history. Mirrors
+ * `app/models/automanage.py:DetectionRunView`. */
+export interface DetectionRun {
+  id: string;
+  trigger: string;
+  status: "running" | "completed" | "failed" | string;
+  triggered_by_user_id: string | null;
+  paths_scanned: number;
+  proposals_emitted: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+/** Recent detection runs, newest first (admin only server-side). `poll` turns
+ * on a short refresh interval — used while a sweep the admin just started is
+ * still enqueued/running, so the outcome shows up without a reload. */
+/** The sweep rows of a runs payload — the one definition of "is a sweep"
+ * shared by the hook and the snapshot-before-trigger path. */
+export function sweepRuns(runs: DetectionRun[]): DetectionRun[] {
+  return runs.filter((r) => r.trigger === "sweep");
+}
+
+export function useDetectionRuns(poll: boolean) {
+  const { data, error, isLoading, mutate } = useSWR<{ runs: DetectionRun[] }>(
+    SWR_KEYS.automanageRuns,
+    { refreshInterval: poll ? 2000 : 0 },
+  );
+  const runs = data?.runs ?? [];
+  // The runs API is trigger-agnostic. Every admin surface here is about
+  // *sweeps* (the outcome watcher and the history table both key off sweep
+  // rows), so expose the filtered view once — a future on_create/on_write
+  // run completing mid-watch must never masquerade as the sweep outcome.
+  // Server-side filtering belongs with the focused-trigger work.
+  const sweeps = sweepRuns(runs);
+  return { sweeps, error, isLoading, refresh: mutate };
+}
+
 /** One Auto Organize change proposal (a pending AI-initiated cleanup awaiting
  * human review). Mirrors `app/models/automanage.py:ProposalView`. */
 export interface Proposal {
