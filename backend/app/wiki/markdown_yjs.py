@@ -603,22 +603,35 @@ def _serialize_code_block(node: XmlElement) -> str:
 # pattern in already-serialized plain text).
 _ORDERED_MARKER_RE = re.compile(r"^\d{1,9}[.)](\s|$)")
 
+# A thematic break is a *whole line* of 3+ "-" (optionally space/tab
+# separated) and nothing else — "---" alone reactivates, but "--- and more
+# text" doesn't (confirmed against the forward parse, not assumed: a
+# trailing non-marker character on the line makes it an ordinary
+# paragraph). "*"/"_" thematic breaks ("***", "_ _ _") need no matching
+# case — every "*"/"_" is already escaped unconditionally by `_wrap_run`
+# for the emphasis/italic reason, which breaks the run regardless of
+# position.
+_THEMATIC_BREAK_DASH_RE = re.compile(r"^-(?:[ \t]*-){2,}[ \t]*(?:\n|$)")
+
 
 def _escape_block_start_ambiguity(text: str) -> str:
     """A paragraph's serialized text starting with a character or pattern
     that's only special as a *block*-start marker (heading ``#``, bullet
-    ``-``/``+``, blockquote ``>``, ordered-list ``1.``) must stay escaped,
-    or the next parse reinterprets this paragraph as a different block
-    type entirely. Unlike ``_wrap_run``'s mark-delimiter escaping (position-
-    independent — a ``*``/``_``/`` ` ``/``[``/``]`` is ambiguous anywhere in
-    the text, already handled there), these are only ambiguous at the very
-    start of the block, which is exactly the one position this function
-    runs at. ``*`` as a bullet marker doesn't need a case here — it's
-    already escaped unconditionally by ``_wrap_run`` for the emphasis
-    reason, which covers this position too as a side effect."""
+    ``-``/``+``, thematic break ``---``, blockquote ``>``, ordered-list
+    ``1.``) must stay escaped, or the next parse reinterprets this
+    paragraph as a different block type entirely. Unlike ``_wrap_run``'s
+    mark-delimiter escaping (position-independent — a ``*``/``_``/`` ` ``/
+    ``[``/``]`` is ambiguous anywhere in the text, already handled there),
+    these are only ambiguous at the very start of the block, which is
+    exactly the one position this function runs at. ``*`` as a bullet
+    marker doesn't need a case here — it's already escaped unconditionally
+    by ``_wrap_run`` for the emphasis reason, which covers this position
+    too as a side effect."""
     if not text:
         return text
     if text[0] == "#":
+        return "\\" + text
+    if text[0] == "-" and _THEMATIC_BREAK_DASH_RE.match(text):
         return "\\" + text
     if text[0] in "-+" and (len(text) == 1 or text[1].isspace()):
         return "\\" + text

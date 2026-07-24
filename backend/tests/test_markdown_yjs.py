@@ -332,6 +332,45 @@ def test_mid_text_block_marker_characters_are_left_alone() -> None:
         assert reconstruct_body(seed_doc_from_markdown(raw)) == raw
 
 
+def test_escaped_thematic_break_dash_run_stays_a_paragraph() -> None:
+    # A paragraph whose whole text is an escaped dash run ("\---") is the
+    # sharpest case: an unescaped "---" alone on a line isn't just
+    # misclassified like the bullet/blockquote cases, it's a thematic
+    # break — content-free — so reactivating it doesn't just change the
+    # block type, it silently discards the paragraph's text entirely.
+    # "***"/"_ _ _" thematic breaks need no dedicated case: every "*"/"_"
+    # is already escaped unconditionally by _wrap_run for the emphasis
+    # reason, which breaks the run regardless of position.
+    for raw in ("\\---\n", "\\- - -\n"):
+        doc = seed_doc_from_markdown(raw)
+        root = _root(doc)
+        assert root.children[0].tag == "paragraph"
+        once = reconstruct_body(doc)
+        assert once == raw
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        assert twice == once
+
+
+def test_dash_run_with_trailing_content_does_not_need_escaping() -> None:
+    # CommonMark requires a thematic break to be the *whole* line — "---"
+    # followed by other text on the same line is never ambiguous, so no
+    # escape should be added (and, separately, checkpointing an already-
+    # unescaped "--- and more" must not spuriously start escaping it).
+    body = "--- and more text on the line\n"
+    doc = seed_doc_from_markdown(body)
+    root = _root(doc)
+    assert root.children[0].tag == "paragraph"
+    assert reconstruct_body(doc) == body
+
+
+def test_two_dashes_is_not_enough_for_a_thematic_break() -> None:
+    # Below the 3-dash threshold — not a break, not a bullet (no whitespace
+    # right after the first dash) — plain literal text, no escape needed.
+    body = "-- not enough dashes for a break\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
 def test_find_by_block_id() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     found = find_by_block_id(doc, "b1")
