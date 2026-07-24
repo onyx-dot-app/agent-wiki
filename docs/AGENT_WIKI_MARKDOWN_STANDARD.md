@@ -65,8 +65,14 @@ referenced standards:
 
 The following constructs MUST NOT be supported:
 
-1. Raw HTML passthrough (block and inline). Any literal `<...>` sequence in
-   source text MUST be treated as ordinary text — MUST NOT be parsed as an
-   HTML tag, and MUST NOT be rendered as a live element. This is a
+1. Raw HTML tags (block and inline), as defined by CommonMark's raw-HTML
+   grammar — open tags, closing tags, comments, processing instructions,
+   declarations, CDATA sections. MUST be treated as ordinary text, MUST NOT
+   be parsed as a tag, and MUST NOT be rendered as a live element. This is a
    deliberate divergence from CommonMark, which mandates raw HTML
    passthrough.
+
+   Autolinks (§2 item 13, e.g. `<https://example.com>`) are a distinct
+   CommonMark construct — matched by a URI/email pattern, not the tag-name
+   grammar above — and are unaffected by this exclusion; they MUST still
+   render as links.
