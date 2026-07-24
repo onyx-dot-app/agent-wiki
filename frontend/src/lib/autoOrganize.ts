@@ -41,6 +41,31 @@ export function updateAutoOrganizeSettings(patch: {
   });
 }
 
+/** One detection run — the sweep history. Mirrors
+ * `app/models/automanage.py:DetectionRunView`. */
+export interface DetectionRun {
+  id: string;
+  trigger: string;
+  status: "running" | "completed" | "failed" | string;
+  triggered_by_user_id: string | null;
+  paths_scanned: number;
+  proposals_emitted: number;
+  error: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+/** Recent detection runs, newest first (admin only server-side). `poll` turns
+ * on a short refresh interval — used while a sweep the admin just started is
+ * still enqueued/running, so the outcome shows up without a reload. */
+export function useDetectionRuns(poll: boolean) {
+  const { data, error, isLoading, mutate } = useSWR<{ runs: DetectionRun[] }>(
+    SWR_KEYS.automanageRuns,
+    { refreshInterval: poll ? 2000 : 0 },
+  );
+  return { runs: data?.runs ?? [], error, isLoading, refresh: mutate };
+}
+
 /** One Auto Organize change proposal (a pending AI-initiated cleanup awaiting
  * human review). Mirrors `app/models/automanage.py:ProposalView`. */
 export interface Proposal {

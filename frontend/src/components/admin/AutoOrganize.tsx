@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button, Card, Switch, Text } from "@onyx-ai/opal/components";
 import { SvgSliders } from "@onyx-ai/opal/icons";
@@ -8,9 +8,11 @@ import { ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
 
 import {
   type AutoOrganizeSchedule,
+  type DetectionRun,
   triggerSweep,
   updateAutoOrganizeSettings,
   useAutoOrganizeSettings,
+  useDetectionRuns,
 } from "@/lib/autoOrganize";
 
 export function AutoOrganize() {
@@ -89,7 +91,54 @@ export function AutoOrganize() {
       </Card>
 
       <SweepControl disabled={!enabled} />
+
+      <RunHistory />
     </div>
+  );
+}
+
+/** UTC second-granular DB text ("YYYY-MM-DD HH:MM:SS") → local display. */
+function runTime(ts: string): string {
+  const d = new Date(ts.replace(" ", "T") + "Z");
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
+}
+
+const RUN_STATUS_LABEL: Record<string, string> = {
+  running: "Running…",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+function RunHistory() {
+  const { runs } = useDetectionRuns(false);
+  if (runs.length === 0) return null;
+
+  return (
+    <Card padding="xs" rounding="md" border="solid" background="heavy">
+      <div className="flex w-full flex-col gap-1 p-1">
+        <Text font="main-content-emphasis" color="text-04">
+          Recent sweeps
+        </Text>
+        {runs.slice(0, 8).map((r) => (
+          <div
+            key={r.id}
+            className="flex w-full items-baseline justify-between gap-2"
+          >
+            <Text font="secondary-body" color="text-03">
+              {`${runTime(r.started_at)} · ${r.triggered_by_user_id === null ? "scheduled" : "manual"}`}
+            </Text>
+            <Text
+              font="secondary-body"
+              color={r.status === "failed" ? "status-error-05" : "text-04"}
+            >
+              {r.status === "completed"
+                ? `${r.proposals_emitted} proposal${r.proposals_emitted === 1 ? "" : "s"} · ${r.paths_scanned} paths`
+                : (RUN_STATUS_LABEL[r.status] ?? r.status)}
+            </Text>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -130,22 +179,55 @@ function ScheduleSelector({
 
 function SweepControl({ disabled }: { disabled: boolean }) {
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The run id at the top of the history when the sweep was requested — the
+  // request only *enqueues*, so the new run appears (and finishes) on its own
+  // schedule; we watch the history until a different id lands and completes.
+  const [watchFrom, setWatchFrom] = useState<string | null>(null);
+  const watching = watchFrom !== null;
+  const { runs, refresh } = useDetectionRuns(watching);
+
+  const latest = runs[0];
+  const newRun =
+    watching && latest && latest.id !== watchFrom ? latest : undefined;
+  const [lastFinished, setLastFinished] = useState<DetectionRun | null>(null);
+  useEffect(() => {
+    // Terminal state on the watched run — capture the outcome, stop polling.
+    if (newRun && newRun.status !== "running") {
+      setLastFinished(newRun);
+      setWatchFrom(null);
+    }
+  }, [newRun]);
 
   async function run() {
     setBusy(true);
     setError(null);
-    setNote(null);
+    setLastFinished(null);
     try {
+      // Snapshot the current top-of-history *before* enqueueing so the new
+      // run is recognized by id, not by racy timestamp comparison.
+      setWatchFrom(runs[0]?.id ?? "");
       await triggerSweep();
-      setNote("Sweep started.");
+      void refresh();
     } catch (e) {
+      setWatchFrom(null);
       setError(e instanceof Error ? e.message : "failed to start sweep");
     } finally {
       setBusy(false);
     }
   }
+
+  const note = watching
+    ? newRun
+      ? "Sweep running…"
+      : "Sweep queued…"
+    : lastFinished
+      ? lastFinished.status === "completed"
+        ? `Sweep finished — ${lastFinished.proposals_emitted} proposal${
+            lastFinished.proposals_emitted === 1 ? "" : "s"
+          } from ${lastFinished.paths_scanned} paths.`
+        : `Sweep failed${lastFinished.error ? `: ${lastFinished.error}` : "."}`
+      : null;
 
   return (
     <Card padding="xs" rounding="md" border="solid" background="heavy">
