@@ -176,25 +176,25 @@ const runColumns = (() => {
   return [
     tc.column("started_at", {
       header: "Started",
-      weight: 18,
+      weight: 30,
       enableSorting: false,
       cell: startedCell,
     }),
     tc.column("triggered_by_user_id", {
       header: "Trigger",
-      weight: 12,
+      weight: 15,
       enableSorting: false,
       cell: triggerCell,
     }),
     tc.column("proposals_emitted", {
       header: "Proposals",
-      weight: 14,
+      weight: 20,
       enableSorting: false,
       cell: proposalsCell,
     }),
     tc.column("paths_scanned", {
       header: "Scanned",
-      weight: 14,
+      weight: 15,
       enableSorting: false,
       cell: scannedCell,
     }),
