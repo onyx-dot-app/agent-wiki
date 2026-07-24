@@ -15,9 +15,10 @@ import {
   IconContainer,
   LineItemButton,
   Switch,
+  Tag,
   Text,
 } from "@onyx-ai/opal/components";
-import { InputHorizontal } from "@onyx-ai/opal/layouts";
+import { InputHorizontal, Section } from "@onyx-ai/opal/layouts";
 import {
   SvgAddLines,
   SvgArrowUpRight,
@@ -147,11 +148,16 @@ function PresenceCard({
   const edits = commits.slice(0, 3);
   const scrollable = entry.editing && entry.caretHead !== null;
   return (
-    <div className="flex flex-col">
-      <div
+    <Section justifyContent="start" alignItems="stretch" height="fit">
+      <Section
+        flexDirection="row"
+        justifyContent="start"
+        alignItems="start"
+        height="fit"
+        gap={0.25}
         data-presence-card={entry.userId}
         // Mock card chrome: white surface lifted off the panel body.
-        className={`flex w-full items-start gap-1 rounded-(--radius-08) bg-(--background-tint-00) p-1 shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)] ${
+        className={`w-full rounded-(--radius-08) bg-(--background-tint-00) p-1 shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)] ${
           scrollable ? "cursor-pointer" : ""
         }`}
         onClick={
@@ -160,11 +166,22 @@ function PresenceCard({
             : undefined
         }
       >
-        <span className="flex shrink-0 items-center gap-0 p-[2px]">
+        <Section
+          flexDirection="row"
+          alignItems="center"
+          width="fit"
+          height="fit"
+          className="shrink-0 p-[2px]"
+        >
           <AvatarCircle entry={entry} size="main-ui" />
           {entry.agentName && <AgentBadge entry={entry} size="main-ui" />}
-        </span>
-        <span className="min-w-0 flex-1 px-[2px]">
+        </Section>
+        <Section
+          justifyContent="start"
+          alignItems="stretch"
+          height="fit"
+          className="min-w-0 flex-1 px-[2px]"
+        >
           <Text font="main-ui-action" color="text-04" as="p" nowrap>
             {entry.display}
           </Text>
@@ -173,8 +190,14 @@ function PresenceCard({
               {`${entry.editing ? "Editing" : "Viewing"} with ${entry.agentName}`}
             </Text>
           )}
-        </span>
-        <span className="flex shrink-0 items-center gap-[2px] pt-[2px]">
+        </Section>
+        <Section
+          flexDirection="row"
+          alignItems="center"
+          width="fit"
+          height="fit"
+          className="shrink-0 gap-[2px] pt-[2px]"
+        >
           {/* raw-ok: no Opal Text color maps to the mock's status-text-info-05 state chip */}
           <span className="px-[2px] text-[12px] leading-4 text-(--status-text-info-05)">
             {entry.editing ? "Editing" : "Viewing"}
@@ -184,20 +207,16 @@ function PresenceCard({
           ) : (
             <span className="mx-[2px] size-[6px] rounded-full bg-(--status-text-info-05)" />
           )}
-        </span>
-      </div>
+        </Section>
+      </Section>
       {edits.length > 0 && (
-        <div className="flex flex-col py-1">
-          <div className="flex items-center px-1 py-[2px]">
-            <span className="w-[6px] border-t border-(--border-01)" />
-            <span className="px-1">
-              <Text font="secondary-body" color="text-03" nowrap>
-                Recent Edits
-              </Text>
-            </span>
-            <span className="min-w-0 flex-1 border-t border-(--border-01)" />
-            <span className="w-2 border-t border-(--border-01)" />
-          </div>
+        <Section
+          justifyContent="start"
+          alignItems="stretch"
+          height="fit"
+          className="py-1"
+        >
+          <Divider title="Recent Edits" />
           {edits.map((c) => {
             const { agentLabel } = parseCommitAuthor(c.author);
             const changed = c.added + c.removed;
@@ -213,20 +232,25 @@ function PresenceCard({
                 sizePreset="secondary"
                 variant="body"
                 rightChildren={
-                  <span className="flex items-center gap-[2px]">
+                  <Section
+                    flexDirection="row"
+                    alignItems="center"
+                    width="fit"
+                    className="gap-[2px]"
+                  >
                     <Text font="secondary-body" color="text-03" nowrap>
                       {relativeTime(c.ts)}
                     </Text>
                     <SvgArrowUpRight size={12} />
-                  </span>
+                  </Section>
                 }
                 onClick={() => onOpenCommit?.(c.sha)}
               />
             );
           })}
-        </div>
+        </Section>
       )}
-    </div>
+    </Section>
   );
 }
 
@@ -266,14 +290,22 @@ function AnchoredPanel({
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, [anchor, hover, onDismiss]);
   return createPortal(
+    // raw-ok: Opal layout primitives are WithoutStyles and the panel needs runtime viewport coordinates
     <div
       ref={panelRef}
-      className="fixed z-50 flex w-(--block-width-panel-medium-small) flex-col"
+      className="fixed z-50"
       style={{ top: rect.bottom + 8, right: window.innerWidth - rect.right }}
       onPointerEnter={hover?.onEnter}
       onPointerLeave={hover?.onLeave}
     >
-      {children}
+      <Section
+        justifyContent="start"
+        alignItems="stretch"
+        height="fit"
+        className="w-(--block-width-panel-medium-small)"
+      >
+        {children}
+      </Section>
     </div>,
     document.body,
   );
@@ -340,8 +372,14 @@ function PolicyPopover({
   };
 
   return (
-    <div className="flex flex-col gap-1 rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]">
-      <div className="p-2">
+    <Section
+      justifyContent="start"
+      alignItems="stretch"
+      height="fit"
+      gap={0.25}
+      className="rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]"
+    >
+      <Section height="fit" alignItems="stretch" padding={0.5}>
         <InputHorizontal
           icon={SvgSparkle}
           title="AI Auto-Edits"
@@ -356,9 +394,9 @@ function PolicyPopover({
             onCheckedChange={() => void toggle()}
           />
         </InputHorizontal>
-      </div>
+      </Section>
       <Divider />
-      <div className="p-2">
+      <Section height="fit" alignItems="stretch" padding={0.5}>
         <InputHorizontal
           icon={SvgAddLines}
           title="Page Instructions"
@@ -374,8 +412,8 @@ function PolicyPopover({
             onClick={onOpenUpdatesPanel}
           />
         </InputHorizontal>
-      </div>
-    </div>
+      </Section>
+    </Section>
   );
 }
 
@@ -507,9 +545,23 @@ export function PresenceAvatars({
   const hovered = entries.find((e) => e.userId === hoverId);
 
   return (
-    <div ref={clusterRef} className="flex items-center gap-1 px-[2px]">
+    <Section
+      ref={clusterRef}
+      flexDirection="row"
+      alignItems="center"
+      width="fit"
+      height="fit"
+      gap={0.25}
+      className="px-[2px]"
+    >
       {entries.length > 0 && (
-        <div className="isolate flex items-center px-[2px]">
+        <Section
+          flexDirection="row"
+          alignItems="center"
+          width="fit"
+          height="fit"
+          className="isolate px-[2px]"
+        >
           {shown.map((e, i) => (
             // raw-ok: no Opal control renders an overlapping avatar-stack slot with a badge overhang
             <button
@@ -534,25 +586,29 @@ export function PresenceAvatars({
             </button>
           ))}
           {overflow.length > 0 && (
-            // raw-ok: the +N chip is the mock's borderless tinted pill, Tag renders border chrome
+            // raw-ok: Tag is a non-interactive div, the click needs a button wrapper
             <button
               type="button"
               aria-label={`${overflow.length} more`}
-              className="ml-[2px] cursor-pointer rounded-(--radius-08) bg-(--background-tint-02) p-1"
+              className="ml-[2px] cursor-pointer"
               onClick={() => {
                 setOverflowOpen((v) => !v);
                 loadCommits();
               }}
             >
-              <Text font="secondary-body" color="text-03" nowrap>
-                {`+${overflow.length}`}
-              </Text>
+              <Tag title={`+${overflow.length}`} color="gray" />
             </button>
           )}
-        </div>
+        </Section>
       )}
       {entries.length > 0 && (
-        <span className="h-4 border-l border-(--border-01)" />
+        <Section height="fit" width="fit" className="h-4 self-center">
+          <Divider
+            orientation="vertical"
+            paddingParallel="fit"
+            paddingPerpendicular="fit"
+          />
+        </Section>
       )}
       {/* raw-ok: the Auto trigger is the mock's blue-ringed avatar circle, not a standard icon button */}
       <button
@@ -589,7 +645,12 @@ export function PresenceAvatars({
           anchor={clusterRef.current}
           onDismiss={() => setOverflowOpen(false)}
         >
-          <div className="flex flex-col gap-1">
+          <Section
+            justifyContent="start"
+            alignItems="stretch"
+            height="fit"
+            gap={0.25}
+          >
             {overflow.map((e) => (
               <PresenceCard
                 key={e.userId}
@@ -599,7 +660,7 @@ export function PresenceAvatars({
                 onOpenCommit={onOpenCommit}
               />
             ))}
-          </div>
+          </Section>
         </AnchoredPanel>
       )}
       {autoOpen && clusterRef.current && (
@@ -614,6 +675,6 @@ export function PresenceAvatars({
           />
         </AnchoredPanel>
       )}
-    </div>
+    </Section>
   );
 }
