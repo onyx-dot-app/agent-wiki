@@ -651,6 +651,16 @@ _TABLE_DELIMITER_ROW_RE = re.compile(
 # just misclassifying the one paragraph.
 _FENCE_OPENER_RE = re.compile(r"^(?:`{3,}|~{3,})")
 
+# An indented code block: 4+ columns of leading indentation (4 spaces, or
+# fewer spaces then a tab — a tab always reaches the next 4-column stop, so
+# 0-3 spaces followed by one is equivalent to 4 bare spaces; confirmed
+# against the forward parse). Unlike every check above, this only matters on
+# a block's *first* line: an indented code block can't interrupt an
+# already-started paragraph (confirmed: a later soft-break line with 4+
+# leading spaces stays part of the same paragraph), so continuation lines
+# are already safe without any escaping.
+_INDENTED_CODE_FIRST_LINE_RE = re.compile(r"^(?: {4}| {0,3}\t)")
+
 
 def _escape_block_start_ambiguity(text: str) -> str:
     """A paragraph's serialized text starting with a character or pattern
@@ -671,28 +681,47 @@ def _escape_block_start_ambiguity(text: str) -> str:
     breaks). ``*`` as a bullet marker doesn't need a case here — it's
     already escaped unconditionally by ``_wrap_run`` for the emphasis
     reason, which covers every line's start position too as a side
-    effect."""
-    return "\n".join(_escape_line_start(line) for line in text.split("\n"))
+    effect. The first line additionally gets the indented-code-block check
+    (``_INDENTED_CODE_FIRST_LINE_RE``), since that ambiguity only exists on
+    a block's first line, not on every line the way the marker checks do."""
+    lines = text.split("\n")
+    escaped = [_escape_line_start(line) for line in lines]
+    if lines[0] and _INDENTED_CODE_FIRST_LINE_RE.match(lines[0]):
+        escaped[0] = "\\" + lines[0]
+    return "\n".join(escaped)
 
 
 def _escape_line_start(line: str) -> str:
     if not line:
         return line
-    if line[0] == "#":
+    # Up to 3 leading spaces are insignificant to CommonMark — "  # Heading"
+    # is still an ATX heading, "   - item" is still a bullet (confirmed
+    # against the forward parse: every marker below reactivates through 1-3
+    # leading spaces the same as at column 0) — so the checks below look
+    # past them, not just at column 0. A 4th leading space (or a tab, which
+    # advances to the next 4-column stop) tips into indented-code territory
+    # instead — a different, narrower case handled separately by
+    # _INDENTED_CODE_FIRST_LINE_RE, so a line whose leading run is that long
+    # is left alone here.
+    indent_len = min(3, len(line) - len(line.lstrip(" ")))
+    rest = line[indent_len:]
+    if not rest or rest[0] in " \t":
+        return line
+    if rest[0] == "#":
         return "\\" + line
-    if line[0] in "-=" and _SETEXT_UNDERLINE_RE.match(line):
+    if rest[0] in "-=" and _SETEXT_UNDERLINE_RE.match(rest):
         return "\\" + line
-    if line[0] == "-" and _THEMATIC_BREAK_DASH_RE.match(line):
+    if rest[0] == "-" and _THEMATIC_BREAK_DASH_RE.match(rest):
         return "\\" + line
-    if line[0] in "-+" and (len(line) == 1 or line[1].isspace()):
+    if rest[0] in "-+" and (len(rest) == 1 or rest[1].isspace()):
         return "\\" + line
-    if line[0] == ">":
+    if rest[0] == ">":
         return "\\" + line
-    if _ORDERED_MARKER_RE.match(line):
+    if _ORDERED_MARKER_RE.match(rest):
         return "\\" + line
     if _TABLE_DELIMITER_ROW_RE.match(line):
         return "\\" + line
-    if _FENCE_OPENER_RE.match(line):
+    if _FENCE_OPENER_RE.match(rest):
         return "\\" + line
     return line
 

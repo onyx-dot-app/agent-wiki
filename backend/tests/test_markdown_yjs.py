@@ -556,6 +556,75 @@ def test_paragraph_line_of_backticks_does_not_reactivate_as_a_fence() -> None:
     assert tags == ["paragraph"]
 
 
+def test_indented_block_markers_do_not_reactivate() -> None:
+    # Up to 3 leading spaces are insignificant to CommonMark — a heading,
+    # blockquote, bullet, ordered marker, thematic break, and fence opener
+    # all still reactivate through 1-3 spaces of indent the same as at
+    # column 0. _escape_line_start's checks used to require the marker at
+    # true column 0 and missed every one of these. The escape backslash
+    # lands before the line's leading spaces rather than before the marker
+    # itself, so (unlike the column-0 case) it isn't consumed as a
+    # single-character escape of the marker on the very next parse — the
+    # literal backslash it produces needs escaping in its own right, which
+    # doesn't happen until the round after. That's the same "correct but
+    # not byte-identical on the first round, stable from the second round
+    # on" tolerance already established elsewhere in this module (e.g.
+    # setext-to-ATX canonicalization) — checked here via the 2nd/3rd round
+    # comparison, not the 1st/2nd.
+    cases = [
+        "First line\n  # Heading",
+        "First line\n > Quote",
+        "First line\n   - item",
+        "First line\n  + item",
+        "First line\n  1. item",
+        "First line\n   ---",
+        "First line\n  ~~~\ncode\n~~~",
+    ]
+    for text in cases:
+        doc = _build_live_paragraph(text)
+        once = reconstruct_body(doc)
+        tags = [
+            c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
+        ]
+        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        thrice = reconstruct_body(seed_doc_from_markdown(twice))
+        assert twice == thrice, f"never stabilized for {text!r}: {twice!r} != {thrice!r}"
+
+
+def test_indented_first_line_does_not_reactivate_as_code_block() -> None:
+    # 4+ columns of leading indentation on a block's *first* line (4 spaces,
+    # or fewer spaces then a tab, which reaches the next 4-column stop)
+    # reactivates as an indented code block — a different, narrower case
+    # than the 1-3-space marker checks above, since indented code can't
+    # interrupt an already-started paragraph.
+    for text in ("    looks like code\nsecond line", "\ttab indented\nsecond line"):
+        doc = _build_live_paragraph(text)
+        once = reconstruct_body(doc)
+        tags = [
+            c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
+        ]
+        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        thrice = reconstruct_body(seed_doc_from_markdown(twice))
+        assert twice == thrice, f"never stabilized for {text!r}: {twice!r} != {thrice!r}"
+
+
+def test_indented_continuation_line_stays_safe_without_escaping() -> None:
+    # A *continuation* line (not the block's first line) with 4+ leading
+    # spaces is already safe without any escaping at all — indented code
+    # can't interrupt a paragraph, so it stays part of the same paragraph
+    # either way. Asserts the byte-identical (mod the trailing newline
+    # reconstruct_body always appends) round trip, not just the tag, to
+    # confirm no unnecessary backslash gets inserted here.
+    text = "First line\n    still one paragraph"
+    doc = _build_live_paragraph(text)
+    once = reconstruct_body(doc)
+    assert once == text + "\n"
+    tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
+    assert tags == ["paragraph"]
+
+
 def test_find_by_block_id() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     found = find_by_block_id(doc, "b1")
