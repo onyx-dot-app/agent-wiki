@@ -265,7 +265,7 @@ export function CommentMessage({
         alignItems="center"
         height="fit"
         gap={0.25}
-        className="px-1 pt-1"
+        className="mx-1 mt-1"
       >
         <CommentAvatar name={authorName} />
         <span className="min-w-0 flex-1">
@@ -414,7 +414,7 @@ export function NewCommentComposer({
         alignItems="center"
         height="fit"
         gap={0.25}
-        className="px-1 pt-1"
+        className="mx-1 mt-1"
       >
         <CommentAvatar name={selfName} />
         <span className="min-w-0 flex-1">

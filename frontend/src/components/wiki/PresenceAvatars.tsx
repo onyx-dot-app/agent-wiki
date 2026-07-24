@@ -697,6 +697,7 @@ export function PresenceAvatars({
             <button
               type="button"
               aria-label={`${overflow.length} more`}
+              aria-expanded={openPanel?.kind === "overflow"}
               className="ml-[2px] cursor-pointer"
               // holdOpen: a close timer pending from leaving a chip would
               // otherwise dismiss the overflow panel right after this click.
@@ -759,6 +760,7 @@ export function PresenceAvatars({
       <button
         type="button"
         aria-label="AI auto-edits"
+        aria-expanded={openPanel?.kind === "auto"}
         className="flex cursor-pointer items-center justify-center px-[2px]"
         onClick={() =>
           setOpenPanel((p) => (p?.kind === "auto" ? null : { kind: "auto" }))
