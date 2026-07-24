@@ -201,11 +201,14 @@ def test_disconnect_removes_participant(client):
     login_fastapi(client, uid)
     _seed_page()
 
-    with _ws(client) as (_ws_conn, joined):
-        sid = joined["session_id"]
-        assert len(coedit.list_participants(sid)) == 1
+    # immediate_mode: if teardown takes the cancellation path, the leave is
+    # enqueued — inline mode runs it here instead of on a worker.
+    with coedit_queue.immediate_mode():
+        with _ws(client) as (_ws_conn, joined):
+            sid = joined["session_id"]
+            assert len(coedit.list_participants(sid)) == 1
 
-    _wait_for(lambda: coedit.list_participants(sid) == [])
+        _wait_for(lambda: coedit.list_participants(sid) == [])
     assert coedit.list_participants(sid) == []
 
 
