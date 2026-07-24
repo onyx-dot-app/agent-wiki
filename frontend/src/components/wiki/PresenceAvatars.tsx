@@ -290,7 +290,7 @@ function AnchoredPanel({
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, [anchor, hover, onDismiss]);
   return createPortal(
-    // raw-ok: Opal layout primitives are WithoutStyles and the panel needs runtime viewport coordinates
+    // raw-ok: Popover.Anchor exists but Popover.Content bakes neutral-00/rounded-12/shadow-md chrome (WithoutStyles, no escape) that the mock's tint-01 policy panel and chromeless floating cards contradict, and this wrapper also needs runtime viewport coordinates
     <div
       ref={panelRef}
       className="fixed z-50"
@@ -598,9 +598,13 @@ export function PresenceAvatars({
             >
               <AvatarCircle entry={e} size="main-content" />
               {e.agentName && (
-                <span className="absolute top-[12px] left-[10px]">
+                <Section
+                  width="fit"
+                  height="fit"
+                  className="absolute top-[12px] left-[10px]"
+                >
                   <AgentBadge entry={e} size="secondary" />
-                </span>
+                </Section>
               )}
             </Section>
           ))}
