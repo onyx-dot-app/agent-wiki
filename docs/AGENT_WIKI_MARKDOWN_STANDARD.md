@@ -12,14 +12,15 @@ this document are to be interpreted as in RFC 2119.
 | Standard | Reference | Adherence |
 |---|---|---|
 | CommonMark | [spec.commonmark.org](https://spec.commonmark.org), latest release | Full, with one deliberate exception — §5. |
-| GitHub Flavored Markdown (GFM) | [github.github.com/gfm](https://github.github.com/gfm) | GFM extends CommonMark with five constructs; four are adopted below, the fifth is superseded by §5. |
+| GitHub Flavored Markdown (GFM) | [github.github.com/gfm](https://github.github.com/gfm) | Full, except tagfilter — superseded by §5. |
 | Agent Wiki Extensions | This document, §4 | Deliberate, non-standard additions adopted where CommonMark and GFM both fall short of a high-value editor feature. |
 
 No other markdown dialect, flavor, or informal convention is in scope.
 
-## 2. CommonMark — Full Compliance (Mandatory)
+## 2. CommonMark — Full Compliance (Mandatory; One Exception — §5)
 
-The following CM constructs MUST be supported:
+The following CM constructs MUST be supported. (Raw HTML passthrough is
+also core CommonMark, but is excluded — see §5.)
 
 1. ATX headings (levels 1–6, `#` through `######`)
 2. Setext headings (`===`/`---` underline form)
