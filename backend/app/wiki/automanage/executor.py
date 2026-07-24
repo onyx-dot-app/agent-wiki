@@ -25,6 +25,7 @@ import logging
 from typing import Any
 
 from app.auth import users
+from app.db import fts
 from app.db.models import Event
 from app.db.session import session
 from app.llm.agents import automanage_apply
@@ -53,6 +54,7 @@ SUPPORTED_OPS: frozenset[str] = frozenset(
         ProposalOp.MERGE.value,
         ProposalOp.DELETE_PAGE.value,
         ProposalOp.RENAME.value,
+        ProposalOp.MOVE.value,
     }
 )
 
@@ -171,24 +173,61 @@ def _scope_violations(base_sha: str, allowed: frozenset[str]) -> list[str]:
     return out
 
 
+def _moves_made(
+    source_paths: list[str], path_ids: dict[str, str]
+) -> list[PathMove]:
+    """The moves the run actually performed, recovered from the pre-minted
+    doc ids *before* the revert: a source whose id row is live at a different
+    path was moved there. This is what lets the revert replay the move
+    fan-out in reverse instead of hand-unwinding each metadata table."""
+    out: list[PathMove] = []
+    for s in source_paths:
+        sid = path_ids.get(s)
+        row = doc_ids.get(sid) if sid else None
+        if (
+            row is not None
+            and row["deleted_at"] is None
+            and row["path"] not in (s, None)
+        ):
+            out.append(PathMove(old=str(row["path"]), new=s))
+    return out
+
+
 def _reconverge_after_revert(
-    allowed: frozenset[str], reverted_sha: str, author: str | None
+    allowed: frozenset[str],
+    reverted_sha: str,
+    author: str | None,
+    *,
+    reversed_moves: list[PathMove],
 ) -> None:
     """Re-converge path-keyed metadata after an additive revert.
 
-    The revert restored file *content*; metadata mutated through the run's
-    lifecycle hooks (id tombstones/forwards, search index) needs pulling back
-    for the proposal's paths: restored ids re-bind (clearing any forward) and
-    live pages re-index. ACL/policy rows re-pointed toward now-removed trash
-    copies are left as orphans — the known-debris class the move machinery
-    already heals on collision."""
+    The revert restored file *content*; everything the run's lifecycle hooks
+    re-pointed needs pulling back:
+
+    - ``reversed_moves`` (destination → source, captured pre-revert) replay
+      through ``notify.after_path_move`` — the same chokepoint the forward
+      move used — so ACL/owner rows, update policies, doc ids, co-edit
+      sessions, comments, the trigger cache, and the search index all follow
+      the page back instead of stranding on a path the revert removed.
+    - Restored ids re-bind (clearing any forward) and live pages re-index.
+    - Any allowed page that is *not* live after the revert (a freshly written
+      destination the revert deleted — not a move) gets its search entry
+      purged; ACL/policy orphans there are the known-debris class the move
+      machinery already heals on collision."""
+    for mv in reversed_moves:
+        notify.after_path_move([mv], reverted_sha, author, root_move=mv)
     live = set(git.list_paths())
     doc_ids.on_restored([path for path in sorted(allowed) if path in live])
     for path in sorted(allowed):
-        if path in live and path.endswith(".md"):
+        if not path.endswith(".md"):
+            continue
+        if path in live:
             notify.after_doc_write(
                 path, reverted_sha, ChangeKind.EDIT, author
             )
+        else:
+            fts.delete_document(path)
 
 
 def _execute_agentic(p: dict[str, Any]) -> None:
@@ -258,13 +297,16 @@ def _execute_agentic(p: dict[str, Any]) -> None:
                         f"move must preserve content: {s} -> {row['path']}"
                     ]
     if violations or not outcome.ok:
+        reversed_moves = _moves_made(p["source_paths"], path_ids)
         reverted = git.revert_to(
             base_sha,
             f"automanage: revert rejected execution of proposal {proposal_id}",
             author=author,
         )
         if reverted is not None:
-            _reconverge_after_revert(allowed, reverted, author)
+            _reconverge_after_revert(
+                allowed, reverted, author, reversed_moves=reversed_moves
+            )
         reason = (
             f"execution touched out-of-scope paths: {violations}"
             if violations
