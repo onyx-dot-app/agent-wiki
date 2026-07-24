@@ -425,6 +425,36 @@ def test_nested_dash_run_with_trailing_content_does_not_need_escaping() -> None:
         assert reconstruct_body(seed_doc_from_markdown(raw)) == raw
 
 
+def test_escaped_block_start_marker_on_a_later_soft_break_line() -> None:
+    # _escape_block_start_ambiguity used to check only text[0] — the very
+    # first character of the whole (possibly multi-line) paragraph text.
+    # A paragraph's *second* line, produced by a soft break, is just as
+    # much a fresh block-start position once re-emitted: unconditionally
+    # at the top level (confirmed against the forward parse: "line one\n#
+    # line two" splits into a paragraph + a separate heading block), and
+    # doubly so once a list item's continuation indent or a blockquote's
+    # per-line "> " prefix (_serialize_blockquote adds that to *every*
+    # line, including a paragraph's internal soft breaks) gets added on
+    # top. The "#" case is the sharpest: reactivating it doesn't just
+    # misparse, it crashes outright the next time the checkpointed body is
+    # seeded (_build_block_sequence has no heading support inside a list
+    # item/blockquote at all).
+    cases = [
+        "first line\n\\# second line\n",
+        "first line\n\\- second line\n",
+        "- first line\n  \\# second line\n",
+        "> first line\n> \\# second line\n",
+        "> first line\n> \\- second line\n",
+    ]
+    for raw in cases:
+        once = reconstruct_body(seed_doc_from_markdown(raw))
+        assert once == raw, f"expected stable round-trip for {raw!r}, got {once!r}"
+        # The real regression: seeding the checkpointed output a second
+        # time must not raise (it did, for "#", before this fix).
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        assert twice == once
+
+
 def test_find_by_block_id() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     found = find_by_block_id(doc, "b1")

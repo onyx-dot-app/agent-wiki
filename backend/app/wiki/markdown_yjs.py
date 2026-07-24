@@ -629,24 +629,35 @@ def _escape_block_start_ambiguity(text: str) -> str:
     paragraph as a different block type entirely. Unlike ``_wrap_run``'s
     mark-delimiter escaping (position-independent — a ``*``/``_``/`` ` ``/
     ``[``/``]`` is ambiguous anywhere in the text, already handled there),
-    these are only ambiguous at the very start of the block, which is
-    exactly the one position this function runs at. ``*`` as a bullet
-    marker doesn't need a case here — it's already escaped unconditionally
-    by ``_wrap_run`` for the emphasis reason, which covers this position
-    too as a side effect."""
-    if not text:
-        return text
-    if text[0] == "#":
-        return "\\" + text
-    if text[0] == "-" and _THEMATIC_BREAK_DASH_RE.match(text):
-        return "\\" + text
-    if text[0] in "-+" and (len(text) == 1 or text[1].isspace()):
-        return "\\" + text
-    if text[0] == ">":
-        return "\\" + text
-    if _ORDERED_MARKER_RE.match(text):
-        return "\\" + text
-    return text
+    these are only ambiguous at the very start of *a line*, which is why
+    this checks every line a soft break produces, not just ``text[0]`` —
+    a multi-line paragraph's second line becomes just as much a fresh
+    block-start position once it's re-emitted, whether that's the plain
+    top level, prefixed with a list item's continuation indent (which
+    CommonMark still parses as a block start through up to 3 spaces), or
+    with a blockquote's repeated ``> `` (``_serialize_blockquote`` adds
+    that per line unconditionally, including a paragraph's internal soft
+    breaks). ``*`` as a bullet marker doesn't need a case here — it's
+    already escaped unconditionally by ``_wrap_run`` for the emphasis
+    reason, which covers every line's start position too as a side
+    effect."""
+    return "\n".join(_escape_line_start(line) for line in text.split("\n"))
+
+
+def _escape_line_start(line: str) -> str:
+    if not line:
+        return line
+    if line[0] == "#":
+        return "\\" + line
+    if line[0] == "-" and _THEMATIC_BREAK_DASH_RE.match(line):
+        return "\\" + line
+    if line[0] in "-+" and (len(line) == 1 or line[1].isspace()):
+        return "\\" + line
+    if line[0] == ">":
+        return "\\" + line
+    if _ORDERED_MARKER_RE.match(line):
+        return "\\" + line
+    return line
 
 
 def serialize_block(node: XmlElement) -> str:
