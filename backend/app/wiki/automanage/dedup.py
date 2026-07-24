@@ -27,6 +27,12 @@ One finding = one proposal row for life:
   (``SUBJECT_COOLDOWN_DAYS``) — content churn on the same pages can't turn
   into weekly re-asks right after a human said no.
 
+Because keys are persisted, the strings inside them are **durable
+identifiers**: detector names and ``ProposalOp`` values must never change
+spelling — a rename would silently orphan identity history (rejected
+findings re-proposed, live findings duplicated). If a rename is ever truly
+needed, it ships with a data migration rewriting the stored keys.
+
 Deliberately mechanical — deterministic keys, no LLM. The soft judgment
 ("is 'merge A+B+C' a variant of the rejected 'merge A+B'?") is the future
 rejected-variant gate, which will slot in as one more decision branch here.
