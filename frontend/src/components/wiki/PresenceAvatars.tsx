@@ -555,36 +555,15 @@ export function PresenceAvatars({
       className="px-[2px]"
     >
       {entries.length > 0 && (
+        // DOM order runs last-chip-first so paint order stacks earlier
+        // chips on top (the mock), row-reverse restores the visual order.
         <Section
           flexDirection="row"
           alignItems="center"
           width="fit"
           height="fit"
-          className="isolate px-[2px]"
+          className="isolate flex-row-reverse px-[2px]"
         >
-          {shown.map((e, i) => (
-            // raw-ok: no Opal control renders an overlapping avatar-stack slot with a badge overhang
-            <button
-              key={e.userId}
-              type="button"
-              aria-label={e.display}
-              className="relative flex w-5 cursor-pointer items-center justify-center"
-              style={{ zIndex: shown.length - i }}
-              onPointerEnter={() => {
-                holdOpen();
-                setHoverId(e.userId);
-                loadCommits();
-              }}
-              onPointerLeave={closeSoon}
-            >
-              <AvatarCircle entry={e} size="main-content" />
-              {e.agentName && (
-                <span className="absolute top-[12px] left-[10px]">
-                  <AgentBadge entry={e} size="secondary" />
-                </span>
-              )}
-            </button>
-          ))}
           {overflow.length > 0 && (
             // raw-ok: Tag is a non-interactive div, the click needs a button wrapper
             <button
@@ -599,6 +578,32 @@ export function PresenceAvatars({
               <Tag title={`+${overflow.length}`} color="gray" />
             </button>
           )}
+          {[...shown].reverse().map((e) => (
+            // Each slot is 20px wide holding a 24px chip, the 4px overlap.
+            <Section
+              key={e.userId}
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="center"
+              width="fit"
+              height="fit"
+              data-presence-chip={e.display}
+              className="relative w-5"
+              onPointerEnter={() => {
+                holdOpen();
+                setHoverId(e.userId);
+                loadCommits();
+              }}
+              onPointerLeave={closeSoon}
+            >
+              <AvatarCircle entry={e} size="main-content" />
+              {e.agentName && (
+                <span className="absolute top-[12px] left-[10px]">
+                  <AgentBadge entry={e} size="secondary" />
+                </span>
+              )}
+            </Section>
+          ))}
         </Section>
       )}
       {entries.length > 0 && (
