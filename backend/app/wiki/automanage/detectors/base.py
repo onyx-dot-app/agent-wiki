@@ -64,9 +64,7 @@ class ProposalDraft(BaseModel):
     runner attaches base SHAs, the audience fingerprint, run id, and TTL.
 
     Arity mirrors ``ProposalOp`` (``delete_empty_folder`` has no target;
-    merge/split carry ``proposed_bodies``). ``dedupe_key`` lets the runner's
-    do-not-re-propose guard match this draft against rejected history without
-    re-deriving the op's identity.
+    merge/split carry ``proposed_bodies``).
 
     ``auto_approvable`` is the detector's own consent to skip the human queue:
     the runner auto-applies a draft only when the scope allows AI management
@@ -90,12 +88,6 @@ class ProposalDraft(BaseModel):
     # template body's blob); None for structural detectors, whose ask
     # doesn't change when content does. See ``automanage/dedup.py``.
     premise: str | None = None
-
-    @property
-    def dedupe_key(self) -> str:
-        """Stable identity for the guardrail set — op + sorted path-set."""
-        paths = ",".join(sorted(self.source_paths + self.target_paths))
-        return f"{self.op.value}:{paths}"
 
 
 @runtime_checkable

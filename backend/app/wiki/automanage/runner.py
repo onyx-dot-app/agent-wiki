@@ -9,8 +9,9 @@ everything stateful lives here so it's inherited uniformly.
 Emit-only: this never mutates the wiki. Execution happens later, on approval.
 
 Guardrails applied to every draft:
-- **Do-not-re-propose** — drop a draft whose op+path-set already has a pending,
-  approved, applied, or human-rejected proposal (`change_proposals.taken_dedupe_keys`).
+- **Do-not-re-propose** — the dedup component (`automanage/dedup.py`) matches
+  every draft against the ledger by finding identity: live rows carry, rejected
+  rows suppress forever, stale/expired rows revive in place.
 - **Forbidden scopes** — drop a draft touching any path whose effective
   ``ai_management_allowed`` is explicitly ``False`` (the do-not-manage marker).
 - **Per-run cap** — stop emitting past ``MAX_PROPOSALS_PER_RUN`` and log the
@@ -29,16 +30,20 @@ from typing import Any
 
 from app.auth.users import AI_USER_ID
 from app.wiki import git, update_policy
-from app.wiki.automanage import executor, fingerprint, review, runs, settings
+from app.wiki.automanage import dedup, executor, fingerprint, review, runs, settings
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
     ProposalCreatedVia,
-    ProposalStatus,
-    taken_dedupe_keys,
 )
 from app.wiki.change_proposals import (
     create as create_proposal,
+)
+from app.wiki.change_proposals import (
+    get as get_proposal,
+)
+from app.wiki.change_proposals import (
+    revive as change_proposals_revive,
 )
 
 log = logging.getLogger(__name__)
@@ -47,15 +52,6 @@ log = logging.getLogger(__name__)
 # can't flood the pending-cleanups queue. Excess is logged, not silently
 # dropped.
 MAX_PROPOSALS_PER_RUN = 50
-
-# Statuses that block re-proposing the same op+path-set. expired/stale are
-# omitted so a timed-out or drifted proposal can recur.
-_BLOCKING_STATUSES = (
-    ProposalStatus.PENDING,
-    ProposalStatus.APPROVED,
-    ProposalStatus.APPLIED,
-    ProposalStatus.REJECTED,
-)
 
 _CREATED_VIA = {
     TriggerKind.SWEEP: ProposalCreatedVia.SWEEP,
@@ -152,7 +148,7 @@ def run_detection(
         )
     try:
         scope = Scope(trigger=trigger, paths=tuple(paths), run_id=run_id)
-        taken = taken_dedupe_keys(_BLOCKING_STATUSES)
+        deduper = dedup.Deduper(paths)
         emitted = 0
         capped = False
         # Pairing detectors compare pages against each other; feeding them one
@@ -187,13 +183,22 @@ def run_detection(
                         run_id,
                         detector.name,
                         draft.op.value,
-                        draft.dedupe_key,
+                        draft.summary,
                     )
-                    continue
-                if draft.dedupe_key in taken:
                     continue
                 if any(mgmt.get(p) is False for p in draft_paths):
                     continue  # explicitly hands-off scope
+                # Dedup is pure identity: a new premise on recently
+                # rejected pages CREATEs immediately by design. The
+                # post-rejection cooldown is a *selection*-step concern
+                # (persisted but unselectable — see the Dedup design page)
+                # and lands with the reconciliation work, not here.
+                decision = deduper.decide(detector.name, draft)
+                if decision.action not in (
+                    dedup.DedupAction.CREATE,
+                    dedup.DedupAction.REVIVE,
+                ):
+                    continue  # carried, or rejected-forever
                 if emitted >= MAX_PROPOSALS_PER_RUN:
                     log.warning(
                         "detection run %s hit per-run cap (%d); "
@@ -206,25 +211,62 @@ def run_detection(
                 base_shas = _base_shas(draft.source_paths, draft.target_paths)
                 if base_shas is None:
                     continue
-                proposal = create_proposal(
-                    op=draft.op,
-                    source_paths=draft.source_paths,
-                    target_paths=draft.target_paths,
-                    base_shas=base_shas,
-                    summary=draft.summary,
-                    created_via=created_via,
-                    detector=detector.name,
-                    instruction=draft.instruction,
-                    proposed_bodies=draft.proposed_bodies,
-                    run_id=run_id,
-                    # Audience snapshot at emit time — staleness re-checks can
-                    # notice a permission change (e.g. group-membership drift)
-                    # between proposal and execution.
-                    acl_fingerprint_before=fingerprint.combined_fingerprint(
-                        draft_paths
-                    ),
-                )
-                taken.add(draft.dedupe_key)
+                # Audience snapshot at emit time — staleness re-checks can
+                # notice a permission change (e.g. group-membership drift)
+                # between proposal and execution.
+                acl_fp = fingerprint.combined_fingerprint(draft_paths)
+                resolution = deduper.resolution(draft)
+                if decision.action is dedup.DedupAction.REVIVE:
+                    if decision.existing_id is None:
+                        # Unreachable: DedupDecision enforces this at
+                        # construction. Skip loudly rather than crash a run.
+                        log.error(
+                            "detection run %s: REVIVE decision without a row "
+                            "(%s) — skipped",
+                            run_id,
+                            decision.dedup_key,
+                        )
+                        continue
+                    if not change_proposals_revive(
+                        decision.existing_id,
+                        source_paths=draft.source_paths,
+                        target_paths=draft.target_paths,
+                        base_shas=base_shas,
+                        summary=draft.summary,
+                        instruction=draft.instruction,
+                        proposed_bodies=draft.proposed_bodies,
+                        run_id=run_id,
+                        acl_fingerprint_before=acl_fp,
+                        doc_ids=resolution,
+                    ):
+                        # A race moved the row out of stale/expired since the
+                        # decision — whatever won represents the finding now.
+                        continue
+                    proposal = get_proposal(decision.existing_id)
+                    if proposal is None:
+                        continue
+                    log.info(
+                        "detection run %s: revived proposal %s (%s)",
+                        run_id,
+                        decision.existing_id,
+                        decision.dedup_key,
+                    )
+                else:
+                    proposal = create_proposal(
+                        op=draft.op,
+                        source_paths=draft.source_paths,
+                        target_paths=draft.target_paths,
+                        base_shas=base_shas,
+                        summary=draft.summary,
+                        created_via=created_via,
+                        detector=detector.name,
+                        instruction=draft.instruction,
+                        proposed_bodies=draft.proposed_bodies,
+                        run_id=run_id,
+                        acl_fingerprint_before=acl_fp,
+                        dedup_key=decision.dedup_key,
+                        doc_ids=resolution,
+                    )
                 emitted += 1
                 # Whole operation inside an AI-managed scope → auto-apply as the
                 # AI system user (no human queue). Otherwise it waits for a
@@ -247,7 +289,7 @@ def run_detection(
                             "proposal %s (%s); left pending",
                             run_id,
                             proposal["id"],
-                            draft.dedupe_key,
+                            decision.dedup_key,
                         )
         runs.mark_completed(
             run_id, paths_scanned=len(paths), proposals_emitted=emitted
