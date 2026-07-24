@@ -265,7 +265,6 @@ def run_detection(
                         run_id=run_id,
                         acl_fingerprint_before=acl_fp,
                         dedup_key=decision.dedup_key,
-                        cooldown_key=decision.cooldown_key,
                         doc_ids=resolution,
                     )
                 taken.add(draft.legacy_dedupe_key)

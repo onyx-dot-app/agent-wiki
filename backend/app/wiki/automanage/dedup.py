@@ -6,9 +6,9 @@ already asked this?* Its unit is the **finding**, identified by
     dedup_key = (detector, op, the touched pages by stable doc id,
                    the detector's premise)
 
-and its content-free prefix, the **subject**
-
-    cooldown_key = (detector, op, the touched pages by stable doc id)
+and its content-free prefix (everything before the premise) is the
+**cooldown scope** — not stored separately; the cooldown query is a prefix
+match on ``dedup_key``.
 
 Doc ids (not paths) make identity rename/move-proof; paths that don't exist
 yet — a rename's reserved destination — fall back to a case-folded path term
@@ -88,7 +88,6 @@ class DedupDecision(BaseModel):
 
     action: DedupAction
     dedup_key: str
-    cooldown_key: str
     # The row that decided a REVIVE / SKIP_* outcome, when one exists.
     existing_id: int | None = None
 
@@ -134,18 +133,18 @@ class Deduper:
             if self._exists(p)
         }
 
-    def cooldown_key(self, detector: str, draft: ProposalDraft) -> str:
+    def _cooldown_prefix(self, detector: str, draft: ProposalDraft) -> str:
         terms = sorted(
             {self._id_term(p) for p in draft.source_paths + draft.target_paths}
         )
-        return f"{detector}|{draft.op.value}|{','.join(terms)}"
+        return f"{detector}|{draft.op.value}|{','.join(terms)}|"
 
     def dedup_key(self, detector: str, draft: ProposalDraft) -> str:
-        return f"{self.cooldown_key(detector, draft)}|{draft.premise or ''}"
+        return f"{self._cooldown_prefix(detector, draft)}{draft.premise or ''}"
 
     def decide(self, detector: str, draft: ProposalDraft) -> DedupDecision:
-        subject = self.cooldown_key(detector, draft)
-        finding = f"{subject}|{draft.premise or ''}"
+        prefix = self._cooldown_prefix(detector, draft)
+        finding = f"{prefix}{draft.premise or ''}"
 
         row = change_proposals.latest_by_dedup_key(finding)
         if row is not None:
@@ -167,13 +166,12 @@ class Deduper:
             return DedupDecision(
                 action=action,
                 dedup_key=finding,
-                cooldown_key=subject,
                 existing_id=row["id"],
             )
 
         # New premise on a subject a human recently declined: stay quiet for
         # the cooldown window, then ask normally.
-        rejected = change_proposals.latest_rejection_for_cooldown_key(subject)
+        rejected = change_proposals.latest_rejection_with_dedup_prefix(prefix)
         if rejected is not None:
             rejected_id, rejected_at = rejected
             try:
@@ -186,10 +184,7 @@ class Deduper:
                 return DedupDecision(
                     action=DedupAction.SKIP_COOLDOWN,
                     dedup_key=finding,
-                    cooldown_key=subject,
                     existing_id=rejected_id,
                 )
 
-        return DedupDecision(
-            action=DedupAction.CREATE, dedup_key=finding, cooldown_key=subject
-        )
+        return DedupDecision(action=DedupAction.CREATE, dedup_key=finding)

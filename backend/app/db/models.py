@@ -1375,13 +1375,12 @@ class ChangeProposal(Base):
     # one row for life; cooldown_key is its content-free prefix, the unit the
     # post-rejection cooldown quiets. Null on rows predating the columns.
     dedup_key: Mapped[str | None] = mapped_column(Text)
-    cooldown_key: Mapped[str | None] = mapped_column(Text)
-    # How many times this finding has been emitted (1 on create, +1 per
-    # revival) and when last. Revival otherwise erases its own history —
-    # "keeps coming back" is a signal reviewers and detector-precision
-    # stats need, and it isn't reconstructable after the fact.
-    emit_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1")
+    # How many times this finding has come back (0 on create, +1 per
+    # revival) and when it was last emitted. Revival otherwise erases its
+    # own history — "keeps coming back" is a signal reviewers and
+    # detector-precision stats need, and it isn't reconstructable later.
+    revive_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
     )
     last_emitted_at: Mapped[str | None] = mapped_column(Text)
     # Human-facing one-liner for the queue card ("why this proposal").
@@ -1435,7 +1434,6 @@ class ChangeProposal(Base):
         ),
         Index("idx_change_proposals_status", "status", "created_at"),
         Index("idx_change_proposals_dedup_key", "dedup_key"),
-        Index("idx_change_proposals_cooldown_key", "cooldown_key"),
     )
 
 

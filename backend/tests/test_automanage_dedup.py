@@ -57,7 +57,6 @@ def _persist(decision: dedup.DedupDecision, draft: ProposalDraft) -> int:
         created_via=ProposalCreatedVia.SWEEP,
         detector="body_dup",
         dedup_key=decision.dedup_key,
-        cooldown_key=decision.cooldown_key,
     )["id"]
 
 
@@ -192,7 +191,7 @@ def test_staled_proposal_revives_with_its_id(sweep_repo):
     assert revived["status"] == ProposalStatus.PENDING.value
     assert revived["status_reason"] is None
     assert revived["run_id"] == second["run_id"]  # anchors refreshed
-    assert revived["emit_count"] == 2  # revival history is recorded
+    assert revived["revive_count"] == 1  # revival history is recorded
     assert revived["last_emitted_at"] is not None
     # Same row, same identity — no sibling row was minted.
     assert len(list_by_status(ProposalStatus.PENDING)) == 1

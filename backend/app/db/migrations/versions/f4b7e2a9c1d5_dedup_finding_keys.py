@@ -1,4 +1,4 @@
-"""dedup_key + cooldown_key + doc_ids on change_proposals — dedup identity.
+"""dedup_key + doc_ids (+ emit history) on change_proposals — dedup identity.
 
 Revision ID: f4b7e2a9c1d5
 Revises: d5e8a1c4f7b2
@@ -36,32 +36,24 @@ def upgrade() -> None:
             "change_proposals",
             sa.Column("doc_ids", postgresql.JSONB(astext_type=sa.Text())),
         )
-    if not _has_column("change_proposals", "emit_count"):
+    if not _has_column("change_proposals", "revive_count"):
         op.add_column(
             "change_proposals",
             sa.Column(
-                "emit_count",
+                "revive_count",
                 sa.Integer(),
                 nullable=False,
-                server_default=sa.text("1"),
+                server_default=sa.text("0"),
             ),
         )
     if not _has_column("change_proposals", "last_emitted_at"):
         op.add_column(
             "change_proposals", sa.Column("last_emitted_at", sa.Text())
         )
-    if not _has_column("change_proposals", "cooldown_key"):
-        op.add_column("change_proposals", sa.Column("cooldown_key", sa.Text()))
     op.create_index(
         "idx_change_proposals_dedup_key",
         "change_proposals",
         ["dedup_key"],
-        if_not_exists=True,
-    )
-    op.create_index(
-        "idx_change_proposals_cooldown_key",
-        "change_proposals",
-        ["cooldown_key"],
         if_not_exists=True,
     )
 
@@ -72,13 +64,7 @@ def downgrade() -> None:
         table_name="change_proposals",
         if_exists=True,
     )
-    op.drop_index(
-        "idx_change_proposals_cooldown_key",
-        table_name="change_proposals",
-        if_exists=True,
-    )
-    op.drop_column("change_proposals", "cooldown_key")
     op.drop_column("change_proposals", "dedup_key")
     op.drop_column("change_proposals", "doc_ids")
-    op.drop_column("change_proposals", "emit_count")
+    op.drop_column("change_proposals", "revive_count")
     op.drop_column("change_proposals", "last_emitted_at")

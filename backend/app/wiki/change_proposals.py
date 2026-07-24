@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.db.models import ChangeProposal
 from app.db.session import execute_dml, session
@@ -83,10 +83,9 @@ def _to_dict(row: ChangeProposal) -> dict[str, Any]:
         "acting_user_id": row.acting_user_id,
         "reviewed_by_user_id": row.reviewed_by_user_id,
         "doc_ids": row.doc_ids,
-        "emit_count": row.emit_count,
+        "revive_count": row.revive_count,
         "last_emitted_at": row.last_emitted_at,
         "dedup_key": row.dedup_key,
-        "cooldown_key": row.cooldown_key,
         "status_reason": row.status_reason,
         "applied_sha": row.applied_sha,
         "created_at": row.created_at,
@@ -112,7 +111,6 @@ def create(
     acl_fingerprint_after: str | None = None,
     expires_at: str | None = None,
     dedup_key: str | None = None,
-    cooldown_key: str | None = None,
     doc_ids: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Insert a ``pending`` proposal and return it.
@@ -151,7 +149,6 @@ def create(
             acl_fingerprint_before=acl_fingerprint_before,
             acl_fingerprint_after=acl_fingerprint_after,
             dedup_key=dedup_key,
-            cooldown_key=cooldown_key,
             doc_ids=doc_ids,
             last_emitted_at=now,
             created_at=now,
@@ -213,14 +210,17 @@ def latest_by_dedup_key(dedup_key: str) -> dict[str, Any] | None:
         return _to_dict(row) if row is not None else None
 
 
-def latest_rejection_for_cooldown_key(cooldown_key: str) -> tuple[int, str] | None:
-    """``(id, updated_at)`` of the most recent *rejected* row on
-    ``cooldown_key`` — what the post-rejection cooldown is measured from."""
+def latest_rejection_with_dedup_prefix(prefix: str) -> tuple[int, str] | None:
+    """``(id, updated_at)`` of the most recent *rejected* row whose
+    ``dedup_key`` starts with ``prefix`` — the cooldown scope is the key's
+    content-free prefix (everything before the premise), so no separate
+    column is stored. ``starts_with`` is exact byte-prefix semantics —
+    immune to LIKE-metacharacter issues in path fallback terms."""
     with session() as s:
         row = s.execute(
             select(ChangeProposal.id, ChangeProposal.updated_at)
             .where(
-                ChangeProposal.cooldown_key == cooldown_key,
+                func.starts_with(ChangeProposal.dedup_key, prefix),
                 ChangeProposal.status == ProposalStatus.REJECTED.value,
             )
             .order_by(ChangeProposal.updated_at.desc(), ChangeProposal.id.desc())
@@ -268,7 +268,7 @@ def revive(
                 acl_fingerprint_before=acl_fingerprint_before,
                 expires_at=expires_at,
                 doc_ids=doc_ids,
-                emit_count=ChangeProposal.emit_count + 1,
+                revive_count=ChangeProposal.revive_count + 1,
                 last_emitted_at=now,
                 updated_at=now,
             ),
