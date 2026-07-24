@@ -12,6 +12,7 @@ from app.wiki.automanage.detectors import (
     case_collision,
     empty_folder,
     folder_chain,
+    stub_page,
     template_echo,
 )
 from app.wiki.automanage.detectors.base import (
@@ -27,6 +28,7 @@ DETECTORS: list[Detector] = [
     template_echo.DETECTOR,
     case_collision.DETECTOR,
     folder_chain.DETECTOR,
+    stub_page.DETECTOR,
 ]
 
 # Validation dispatch: a proposal records which detector authored it, and the
