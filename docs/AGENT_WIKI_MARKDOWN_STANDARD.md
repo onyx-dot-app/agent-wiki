@@ -11,8 +11,8 @@ this document are to be interpreted as in RFC 2119.
 
 | Standard | Reference | Adherence |
 |---|---|---|
-| CommonMark | [spec.commonmark.org](https://spec.commonmark.org), latest release | Full. Every construct defined by the CommonMark spec MUST be supported. |
-| GitHub Flavored Markdown (GFM) | [github.github.com/gfm](https://github.github.com/gfm) | Full. GFM extends CommonMark with exactly five constructs; all five are adopted below. |
+| CommonMark | [spec.commonmark.org](https://spec.commonmark.org), latest release | Full, with one deliberate exception — §5. |
+| GitHub Flavored Markdown (GFM) | [github.github.com/gfm](https://github.github.com/gfm) | GFM extends CommonMark with five constructs; four are adopted below, the fifth is superseded by §5. |
 | Agent Wiki Extensions | This document, §4 | Deliberate, non-standard additions adopted where CommonMark and GFM both fall short of a high-value editor feature. |
 
 No other markdown dialect, flavor, or informal convention is in scope.
@@ -35,7 +35,7 @@ The following CM constructs MUST be supported:
 12. Reference-style links (including link reference definitions)
 13. Autolinks (angle-bracket form, e.g. `<https://example.com>`)
 14. Hard line breaks (trailing double-space or backslash)
-15. Raw HTML passthrough (block and inline)
+15. Images (`![alt](src)`)
 
 ## 3. GFM — Adopted Extensions
 
@@ -45,10 +45,10 @@ The following GFM constructs MUST be supported:
 2. Strikethrough (`~~text~~`)
 3. Task list items (`- [ ]` / `- [x]`)
 4. Extended autolinks (bare URLs and email addresses, no delimiters required)
-5. Disallowed Raw HTML ("tagfilter") — `script`, `style`, `xmp`, `iframe`,
-   `noembed`, `noframes`, `title`, `textarea`, and `plaintext` tags MUST be
-   escaped rather than passed through raw (§2 item 15), regardless of
-   CommonMark's general raw-HTML-passthrough rule.
+
+GFM's fifth construct, Disallowed Raw HTML ("tagfilter"), modifies raw-HTML-
+passthrough behavior. It is not adopted as such — §5 excludes raw HTML
+passthrough entirely, which supersedes it.
 
 ## 4. Agent Wiki Extensions (Beyond CommonMark and GFM)
 
@@ -60,10 +60,12 @@ referenced standards:
    no separate support — CommonMark text content is Unicode, so a literal
    emoji character is already ordinary text.
 
-## 5. Deferred
+## 5. Explicitly Excluded
 
-1. Images (`![alt](src)`). Support is deferred, not rejected. Resolution
-   requires distinguishing external image links from internally-stored
-   wiki image links, the latter of which is unresolved pending design work
-   with Nik. Until resolved, image syntax MAY parse but MUST NOT be assumed
-   reliable, and MUST NOT be advertised as supported.
+The following constructs MUST NOT be supported:
+
+1. Raw HTML passthrough (block and inline). Any literal `<...>` sequence in
+   source text MUST be treated as ordinary text — MUST NOT be parsed as an
+   HTML tag, and MUST NOT be rendered as a live element. This is a
+   deliberate divergence from CommonMark, which mandates raw HTML
+   passthrough.
