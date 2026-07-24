@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
+import threading
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -393,5 +394,23 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     finally:
         if conn is not None:
             coedit_channel.disconnect(conn.id)
-        await asyncio.to_thread(_disconnect_sync, sess.id, user.id)
+        # The disconnect handler IS the leave signal (no client message), so
+        # it must survive this task being *cancelled* — server shutdown, or
+        # the test portal tearing down the connection. Inside a cancelled
+        # task every `await` re-raises CancelledError instead of completing,
+        # which silently drops the leave: a phantom participant forever, and
+        # a dirty buffer that never gets its last-leave checkpoint. Detect
+        # the in-flight cancellation up front and hand the leave to a plain
+        # thread no cancellation can touch; the normal disconnect path keeps
+        # awaiting so the leave is recorded before the handler returns.
+        task = asyncio.current_task()
+        if task is not None and task.cancelling():
+            threading.Thread(
+                target=_disconnect_sync,
+                args=(sess.id, user.id),
+                name=f"coedit-leave-{sess.id}",
+                daemon=False,
+            ).start()
+        else:
+            await asyncio.to_thread(_disconnect_sync, sess.id, user.id)
         log.info("coedit ws closed session=%s user=%s", sess.id, user.id)
