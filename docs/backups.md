@@ -74,6 +74,16 @@ To take a one-off backup outside the schedule:
 kubectl create job --from=cronjob/<release>-agent-workspace-backup manual-backup-1
 ```
 
+## Images in backups
+
+Wiki images live in Postgres in the `images` table. They are already captured
+by the `pg_dump` half of the backup pair, so there is no separate image backup
+step.
+
+Dump size grows with the total stored image bytes. PNG, JPEG, GIF, and
+WebP data is already compressed, so the dump does not shrink much further.
+Size the backup CronJob's ephemeral storage with image volume in mind.
+
 ## Restore
 
 Restore both halves **from the same timestamp group** (one that contains

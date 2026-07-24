@@ -138,6 +138,32 @@ ingest_queue_depth = Gauge(
     "Current number of pending tasks in the documents queue",
 )
 
+# --------------------------------------------------------------------------- #
+# Wiki images                                                                 #
+# --------------------------------------------------------------------------- #
+
+wiki_images_total = Gauge(
+    "wiki_images_total",
+    "Wiki image blobs currently stored",
+)
+
+wiki_images_bytes_total = Gauge(
+    "wiki_images_bytes_total",
+    "Total bytes of stored wiki image blobs",
+)
+
+wiki_image_sweep_deleted_total = Counter(
+    "wiki_image_sweep_deleted_total",
+    "Wiki image blobs deleted by the retention sweep",
+)
+
+wiki_image_upload_rejected_total = Counter(
+    "wiki_image_upload_rejected_total",
+    "Wiki image uploads rejected before storage",
+    ["reason"],
+)
+
+
 class _WikiPagesCollector:
     def collect(self):
         count = fts.count_documents() or 0

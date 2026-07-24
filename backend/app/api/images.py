@@ -7,6 +7,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.auth import User, require_can
 from app.auth.deps import require_user, require_user_or_bearer
+from app.metrics import wiki_image_upload_rejected_total
 from app.models.images import UploadImageResponse
 from app.wiki import doc_ids, filesystem, image_store
 from app.wiki import git as wiki_git
@@ -39,6 +40,7 @@ async def upload_image(
     buf = bytearray()
     async for chunk in request.stream():
         if len(buf) + len(chunk) > _UPLOAD_CAP_BYTES:
+            wiki_image_upload_rejected_total.labels(reason="too_large").inc()
             raise HTTPException(status_code=413, detail="image exceeds 10 MiB limit")
         buf.extend(chunk)
     data = bytes(buf)
@@ -47,9 +49,11 @@ async def upload_image(
 
     sniffed = image_store.sniff_image_type(data)
     if sniffed is None:
+        wiki_image_upload_rejected_total.labels(reason="unsupported_type").inc()
         raise HTTPException(status_code=415, detail="unsupported image type")
     declared = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
     if declared != sniffed:
+        wiki_image_upload_rejected_total.labels(reason="content_type_mismatch").inc()
         raise HTTPException(status_code=415, detail="content-type does not match image data")
 
     # Uploading to a page that doesn't exist at HEAD would mint a live doc id
