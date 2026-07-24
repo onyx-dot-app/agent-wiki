@@ -14,7 +14,7 @@ import re
 import subprocess
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -563,6 +563,30 @@ def list_paths(prefix: str = "") -> list[str]:
     """List tracked files under a path prefix (excluding the hidden ``.trash/``)."""
     out = _run(["ls-files", "-z", prefix or "."]).stdout
     return [p for p in out.split("\0") if p and not p.startswith(TRASH_PREFIX)]
+
+
+def grep_working_tree_fixed(needles: Iterable[str]) -> set[str]:
+    """Fixed-string search over the working tree, INCLUDING ``.trash/``.
+
+    Unlike ``list_paths`` (which filters ``TRASH_PREFIX``), git grep applies no
+    ``.trash/`` exclusion, so a reference inside a trashed page still counts.
+    Only the image sweep should rely on that bypass.
+    """
+    wanted = {needle for needle in needles if needle}
+    if not wanted:
+        return set()
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=True) as f:
+        f.write("\n".join(wanted))
+        f.flush()
+        res = _run(
+            ["grep", "--no-color", "-I", "-F", "-f", f.name, "-o", "-h"],
+            check=False,
+        )
+    if res.returncode == 1:
+        return set()
+    if res.returncode != 0:
+        raise RuntimeError(f"git grep failed (exit {res.returncode}): {res.stderr.strip()!r}")
+    return {line for line in res.stdout.splitlines() if line} & wanted
 
 
 def bundle(dest_path: str) -> None:

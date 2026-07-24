@@ -7,7 +7,7 @@ import uuid
 
 from pydantic import BaseModel
 from sqlalchemy import delete as sqla_delete
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import defer
 
 from app.db.models import Image
@@ -26,6 +26,12 @@ class StoredImage(BaseModel):
 
 class StoredImageData(StoredImage):
     data: bytes
+
+
+class ImageSweepRow(BaseModel):
+    id: str
+    created_at: str
+    unreferenced_since: str | None
 
 
 def sniff_image_type(data: bytes) -> str | None:
@@ -96,6 +102,39 @@ def get(image_id: str) -> StoredImageData | None:
     with session() as s:
         row = s.get(Image, image_id)
         return _to_stored_image_data(row) if row is not None else None
+
+
+def list_for_sweep() -> list[ImageSweepRow]:
+    with session() as s:
+        rows = s.execute(
+            select(Image.id, Image.created_at, Image.unreferenced_since)
+        ).all()
+        return [
+            ImageSweepRow(
+                id=image_id,
+                created_at=created_at,
+                unreferenced_since=unreferenced_since,
+            )
+            for image_id, created_at, unreferenced_since in rows
+        ]
+
+
+def set_unreferenced_since(image_id: str, value: str | None) -> None:
+    with session() as s:
+        s.execute(
+            update(Image)
+            .where(Image.id == image_id)
+            .values(unreferenced_since=value)
+            .execution_options(synchronize_session=False)
+        )
+
+
+def totals() -> tuple[int, int]:
+    with session() as s:
+        count, total_bytes = s.execute(
+            select(func.count(), func.coalesce(func.sum(Image.size_bytes), 0))
+        ).one()
+        return int(count), int(total_bytes)
 
 
 def delete(image_id: str) -> bool:

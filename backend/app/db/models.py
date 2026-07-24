@@ -1339,6 +1339,7 @@ class Image(Base):
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
+    unreferenced_since: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (Index("idx_images_anchor_doc_id", "anchor_doc_id"),)
 

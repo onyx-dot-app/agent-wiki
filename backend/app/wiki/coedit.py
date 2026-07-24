@@ -169,6 +169,18 @@ def blocking_active_session_path(dest: str) -> str | None:
         )
 
 
+def active_buffer_texts() -> list[str]:
+    """Editing-buffer text of every active co-edit session (uncommitted drafts)."""
+    with session() as s:
+        return list(
+            s.scalars(
+                select(CoeditSession.buffer_text).where(
+                    CoeditSession.status == SessionStatus.ACTIVE.value
+                )
+            )
+        )
+
+
 def get_session(session_id: int) -> SessionRow | None:
     """Look up a session by id, regardless of status (active or closed)."""
     with session() as s:
