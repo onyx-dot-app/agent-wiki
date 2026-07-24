@@ -195,29 +195,66 @@ def list_for_run(run_id: str) -> list[dict[str, Any]]:
         return [_to_dict(r) for r in rows]
 
 
-def taken_dedupe_keys(statuses: tuple[ProposalStatus, ...]) -> set[str]:
-    """Dedupe keys (``op`` + sorted source+target path-set) of every proposal
-    currently in one of ``statuses`` — the detection runner's do-not-re-propose
-    set. Pass ``(pending, approved, applied, rejected)`` to avoid re-emitting an
-    in-flight, already-applied, or human-rejected change; ``expired``/``stale``
-    are intentionally omitted so a timed-out or drifted proposal can recur.
-
-    Key format matches ``ProposalDraft.dedupe_key`` in the detector seam."""
+def get_by_dedup_key(dedup_key: str) -> dict[str, Any] | None:
+    """The proposal row representing this finding, or None. At most one
+    exists — one finding = one row is a partial unique index, not a
+    convention (see ``automanage/dedup.py``)."""
     with session() as s:
-        # Project only the three columns the key needs — full rows would
-        # deserialize proposed_bodies / base_shas we immediately discard.
-        rows = s.execute(
-            select(
-                ChangeProposal.op,
-                ChangeProposal.source_paths,
-                ChangeProposal.target_paths,
-            ).where(ChangeProposal.status.in_([st.value for st in statuses]))
-        ).all()
-        keys: set[str] = set()
-        for op, source_paths, target_paths in rows:
-            paths = ",".join(sorted(list(source_paths) + list(target_paths)))
-            keys.add(f"{op}:{paths}")
-        return keys
+        row = s.scalars(
+            select(ChangeProposal).where(ChangeProposal.dedup_key == dedup_key)
+        ).one_or_none()
+        return _to_dict(row) if row is not None else None
+
+
+def revive(
+    proposal_id: int,
+    *,
+    source_paths: list[str],
+    target_paths: list[str],
+    base_shas: dict[str, str],
+    summary: str,
+    run_id: str | None,
+    acl_fingerprint_before: str | None,
+    instruction: str | None = None,
+    proposed_bodies: dict[str, str] | None = None,
+    expires_at: str | None = None,
+    doc_ids: dict[str, str] | None = None,
+) -> bool:
+    """``stale | expired → pending`` — the same finding was re-detected, so
+    its row returns to the queue with refreshed anchors instead of a sibling
+    row being minted (one finding = one row for life; notification and
+    impression history ride the id). A stale-from-approved row revives to
+    *pending*, not approved — the world drifted since that consent."""
+    now = _now()
+    with session() as s:
+        touched = execute_dml(
+            s,
+            update(ChangeProposal)
+            .where(
+                ChangeProposal.id == proposal_id,
+                ChangeProposal.status.in_(
+                    [ProposalStatus.STALE.value, ProposalStatus.EXPIRED.value]
+                ),
+            )
+            .values(
+                status=ProposalStatus.PENDING.value,
+                status_reason=None,
+                source_paths=source_paths,
+                target_paths=target_paths,
+                base_shas=base_shas,
+                summary=summary,
+                instruction=instruction,
+                proposed_bodies=proposed_bodies,
+                run_id=run_id,
+                acl_fingerprint_before=acl_fingerprint_before,
+                expires_at=expires_at,
+                doc_ids=doc_ids,
+                revive_count=ChangeProposal.revive_count + 1,
+                last_emitted_at=now,
+                updated_at=now,
+            ),
+        )
+    return touched > 0
 
 
 def _transition(

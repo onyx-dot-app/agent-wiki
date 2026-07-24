@@ -1433,7 +1433,16 @@ class ChangeProposal(Base):
             name="change_proposals_created_via_check",
         ),
         Index("idx_change_proposals_status", "status", "created_at"),
-        Index("idx_change_proposals_dedup_key", "dedup_key"),
+        # One finding = one row, structurally: revival reuses the row and
+        # rejection suppresses, so a second row with the same key is always
+        # a bug (or a future concurrent-trigger race, which should fail
+        # loudly here rather than silently fork the finding's history).
+        Index(
+            "ux_change_proposals_dedup_key",
+            "dedup_key",
+            unique=True,
+            postgresql_where=text("dedup_key IS NOT NULL"),
+        ),
     )
 
 
