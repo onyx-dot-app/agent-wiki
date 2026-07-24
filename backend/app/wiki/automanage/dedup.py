@@ -123,11 +123,13 @@ class Deduper:
         return f"path:{path.casefold()}"
 
     def resolution(self, draft: ProposalDraft) -> dict[str, str]:
-        """``{path: doc id}`` for the draft's existing paths — the same
+        """``{doc id: path}`` for the draft's existing paths — the same
         emit-time snapshot the keys embed, in queryable form (stored on the
-        row as ``doc_ids``). Reserved not-yet-existing names are absent."""
+        row as ``doc_ids``). Keyed by the id — the stable term — with the
+        emit-time path as its label; reserved not-yet-existing names are
+        absent."""
         return {
-            p: doc_ids.get_or_mint(p)
+            doc_ids.get_or_mint(p): p
             for p in dict.fromkeys(draft.source_paths + draft.target_paths)
             if self._exists(p)
         }

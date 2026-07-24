@@ -168,8 +168,9 @@ def test_second_sweep_carries_instead_of_duplicating(sweep_repo):
     from app.wiki.change_proposals import ProposalStatus, list_by_status
 
     (row,) = list_by_status(ProposalStatus.PENDING)
-    # The identity snapshot is first-class: {path: doc id} at emit time.
-    assert row["doc_ids"] == {"hollow": doc_ids.get_or_mint("hollow")}
+    # The identity snapshot is first-class and id-keyed: the stable term
+    # indexes the map; the emit-time path is its label.
+    assert row["doc_ids"] == {doc_ids.get_or_mint("hollow"): "hollow"}
 
     second = runner.run_sweep(triggered_by_user_id=None)
     assert second["proposals_emitted"] == 0  # carried, not re-created

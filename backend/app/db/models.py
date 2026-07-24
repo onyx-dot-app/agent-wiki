@@ -1354,10 +1354,12 @@ class ChangeProposal(Base):
     base_shas: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    # {path: stable doc id} at emit time — base_shas's identity twin: which
-    # *documents* the proposal is about, resolved while path↔id bindings were
-    # true (paths get reused; this snapshot doesn't). Reserved names that
-    # don't exist yet (a rename target) are absent. Null on legacy rows.
+    # {stable doc id: path at emit} — base_shas's identity twin: which
+    # *documents* the proposal is about. Keyed by the id (the stable term)
+    # so nothing can index this map by a since-moved path; the path value is
+    # a label of where the document was when proposed. Id-keyed also makes
+    # "proposals about doc X" a JSONB key-existence query. Reserved names
+    # that don't exist yet (a rename target) are absent. Null on legacy rows.
     doc_ids: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Hash of the effective read/write audience before/after (audience-change
     # detection). Null until the ACL fingerprinting lands.
