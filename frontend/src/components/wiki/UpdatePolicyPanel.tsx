@@ -34,6 +34,7 @@ import {
 } from "@/lib/updatePolicy";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
 import type { UpdateHealth } from "@/lib/wiki/types";
+import { updateWarnLevel } from "@/lib/wiki/utils";
 import { absoluteTime } from "@/lib/time";
 
 interface Props {
@@ -219,13 +220,9 @@ export function UpdatePolicyPanel({
   }
 
   // Health state drives the history card's chrome (mock 1790:52516/52531).
-  const overCap =
-    !!health && health.cap_24h > 0 && health.count_24h >= health.cap_24h;
-  const nearCap =
-    !!health &&
-    !overCap &&
-    health.count_24h > 0 &&
-    health.count_24h >= health.threshold_24h;
+  const warnLevel = updateWarnLevel(health);
+  const overCap = warnLevel === "over";
+  const nearCap = warnLevel === "near";
   const historyCardChrome = overCap
     ? "border-(--status-warning-02) bg-(--status-warning-00)"
     : nearCap

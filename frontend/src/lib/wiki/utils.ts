@@ -1,4 +1,20 @@
-import type { CommitAgent, CommitAuthor } from "@/lib/wiki/types";
+import type { CommitAgent, CommitAuthor, UpdateHealth } from "@/lib/wiki/types";
+
+export type UpdateWarnLevel = "over" | "near" | null;
+
+/** The page's auto-update warning level: "over" once the hard daily cap is
+ * hit, "near" once activity crosses the alert threshold. Drives both the
+ * policy panel's history-card chrome and the header Auto ring, so the two
+ * surfaces can't disagree. */
+export function updateWarnLevel(
+  health: UpdateHealth | null | undefined,
+): UpdateWarnLevel {
+  if (!health) return null;
+  if (health.cap_24h > 0 && health.count_24h >= health.cap_24h) return "over";
+  if (health.count_24h > 0 && health.count_24h >= health.threshold_24h)
+    return "near";
+  return null;
+}
 
 /** Last path segment as a display name — drops a trailing `.md`. Shared by the
  * share + transfer dialogs so the two copies don't drift. See also

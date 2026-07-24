@@ -24,10 +24,12 @@ import {
   SvgAddLines,
   SvgArrowUpRight,
   SvgExpand,
+  SvgOnyxOctagon,
   SvgSparkle,
+  SvgTextLinesSmall,
 } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
-import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
+import { SvgAnthropic, SvgOpenai } from "@onyx-ai/opal/logos";
 
 import { toast } from "@/hooks/useToast";
 import {
@@ -37,8 +39,9 @@ import {
 } from "@/lib/updatePolicy";
 import { relativeTime } from "@/lib/users";
 import { fetchFileHistory } from "@/lib/wiki/svc";
+import { useUpdateHealth } from "@/lib/wiki/hooks";
 import type { CommitInfo } from "@/lib/wiki/types";
-import { parseCommitAuthor } from "@/lib/wiki/utils";
+import { parseCommitAuthor, updateWarnLevel } from "@/lib/wiki/utils";
 import type { CoeditParticipant, CoeditPeer } from "@/lib/editor/types";
 import type { DocumentActivity } from "@/types";
 
@@ -55,12 +58,41 @@ const USER_COLORS = [
 
 const MAX_CHIPS = 5;
 
+interface AutoGlyphProps {
+  size?: number;
+}
+
+/** The Auto mark (mock 2079:379954): the octagon outline holding the blue
+ * lines glyph, composed from Opal icons since no single asset ships it. */
+function AutoGlyph({ size = 16 }: AutoGlyphProps) {
+  return (
+    <Section
+      gap={0}
+      width="fit"
+      height="fit"
+      className="relative text-(--text-05)"
+    >
+      <SvgOnyxOctagon size={size} />
+      <Section
+        gap={0}
+        width="full"
+        height="full"
+        alignItems="center"
+        justifyContent="center"
+        className="absolute inset-0 text-(--theme-blue-05)"
+      >
+        <SvgTextLinesSmall size={Math.round(size * 0.55)} />
+      </Section>
+    </Section>
+  );
+}
+
 function agentGlyph(name: string | null): IconFunctionComponent | null {
   const key = name?.trim().toLowerCase();
   if (!key) return null;
-  if (key.includes("claude")) return SvgClaude;
+  if (key.includes("claude")) return SvgAnthropic;
   if (key.includes("codex") || key.includes("openai")) return SvgOpenai;
-  if (key.includes("onyx") || key.includes("craft")) return SvgOnyxLogo;
+  if (key.includes("onyx") || key.includes("craft")) return SvgOnyxOctagon;
   return null;
 }
 
@@ -105,7 +137,7 @@ function IdentityRing({ color }: { color: string }) {
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute inset-0 rounded-full border"
+      className="pointer-events-none absolute inset-0 rounded-full border-2"
       style={{ borderColor: color }}
     />
   );
@@ -113,7 +145,7 @@ function IdentityRing({ color }: { color: string }) {
 
 function AvatarCircle({ entry, size }: AvatarCircleProps) {
   return (
-    <Section width="fit" height="fit" className="relative shrink-0">
+    <Section gap={0} width="fit" height="fit" className="relative shrink-0">
       <IconContainer size={size} avatar="user" name={entry.display} />
       <IdentityRing color={entry.color} />
     </Section>
@@ -124,7 +156,12 @@ function AgentBadge({ entry, size }: AvatarCircleProps) {
   const Glyph = agentGlyph(entry.agentName);
   if (!Glyph) return null;
   return (
-    <Section width="fit" height="fit" className="relative shrink-0">
+    <Section
+      gap={0}
+      width="fit"
+      height="fit"
+      className="relative shrink-0 text-(--text-05)"
+    >
       <IconContainer size={size} avatar="icon" icon={Glyph} />
       <IdentityRing color={entry.color} />
     </Section>
@@ -148,10 +185,14 @@ function PresenceCard({
 }: PresenceCardProps) {
   const edits = commits.slice(0, 3);
   const scrollable = entry.editing && entry.caretHead !== null;
+  // Unmapped agent names get a subtitle but no badge; gating the slot on
+  // the glyph keeps the title row from holding a blank 16px box.
+  const hasBadge = !!agentGlyph(entry.agentName);
   return (
     // Mock card chrome: ONE white surface holds the title row and the
     // Recent Edits list together (mock 2079:381324).
     <Section
+      gap={0}
       justifyContent="start"
       alignItems="stretch"
       height="fit"
@@ -172,20 +213,44 @@ function PresenceCard({
         }
       >
         <Section
+          gap={0}
           flexDirection="row"
           alignItems="center"
           width="fit"
           height="fit"
-          className="shrink-0 p-[2px]"
+          className="shrink-0 px-[2px]"
         >
-          <AvatarCircle entry={entry} size="main-ui" />
-          {entry.agentName && <AgentBadge entry={entry} size="main-ui" />}
+          {/* 16px slots hold the 20px circles, so the badge tucks over
+              the chip's corner exactly like the header stack. */}
+          <Section
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="center"
+            width={1}
+            height="fit"
+            gap={0}
+          >
+            <AvatarCircle entry={entry} size="main-ui" />
+          </Section>
+          {hasBadge && (
+            <Section
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="center"
+              width={1}
+              height="fit"
+              gap={0}
+            >
+              <AgentBadge entry={entry} size="main-ui" />
+            </Section>
+          )}
         </Section>
         <Section
-          justifyContent="start"
+          gap={0}
+          justifyContent="center"
           alignItems="stretch"
           height="fit"
-          className="min-w-0 flex-1 px-[2px]"
+          className="min-w-0 flex-1 px-1"
         >
           <Text font="main-ui-action" color="text-04" as="p" nowrap>
             {entry.display}
@@ -197,11 +262,12 @@ function PresenceCard({
           )}
         </Section>
         <Section
+          gap={0.125}
           flexDirection="row"
           alignItems="center"
           width="fit"
           height="fit"
-          className="shrink-0 gap-[2px] pt-[2px]"
+          className="shrink-0 pt-[2px]"
         >
           {/* raw-ok: no Opal Text color maps to the mock's status-text-info-05 state chip */}
           <span className="px-[2px] text-[12px] leading-4 text-(--status-text-info-05)">
@@ -216,6 +282,7 @@ function PresenceCard({
       </Section>
       {edits.length > 0 && (
         <Section
+          gap={0}
           justifyContent="start"
           alignItems="stretch"
           height="fit"
@@ -238,10 +305,10 @@ function PresenceCard({
                 variant="body"
                 rightChildren={
                   <Section
+                    gap={0.125}
                     flexDirection="row"
                     alignItems="center"
                     width="fit"
-                    className="gap-[2px]"
                   >
                     <Text font="secondary-body" color="text-03" nowrap>
                       {relativeTime(c.ts)}
@@ -303,7 +370,7 @@ function AnchoredPanel({
       onPointerEnter={hover?.onEnter}
       onPointerLeave={hover?.onLeave}
     >
-      <Section justifyContent="start" alignItems="stretch" height="fit">
+      <Section gap={0} justifyContent="start" alignItems="stretch" height="fit">
         {children}
       </Section>
     </div>,
@@ -377,7 +444,7 @@ function PolicyPopover({
       gap={0.25}
       className="rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]"
     >
-      <Section height="fit" alignItems="stretch" padding={0.5}>
+      <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
         <InputHorizontal
           icon={SvgSparkle}
           title="AI Auto-Edits"
@@ -436,7 +503,7 @@ function PolicyPopover({
         )}
       </Section>
       <Divider />
-      <Section height="fit" alignItems="stretch" padding={0.5}>
+      <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
         <InputHorizontal
           icon={SvgAddLines}
           title="Page Instructions"
@@ -587,6 +654,12 @@ export function PresenceAvatars({
 
   const hovered = entries.find((e) => e.userId === hoverId);
 
+  // The Auto ring matches the page's warning level (mock annotation
+  // "Match warning level"), sharing the policy panel's predicate: amber
+  // near the threshold, warning at the cap, the calm blue otherwise.
+  const { health } = useUpdateHealth(path);
+  const warnLevel = updateWarnLevel(health);
+
   return (
     <Section
       ref={clusterRef}
@@ -601,6 +674,7 @@ export function PresenceAvatars({
         // DOM order runs last-chip-first so paint order stacks earlier
         // chips on top (the mock), row-reverse restores the visual order.
         <Section
+          gap={0}
           flexDirection="row"
           alignItems="center"
           width="fit"
@@ -628,10 +702,11 @@ export function PresenceAvatars({
               flexDirection="row"
               alignItems="center"
               justifyContent="center"
-              width="fit"
+              width={1.25}
               height="fit"
+              gap={0}
               data-presence-chip={e.display}
-              className="relative w-5"
+              className="relative"
               onPointerEnter={() => {
                 holdOpen();
                 setHoverId(e.userId);
@@ -642,6 +717,7 @@ export function PresenceAvatars({
               <AvatarCircle entry={e} size="main-content" />
               {e.agentName && (
                 <Section
+                  gap={0}
                   width="fit"
                   height="fit"
                   className="absolute top-[12px] left-[10px]"
@@ -654,7 +730,7 @@ export function PresenceAvatars({
         </Section>
       )}
       {entries.length > 0 && (
-        <Section height="fit" width="fit" className="h-4 self-center">
+        <Section gap={0} height="fit" width="fit" className="h-4 self-center">
           <Divider
             orientation="vertical"
             paddingParallel="fit"
@@ -674,11 +750,17 @@ export function PresenceAvatars({
         }}
         onPointerLeave={closeSoon}
       >
-        <Section width="fit" height="fit" className="relative">
-          <IconContainer size="main-content" avatar="icon" icon={SvgOnyxLogo} />
+        <Section gap={0} width="fit" height="fit" className="relative">
+          <IconContainer size="main-content" avatar="icon" icon={AutoGlyph} />
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-full border border-(--theme-blue-05)"
+            className={`pointer-events-none absolute inset-0 rounded-full border ${
+              warnLevel === "over"
+                ? "border-(--status-warning-02)"
+                : warnLevel === "near"
+                  ? "border-(--theme-amber-02)"
+                  : "border-(--theme-blue-05)"
+            }`}
           />
         </Section>
       </button>
