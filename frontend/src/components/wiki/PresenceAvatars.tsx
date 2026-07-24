@@ -290,6 +290,7 @@ function PolicyPopover({
   onOpenUpdatesPanel,
 }: PolicyPopoverProps) {
   const [policy, setPolicy] = useState<EffectivePolicy | null>(null);
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     let alive = true;
     getUpdatePolicy(path)
@@ -302,6 +303,7 @@ function PolicyPopover({
 
   const allowed = !!policy?.ai_management_allowed;
   const toggle = async () => {
+    setSaving(true);
     setPolicy((p) => (p ? { ...p, ai_management_allowed: !allowed } : p));
     try {
       await patchUpdatePolicy(path, { ai_management_allowed: !allowed });
@@ -310,6 +312,8 @@ function PolicyPopover({
       toast.error(
         e instanceof Error ? e.message : "Couldn't update the page's policy",
       );
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -323,9 +327,10 @@ function PolicyPopover({
         >
           <Switch
             checked={allowed}
-            // Held until the policy loads: toggling against the null
-            // default would persist a wrong explicit override.
-            disabled={!canWrite || !policy}
+            // Held until the policy loads (toggling against the null
+            // default would persist a wrong override) and while a save is
+            // in flight (a second click would race the first PATCH).
+            disabled={!canWrite || !policy || saving}
             onCheckedChange={() => void toggle()}
           />
         </InputHorizontal>
