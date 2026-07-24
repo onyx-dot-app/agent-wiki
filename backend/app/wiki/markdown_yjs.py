@@ -596,6 +596,39 @@ def _serialize_code_block(node: XmlElement) -> str:
     return f"{fence}{language}\n{content}{fence}\n"
 
 
+# Ordered-list marker: 1-9 digits + "." or ")" + a space or end of line —
+# matches CommonMark's own marker grammar (see the list-building side,
+# `_build_list`, which reads `open_tok.attrs["start"]` rather than
+# re-deriving this pattern; this is the inverse direction, detecting the
+# pattern in already-serialized plain text).
+_ORDERED_MARKER_RE = re.compile(r"^\d{1,9}[.)](\s|$)")
+
+
+def _escape_block_start_ambiguity(text: str) -> str:
+    """A paragraph's serialized text starting with a character or pattern
+    that's only special as a *block*-start marker (heading ``#``, bullet
+    ``-``/``+``, blockquote ``>``, ordered-list ``1.``) must stay escaped,
+    or the next parse reinterprets this paragraph as a different block
+    type entirely. Unlike ``_wrap_run``'s mark-delimiter escaping (position-
+    independent — a ``*``/``_``/`` ` ``/``[``/``]`` is ambiguous anywhere in
+    the text, already handled there), these are only ambiguous at the very
+    start of the block, which is exactly the one position this function
+    runs at. ``*`` as a bullet marker doesn't need a case here — it's
+    already escaped unconditionally by ``_wrap_run`` for the emphasis
+    reason, which covers this position too as a side effect."""
+    if not text:
+        return text
+    if text[0] == "#":
+        return "\\" + text
+    if text[0] in "-+" and (len(text) == 1 or text[1].isspace()):
+        return "\\" + text
+    if text[0] == ">":
+        return "\\" + text
+    if _ORDERED_MARKER_RE.match(text):
+        return "\\" + text
+    return text
+
+
 def serialize_block(node: XmlElement) -> str:
     attrs = dict(node.attributes)
     trailing = attrs.get(_NL_ATTR) == "1"
@@ -605,14 +638,7 @@ def serialize_block(node: XmlElement) -> str:
         text = _serialize_inline_children(list(node.children))
         return "#" * level + " " + text + ("\n" if trailing else "")
     if node.tag == "paragraph":
-        text = _serialize_inline_children(list(node.children))
-        # A literal leading "#" (e.g. from escaped `\# not a heading` source
-        # text) must stay escaped on the way back out too — `_wrap_run`
-        # only escapes mark-delimiter characters, but "#" is only special
-        # as a block-start marker, which is exactly the position this text
-        # is about to occupy.
-        if text.startswith("#"):
-            text = "\\" + text
+        text = _escape_block_start_ambiguity(_serialize_inline_children(list(node.children)))
         return text + ("\n" if trailing else "")
     if node.tag in ("bulletList", "orderedList", "taskList"):
         text = _serialize_list(node)

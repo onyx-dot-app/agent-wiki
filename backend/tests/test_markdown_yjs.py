@@ -298,6 +298,40 @@ def test_escaping_does_not_corrupt_inline_code_content() -> None:
     assert reconstruct_body(doc) == body
 
 
+def test_escaped_block_start_markers_round_trip_as_literal_text() -> None:
+    # A leading "-"/"+"/">"/"1." in a paragraph's serialized text is only
+    # ambiguous as a *block*-start marker — _wrap_run's mark-delimiter
+    # escaping is position-independent and doesn't cover this ("*" is the
+    # one marker character that's already covered there, for the unrelated
+    # emphasis reason). Without _escape_block_start_ambiguity, checkpointing
+    # a touched paragraph beginning with one of these silently turns it into
+    # a real bullet/blockquote/ordered-list item on the next parse.
+    cases = [
+        "\\- not a bullet\n",
+        "\\+ not a bullet\n",
+        "\\> not a quote\n",
+        "\\* not a bullet\n",
+    ]
+    for raw in cases:
+        once = reconstruct_body(seed_doc_from_markdown(raw))
+        assert once == raw, f"expected stable round-trip for {raw!r}, got {once!r}"
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        assert twice == once
+
+
+def test_mid_text_block_marker_characters_are_left_alone() -> None:
+    # Only the block-start position is ambiguous — a dash or "1." elsewhere
+    # in a paragraph was never going to be misread as a marker, so it
+    # shouldn't gain a spurious escape.
+    cases = [
+        "A dash - mid sentence, not a marker.\n",
+        "A number 1. mid sentence, not a marker.\n",
+        "Just a dash alone: -\n",
+    ]
+    for raw in cases:
+        assert reconstruct_body(seed_doc_from_markdown(raw)) == raw
+
+
 def test_find_by_block_id() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     found = find_by_block_id(doc, "b1")
