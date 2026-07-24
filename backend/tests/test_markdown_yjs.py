@@ -234,6 +234,70 @@ def test_heading_level_preserved() -> None:
     assert reconstruct_body(doc) == "### Sub-heading\n\nBody.\n"
 
 
+def test_setext_h1_becomes_level_1_atx() -> None:
+    # Setext (underline) headings have no leading hashes at all — a
+    # hand-rolled "count leading #" parse mislevels this to 0, which then
+    # serializes with no "#" marker, silently demoting the heading to a
+    # paragraph. Canonicalizing to ATX form (not byte-identical to the
+    # setext source) is the same "correct over byte-identical" tradeoff
+    # this module already makes for lists/hard-breaks.
+    doc = seed_doc_from_markdown("Title\n=====\n\nBody.\n")
+    root = _root(doc)
+    heading = root.children[0]
+    assert heading.tag == "heading"
+    assert dict(heading.attributes)["level"] == "1"
+    assert reconstruct_body(doc) == "# Title\n\nBody.\n"
+
+
+def test_setext_h2_becomes_level_2_atx() -> None:
+    doc = seed_doc_from_markdown("Sub\n---\n\nBody.\n")
+    root = _root(doc)
+    heading = root.children[0]
+    assert dict(heading.attributes)["level"] == "2"
+    assert reconstruct_body(doc) == "## Sub\n\nBody.\n"
+
+
+def test_setext_heading_does_not_leak_underline_into_title_text() -> None:
+    # The underline line must not become part of the heading's own inline
+    # content (a second, compounding failure mode alongside the wrong
+    # level: parsing "Title\n=====" as a whole would fold "=====" into the
+    # title text instead of recognizing it as the setext marker).
+    doc = seed_doc_from_markdown("Title\n=====\n")
+    root = _root(doc)
+    heading = root.children[0]
+    assert heading.children[0].to_py() == "Title"
+
+
+def test_escaped_mark_delimiters_round_trip_as_literal_text() -> None:
+    # markdown-it resolves `\*x\*` to the literal text "*x*" at parse time
+    # (correctly not treated as emphasis) — reserializing that text
+    # verbatim hands back active syntax on the next parse. Same failure
+    # mode for `\[text\](url)` and a leading `\#`.
+    cases = [
+        "A \\*literal\\* asterisk.\n",
+        "A \\_literal\\_ underscore.\n",
+        "A \\`literal\\` backtick.\n",
+        "A \\[link\\](x) escaped.\n",
+        "\\# not a heading\n",
+    ]
+    for raw in cases:
+        once = reconstruct_body(seed_doc_from_markdown(raw))
+        assert once == raw, f"expected stable round-trip for {raw!r}, got {once!r}"
+        # And re-parsing the output must not activate the escaped syntax —
+        # a second round-trip must be byte-identical to the first.
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        assert twice == once
+
+
+def test_escaping_does_not_corrupt_inline_code_content() -> None:
+    # Inline code spans are verbatim — CommonMark never processes escapes
+    # inside them. Escaping backslash/backtick/etc. in code content would
+    # corrupt the code's actual text, not just its markdown presentation.
+    body = "Code with a literal backslash: `a\\\\b` and stars `*x*`.\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
 def test_find_by_block_id() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     found = find_by_block_id(doc, "b1")

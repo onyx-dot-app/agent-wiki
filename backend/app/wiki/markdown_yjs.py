@@ -141,7 +141,25 @@ def _inline_runs(inline_token: Any) -> list[_Segment]:
     return segments
 
 
+def _escape_inline_text(text: str) -> str:
+    """Escape characters markdown-it consumes at parse time — `\\*x\\*`
+    parses to the *text* `*x*` with no italic mark (correctly, since it was
+    escaped), but re-serializing that text verbatim hands back active
+    syntax on the next parse (`*x*` now reads as real emphasis). Same
+    failure mode for `` \\` ``, `\\_`, `\\[`, `\\]`. Backslash itself goes
+    first, so escaping the other characters doesn't get double-escaped."""
+    for ch in "\\`*_[]":
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
 def _wrap_run(text: str, attrs: dict[str, Any] | None) -> str:
+    attrs = attrs or {}
+    # Inline code spans are verbatim — CommonMark never processes escapes
+    # inside them, so escaping here would corrupt the code's actual text
+    # (a literal backslash would become part of the visible content).
+    if "code" not in attrs:
+        text = _escape_inline_text(text)
     if not attrs:
         return text
     result = text
@@ -383,15 +401,27 @@ def _build_code_block(raw: str, attrs: dict[str, str]) -> XmlElement:
     )
 
 
-def _heading_level_and_line(raw: str) -> tuple[int, str]:
-    line = raw.rstrip("\n")
-    hashes = 0
-    while hashes < len(line) and line[hashes] == "#":
-        hashes += 1
-    rest = line[hashes:]
-    if rest.startswith(" "):
-        rest = rest[1:]
-    return hashes, rest
+def _build_heading(raw: str, attrs: dict[str, str]) -> tuple[XmlElement, list[Any]]:
+    """Parses ``raw`` through the real tokenizer rather than hand-stripping
+    a leading ``#`` run — a setext heading (``Title\\n=====\\n``) has no
+    leading hashes at all, and a hand-rolled ATX-only strip both mis-levels
+    it (falls through to ``level=0``, which then serializes with no ``#``
+    marker at all — silently demoting the heading to a paragraph) and
+    leaves the underline line embedded in the parsed title text. The
+    tokenizer's own ``heading_open.tag`` (``"h1"``..``"h6"``) is correct for
+    both styles, and its ``inline`` token's content already excludes
+    whichever prefix/underline syntax produced it — including the
+    empty-title case (``"# "`` with nothing after it still yields an
+    ``inline`` token with empty content when parsing the *unstripped* raw
+    block, unlike parsing a manually-stripped empty string standalone,
+    which yields no inline token at all)."""
+    tokens = gfm_parser().parse(raw)
+    open_idx = next(i for i, t in enumerate(tokens) if t.type == "heading_open")
+    level = int(tokens[open_idx].tag[1:])
+    inline_token = tokens[open_idx + 1]
+    return _element_from_segments(
+        "heading", {**attrs, "level": str(level)}, _inline_runs(inline_token)
+    )
 
 
 def _build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list[Any]]:
@@ -403,10 +433,7 @@ def _build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list
     nl_attr = "1" if trailing_nl else "0"
 
     if block.kind is BlockKind.HEADING:
-        level, line = _heading_level_and_line(raw)
-        return _make_inline_element(
-            "heading", {BLOCK_ID_ATTR: block.block_id, "level": str(level), _NL_ATTR: nl_attr}, line
-        )
+        return _build_heading(raw, {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr})
 
     if block.kind is BlockKind.PARAGRAPH:
         line = raw[:-1] if trailing_nl else raw
@@ -579,6 +606,13 @@ def serialize_block(node: XmlElement) -> str:
         return "#" * level + " " + text + ("\n" if trailing else "")
     if node.tag == "paragraph":
         text = _serialize_inline_children(list(node.children))
+        # A literal leading "#" (e.g. from escaped `\# not a heading` source
+        # text) must stay escaped on the way back out too — `_wrap_run`
+        # only escapes mark-delimiter characters, but "#" is only special
+        # as a block-start marker, which is exactly the position this text
+        # is about to occupy.
+        if text.startswith("#"):
+            text = "\\" + text
         return text + ("\n" if trailing else "")
     if node.tag in ("bulletList", "orderedList", "taskList"):
         text = _serialize_list(node)
