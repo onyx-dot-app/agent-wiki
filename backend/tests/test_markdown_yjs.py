@@ -371,6 +371,51 @@ def test_two_dashes_is_not_enough_for_a_thematic_break() -> None:
     assert reconstruct_body(doc) == body
 
 
+def test_escaped_block_start_markers_inside_list_item_stay_literal() -> None:
+    # _serialize_block_sequence (list item / blockquote content) used to
+    # call _serialize_inline_children directly, bypassing
+    # _escape_block_start_ambiguity entirely — a list item or blockquote's
+    # own first line is just as much a fresh block-start position as the
+    # top of the document. Without the fix, these reactivate as a nested
+    # list/blockquote; a nested heading attempt doesn't just misparse, it
+    # crashes outright (_build_block_sequence has no heading support at
+    # all), since escaping is also what prevents ever attempting that
+    # parse in the first place.
+    cases = [
+        "- \\- nested item text\n",
+        "- \\# nested heading text\n",
+        "- \\--- nested break only\n",
+    ]
+    for raw in cases:
+        doc = seed_doc_from_markdown(raw)
+        root = _root(doc)
+        assert root.children[0].tag == "bulletList"
+        item = root.children[0].children[0]
+        assert item.tag == "listItem"
+        assert item.children[0].tag == "paragraph"
+        once = reconstruct_body(doc)
+        assert once == raw
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        assert twice == once
+
+
+def test_escaped_block_start_markers_inside_blockquote_stay_literal() -> None:
+    cases = [
+        "> \\> nested quote text\n",
+        "> \\# nested heading text\n",
+        "> \\--- nested break only\n",
+    ]
+    for raw in cases:
+        doc = seed_doc_from_markdown(raw)
+        root = _root(doc)
+        assert root.children[0].tag == "blockquote"
+        assert root.children[0].children[0].tag == "paragraph"
+        once = reconstruct_body(doc)
+        assert once == raw
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        assert twice == once
+
+
 def test_find_by_block_id() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     found = find_by_block_id(doc, "b1")

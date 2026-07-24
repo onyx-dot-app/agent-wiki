@@ -535,7 +535,14 @@ def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
     parts: list[str] = []
     for child in children:
         if child.tag == "paragraph":
-            parts.append(_serialize_inline_children(list(child.children)))
+            # Same block-start ambiguity as a top-level paragraph
+            # (serialize_block) — a list item or blockquote's own first
+            # line is just as much a fresh block-start position as the
+            # top of the document, so a literal leading "-"/">"/"#"/"---"
+            # needs the same escaping, not just the top-level case.
+            parts.append(
+                _escape_block_start_ambiguity(_serialize_inline_children(list(child.children)))
+            )
         elif child.tag in ("bulletList", "orderedList", "taskList"):
             parts.append(_serialize_list(child).rstrip("\n"))
         elif child.tag == "blockquote":
