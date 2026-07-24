@@ -998,7 +998,11 @@ export function FileView({ path }: FileViewProps) {
                 variant="section"
                 onClick={() => {
                   setMoreOpen(false);
-                  void downloadMarkdownExport(path);
+                  downloadMarkdownExport(path).catch((e: unknown) => {
+                    toast.error(
+                      e instanceof Error ? e.message : "Export failed",
+                    );
+                  });
                 }}
               />
             </PopoverMenu>
