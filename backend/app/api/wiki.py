@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+import posixpath
 import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.auth import PermissionDenied, User, require_can
 from app.auth.deps import require_user
@@ -66,6 +67,7 @@ from app.wiki import (
     diff as wiki_diff,
     doc_ids,
     drafts as wiki_drafts,
+    export as wiki_export,
     filesystem,
     git as wiki_git,
     notify as wiki_notify,
@@ -398,6 +400,48 @@ def get_source_spans(
         raise HTTPException(status_code=400, detail=str(e)) from e
     require_can("read", rel, user)
     return provenance.content_spans_for_path(rel)
+
+
+@router.get("/export")
+def export_markdown(
+    user: User = Depends(require_user),
+    path: str = "",
+) -> Response:
+    """Download markdown: one page as a ``.md`` attachment, or a folder
+    (``""`` for the whole wiki) as a zip of the pages the caller can read.
+
+    Internal ``/app/wiki/`` links are rewritten to relative paths so the
+    exported files cross-link on disk. Permission rows are Postgres-only
+    and never part of an export — whatever is downloaded carries no ACLs.
+    """
+    try:
+        rel = filesystem.safe_rel_path(path) if path else ""
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    if rel.endswith(".md"):
+        require_can("read", rel, user)
+        body = wiki_export.export_page(rel)
+        if body is None:
+            raise HTTPException(status_code=404, detail="not found")
+        filename = posixpath.basename(rel)
+        return Response(
+            content=body,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": wiki_export.content_disposition(filename)},
+        )
+
+    visible = wiki_export.visible_md_paths(user, rel)
+    if not visible:
+        raise HTTPException(status_code=404, detail="nothing to export")
+    base = posixpath.basename(rel) if rel else "wiki"
+    return Response(
+        content=wiki_export.build_zip(visible),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": wiki_export.content_disposition(f"{base}-export.zip")
+        },
+    )
 
 
 @router.put("/file", response_model=PutDocumentResponse)
