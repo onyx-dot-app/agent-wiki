@@ -21,7 +21,12 @@
 import type { Node as PMNode } from "prosemirror-model";
 import { EditorState } from "prosemirror-state";
 import { Plugin, PluginKey } from "prosemirror-state";
-import { EditorView, type NodeView } from "prosemirror-view";
+import {
+  Decoration,
+  DecorationSet,
+  EditorView,
+  type NodeView,
+} from "prosemirror-view";
 import {
   initProseMirrorDoc,
   redoCommand,
@@ -55,6 +60,53 @@ import { colorFor } from "@/lib/editor/utils";
 
 const commentHighlightKey = new PluginKey<HighlightState>("commentHighlights");
 const sourceHighlightKey = new PluginKey<HighlightState>("sourceHighlights");
+
+/** A real PM placeholder, not a DOM overlay: decorates the empty block the
+ * cursor is currently in with a `data-placeholder` attr (read by a CSS
+ * `::before` in globals.css) — covers a freshly empty doc (cursor starts in
+ * the sole empty paragraph) *and* any new empty block created later (hit
+ * Enter, land in a fresh empty paragraph mid-document — that's a distinct
+ * case from "the whole doc is empty" and needs the same treatment). Only
+ * the block the cursor is actually in gets the decoration, not every empty
+ * block simultaneously — several blank lines in a row don't all light up at
+ * once, matching how Notion/Docs-style per-line placeholders behave.
+ *
+ * Reuses the single `placeholder` prop text for every case for now — that
+ * copy ("Start typing, or pick a template above…") reads a little oddly on
+ * an empty block mid-document rather than the page's very first line, but
+ * splitting doc-empty vs block-empty copy is a product-copy decision, not
+ * a mechanism one; flag if you want that split.
+ *
+ * `getText` is a ref getter rather than a captured string so the plugin
+ * (built once per `conn` in the mount effect below) stays live if the
+ * `placeholder` prop changes without needing to remount the editor. */
+function placeholderPlugin(getText: () => string | undefined): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state) {
+        const text = getText();
+        if (!text) return null;
+        const { selection } = state;
+        if (!selection.empty) return null;
+        const { $from } = selection;
+        // depth 0 means $from.parent IS the top-level doc (a genuinely
+        // empty doc with zero block children, not just an empty block) —
+        // $from.before() has no position to give for the doc itself and
+        // throws ("There is no position before the top-level node").
+        if ($from.depth === 0) return null;
+        const node = $from.parent;
+        if (node.content.size !== 0) return null;
+        const pos = $from.before();
+        return DecorationSet.create(state.doc, [
+          Decoration.node(pos, pos + node.nodeSize, {
+            class: "is-empty",
+            "data-placeholder": text,
+          }),
+        ]);
+      },
+    },
+  });
+}
 
 function taskItemNodeView(
   node: PMNode,
@@ -189,7 +241,7 @@ function CoeditorInner({
     comment: "",
     source: "",
   });
-  const [, forceRender] = useState(0);
+  const placeholderRef = useRef(placeholder);
 
   useEffect(() => {
     conn.provider.awareness.setLocalStateField("user", {
@@ -197,6 +249,15 @@ function CoeditorInner({
       color: colorFor(userId),
     });
   }, [conn, userId, userDisplay]);
+
+  // Keep the ref current, and force PM to re-run `decorations()` — a bare
+  // ref write doesn't trigger a redraw on its own, since nothing else
+  // dispatched a transaction.
+  useEffect(() => {
+    placeholderRef.current = placeholder;
+    const view = viewRef.current;
+    if (view) view.dispatch(view.state.tr);
+  }, [placeholder]);
 
   useEffect(() => {
     if (!editorHostRef.current) return;
@@ -217,6 +278,7 @@ function CoeditorInner({
         }),
         agentWikiKeymap(),
         agentWikiInputRules(),
+        placeholderPlugin(() => placeholderRef.current),
         anchoredHighlightPlugin(commentHighlightKey, {
           idle: "agent-wiki-comment-highlight",
           active: "agent-wiki-comment-highlight-active",
@@ -274,7 +336,6 @@ function CoeditorInner({
       },
     });
     viewRef.current = view;
-    forceRender((n) => n + 1);
 
     const scroller = scrollerRef.current;
     const onScroll = () => {
@@ -437,12 +498,10 @@ function CoeditorInner({
   );
 
   return (
-    <div ref={scrollerRef} className="relative h-full w-full overflow-y-auto">
-      {placeholder && viewRef.current?.state.doc.textContent === "" && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 mx-auto max-w-[768px] px-(--cm-gutter,1.5rem) py-6 text-(--text-04)">
-          {placeholder}
-        </div>
-      )}
+    <div
+      ref={scrollerRef}
+      className="pm-scroller h-full w-full overflow-y-auto"
+    >
       <div ref={editorHostRef} className="h-full" />
     </div>
   );
