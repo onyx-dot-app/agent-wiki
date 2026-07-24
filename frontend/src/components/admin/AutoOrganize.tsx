@@ -208,13 +208,7 @@ const runColumns = (() => {
 })();
 
 function RunHistory() {
-  const { runs } = useDetectionRuns(false);
-  // This card is the *sweep* history. Every run is a sweep today, but the
-  // runs API is trigger-agnostic — once on-create/on-write triggers exist,
-  // their per-page runs must not flood this table. (Server-side filtering
-  // belongs with that work: a client filter over a limited fetch would skew
-  // the page size.)
-  const sweeps = runs.filter((r) => r.trigger === "sweep");
+  const { sweeps } = useDetectionRuns(false);
   if (sweeps.length === 0) return null;
 
   return (
@@ -280,9 +274,9 @@ function SweepControl({ disabled }: { disabled: boolean }) {
   // schedule; we watch the history until a different id lands and completes.
   const [watchFrom, setWatchFrom] = useState<string | null>(null);
   const watching = watchFrom !== null;
-  const { runs, refresh } = useDetectionRuns(watching);
+  const { sweeps, refresh } = useDetectionRuns(watching);
 
-  const latest = runs[0];
+  const latest = sweeps[0];
   const newRun =
     watching && latest && latest.id !== watchFrom ? latest : undefined;
   const [lastFinished, setLastFinished] = useState<DetectionRun | null>(null);
@@ -301,7 +295,7 @@ function SweepControl({ disabled }: { disabled: boolean }) {
     try {
       // Snapshot the current top-of-history *before* enqueueing so the new
       // run is recognized by id, not by racy timestamp comparison.
-      setWatchFrom(runs[0]?.id ?? "");
+      setWatchFrom(sweeps[0]?.id ?? "");
       await triggerSweep();
       void refresh();
     } catch (e) {

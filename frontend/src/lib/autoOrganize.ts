@@ -63,7 +63,14 @@ export function useDetectionRuns(poll: boolean) {
     SWR_KEYS.automanageRuns,
     { refreshInterval: poll ? 2000 : 0 },
   );
-  return { runs: data?.runs ?? [], error, isLoading, refresh: mutate };
+  const runs = data?.runs ?? [];
+  // The runs API is trigger-agnostic. Every admin surface here is about
+  // *sweeps* (the outcome watcher and the history table both key off sweep
+  // rows), so expose the filtered view once — a future on_create/on_write
+  // run completing mid-watch must never masquerade as the sweep outcome.
+  // Server-side filtering belongs with the focused-trigger work.
+  const sweeps = runs.filter((r) => r.trigger === "sweep");
+  return { sweeps, error, isLoading, refresh: mutate };
 }
 
 /** One Auto Organize change proposal (a pending AI-initiated cleanup awaiting
