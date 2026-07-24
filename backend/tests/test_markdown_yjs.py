@@ -384,7 +384,7 @@ def test_escaped_block_start_markers_inside_list_item_stay_literal() -> None:
     cases = [
         "- \\- nested item text\n",
         "- \\# nested heading text\n",
-        "- \\--- nested break only\n",
+        "- \\---\n",
     ]
     for raw in cases:
         doc = seed_doc_from_markdown(raw)
@@ -403,7 +403,7 @@ def test_escaped_block_start_markers_inside_blockquote_stay_literal() -> None:
     cases = [
         "> \\> nested quote text\n",
         "> \\# nested heading text\n",
-        "> \\--- nested break only\n",
+        "> \\---\n",
     ]
     for raw in cases:
         doc = seed_doc_from_markdown(raw)
@@ -414,6 +414,15 @@ def test_escaped_block_start_markers_inside_blockquote_stay_literal() -> None:
         assert once == raw
         twice = reconstruct_body(seed_doc_from_markdown(once))
         assert twice == once
+
+
+def test_nested_dash_run_with_trailing_content_does_not_need_escaping() -> None:
+    # Mirrors the top-level case: a dash run is only a thematic break when
+    # it's the *whole* line — trailing content after it was never ambiguous
+    # inside a list item/blockquote either, so no escape should be added
+    # (and an already-unescaped one must round-trip unchanged, not gain one).
+    for raw in ("- --- nested break text\n", "> --- nested break text\n"):
+        assert reconstruct_body(seed_doc_from_markdown(raw)) == raw
 
 
 def test_find_by_block_id() -> None:
