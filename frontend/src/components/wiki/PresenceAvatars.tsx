@@ -112,10 +112,10 @@ function IdentityRing({ color }: { color: string }) {
 
 function AvatarCircle({ entry, size }: AvatarCircleProps) {
   return (
-    <span className="relative flex shrink-0">
+    <Section width="fit" height="fit" className="relative shrink-0">
       <IconContainer size={size} avatar="user" name={entry.display} />
       <IdentityRing color={entry.color} />
-    </span>
+    </Section>
   );
 }
 
@@ -123,10 +123,10 @@ function AgentBadge({ entry, size }: AvatarCircleProps) {
   const Glyph = agentGlyph(entry.agentName);
   if (!Glyph) return null;
   return (
-    <span className="relative flex shrink-0">
+    <Section width="fit" height="fit" className="relative shrink-0">
       <IconContainer size={size} avatar="icon" icon={Glyph} />
       <IdentityRing color={entry.color} />
-    </span>
+    </Section>
   );
 }
 
@@ -626,13 +626,13 @@ export function PresenceAvatars({
         className="flex cursor-pointer items-center justify-center px-[2px]"
         onClick={() => setAutoOpen((v) => !v)}
       >
-        <span className="relative flex">
+        <Section width="fit" height="fit" className="relative">
           <IconContainer size="main-content" avatar="icon" icon={SvgOnyxLogo} />
           <span
             aria-hidden
             className="pointer-events-none absolute inset-0 rounded-full border border-(--theme-blue-05)"
           />
-        </span>
+        </Section>
       </button>
 
       {hovered && clusterRef.current && (
