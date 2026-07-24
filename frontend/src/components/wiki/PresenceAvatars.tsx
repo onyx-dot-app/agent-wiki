@@ -6,13 +6,13 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import {
   Button,
   Divider,
+  IconContainer,
   LineItemButton,
   Switch,
   Text,
@@ -24,7 +24,7 @@ import {
   SvgExpand,
   SvgSparkle,
 } from "@onyx-ai/opal/icons";
-import type { IconProps } from "@onyx-ai/opal/types";
+import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 
 import { toast } from "@/hooks/useToast";
@@ -53,7 +53,7 @@ const USER_COLORS = [
 
 const MAX_CHIPS = 5;
 
-function agentGlyph(name: string | null): ComponentType<IconProps> | null {
+function agentGlyph(name: string | null): IconFunctionComponent | null {
   const key = name?.trim().toLowerCase();
   if (!key) return null;
   if (key.includes("claude")) return SvgClaude;
@@ -65,7 +65,6 @@ function agentGlyph(name: string | null): ComponentType<IconProps> | null {
 interface PresenceEntry {
   userId: string;
   display: string;
-  initial: string;
   color: string;
   editing: boolean;
   /** Live agent writing for this user on the page, when one is. */
@@ -94,18 +93,27 @@ interface PresenceAvatarsProps {
 
 interface AvatarCircleProps {
   entry: PresenceEntry;
-  size: number;
+  /** IconContainer preset: main-content 24px, main-ui 20px, secondary 16px. */
+  size: "main-content" | "main-ui" | "secondary";
+}
+
+/** The identity-colored 1px ring: Opal's avatar circles carry no color
+ * prop, so the ring overlays without touching the primitive's box. */
+function IdentityRing({ color }: { color: string }) {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute inset-0 rounded-full border"
+      style={{ borderColor: color }}
+    />
+  );
 }
 
 function AvatarCircle({ entry, size }: AvatarCircleProps) {
   return (
-    <span
-      className="flex shrink-0 items-center justify-center rounded-full border bg-(--background-neutral-inverted-00)"
-      style={{ width: size, height: size, borderColor: entry.color }}
-    >
-      <Text font="secondary-action" color="text-inverted-05">
-        {entry.initial}
-      </Text>
+    <span className="relative flex shrink-0">
+      <IconContainer size={size} avatar="user" name={entry.display} />
+      <IdentityRing color={entry.color} />
     </span>
   );
 }
@@ -114,11 +122,9 @@ function AgentBadge({ entry, size }: AvatarCircleProps) {
   const Glyph = agentGlyph(entry.agentName);
   if (!Glyph) return null;
   return (
-    <span
-      className="flex shrink-0 items-center justify-center rounded-full border bg-(--background-neutral-00)"
-      style={{ width: size, height: size, borderColor: entry.color }}
-    >
-      <Glyph size={size - 4} />
+    <span className="relative flex shrink-0">
+      <IconContainer size={size} avatar="icon" icon={Glyph} />
+      <IdentityRing color={entry.color} />
     </span>
   );
 }
@@ -155,8 +161,8 @@ function PresenceCard({
         }
       >
         <span className="flex shrink-0 items-center gap-0 p-[2px]">
-          <AvatarCircle entry={entry} size={20} />
-          {entry.agentName && <AgentBadge entry={entry} size={20} />}
+          <AvatarCircle entry={entry} size="main-ui" />
+          {entry.agentName && <AgentBadge entry={entry} size="main-ui" />}
         </span>
         <span className="min-w-0 flex-1 px-[2px]">
           <Text font="main-ui-action" color="text-04" as="p" nowrap>
@@ -424,7 +430,6 @@ export function PresenceAvatars({
     ): PresenceEntry => ({
       userId,
       display,
-      initial: (display.trim().charAt(0) || "?").toUpperCase(),
       color: USER_COLORS[i % USER_COLORS.length],
       editing,
       agentName,
@@ -520,10 +525,10 @@ export function PresenceAvatars({
               }}
               onPointerLeave={closeSoon}
             >
-              <AvatarCircle entry={e} size={24} />
+              <AvatarCircle entry={e} size="main-content" />
               {e.agentName && (
                 <span className="absolute top-[12px] left-[10px]">
-                  <AgentBadge entry={e} size={16} />
+                  <AgentBadge entry={e} size="secondary" />
                 </span>
               )}
             </button>
@@ -556,8 +561,12 @@ export function PresenceAvatars({
         className="flex cursor-pointer items-center justify-center px-[2px]"
         onClick={() => setAutoOpen((v) => !v)}
       >
-        <span className="flex size-6 items-center justify-center rounded-full border border-(--theme-blue-05) bg-(--background-neutral-00)">
-          <SvgOnyxLogo size={16} />
+        <span className="relative flex">
+          <IconContainer size="main-content" avatar="icon" icon={SvgOnyxLogo} />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-full border border-(--theme-blue-05)"
+          />
         </span>
       </button>
 
