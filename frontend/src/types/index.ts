@@ -33,6 +33,9 @@ export interface Event {
 }
 
 export interface DocumentActivity {
+  /** The user the agent acts for, so presence UI can badge that user's
+   * avatar. Null for activity registered outside a user context. */
+  user_id: string | null;
   owner_display: string;
   agent_name: string | null;
   activity: "read" | "wrote";

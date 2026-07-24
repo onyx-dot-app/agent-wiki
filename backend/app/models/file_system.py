@@ -391,11 +391,13 @@ class ActivityRowView(BaseModel):
     """One active registration on a doc — what the UI / agents see.
 
     Mirror of ``app.wiki.agent_activity.ActivityRow`` minus the internal
-    ``id`` and ``user_id``. ``owner_display`` is the user's display
-    name (falling back to email); ``agent_name`` is ``None`` when the
-    agent didn't identify itself.
+    ``id``. ``user_id`` lets presence UI attribute the agent to the user
+    it acts for; ``owner_display`` is the user's display name (falling
+    back to email); ``agent_name`` is ``None`` when the agent didn't
+    identify itself.
     """
 
+    user_id: str | None
     owner_display: str
     agent_name: str | None
     activity: str  # "read" | "wrote"

@@ -51,6 +51,7 @@ import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { CommentMarginRail } from "@/components/wiki/CommentMarginRail";
+import { PresenceAvatars } from "@/components/wiki/PresenceAvatars";
 import { toast } from "@/hooks/useToast";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
 import { craftFailureMessage } from "@/lib/craft";
@@ -952,6 +953,26 @@ export function FileView({ path }: FileViewProps) {
           <span className="mr-1 text-[12px] text-(--text-03)">
             {coedit.saveStatus === "saving" ? "Saving…" : "Couldn't save"}
           </span>
+        )}
+        {!viewingVersion && !isMobile && (
+          <PresenceAvatars
+            path={path}
+            participants={coedit.participants}
+            peers={coedit.peers}
+            typing={coedit.typing}
+            myUserId={user?.id ?? null}
+            agents={agents}
+            onScrollToOffset={(offset) =>
+              coeditorRef.current?.scrollToOffset(offset)
+            }
+            onOpenCommit={(sha) => {
+              void (async () => {
+                if (!commits) await refreshHistory();
+                void onPickCommit(sha);
+              })();
+            }}
+            onOpenUpdatesPanel={() => openPanel("updates")}
+          />
         )}
         <Button
           icon={SvgShare}
