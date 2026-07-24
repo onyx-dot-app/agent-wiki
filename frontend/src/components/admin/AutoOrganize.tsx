@@ -120,7 +120,15 @@ function runTime(ts: string): string {
 function startedCell(_value: string, row: DetectionRun) {
   return (
     <Text font="main-ui-body" color="text-04">
-      {`${runTime(row.started_at)} · ${row.triggered_by_user_id === null ? "system" : "manual"}`}
+      {runTime(row.started_at)}
+    </Text>
+  );
+}
+
+function triggerCell(_value: string | null, row: DetectionRun) {
+  return (
+    <Text font="main-ui-body" color="text-03">
+      {row.triggered_by_user_id === null ? "Scheduled" : "Manual"}
     </Text>
   );
 }
@@ -168,9 +176,15 @@ const runColumns = (() => {
   return [
     tc.column("started_at", {
       header: "Started",
-      weight: 22,
+      weight: 18,
       enableSorting: false,
       cell: startedCell,
+    }),
+    tc.column("triggered_by_user_id", {
+      header: "Trigger",
+      weight: 12,
+      enableSorting: false,
+      cell: triggerCell,
     }),
     tc.column("proposals_emitted", {
       header: "Proposals",
