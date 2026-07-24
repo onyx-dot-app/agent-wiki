@@ -16,6 +16,7 @@ import { ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
 import {
   type AutoOrganizeSchedule,
   type DetectionRun,
+  sweepRuns,
   triggerSweep,
   updateAutoOrganizeSettings,
   useAutoOrganizeSettings,
@@ -293,9 +294,14 @@ function SweepControl({ disabled }: { disabled: boolean }) {
     setError(null);
     setLastFinished(null);
     try {
-      // Snapshot the current top-of-history *before* enqueueing so the new
-      // run is recognized by id, not by racy timestamp comparison.
-      setWatchFrom(sweeps[0]?.id ?? "");
+      // Snapshot the top-of-history from an *awaited authoritative fetch*
+      // before enqueueing, so the new run is recognized by id. Reading the
+      // possibly-unloaded cache instead would snapshot "" while history
+      // exists — and the first pre-existing terminal run to arrive would
+      // masquerade as the new sweep. After this await, "" can only mean
+      // the history is verifiably empty (any sweep row IS the new one).
+      const fresh = await refresh();
+      setWatchFrom(sweepRuns(fresh?.runs ?? [])[0]?.id ?? "");
       await triggerSweep();
       void refresh();
     } catch (e) {

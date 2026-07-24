@@ -58,6 +58,12 @@ export interface DetectionRun {
 /** Recent detection runs, newest first (admin only server-side). `poll` turns
  * on a short refresh interval — used while a sweep the admin just started is
  * still enqueued/running, so the outcome shows up without a reload. */
+/** The sweep rows of a runs payload — the one definition of "is a sweep"
+ * shared by the hook and the snapshot-before-trigger path. */
+export function sweepRuns(runs: DetectionRun[]): DetectionRun[] {
+  return runs.filter((r) => r.trigger === "sweep");
+}
+
 export function useDetectionRuns(poll: boolean) {
   const { data, error, isLoading, mutate } = useSWR<{ runs: DetectionRun[] }>(
     SWR_KEYS.automanageRuns,
@@ -69,7 +75,7 @@ export function useDetectionRuns(poll: boolean) {
   // rows), so expose the filtered view once — a future on_create/on_write
   // run completing mid-watch must never masquerade as the sweep outcome.
   // Server-side filtering belongs with the focused-trigger work.
-  const sweeps = runs.filter((r) => r.trigger === "sweep");
+  const sweeps = sweepRuns(runs);
   return { sweeps, error, isLoading, refresh: mutate };
 }
 
