@@ -6,7 +6,7 @@ the originating conversation for the design rationale.
 
 The first ``asyncio`` in this backend, scoped deliberately: ``async`` here
 covers connection lifecycle only (accept, the recv/send loops, task
-orchestration) — every ``_connect_sync``/``_disconnect_sync``/``_handle_*``
+orchestration) — every ``_connect_sync``/``record_leave``/``_handle_*``
 helper below is a plain sync function, run via ``asyncio.to_thread`` from
 the loops, with no idea it's being called from an async context at all. See
 CLAUDE.md's "WebSocket routes" rule before adding another route like this
@@ -51,6 +51,7 @@ from app.models.coedit import (
     ParticipantOut,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session
+from app.tasks.coedit_leave import leave_coedit_session, record_leave
 from app.wiki import coedit, coedit_channel, git
 
 router = APIRouter()
@@ -72,21 +73,6 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
         )
         for p in coedit.list_participants(session_id)
     ]
-
-
-def _checkpoint_if_last_left(session_id: int) -> None:
-    """Enqueue a final checkpoint when the last participant has left, so the
-    session's buffer lands in git without waiting for the periodic scan.
-
-    Best-effort: the participant row is already gone, so a failed enqueue (e.g.
-    a full queue) must not fail the leave. The periodic scan is the backstop —
-    the session is dirty, so it's recovered (checkpointed + closed) once idle."""
-    if coedit.list_participants(session_id):
-        return
-    try:
-        checkpoint_coedit_session(session_id)
-    except Exception:
-        log.exception("coedit: checkpoint enqueue failed on last-leave for session %s", session_id)
 
 
 class _WsActionError(Exception):
@@ -323,15 +309,6 @@ def _connect_sync(path: str, user: User) -> coedit.SessionRow:
     return sess
 
 
-def _disconnect_sync(session_id: int, user_id: str) -> None:
-    # Only mark the user gone when their last connection closes, so a
-    # second tab doesn't evict them.
-    if not coedit_channel.user_still_connected(session_id, user_id):
-        coedit.leave(session_id, user_id)
-        coedit_channel.broadcast_presence(session_id)
-        _checkpoint_if_last_left(session_id)
-
-
 @router.websocket("/ws")
 async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_ws)) -> None:
     """``path`` is a query param (``?path=...``), not a URL segment — this
@@ -350,7 +327,7 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     # before returning, so from here on a disconnect — including one during
     # `accept()` itself, which the client can trigger mid-handshake since
     # `_connect_sync`'s git/DB work takes measurable time — must still reach
-    # `_disconnect_sync` to undo it. Otherwise the user is stuck as a
+    # `record_leave` to undo it. Otherwise the user is stuck as a
     # phantom participant forever, which also blocks
     # `_checkpoint_if_last_left` from ever firing for this session.
     conn: coedit_channel.Connection | None = None
@@ -393,5 +370,23 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     finally:
         if conn is not None:
             coedit_channel.disconnect(conn.id)
-        await asyncio.to_thread(_disconnect_sync, sess.id, user.id)
+        # The leave must survive this task being cancelled (server shutdown;
+        # the test portal tearing down the connection). A cancelled `await`
+        # is not enough: the executor item it submitted can be *discarded*
+        # before any pool worker picks it up — cancelling a not-yet-started
+        # future removes it from the queue — and the cancellation can land at
+        # any moment, so no up-front check closes the window. On that path,
+        # hand the leave to the coedit queue instead: a synchronous enqueue
+        # nothing can cancel, durable across the shutdown that caused it.
+        # `record_leave` is idempotent, so the rare both-ran overlap is safe.
+        try:
+            await asyncio.to_thread(record_leave, sess.id, user.id)
+        except asyncio.CancelledError:
+            try:
+                leave_coedit_session(sess.id, user.id)  # enqueue, no await
+            except Exception:
+                log.exception(
+                    "coedit: queued-leave fallback failed for session %s", sess.id
+                )
+            raise
         log.info("coedit ws closed session=%s user=%s", sess.id, user.id)

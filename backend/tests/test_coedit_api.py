@@ -9,6 +9,7 @@ shapes, one WebSocket instead of eight endpoints.
 """
 from __future__ import annotations
 
+import time
 from contextlib import contextmanager
 
 import pytest
@@ -84,6 +85,17 @@ def _checkpoint(ws) -> dict:
 def _get_ops(ws, since_version: int) -> dict:
     ws.send_json({"type": "get_ops", "request_id": "g", "since_version": since_version})
     return _receive_typed(ws, "ops_result")
+
+
+def _wait_for(predicate, timeout: float = 15.0) -> None:
+    """Wait for a disconnect side effect. The server's disconnect handler is
+    the leave signal, and nothing guarantees it has finished by the time
+    ``websocket_connect.__exit__`` returns — the handler runs on the app's
+    event loop/threads on its own schedule. Tests observe its *effects*, so
+    they must wait for them, not assume an ordering the API doesn't offer."""
+    deadline = time.monotonic() + timeout
+    while not predicate() and time.monotonic() < deadline:
+        time.sleep(0.02)
 
 
 def test_connect_requires_auth(client):
@@ -189,10 +201,14 @@ def test_disconnect_removes_participant(client):
     login_fastapi(client, uid)
     _seed_page()
 
-    with _ws(client) as (_ws_conn, joined):
-        sid = joined["session_id"]
-        assert len(coedit.list_participants(sid)) == 1
+    # immediate_mode: if teardown takes the cancellation path, the leave is
+    # enqueued — inline mode runs it here instead of on a worker.
+    with coedit_queue.immediate_mode():
+        with _ws(client) as (_ws_conn, joined):
+            sid = joined["session_id"]
+            assert len(coedit.list_participants(sid)) == 1
 
+        _wait_for(lambda: coedit.list_participants(sid) == [])
     assert coedit.list_participants(sid) == []
 
 
@@ -205,11 +221,21 @@ def test_disconnect_of_last_participant_checkpoints(client):
         with _ws(client) as (ws, joined):
             sid = joined["session_id"]
             _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
-        # The disconnect handler enqueues a checkpoint; immediate_mode runs
-        # it inline before websocket_connect's __exit__ returns.
+        # The disconnect handler enqueues the checkpoint; immediate_mode runs
+        # it inline wherever the handler executes. Wait *inside* the block:
+        # once the flag drops, a late enqueue would go to the real queue.
+        _wait_for(
+            lambda: git.read_file(_PATH) == "hi world"
+            and coedit.get_active_session(_PATH) is None
+        )
 
-    assert git.read_file(_PATH) == "hi world"
-    assert coedit.get_active_session(_PATH) is None
+    session_after = coedit.get_active_session(_PATH)
+    assert git.read_file(_PATH) == "hi world", (
+        "checkpoint never landed: "
+        f"session={'still open' if session_after else 'closed'}, "
+        f"participants={coedit.list_participants(sid)}"
+    )
+    assert session_after is None
     assert sid is not None
 
 
