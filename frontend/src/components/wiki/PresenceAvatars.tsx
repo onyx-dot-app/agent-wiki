@@ -293,6 +293,9 @@ function PolicyPopover({
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let alive = true;
+    // Clearing first re-disables the switch, a stale page's policy must
+    // never drive a PATCH against the new path.
+    setPolicy(null);
     getUpdatePolicy(path)
       .then((p) => alive && setPolicy(p.effective))
       .catch(() => alive && setPolicy(null));
@@ -459,10 +462,15 @@ export function PresenceAvatars({
   }, []);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
-  // Recent edits load lazily on first hover and cache until the path
-  // changes, so a stale doc's shas never feed the history view.
+  // Path changes drop every floating panel and the edits cache, nothing
+  // from the previous doc may drive fetches or clicks on the new one.
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
-  useEffect(() => setCommits(null), [path]);
+  useEffect(() => {
+    setCommits(null);
+    setHoverId(null);
+    setOverflowOpen(false);
+    setAutoOpen(false);
+  }, [path]);
   const loadCommits = useCallback(() => {
     if (commits) return;
     fetchFileHistory(path)
