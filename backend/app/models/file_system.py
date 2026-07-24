@@ -388,16 +388,16 @@ class SearchResponse(BaseModel):
 
 
 class ActivityRowView(BaseModel):
-    """One active registration on a doc — what the UI / agents see.
+    """One active registration on a doc, as the UI and agents see it.
 
     Mirror of ``app.wiki.agent_activity.ActivityRow`` minus the internal
-    ``id``. ``user_id`` lets presence UI attribute the agent to the user
-    it acts for; ``owner_display`` is the user's display name (falling
-    back to email); ``agent_name`` is ``None`` when the agent didn't
-    identify itself.
+    ``id`` and the ``doc_path`` the response carries once. ``user_id``
+    ties the agent to the user it acts for. ``owner_display`` is the
+    user's display name, falling back to email. ``agent_name`` is
+    ``None`` when the agent didn't identify itself.
     """
 
-    user_id: str | None
+    user_id: str
     owner_display: str
     agent_name: str | None
     activity: str  # "read" | "wrote"

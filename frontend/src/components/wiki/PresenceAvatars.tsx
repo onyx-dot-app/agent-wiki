@@ -10,8 +10,20 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { Button, Switch, Text } from "@onyx-ai/opal/components";
-import { SvgArrowUpRight, SvgExpand, SvgSparkle } from "@onyx-ai/opal/icons";
+import {
+  Button,
+  Divider,
+  LineItemButton,
+  Switch,
+  Text,
+} from "@onyx-ai/opal/components";
+import { InputHorizontal } from "@onyx-ai/opal/layouts";
+import {
+  SvgAddLines,
+  SvgArrowUpRight,
+  SvgExpand,
+  SvgSparkle,
+} from "@onyx-ai/opal/icons";
 import type { IconProps } from "@onyx-ai/opal/types";
 import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
 
@@ -27,30 +39,22 @@ import { parseCommitAuthor } from "@/lib/wiki/utils";
 import type { CoeditParticipant, CoeditPeer } from "@/lib/editor/types";
 import type { DocumentActivity } from "@/types";
 
-// Identity hues cycled per user. Semantic hues stay reserved:
-// red/green/orange for status, blue/amber/sky for selection. The mock
-// names five theme colors but Opal ships tokens for four non-reserved
-// hues today (mint/coral/violet are gaps), so the cycle runs on those.
+// Identity hues cycled per user. Semantic hues stay reserved: red/green/
+// orange for status, blue/amber/sky for selection. The mock's mint/coral/
+// violet have no Opal tokens, so the cycle substitutes shipped hues.
 const USER_COLORS = [
   "var(--neon-cyan-50)",
   "var(--neon-yellow-50)",
+  "var(--neon-lime-60)",
   "var(--neon-magenta-50)",
   "var(--purple-50)",
 ];
 
 const MAX_CHIPS = 5;
 
-const AGENT_GLYPHS: Record<string, ComponentType<IconProps>> = {
-  "claude code": SvgClaude,
-  codex: SvgOpenai,
-  "onyx craft": SvgOnyxLogo,
-};
-
 function agentGlyph(name: string | null): ComponentType<IconProps> | null {
-  if (!name) return null;
-  const key = name.trim().toLowerCase();
-  const direct = AGENT_GLYPHS[key];
-  if (direct) return direct;
+  const key = name?.trim().toLowerCase();
+  if (!key) return null;
   if (key.includes("claude")) return SvgClaude;
   if (key.includes("codex") || key.includes("openai")) return SvgOpenai;
   if (key.includes("onyx") || key.includes("craft")) return SvgOnyxLogo;
@@ -63,7 +67,7 @@ interface PresenceEntry {
   initial: string;
   color: string;
   editing: boolean;
-  /** Live agent acting for this user on the page, when one is active. */
+  /** Live agent writing for this user on the page, when one is. */
   agentName: string | null;
   /** Caret offset to scroll to when this entry is editing. */
   caretHead: number | null;
@@ -190,25 +194,25 @@ function PresenceCard({
             const changed = c.added + c.removed;
             const lines = `${changed} line${changed === 1 ? "" : "s"}`;
             return (
-              // raw-ok: no Opal row control carries text plus a right-aligned time and glyph pair
-              <button
+              <LineItemButton
                 key={c.sha}
-                type="button"
-                className="flex w-full cursor-pointer items-center gap-[2px] rounded-(--radius-04) p-1 text-left hover:bg-(--background-tint-01)"
+                title={
+                  agentLabel
+                    ? `Updated ${lines} with ${agentLabel}`
+                    : `Updated ${lines}`
+                }
+                sizePreset="secondary"
+                variant="body"
+                rightChildren={
+                  <span className="flex items-center gap-[2px]">
+                    <Text font="secondary-body" color="text-03" nowrap>
+                      {relativeTime(c.ts)}
+                    </Text>
+                    <SvgArrowUpRight size={12} />
+                  </span>
+                }
                 onClick={() => onOpenCommit?.(c.sha)}
-              >
-                <span className="min-w-0 flex-1 px-[2px]">
-                  <Text font="secondary-body" color="text-04" nowrap>
-                    {agentLabel
-                      ? `Updated ${lines} with ${agentLabel}`
-                      : `Updated ${lines}`}
-                  </Text>
-                </span>
-                <Text font="secondary-body" color="text-03" nowrap>
-                  {relativeTime(c.ts)}
-                </Text>
-                <SvgArrowUpRight size={12} />
-              </button>
+              />
             );
           })}
         </div>
@@ -226,7 +230,7 @@ interface AnchoredPanelProps {
 }
 
 /** Anchors a floating panel to the header cluster: fixed-position, right
- * edges aligned, just below the anchor (the mock's 344px activity panel). */
+ * edges aligned, just below the anchor. */
 function AnchoredPanel({
   anchor,
   onDismiss,
@@ -298,44 +302,32 @@ function PolicyPopover({ path, onOpenUpdatesPanel }: PolicyPopoverProps) {
 
   return (
     <div className="flex flex-col gap-1 rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]">
-      <div className="flex items-start justify-between rounded-(--radius-08) p-2">
-        <span className="flex min-w-0 flex-1 items-start gap-1 pr-2">
-          <span className="p-[2px]">
-            <SvgSparkle size={16} />
-          </span>
-          <span className="min-w-0">
-            <Text font="main-ui-action" color="text-04" as="p">
-              AI Auto-Edits
-            </Text>
-            <Text font="secondary-body" color="text-03" as="p">
-              Let AI update/organize this page on its own.
-            </Text>
-          </span>
-        </span>
-        <Switch checked={allowed} onCheckedChange={() => void toggle()} />
+      <div className="p-2">
+        <InputHorizontal
+          icon={SvgSparkle}
+          title="AI Auto-Edits"
+          description="Let AI update/organize this page on its own."
+        >
+          <Switch checked={allowed} onCheckedChange={() => void toggle()} />
+        </InputHorizontal>
       </div>
-      <div className="mx-2 border-t border-(--border-01)" />
-      <div className="flex items-start gap-1 rounded-(--radius-08) p-1">
-        <span className="flex min-w-0 flex-1 items-start gap-1 p-1 pr-2">
-          <span className="p-[2px]">
-            <SvgSparkle size={16} />
-          </span>
-          <span className="min-w-0">
-            <Text font="main-ui-action" color="text-04" as="p">
-              Page Instructions
-            </Text>
-            <Text font="secondary-body" color="text-03" as="p">
-              {policy?.update_instruction || "How should this page be updated?"}
-            </Text>
-          </span>
-        </span>
-        <Button
-          icon={SvgExpand}
-          size="md"
-          prominence="tertiary"
-          tooltip="Open in panel"
-          onClick={onOpenUpdatesPanel}
-        />
+      <Divider />
+      <div className="p-2">
+        <InputHorizontal
+          icon={SvgAddLines}
+          title="Page Instructions"
+          description={
+            policy?.update_instruction || "How should this page be updated?"
+          }
+        >
+          <Button
+            icon={SvgExpand}
+            size="md"
+            prominence="tertiary"
+            tooltip="Open in panel"
+            onClick={onOpenUpdatesPanel}
+          />
+        </InputHorizontal>
       </div>
     </div>
   );
@@ -343,7 +335,7 @@ function PolicyPopover({ path, onOpenUpdatesPanel }: PolicyPopoverProps) {
 
 /**
  * The header's "who is on this page" cluster (mocks 2079:379824,
- * 2079:381324, 2079:383512, 1929:361938): everyone active on the page as
+ * 2079:381324, 2079:383512, 1929:361938): every coedit participant as
  * overlapping colored chips, agents badged onto the user they act for,
  * a +N overflow, and the Auto slot controlling AI auto-edits. The
  * current user is never shown.
@@ -367,8 +359,8 @@ export function PresenceAvatars({
     const caretByUser = new Map(peers.map((p) => [p.user_id, p.head]));
     const agentByUser = new Map(
       agents
-        .filter((a) => a.user_id && a.activity === "wrote")
-        .map((a) => [a.user_id as string, a.agent_name]),
+        .filter((a) => a.activity === "wrote")
+        .map((a) => [a.user_id, a.agent_name]),
     );
     return participants
       .filter((p) => p.user_id !== myUserId)
@@ -402,9 +394,10 @@ export function PresenceAvatars({
   }, []);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
-  // Recent edits load once per doc: first hover fetches, later hovers
-  // reuse the same list.
+  // Recent edits load lazily on first hover and cache until the path
+  // changes, so a stale doc's shas never feed the history view.
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
+  useEffect(() => setCommits(null), [path]);
   const loadCommits = useCallback(() => {
     if (commits) return;
     fetchFileHistory(path)
