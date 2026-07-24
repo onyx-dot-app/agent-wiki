@@ -165,6 +165,11 @@ def _eager_detector(monkeypatch):
 def test_second_sweep_carries_instead_of_duplicating(sweep_repo):
     first = runner.run_sweep(triggered_by_user_id=None)
     assert first["proposals_emitted"] == 1
+    from app.wiki.change_proposals import ProposalStatus, list_by_status
+
+    (row,) = list_by_status(ProposalStatus.PENDING)
+    # The identity snapshot is first-class: {path: doc id} at emit time.
+    assert row["doc_ids"] == {"hollow": doc_ids.get_or_mint("hollow")}
 
     second = runner.run_sweep(triggered_by_user_id=None)
     assert second["proposals_emitted"] == 0  # carried, not re-created

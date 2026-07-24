@@ -122,6 +122,16 @@ class Deduper:
             return f"id:{doc_ids.get_or_mint(path)}"
         return f"path:{path.casefold()}"
 
+    def resolution(self, draft: ProposalDraft) -> dict[str, str]:
+        """``{path: doc id}`` for the draft's existing paths — the same
+        emit-time snapshot the keys embed, in queryable form (stored on the
+        row as ``doc_ids``). Reserved not-yet-existing names are absent."""
+        return {
+            p: doc_ids.get_or_mint(p)
+            for p in dict.fromkeys(draft.source_paths + draft.target_paths)
+            if self._exists(p)
+        }
+
     def subject_key(self, detector: str, draft: ProposalDraft) -> str:
         terms = sorted(
             {self._id_term(p) for p in draft.source_paths + draft.target_paths}

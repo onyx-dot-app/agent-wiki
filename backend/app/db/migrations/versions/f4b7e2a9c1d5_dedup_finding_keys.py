@@ -1,4 +1,4 @@
-"""finding_key + subject_key on change_proposals — Layer-1 dedup identity.
+"""finding_key + subject_key + doc_ids on change_proposals — dedup identity.
 
 Revision ID: f4b7e2a9c1d5
 Revises: d5e8a1c4f7b2
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision: str = "f4b7e2a9c1d5"
 down_revision: str | None = "d5e8a1c4f7b2"
@@ -30,6 +31,11 @@ def _has_column(table: str, column: str) -> bool:
 def upgrade() -> None:
     if not _has_column("change_proposals", "finding_key"):
         op.add_column("change_proposals", sa.Column("finding_key", sa.Text()))
+    if not _has_column("change_proposals", "doc_ids"):
+        op.add_column(
+            "change_proposals",
+            sa.Column("doc_ids", postgresql.JSONB(astext_type=sa.Text())),
+        )
     if not _has_column("change_proposals", "subject_key"):
         op.add_column("change_proposals", sa.Column("subject_key", sa.Text()))
     op.create_index(
@@ -59,3 +65,4 @@ def downgrade() -> None:
     )
     op.drop_column("change_proposals", "subject_key")
     op.drop_column("change_proposals", "finding_key")
+    op.drop_column("change_proposals", "doc_ids")

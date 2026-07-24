@@ -82,6 +82,7 @@ def _to_dict(row: ChangeProposal) -> dict[str, Any]:
         "run_id": row.run_id,
         "acting_user_id": row.acting_user_id,
         "reviewed_by_user_id": row.reviewed_by_user_id,
+        "doc_ids": row.doc_ids,
         "finding_key": row.finding_key,
         "subject_key": row.subject_key,
         "status_reason": row.status_reason,
@@ -110,6 +111,7 @@ def create(
     expires_at: str | None = None,
     finding_key: str | None = None,
     subject_key: str | None = None,
+    doc_ids: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Insert a ``pending`` proposal and return it.
 
@@ -148,6 +150,7 @@ def create(
             acl_fingerprint_after=acl_fingerprint_after,
             finding_key=finding_key,
             subject_key=subject_key,
+            doc_ids=doc_ids,
             created_at=now,
             updated_at=now,
             expires_at=expires_at,
@@ -233,6 +236,7 @@ def revive(
     instruction: str | None = None,
     proposed_bodies: dict[str, str] | None = None,
     expires_at: str | None = None,
+    doc_ids: dict[str, str] | None = None,
 ) -> bool:
     """``stale | expired → pending`` — the same finding was re-detected, so
     its row returns to the queue with refreshed anchors instead of a sibling
@@ -260,6 +264,7 @@ def revive(
                 run_id=run_id,
                 acl_fingerprint_before=acl_fingerprint_before,
                 expires_at=expires_at,
+                doc_ids=doc_ids,
                 updated_at=now,
             ),
         )

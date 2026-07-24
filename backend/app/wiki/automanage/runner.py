@@ -226,6 +226,7 @@ def run_detection(
                 # notice a permission change (e.g. group-membership drift)
                 # between proposal and execution.
                 acl_fp = fingerprint.combined_fingerprint(draft_paths)
+                resolution = deduper.resolution(draft)
                 if decision.action is dedup.DedupAction.REVIVE:
                     assert decision.existing_id is not None
                     if not change_proposals_revive(
@@ -236,6 +237,7 @@ def run_detection(
                         proposed_bodies=draft.proposed_bodies,
                         run_id=run_id,
                         acl_fingerprint_before=acl_fp,
+                        doc_ids=resolution,
                     ):
                         # A race moved the row out of stale/expired since the
                         # decision — whatever won represents the finding now.
@@ -264,6 +266,7 @@ def run_detection(
                         acl_fingerprint_before=acl_fp,
                         finding_key=decision.finding_key,
                         subject_key=decision.subject_key,
+                        doc_ids=resolution,
                     )
                 taken.add(draft.dedupe_key)
                 emitted += 1
