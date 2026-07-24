@@ -77,6 +77,18 @@ const STATUS_LABEL: Record<string, string> = {
  * must see both sides, so ops with a target always render this detail. */
 function operationDetail(p: Proposal): string | undefined {
   if (p.target_paths.length === 0) return undefined;
+  if (p.op === "move") {
+    // A move keeps every page — nothing is retired. Folder paths in
+    // source_paths are the chain being flattened; the shortest one is the
+    // destination the pages move up into.
+    const pages = p.source_paths.filter((s) => s.endsWith(".md"));
+    const folders = p.source_paths.filter((s) => !s.endsWith(".md"));
+    const dest =
+      folders.length > 0
+        ? folders.reduce((a, b) => (b.length < a.length ? b : a))
+        : (p.target_paths[0].split("/").slice(0, -1).join("/") ?? "");
+    return `Moves ${pages.length} page${pages.length === 1 ? "" : "s"} into “${dest}” — links, permissions, and comments follow each page.`;
+  }
   const retire = p.source_paths.map((s) => `“${s}”`).join(", ");
   const keep = p.target_paths.map((t) => `“${t}”`).join(", ");
   return `Keeps ${keep} — retires ${retire} (restorable from Trash; links to it will point at the surviving page).`;
