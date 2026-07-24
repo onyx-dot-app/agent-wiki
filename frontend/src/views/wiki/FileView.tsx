@@ -1200,18 +1200,17 @@ export function FileView({ path }: FileViewProps) {
               </div>
             ) : (
               // Live editor: the full-width editor owns the scroll, so its
-              // scrollbar sits flush at the far-right edge while the text stays
-              // capped + centered by the editor theme. `--cm-gutter` mirrors the
-              // negative margin (which cancels `<main>`'s padding) so the editor
-              // text keeps the same side gutter as the DocTitle at every
-              // breakpoint. The banners stay capped + centered above it, aligned
-              // with the text and DocTitle (`empty:hidden` drops the gap when
-              // none render).
+              // scrollbar sits flush at the far-right edge. The negative
+              // margin cancels <main>'s padding so the scroller spans the
+              // full width; the editor's own `mx-auto max-w-[768px]` (no
+              // extra side padding, per the fix for the text sitting
+              // double-indented past DocTitle) centers the text at the same
+              // gutter DocTitle and the banners use. The banners stay capped
+              // + centered above it, aligned with the text and DocTitle
+              // (`empty:hidden` drops the gap when none render).
               <div
                 className={`flex min-h-0 flex-1 flex-col gap-3 ${
-                  isMobile
-                    ? "-mx-3 [--cm-gutter:0.75rem]"
-                    : "-mx-8 [--cm-gutter:2rem]"
+                  isMobile ? "-mx-3" : "-mx-8"
                 }`}
               >
                 <div
@@ -1283,7 +1282,6 @@ export function FileView({ path }: FileViewProps) {
                       sourceHighlights={sourceHighlights}
                       activeSourceIds={activeSourceIds}
                       onSourceCaret={setCaretSourceKeys}
-                      placeholder="Start typing, or pick a template above…"
                     />
                   </div>
                 ) : coedit.connectError ? (

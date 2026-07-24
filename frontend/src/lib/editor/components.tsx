@@ -45,7 +45,11 @@ import {
   type ForwardedRef,
 } from "react";
 import type { CoeditProvider } from "@/lib/editor/provider";
-import { agentWikiSchema as schema, coerceChecked } from "@/lib/editor/schema";
+import {
+  agentWikiSchema as schema,
+  coerceChecked,
+  coerceLevel,
+} from "@/lib/editor/schema";
 import { agentWikiInputRules } from "@/lib/editor/inputRules";
 import { agentWikiKeymap } from "@/lib/editor/keymap";
 import {
@@ -61,31 +65,33 @@ import { colorFor } from "@/lib/editor/utils";
 const commentHighlightKey = new PluginKey<HighlightState>("commentHighlights");
 const sourceHighlightKey = new PluginKey<HighlightState>("sourceHighlights");
 
+/** Placeholder copy for an empty block, keyed by node type (Notion/Docs-
+ * style contextual placeholders — not one static string for every block).
+ * `null` means "no placeholder for this type" (list items, code blocks,
+ * etc. — the checkbox/fence itself is already the affordance). */
+function placeholderTextFor(node: PMNode): string | null {
+  if (node.type === schema.nodes.heading) {
+    return `Heading ${coerceLevel(node.attrs.level)}`;
+  }
+  if (node.type === schema.nodes.paragraph) {
+    return 'Start writing or press "/" for commands...';
+  }
+  return null;
+}
+
 /** A real PM placeholder, not a DOM overlay: decorates the empty block the
  * cursor is currently in with a `data-placeholder` attr (read by a CSS
- * `::before` in globals.css) — covers a freshly empty doc (cursor starts in
- * the sole empty paragraph) *and* any new empty block created later (hit
- * Enter, land in a fresh empty paragraph mid-document — that's a distinct
- * case from "the whole doc is empty" and needs the same treatment). Only
- * the block the cursor is actually in gets the decoration, not every empty
- * block simultaneously — several blank lines in a row don't all light up at
- * once, matching how Notion/Docs-style per-line placeholders behave.
- *
- * Reuses the single `placeholder` prop text for every case for now — that
- * copy ("Start typing, or pick a template above…") reads a little oddly on
- * an empty block mid-document rather than the page's very first line, but
- * splitting doc-empty vs block-empty copy is a product-copy decision, not
- * a mechanism one; flag if you want that split.
- *
- * `getText` is a ref getter rather than a captured string so the plugin
- * (built once per `conn` in the mount effect below) stays live if the
- * `placeholder` prop changes without needing to remount the editor. */
-function placeholderPlugin(getText: () => string | undefined): Plugin {
+ * `::before` in css/prosemirror.css) — covers a freshly empty doc (cursor
+ * starts in the sole empty paragraph) *and* any new empty block created
+ * later (hit Enter, land in a fresh empty paragraph mid-document — that's a
+ * distinct case from "the whole doc is empty" and needs the same
+ * treatment). Only the block the cursor is actually in gets the
+ * decoration, not every empty block simultaneously — several blank lines
+ * in a row don't all light up at once. */
+function placeholderPlugin(): Plugin {
   return new Plugin({
     props: {
       decorations(state) {
-        const text = getText();
-        if (!text) return null;
         const { selection } = state;
         if (!selection.empty) return null;
         const { $from } = selection;
@@ -96,6 +102,8 @@ function placeholderPlugin(getText: () => string | undefined): Plugin {
         if ($from.depth === 0) return null;
         const node = $from.parent;
         if (node.content.size !== 0) return null;
+        const text = placeholderTextFor(node);
+        if (!text) return null;
         const pos = $from.before();
         return DecorationSet.create(state.doc, [
           Decoration.node(pos, pos + node.nodeSize, {
@@ -185,7 +193,6 @@ export interface CoeditorProps {
   userId: string;
   userDisplay: string;
   readOnly?: boolean;
-  placeholder?: string;
   onEmptyChange?: (empty: boolean) => void;
   /** Fires on a real, user-driven doc change — not on the programmatic
    * transaction `setDoc` itself dispatches (tagged and filtered out, see
@@ -220,7 +227,6 @@ function CoeditorInner({
   userId,
   userDisplay,
   readOnly,
-  placeholder,
   onEmptyChange,
   onDocChanged,
   commentHighlights,
@@ -241,7 +247,6 @@ function CoeditorInner({
     comment: "",
     source: "",
   });
-  const placeholderRef = useRef(placeholder);
 
   useEffect(() => {
     conn.provider.awareness.setLocalStateField("user", {
@@ -249,15 +254,6 @@ function CoeditorInner({
       color: colorFor(userId),
     });
   }, [conn, userId, userDisplay]);
-
-  // Keep the ref current, and force PM to re-run `decorations()` — a bare
-  // ref write doesn't trigger a redraw on its own, since nothing else
-  // dispatched a transaction.
-  useEffect(() => {
-    placeholderRef.current = placeholder;
-    const view = viewRef.current;
-    if (view) view.dispatch(view.state.tr);
-  }, [placeholder]);
 
   useEffect(() => {
     if (!editorHostRef.current) return;
@@ -278,7 +274,7 @@ function CoeditorInner({
         }),
         agentWikiKeymap(),
         agentWikiInputRules(),
-        placeholderPlugin(() => placeholderRef.current),
+        placeholderPlugin(),
         anchoredHighlightPlugin(commentHighlightKey, {
           idle: "agent-wiki-comment-highlight",
           active: "agent-wiki-comment-highlight-active",
@@ -295,8 +291,7 @@ function CoeditorInner({
               // defaults, so without it every node type renders as flat
               // unstyled text (the same class the read-only ReactMarkdown
               // view uses for its output).
-              class:
-                "markdown mx-auto max-w-[768px] px-(--cm-gutter,1.5rem) py-6 min-h-full",
+              class: "markdown mx-auto max-w-[768px] py-6 min-h-full",
             },
           },
         }),
@@ -547,7 +542,7 @@ export function CoeditPresenceBar({
   if (others.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-2 px-(--cm-gutter,1.5rem) py-1 text-xs text-(--text-04)">
+    <div className="flex items-center gap-2 py-1 text-xs text-(--text-04)">
       {others.map((p) => (
         <span key={p.userId} className="flex items-center gap-1">
           <span
