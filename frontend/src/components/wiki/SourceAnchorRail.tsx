@@ -234,8 +234,7 @@ export function SourceAnchorRail({
     // target per source wins, targets arrive ordered by offset.
     const anchorOffsets = new Map<string, number>();
     for (const t of editor.sourceTargets()) {
-      if (t.id && t.startOffset < t.endOffset && !anchorOffsets.has(t.id))
-        anchorOffsets.set(t.id, t.startOffset);
+      if (t.id && !anchorOffsets.has(t.id)) anchorOffsets.set(t.id, t.offset);
     }
     const anchored: { rail: RailSource; want: number }[] = [];
     for (const s of sources) {

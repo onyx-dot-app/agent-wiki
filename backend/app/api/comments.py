@@ -33,7 +33,7 @@ from app.models.comment import (
     CreateReplyRequest,
     EditCommentRequest,
 )
-from app.wiki import comment_mentions, comment_remap, filesystem
+from app.wiki import coedit, coedit_ws, comment_mentions, comment_remap, filesystem
 from app.wiki import comments as comments_repo
 from app.wiki import comment_notifications
 
@@ -70,11 +70,48 @@ def _require_author_or_admin(comment: dict[str, Any], user: User) -> None:
         )
 
 
-def _group_threads(rows: list[dict[str, Any]]) -> list[CommentThreadView]:
+def _resolve_live_anchors(rel_path: str, rows: list[dict[str, Any]]) -> dict[str, tuple[Any, Any]]:
+    """``{comment_id: (live_start, live_end)}`` for every inline row that
+    could be resolved against the page's active live session — empty if
+    there's no active session. Grouped by ``anchor_sha`` (normally uniform
+    across a page's comments right after ``remap_comments`` runs, but not
+    assumed) so ``resolve_live_spans`` reads each old-body ref only once,
+    matching ``app/wiki/anchor_remap.py``'s own batching pattern."""
+    sess = coedit.get_active_session(rel_path)
+    if sess is None:
+        return {}
+    by_anchor: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        if r["anchor_sha"] and r["start_offset"] is not None and r["end_offset"] is not None:
+            by_anchor[r["anchor_sha"]].append(r)
+    resolved: dict[str, tuple[Any, Any]] = {}
+    for anchor_sha, group in by_anchor.items():
+        spans = [(r["start_offset"], r["end_offset"]) for r in group]
+        try:
+            results = coedit_ws.resolve_live_spans(sess.id, rel_path, anchor_sha, spans)
+        except Exception:
+            log.exception("live-anchor resolution failed for %s", rel_path)
+            continue
+        for r, result in zip(group, results):
+            if result is not None:
+                resolved[r["id"]] = result
+    return resolved
+
+
+def _group_threads(rel_path: str, rows: list[dict[str, Any]]) -> list[CommentThreadView]:
     """Group flat rows into threads (root + replies), oldest thread first."""
+    live = _resolve_live_anchors(rel_path, rows)
     by_thread: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in rows:
         by_thread[r["thread_root_id"]].append(r)
+
+    def _view(row: dict[str, Any]) -> CommentView:
+        view = CommentView.model_validate(row)
+        resolved = live.get(row["id"])
+        if resolved is not None:
+            view = view.model_copy(update={"live_start": resolved[0], "live_end": resolved[1]})
+        return view
+
     threads: list[CommentThreadView] = []
     for members in by_thread.values():
         root = next((m for m in members if m["id"] == m["thread_root_id"]), None)
@@ -85,10 +122,7 @@ def _group_threads(rows: list[dict[str, Any]]) -> list[CommentThreadView]:
             key=lambda m: m["created_at"],
         )
         threads.append(
-            CommentThreadView(
-                root=CommentView.model_validate(root),
-                replies=[CommentView.model_validate(m) for m in replies],
-            )
+            CommentThreadView(root=_view(root), replies=[_view(m) for m in replies])
         )
     threads.sort(key=lambda t: t.root.created_at)
     return threads
@@ -141,7 +175,9 @@ def list_comments(
         comment_remap.remap_comments(rel_path)
     except Exception:
         log.exception("comment remap backstop failed for %s", rel_path)
-    return CommentListResponse(threads=_group_threads(comments_repo.list_for_doc(rel_path)))
+    return CommentListResponse(
+        threads=_group_threads(rel_path, comments_repo.list_for_doc(rel_path))
+    )
 
 
 @router.get("/search", response_model=CommentSearchResponse)

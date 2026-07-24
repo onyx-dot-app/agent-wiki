@@ -42,7 +42,6 @@ _TASK_MODULES = (
     "app.tasks.agent_activity",
     "app.tasks.chat_title",
     "app.tasks.automanage",
-    "app.tasks.coedit_checkpoint",
     "app.tasks.coedit_leave",
     "app.tasks.coedit_rebase",
     "app.tasks.craft",

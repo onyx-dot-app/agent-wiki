@@ -1,5 +1,6 @@
 @import "@onyx-ai/opal/root.css";
 @import "./css/z-index.css";
+@import "prosemirror-view/style/prosemirror.css";
 @config "../../tailwind.config.cjs";
 
 /* The app shell is height-capped and scrolls inside its own columns, so
@@ -330,6 +331,33 @@ body {
   border: none;
   border-top: 1px solid var(--border-01);
   margin: 16px 0;
+}
+
+/* ── AgentWikiEditor (raw ProseMirror) ────────────────────────────────────
+   `prosemirror-view/style/prosemirror.css` (imported above) supplies the
+   essential base rules every PM integration needs (white-space handling,
+   li positioning, etc.) but deliberately ships no visual opinions — a
+   contenteditable element still gets the browser's native focus ring
+   without an explicit override.
+   ───────────────────────────────────────────────────────────────────── */
+.ProseMirror:focus,
+.ProseMirror:focus-visible {
+  outline: none;
+}
+
+/* Opaque verbatim blocks (schema.ts's `opaqueTextBlock` nodes other than
+   codeBlock, which already reads as code without help): rendered plainly
+   per the "editable as raw text, not decomposed" design rather than faking
+   a real `<hr>`/etc. — distinct muted styling so it doesn't read as a
+   normal paragraph. */
+.ProseMirror [data-raw-block] {
+  margin: 12px 0;
+  padding: 2px 0;
+  color: var(--text-04);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  border-top: 1px solid var(--border-01);
+  border-bottom: 1px solid var(--border-01);
 }
 
 /* ── Inline comment highlights (CSS Custom Highlight API) ─────────────────

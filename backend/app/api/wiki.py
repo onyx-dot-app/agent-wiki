@@ -64,6 +64,7 @@ from app.wiki import (
     acl,
     agent_activity,
     coedit,
+    coedit_ws,
     diff as wiki_diff,
     doc_ids,
     drafts as wiki_drafts,
@@ -336,22 +337,25 @@ def get_document_by_path(
     # committed pages.
     sess = coedit.get_active_session(rel)
     if sess is not None:
-        body = sess.buffer_text
-        # Fast path: if HEAD hasn't moved since the session opened (the common
-        # case — live-rebase folds inbound agent commits into the buffer and
-        # advances base_sha), the buffer already reflects everything, so skip
-        # the merge subprocess. When HEAD has advanced past the session's base,
-        # reconcile the committed change with the buffer for display: a clean
-        # 3-way merge shows both; on a conflict — or a merge failure — serve
-        # committed HEAD, not the buffer. Preferring the buffer there would let
-        # a stale/lagging session (in the limit, a zombie with no participants
-        # left to reconcile it) hide the committed change from every viewer —
-        # the 2026-07-06 incident. The authoritative merge happens at checkpoint.
+        live_body = coedit_ws.reconstruct_live_body(sess.id, rel)
+        body = live_body
+        # Fast path: if HEAD hasn't moved since the session opened, the live
+        # body already reflects everything, so skip the merge subprocess.
+        # When HEAD has advanced past the session's base (an external commit
+        # landed — live-rebase only triggers a checkpoint, it doesn't fold
+        # the change in immediately, so base_sha stays put until then),
+        # reconcile the committed change with the live body for display: a
+        # clean 3-way merge shows both; on a conflict — or a merge failure —
+        # serve committed HEAD, not the live body. Preferring the live body
+        # there would let a stale/lagging session (in the limit, a zombie
+        # with no participants left to reconcile it) hide the committed
+        # change from every viewer — the 2026-07-06 incident. The
+        # authoritative merge happens at checkpoint.
         if sess.base_sha is not None and sess.base_sha != head_sha:
             base = wiki_git.read_file_opt(rel, ref=sess.base_sha) or ""
             current = wiki_git.read_file_opt(rel) or ""
             try:
-                merge = wiki_git.merge_content(base, current, sess.buffer_text)
+                merge = wiki_git.merge_content(base, current, live_body)
                 body = merge.merged if merge.clean else current
             except RuntimeError:
                 log.warning(
