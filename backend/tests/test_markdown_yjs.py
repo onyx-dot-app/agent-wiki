@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pycrdt import XmlFragment
+from pycrdt import Doc, XmlElement, XmlFragment, XmlText
 
 from app.wiki.markdown_yjs import (
     BLOCK_ID_ATTR,
@@ -453,6 +453,107 @@ def test_escaped_block_start_marker_on_a_later_soft_break_line() -> None:
         # time must not raise (it did, for "#", before this fix).
         twice = reconstruct_body(seed_doc_from_markdown(once))
         assert twice == once
+
+
+def test_escaped_setext_underline_on_a_later_line_stays_literal() -> None:
+    # A setext heading underline (one or more contiguous "=" for level 1,
+    # or "-" for level 2 — a different, lower threshold than a thematic
+    # break's 3+) only ever reactivates a *preceding* line, i.e. exactly
+    # the per-line position _escape_line_start already runs at. "=" had no
+    # handling at all; a bare "-"/"--" (below the thematic-break floor,
+    # and not matching the bullet check either since nothing follows)
+    # fell through every existing check.
+    cases = [
+        "My Title\n\\===\n",
+        "My Title\n\\-\n",
+        "My Title\n\\--\n",
+        "- My Title\n  \\===\n",
+        "> My Title\n> \\===\n",
+    ]
+    for raw in cases:
+        once = reconstruct_body(seed_doc_from_markdown(raw))
+        assert once == raw, f"expected stable round-trip for {raw!r}, got {once!r}"
+        # Confirms no crash on re-seed for the nested cases (same failure
+        # mode as the "#" case: _build_block_sequence has no heading
+        # support inside a list item/blockquote at all).
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        assert twice == once
+
+
+def _build_live_paragraph(text: str) -> Doc:
+    """A paragraph built directly (not via seed_doc_from_markdown), to
+    simulate what a user typing plain prose in the live editor actually
+    produces — critically, one that never went through the forward
+    markdown parser, so text that *happens* to look like table source
+    (e.g. "a | b" + a soft break + "---|---") was never classified as a
+    table in the first place. Round-tripping this through checkpoint
+    serialization is the only way this specific reactivation is
+    reachable; seeding directly from that same markdown text would
+    already (correctly) parse it as a table, not a paragraph."""
+    doc = Doc()
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    para = XmlElement("paragraph", {BLOCK_ID_ATTR: "b0", "_nl": "1"}, contents=[])
+    with doc.transaction():
+        root.children.append(para)
+    with doc.transaction():
+        para.children.append(XmlText(text))
+    return doc
+
+
+def test_paragraph_reactivates_as_table_without_escaping() -> None:
+    # A plain paragraph a user actually typed — "a | b" then a soft break
+    # then "---|---" — serializes with neither "|" nor the bare dash run
+    # escaped by anything else in this module, and a GFM table delimiter
+    # row needs only 1+ dashes per cell (no thematic-break-style 3+
+    # floor), so the checkpointed output reactivates as a table on the
+    # next parse.
+    doc = _build_live_paragraph("a | b\n---|---")
+    once = reconstruct_body(doc)
+    reseeded = seed_doc_from_markdown(once)
+    tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
+    assert tags == ["paragraph"], (
+        f"expected the checkpointed text to stay a single paragraph, "
+        f"got tags={tags} for body={once!r}"
+    )
+
+
+def test_table_delimiter_row_escaping_is_stable() -> None:
+    for text in ("a | b\n---|---", "a | b\n--|--", "a | b\n:--|--:"):
+        doc = _build_live_paragraph(text)
+        once = reconstruct_body(doc)
+        twice = reconstruct_body(seed_doc_from_markdown(once))
+        assert once == twice
+        tags = [
+            c.tag
+            for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
+        ]
+        assert tags == ["paragraph"]
+
+
+def test_paragraph_line_of_tildes_does_not_reactivate_as_a_fence() -> None:
+    # "~" isn't in _escape_inline_text's char set at all (only
+    # \`*_[] are), unlike backtick fences — a plain paragraph line typed
+    # as "~~~" reactivates as a fenced code block opener on the next
+    # parse, which is more severe than the other cases: a fence doesn't
+    # just misclassify one block, it swallows everything up to the *next*
+    # matching fence (or EOF) as raw content.
+    doc = _build_live_paragraph("some text:\n~~~\nmore text")
+    once = reconstruct_body(doc)
+    twice = reconstruct_body(seed_doc_from_markdown(once))
+    assert once == twice
+    tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
+    assert tags == ["paragraph"]
+
+
+def test_paragraph_line_of_backticks_does_not_reactivate_as_a_fence() -> None:
+    # Backtick is already in _escape_inline_text's char set, so this is
+    # already protected as a side effect (confirmed, not assumed) — kept
+    # as an explicit regression test alongside the tilde case rather than
+    # relying on that being obvious from reading _wrap_run alone.
+    doc = _build_live_paragraph("some text:\n```\nmore text")
+    once = reconstruct_body(doc)
+    tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
+    assert tags == ["paragraph"]
 
 
 def test_find_by_block_id() -> None:

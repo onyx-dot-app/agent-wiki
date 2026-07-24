@@ -620,6 +620,37 @@ _ORDERED_MARKER_RE = re.compile(r"^\d{1,9}[.)](\s|$)")
 # position.
 _THEMATIC_BREAK_DASH_RE = re.compile(r"^-(?:[ \t]*-){2,}[ \t]*(?:\n|$)")
 
+# A setext heading underline: one or more *contiguous* "=" (level 1) or "-"
+# (level 2), only trailing space/tab, nothing else — a different threshold
+# from a thematic break (which needs 3+ dashes, and tolerates spaces
+# *between* them): a setext underline needs only one dash/equals, but no
+# internal spaces. It only ever reactivates a *preceding* line (there's no
+# rule for a bare "-\n" as a heading without a paragraph line above it),
+# which is exactly the per-line position this module already escapes at.
+_SETEXT_UNDERLINE_RE = re.compile(r"^(?:-+|=+)[ \t]*$")
+
+# A GFM table delimiter row: 1+ cells of optional ":", 1+ "-", optional
+# ":", separated by "|", with optional leading/trailing "|" and whitespace
+# around each cell. A paragraph whose *first* line contains "|" followed by
+# a line matching this shape reactivates as a table header on the next
+# parse — confirmed against the forward parse (not assumed): a plain
+# paragraph typed as "a | b" + soft break + "---|---" is indistinguishable
+# from real table source once serialized, since neither "|" nor a bare
+# dash run were escaped by anything else in this module.
+_TABLE_DELIMITER_ROW_RE = re.compile(
+    r"^[ \t]*\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$"
+)
+
+# A fence opener: 3+ backticks or 3+ tildes at the start of the line — unlike
+# a thematic break/setext underline/table row, a fence opener is *not*
+# whole-line-only: trailing content (the info string, e.g. "```python") is
+# valid and still opens the fence (confirmed against the forward parse: 2
+# backticks doesn't, 3+ does, with or without trailing text). Reactivating
+# one is the most severe case in this module — a fenced code block swallows
+# everything up to the *next* matching fence (or EOF) as raw content, not
+# just misclassifying the one paragraph.
+_FENCE_OPENER_RE = re.compile(r"^(?:`{3,}|~{3,})")
+
 
 def _escape_block_start_ambiguity(text: str) -> str:
     """A paragraph's serialized text starting with a character or pattern
@@ -649,6 +680,8 @@ def _escape_line_start(line: str) -> str:
         return line
     if line[0] == "#":
         return "\\" + line
+    if line[0] in "-=" and _SETEXT_UNDERLINE_RE.match(line):
+        return "\\" + line
     if line[0] == "-" and _THEMATIC_BREAK_DASH_RE.match(line):
         return "\\" + line
     if line[0] in "-+" and (len(line) == 1 or line[1].isspace()):
@@ -656,6 +689,10 @@ def _escape_line_start(line: str) -> str:
     if line[0] == ">":
         return "\\" + line
     if _ORDERED_MARKER_RE.match(line):
+        return "\\" + line
+    if _TABLE_DELIMITER_ROW_RE.match(line):
+        return "\\" + line
+    if _FENCE_OPENER_RE.match(line):
         return "\\" + line
     return line
 
