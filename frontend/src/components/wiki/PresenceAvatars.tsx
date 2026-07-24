@@ -289,29 +289,42 @@ function PolicyPopover({
   canWrite,
   onOpenUpdatesPanel,
 }: PolicyPopoverProps) {
-  const [policy, setPolicy] = useState<EffectivePolicy | null>(null);
+  // The policy carries the path it was fetched for: a mismatch reads as
+  // unloaded in the same render a navigation lands, so a stale page's
+  // value can never be shown or PATCHed against the new path.
+  const [policy, setPolicy] = useState<{
+    forPath: string;
+    effective: EffectivePolicy;
+  } | null>(null);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     let alive = true;
-    // Clearing first re-disables the switch, a stale page's policy must
-    // never drive a PATCH against the new path.
-    setPolicy(null);
     getUpdatePolicy(path)
-      .then((p) => alive && setPolicy(p.effective))
+      .then(
+        (p) => alive && setPolicy({ forPath: path, effective: p.effective }),
+      )
       .catch(() => alive && setPolicy(null));
     return () => {
       alive = false;
     };
   }, [path]);
+  const loaded = policy?.forPath === path ? policy.effective : null;
 
-  const allowed = !!policy?.ai_management_allowed;
+  const allowed = !!loaded?.ai_management_allowed;
   const toggle = async () => {
+    if (!loaded) return;
     setSaving(true);
-    setPolicy((p) => (p ? { ...p, ai_management_allowed: !allowed } : p));
+    setPolicy({
+      forPath: path,
+      effective: { ...loaded, ai_management_allowed: !allowed },
+    });
     try {
       await patchUpdatePolicy(path, { ai_management_allowed: !allowed });
     } catch (e) {
-      setPolicy((p) => (p ? { ...p, ai_management_allowed: allowed } : p));
+      setPolicy({
+        forPath: path,
+        effective: { ...loaded, ai_management_allowed: allowed },
+      });
       toast.error(
         e instanceof Error ? e.message : "Couldn't update the page's policy",
       );
@@ -330,10 +343,10 @@ function PolicyPopover({
         >
           <Switch
             checked={allowed}
-            // Held until the policy loads (toggling against the null
-            // default would persist a wrong override) and while a save is
-            // in flight (a second click would race the first PATCH).
-            disabled={!canWrite || !policy || saving}
+            // Held until this path's policy loads (toggling against the
+            // null default would persist a wrong override) and while a
+            // save is in flight (a second click would race the PATCH).
+            disabled={!canWrite || !loaded || saving}
             onCheckedChange={() => void toggle()}
           />
         </InputHorizontal>
@@ -344,7 +357,7 @@ function PolicyPopover({
           icon={SvgAddLines}
           title="Page Instructions"
           description={
-            policy?.update_instruction || "How should this page be updated?"
+            loaded?.update_instruction || "How should this page be updated?"
           }
         >
           <Button
