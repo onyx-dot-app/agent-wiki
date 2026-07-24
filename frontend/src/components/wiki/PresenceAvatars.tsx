@@ -17,6 +17,7 @@ import {
   Switch,
   Tag,
   Text,
+  Tooltip,
 } from "@onyx-ai/opal/components";
 import { InputHorizontal, Section } from "@onyx-ai/opal/layouts";
 import {
@@ -148,18 +149,22 @@ function PresenceCard({
   const edits = commits.slice(0, 3);
   const scrollable = entry.editing && entry.caretHead !== null;
   return (
-    <Section justifyContent="start" alignItems="stretch" height="fit">
+    // Mock card chrome: ONE white surface holds the title row and the
+    // Recent Edits list together (mock 2079:381324).
+    <Section
+      justifyContent="start"
+      alignItems="stretch"
+      height="fit"
+      data-presence-card={entry.userId}
+      className="w-full rounded-(--radius-08) bg-(--background-tint-00) shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)]"
+    >
       <Section
         flexDirection="row"
         justifyContent="start"
         alignItems="start"
         height="fit"
         gap={0.25}
-        data-presence-card={entry.userId}
-        // Mock card chrome: white surface lifted off the panel body.
-        className={`w-full rounded-(--radius-08) bg-(--background-tint-00) p-1 shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)] ${
-          scrollable ? "cursor-pointer" : ""
-        }`}
+        className={`w-full p-1 ${scrollable ? "cursor-pointer" : ""}`}
         onClick={
           scrollable
             ? () => onScrollToOffset?.(entry.caretHead as number)
@@ -214,7 +219,7 @@ function PresenceCard({
           justifyContent="start"
           alignItems="stretch"
           height="fit"
-          className="py-1"
+          className="px-1 pb-1"
         >
           <Divider title="Recent Edits" />
           {edits.map((c) => {
@@ -293,17 +298,12 @@ function AnchoredPanel({
     // raw-ok: Popover.Anchor exists but Popover.Content bakes neutral-00/rounded-12/shadow-md chrome (WithoutStyles, no escape) that the mock's tint-01 policy panel and chromeless floating cards contradict, and this wrapper also needs runtime viewport coordinates
     <div
       ref={panelRef}
-      className="fixed z-50"
+      className="fixed z-50 w-(--block-width-panel-medium-small)"
       style={{ top: rect.bottom + 8, right: window.innerWidth - rect.right }}
       onPointerEnter={hover?.onEnter}
       onPointerLeave={hover?.onLeave}
     >
-      <Section
-        justifyContent="start"
-        alignItems="stretch"
-        height="fit"
-        className="w-(--block-width-panel-medium-small)"
-      >
+      <Section justifyContent="start" alignItems="stretch" height="fit">
         {children}
       </Section>
     </div>,
@@ -349,20 +349,18 @@ function PolicyPopover({
   const loaded = policy?.forPath === path ? policy.effective : null;
 
   const allowed = !!loaded?.ai_management_allowed;
-  const toggle = async () => {
+  const updating = !loaded?.ingestion_auto_update_disabled;
+  const patchField = async (
+    patch: Partial<EffectivePolicy>,
+    revert: Partial<EffectivePolicy>,
+  ) => {
     if (!loaded) return;
     setSaving(true);
-    setPolicy({
-      forPath: path,
-      effective: { ...loaded, ai_management_allowed: !allowed },
-    });
+    setPolicy({ forPath: path, effective: { ...loaded, ...patch } });
     try {
-      await patchUpdatePolicy(path, { ai_management_allowed: !allowed });
+      await patchUpdatePolicy(path, patch);
     } catch (e) {
-      setPolicy({
-        forPath: path,
-        effective: { ...loaded, ai_management_allowed: allowed },
-      });
+      setPolicy({ forPath: path, effective: { ...loaded, ...revert } });
       toast.error(
         e instanceof Error ? e.message : "Couldn't update the page's policy",
       );
@@ -391,9 +389,51 @@ function PolicyPopover({
             // null default would persist a wrong override) and while a
             // save is in flight (a second click would race the PATCH).
             disabled={!canWrite || !loaded || saving}
-            onCheckedChange={() => void toggle()}
+            onCheckedChange={() =>
+              void patchField(
+                { ai_management_allowed: !allowed },
+                { ai_management_allowed: allowed },
+              )
+            }
           />
         </InputHorizontal>
+        {allowed && (
+          <Section
+            justifyContent="start"
+            alignItems="stretch"
+            height="fit"
+            gap={0.5}
+            className="pt-2 pl-6"
+          >
+            <InputHorizontal
+              title="Update"
+              description="Periodically scan ingested data sources to add relevant new information."
+            >
+              <Switch
+                checked={updating}
+                disabled={!canWrite || !loaded || saving}
+                onCheckedChange={() =>
+                  void patchField(
+                    { ingestion_auto_update_disabled: updating },
+                    { ingestion_auto_update_disabled: !updating },
+                  )
+                }
+              />
+            </InputHorizontal>
+            <InputHorizontal
+              title="Organize"
+              description="Reorganize, move, and/or merge content in this page when needed."
+            >
+              <Tooltip tooltip="Coming soon" side="left">
+                {/* The span keeps hover alive: a disabled control swallows
+                    pointer events, so the tooltip would never fire on it. */}
+                <span className="inline-flex">
+                  <Switch checked={false} disabled />
+                </span>
+              </Tooltip>
+            </InputHorizontal>
+          </Section>
+        )}
       </Section>
       <Divider />
       <Section height="fit" alignItems="stretch" padding={0.5}>
@@ -514,7 +554,10 @@ export function PresenceAvatars({
   );
   const closeSoon = useCallback(() => {
     window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => setHoverId(null), 150);
+    closeTimer.current = window.setTimeout(() => {
+      setHoverId(null);
+      setAutoOpen(false);
+    }, 150);
   }, []);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
@@ -625,6 +668,11 @@ export function PresenceAvatars({
         aria-label="AI auto-edits"
         className="flex cursor-pointer items-center justify-center px-[2px]"
         onClick={() => setAutoOpen((v) => !v)}
+        onPointerEnter={() => {
+          holdOpen();
+          setAutoOpen(true);
+        }}
+        onPointerLeave={closeSoon}
       >
         <Section width="fit" height="fit" className="relative">
           <IconContainer size="main-content" avatar="icon" icon={SvgOnyxLogo} />
@@ -676,6 +724,7 @@ export function PresenceAvatars({
         <AnchoredPanel
           anchor={clusterRef.current}
           onDismiss={() => setAutoOpen(false)}
+          hover={{ onEnter: holdOpen, onLeave: closeSoon }}
         >
           <PolicyPopover
             path={path}
