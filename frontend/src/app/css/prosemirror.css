@@ -1,0 +1,85 @@
+/* All CSS specific to AgentWikiEditor (raw ProseMirror) lives here — see
+   frontend/src/lib/editor/ for the plugins/schema that produce the classes
+   and attres these rules key off. */
+
+@import "prosemirror-view/style/prosemirror.css";
+
+/* `prosemirror-view/style/prosemirror.css` supplies the essential base
+   rules every PM integration needs (white-space handling, li positioning,
+   etc.) but deliberately ships no visual opinions — a contenteditable
+   element still gets the browser's native focus ring without an explicit
+   override. */
+.ProseMirror:focus,
+.ProseMirror:focus-visible {
+  outline: none;
+}
+
+/* Opaque verbatim blocks (schema.ts's `opaqueTextBlock` nodes other than
+   codeBlock, which already reads as code without help): rendered plainly
+   per the "editable as raw text, not decomposed" design rather than faking
+   a real `<hr>`/etc. — distinct muted styling so it doesn't read as a
+   normal paragraph. */
+.ProseMirror [data-raw-block] {
+  margin: 12px 0;
+  padding: 2px 0;
+  color: var(--text-04);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  border-top: 1px solid var(--border-01);
+  border-bottom: 1px solid var(--border-01);
+}
+
+/* Placeholder text (components.tsx's `placeholderPlugin`) — a real PM node
+   decoration + this CSS `::before`, not a DOM overlay positioned on top of
+   the editor. `float: left; height: 0` is the standard PM placeholder trick:
+   the pseudo-element takes zero layout height of its own (so it can't push
+   real content down) while still rendering inline at the start of the
+   (empty) block it's decorating. */
+.ProseMirror .is-empty::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--text-02);
+}
+
+/* The editor hides its native scroll chrome per the mocks — the
+   scroll-position tick rail (EditorEdgeScrollbar) is the intended indicator
+   surface. `.pm-scroller` is the scroll container components.tsx renders
+   around the `.ProseMirror` content box (not the ProseMirror root itself,
+   which never scrolls on its own — its parent does). */
+.pm-scroller {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.pm-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+/* Margin-comments lane reservation. The editor stays full width so its
+   scrollbar hugs the window edge, and every centered doc block (title,
+   banners, editor text) reserves the 360px lane inside its own box, so
+   content can never slide under the floating cards. Scoped to the same
+   container query that shows the lane (FileView.tsx's `rail-reserved`
+   wrapper class). The extra `.pm-scroller` hop outranks Tailwind's
+   `max-w-[768px]` utility on `.ProseMirror` itself on specificity alone,
+   without needing `!important`. */
+@container (min-width: 920px) {
+  .rail-reserved .pm-scroller .ProseMirror,
+  .rail-reserved .rail-inset {
+    max-width: calc(768px + 360px);
+    padding-right: 360px;
+  }
+}
+
+/* Anchored comments panel: the editor's native scrollbar would sit at the
+   doc/panel boundary, so it hides in favor of the panel's viewport-edge
+   scrollbar (EditorEdgeScrollbar). Redundant with `.pm-scroller`'s
+   always-hidden rule above as written today, but kept as an explicit,
+   independently-scoped rule (matches the pre-migration structure) rather
+   than assumed dead and deleted. */
+.panel-anchored .pm-scroller {
+  scrollbar-width: none;
+}
+.panel-anchored .pm-scroller::-webkit-scrollbar {
+  display: none;
+}

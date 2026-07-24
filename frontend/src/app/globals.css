@@ -1,6 +1,6 @@
 @import "@onyx-ai/opal/root.css";
 @import "./css/z-index.css";
-@import "prosemirror-view/style/prosemirror.css";
+@import "./css/prosemirror.css";
 @config "../../tailwind.config.cjs";
 
 /* The app shell is height-capped and scrolls inside its own columns, so
@@ -157,16 +157,6 @@ body {
    setups. */
 .opal-root-layout__panel {
   overflow: clip;
-}
-
-/* The editor hides its scroll chrome per the mocks. The scroll-position
-   tick rail is the intended indicator surface. */
-.cm-scroller {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.cm-scroller::-webkit-scrollbar {
-  display: none;
 }
 
 /* ── Doc panel tab transitions ────────────────────────────────────────────
@@ -333,33 +323,6 @@ body {
   margin: 16px 0;
 }
 
-/* ── AgentWikiEditor (raw ProseMirror) ────────────────────────────────────
-   `prosemirror-view/style/prosemirror.css` (imported above) supplies the
-   essential base rules every PM integration needs (white-space handling,
-   li positioning, etc.) but deliberately ships no visual opinions — a
-   contenteditable element still gets the browser's native focus ring
-   without an explicit override.
-   ───────────────────────────────────────────────────────────────────── */
-.ProseMirror:focus,
-.ProseMirror:focus-visible {
-  outline: none;
-}
-
-/* Opaque verbatim blocks (schema.ts's `opaqueTextBlock` nodes other than
-   codeBlock, which already reads as code without help): rendered plainly
-   per the "editable as raw text, not decomposed" design rather than faking
-   a real `<hr>`/etc. — distinct muted styling so it doesn't read as a
-   normal paragraph. */
-.ProseMirror [data-raw-block] {
-  margin: 12px 0;
-  padding: 2px 0;
-  color: var(--text-04);
-  font-family: var(--font-mono, monospace);
-  font-size: 0.9em;
-  border-top: 1px solid var(--border-01);
-  border-bottom: 1px solid var(--border-01);
-}
-
 /* ── Inline comment highlights (CSS Custom Highlight API) ─────────────────
    The wiki page registers Ranges under these names via paintCommentHighlights().
    Yellow/orange are illustrative decoration — raw hex is intentional here.
@@ -431,29 +394,11 @@ body {
   color: var(--text-04);
 }
 
-/* Margin-comments lane reservation. The editor stays full width so its
-   scrollbar hugs the window edge, and every centered doc block (title,
-   banners, editor text) reserves the 360px lane inside its own box, so
-   content can never slide under the floating cards. Scoped to the same
-   container query that shows the lane. The extra .cm-scroller hop outranks
-   the runtime-injected CodeMirror theme rule. */
-@container (min-width: 920px) {
-  .rail-reserved .cm-scroller .cm-content,
-  .rail-reserved .rail-inset {
-    max-width: calc(768px + 360px);
-    padding-right: 360px;
-  }
-}
-
-/* Anchored comments panel: the editor's native scrollbar would sit at the
-   doc/panel boundary, so it hides in favor of the panel's viewport-edge
-   scrollbar (EditorEdgeScrollbar). */
-.panel-anchored .cm-scroller {
-  scrollbar-width: none;
-}
-.panel-anchored .cm-scroller::-webkit-scrollbar {
-  display: none;
-}
+/* Margin-comments lane reservation (.rail-reserved, including the
+   .rail-inset title/banners half) and anchored-panel scrollbar hiding
+   (.panel-anchored) now live in css/prosemirror.css, alongside the rest of
+   the AgentWikiEditor CSS — both rules only ever match inside the editor's
+   own DOM. */
 
 /* Comment inputs wrap MentionTextarea inside the mock's bordered field
    (566:19918), so the textarea itself goes chromeless. The wrapper owns
