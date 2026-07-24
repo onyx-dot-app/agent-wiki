@@ -59,6 +59,45 @@ def test_editing_one_paragraph_leaves_every_other_byte_identical() -> None:
     assert new_body.endswith(tail)
 
 
+def test_editing_image_paragraph_touches_only_that_paragraph_and_keeps_image_intact() -> None:
+    base_body = "# Heading\n\nBefore ![pic](img.png) after.\n\nFinal paragraph.\n"
+    doc = seed_doc_from_markdown(base_body)
+    tracker = TouchedTracker(doc)
+    root = _root(doc)
+
+    para = root.children[1]
+    with doc.transaction():
+        para.children[0].insert(0, "EDITED ")
+
+    assert tracker.touched_block_ids == {"b1"}
+    assert tracker.touched_row_ids == {}
+
+    new_body = checkpoint_body(base_body, doc, tracker)
+    assert "EDITED Before ![pic](img.png) after." in new_body
+    assert new_body.startswith("# Heading\n\n")
+    assert new_body.endswith("\n\nFinal paragraph.\n")
+
+
+def test_editing_different_block_leaves_image_paragraph_as_verbatim_base_slice() -> None:
+    image_block = "Before ![esc\\]bracket](img.png#w=640) after.\n"
+    base_body = f"# Heading\n\n{image_block}\nFinal paragraph.\n"
+    doc = seed_doc_from_markdown(base_body)
+    tracker = TouchedTracker(doc)
+    root = _root(doc)
+
+    final_para = root.children[2]
+    with doc.transaction():
+        final_para.children[0].insert(0, "EDITED ")
+
+    assert tracker.touched_block_ids == {"b2"}
+    image_start = base_body.index(image_block)
+    image_end = image_start + len(image_block)
+
+    new_body = checkpoint_body(base_body, doc, tracker)
+    assert new_body[image_start:image_end] == base_body[image_start:image_end] == image_block
+    assert "EDITED Final paragraph." in new_body
+
+
 def test_editing_table_cell_only_touches_that_row() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     tracker = TouchedTracker(doc)

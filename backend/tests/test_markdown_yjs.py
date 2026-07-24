@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from pycrdt import Doc, XmlElement, XmlFragment, XmlText
 
@@ -9,6 +11,7 @@ from app.wiki.markdown_yjs import (
     BLOCK_ID_ATTR,
     ROOT_XML_KEY,
     ROW_ID_ATTR,
+    _inline_runs,
     find_by_block_id,
     find_by_row_id,
     reconstruct_body,
@@ -70,6 +73,125 @@ def test_empty_heading_does_not_raise() -> None:
 
 def test_reconstruct_body_round_trips_bold_italic_code_link() -> None:
     body = "A **bold** and *italic* and `code` and [a link](https://x.example) end.\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_bare_image_round_trips_exactly() -> None:
+    body = "![alt text](https://x.example/img.png)\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_image_with_title_round_trips_exactly() -> None:
+    body = '![alt](s.png "a \\"quoted\\" title")\n'
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_image_with_escaped_bracket_in_alt_round_trips_exactly_and_is_idempotent() -> None:
+    body = "![esc\\]bracket](s.png)\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    assert once == body
+    twice = reconstruct_body(seed_doc_from_markdown(once))
+    assert twice == once
+
+
+def test_image_with_escaped_emphasis_like_alt_round_trips_exactly_and_is_idempotent() -> None:
+    body = "![a \\*x\\* b](s.png)\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    assert once == body
+    twice = reconstruct_body(seed_doc_from_markdown(once))
+    assert twice == once
+
+
+def test_image_src_fragment_is_stored_verbatim_and_round_trips_exactly() -> None:
+    body = "![pic](img.png#w=640)\n"
+    doc = seed_doc_from_markdown(body)
+    root = _root(doc)
+    para = root.children[0]
+    image = para.children[0]
+    assert isinstance(image, XmlElement)
+    assert dict(image.attributes)["src"] == "img.png#w=640"
+    assert reconstruct_body(doc) == body
+
+
+def test_image_mid_paragraph_round_trips_exactly() -> None:
+    body = "Before ![alt](img.png) after.\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_multiple_images_in_one_paragraph_round_trip_exactly() -> None:
+    body = "![a](a.png) middle ![b](b.png)\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_image_adjacent_to_link_and_emphasis_round_trips_exactly() -> None:
+    body = "[link](https://x.example)![img](i.png)*em*\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_image_inside_emphasis_is_content_correct_and_idempotent() -> None:
+    body = "*before ![a](i.png) after*\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    twice = reconstruct_body(seed_doc_from_markdown(once))
+    assert once != body
+    assert once == twice
+    assert "before" in once and "after" in once
+    assert "![a](i.png)" in once
+    assert "*" in once
+
+
+def test_image_in_list_item_and_blockquote_survives_round_trip() -> None:
+    body = "- item ![a](i.png)\n\n> quote ![b](q.png)\n"
+    doc = seed_doc_from_markdown(body)
+    root = _root(doc)
+    assert reconstruct_body(doc) == body
+
+    list_para = root.children[0].children[0].children[0]
+    assert any(isinstance(child, XmlElement) and child.tag == "image" for child in list_para.children)
+
+    quote_para = root.children[1].children[0]
+    assert any(
+        isinstance(child, XmlElement) and child.tag == "image" for child in quote_para.children
+    )
+
+
+def test_image_is_a_sibling_leaf_with_expected_attributes() -> None:
+    doc = seed_doc_from_markdown('before ![shown](s.png "caption") after\n')
+    root = _root(doc)
+    para = root.children[0]
+    children = list(para.children)
+
+    assert len(children) == 3
+    assert isinstance(children[0], XmlText)
+    assert isinstance(children[1], XmlElement)
+    assert isinstance(children[2], XmlText)
+    assert children[1].tag == "image"
+    assert dict(children[1].attributes) == {
+        "src": "s.png",
+        "alt": "shown",
+        "title": "caption",
+    }
+
+
+def test_untitled_image_has_no_title_attribute_and_titled_image_stores_unescaped_title() -> None:
+    untitled = seed_doc_from_markdown("![alt](s.png)\n")
+    untitled_image = _root(untitled).children[0].children[0]
+    assert isinstance(untitled_image, XmlElement)
+    assert "title" not in dict(untitled_image.attributes)
+
+    titled = seed_doc_from_markdown('![alt](s.png "a \\"quoted\\" title")\n')
+    titled_image = _root(titled).children[0].children[0]
+    assert isinstance(titled_image, XmlElement)
+    assert dict(titled_image.attributes)["title"] == 'a "quoted" title'
+
+
+def test_empty_alt_image_round_trips_exactly() -> None:
+    body = "![](s.png)\n"
     doc = seed_doc_from_markdown(body)
     assert reconstruct_body(doc) == body
 
@@ -688,13 +810,14 @@ def test_find_by_row_id() -> None:
 
 
 def test_unrecognized_inline_construct_raises_not_implemented() -> None:
-    # GFM strikethrough isn't in _KNOWN_INLINE_TYPES (no strikethrough
-    # plugin enabled on gfm_parser()), so markdown-it never emits the token
-    # type in the first place — use an image instead, which markdown-it
-    # does emit and this codec has no encoder for.
-    body = "A picture: ![alt](https://x.example/img.png) here.\n"
+    # This parser config folds every inline construct into a token type this
+    # codec encodes, so exercise the fail-loud guard with a synthetic unknown
+    # child instead of real markdown.
+    body = SimpleNamespace(
+        children=[SimpleNamespace(type="strikethrough_open", content="", children=None)]
+    )
     with pytest.raises(NotImplementedError):
-        seed_doc_from_markdown(body)
+        _inline_runs(body)
 
 
 def test_hard_line_break_backslash_form_round_trips_to_canonical_form() -> None:

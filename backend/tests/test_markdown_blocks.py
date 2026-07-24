@@ -84,6 +84,14 @@ def test_single_paragraph() -> None:
     assert body[blocks[0].start : blocks[0].end] == body
 
 
+def test_paragraph_containing_image_stays_a_single_paragraph_block() -> None:
+    body = "Before ![alt](img.png) after.\n"
+    blocks = top_level_block_ranges(body)
+    assert len(blocks) == 1
+    assert blocks[0].kind is BlockKind.PARAGRAPH
+    assert body[blocks[0].start : blocks[0].end] == body
+
+
 def test_code_block_kind() -> None:
     body = "Intro.\n\n```python\nx = 1\n```\n\nOutro.\n"
     blocks = top_level_block_ranges(body)
