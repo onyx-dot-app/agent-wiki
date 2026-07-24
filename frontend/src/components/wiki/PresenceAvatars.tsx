@@ -189,15 +189,16 @@ function PresenceCard({
   // the glyph keeps the title row from holding a blank 16px box.
   const hasBadge = !!agentGlyph(entry.agentName);
   return (
-    // Mock card chrome: a single white surface wraps the title row and
-    // the Recent Edits list (mock 2079:381324).
+    // Mock anatomy (node 2079:380115 "Activity Panel"): the elevated white
+    // title card sits on the shared panel surface, and the Recent Edits
+    // list renders BELOW the card on the panel background.
     <Section
       gap={0}
       justifyContent="start"
       alignItems="stretch"
       height="fit"
       data-presence-card={entry.userId}
-      className="w-full rounded-(--radius-08) bg-(--background-tint-00) shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)]"
+      className="w-full"
     >
       <Section
         flexDirection="row"
@@ -205,20 +206,24 @@ function PresenceCard({
         alignItems="start"
         height="fit"
         gap={0.25}
-        className={`w-full p-1 ${scrollable ? "cursor-pointer" : ""}`}
+        padding={0.5}
+        className={`w-full rounded-(--radius-08) bg-(--background-tint-00) shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)] ${scrollable ? "cursor-pointer" : ""}`}
         onClick={
           scrollable
             ? () => onScrollToOffset?.(entry.caretHead as number)
             : undefined
         }
       >
+        {/* Node 2079:380987: three nested 4/2/2 insets collapse to p-2,
+            putting the avatar pair 8px off the card edge. */}
         <Section
           gap={0}
           flexDirection="row"
           alignItems="center"
           width="fit"
           height="fit"
-          className="shrink-0 px-[2px]"
+          padding={0.125}
+          className="shrink-0"
         >
           {/* 16px slots under the 20px circles give the avatar/badge
               pair the header stack's 4px overlap. */}
@@ -247,10 +252,10 @@ function PresenceCard({
         </Section>
         <Section
           gap={0}
-          justifyContent="center"
+          justifyContent="start"
           alignItems="stretch"
           height="fit"
-          className="min-w-0 flex-1 px-1"
+          className="min-w-0 flex-1"
         >
           <Text font="main-ui-action" color="text-04" as="p" nowrap>
             {entry.display}
@@ -266,15 +271,15 @@ function PresenceCard({
           flexDirection="row"
           alignItems="center"
           width="fit"
-          height="fit"
-          className="shrink-0 pt-[2px]"
+          height={1.25}
+          className="shrink-0 text-(--status-text-info-05)"
         >
           {/* raw-ok: no Opal Text color maps to the mock's status-text-info-05 state chip */}
-          <span className="px-[2px] text-[12px] leading-4 text-(--status-text-info-05)">
+          <span className="px-[2px] text-[12px] leading-4">
             {entry.editing ? "Editing" : "Viewing"}
           </span>
           {entry.editing ? (
-            <SvgArrowUpRight size={12} />
+            <SvgArrowUpRight size={12} className="mx-[2px]" />
           ) : (
             <span className="mx-[2px] size-[6px] rounded-full bg-(--status-text-info-05)" />
           )}
@@ -286,20 +291,23 @@ function PresenceCard({
           justifyContent="start"
           alignItems="stretch"
           height="fit"
-          className="px-1 pb-1"
+          className="my-1"
         >
           <Divider title="Recent Edits" />
           {edits.map((c) => {
             const { agentLabel } = parseCommitAuthor(c.author);
             const changed = c.added + c.removed;
             const lines = `${changed} line${changed === 1 ? "" : "s"}`;
+            // Pure additions read "Added", anything else "Updated"
+            // (mock rows "Added 40 lines" / "Updated 45 lines with Codex").
+            const verb = c.removed === 0 ? "Added" : "Updated";
             return (
               <LineItemButton
                 key={c.sha}
                 title={
                   agentLabel
-                    ? `Updated ${lines} with ${agentLabel}`
-                    : `Updated ${lines}`
+                    ? `${verb} ${lines} with ${agentLabel}`
+                    : `${verb} ${lines}`
                 }
                 sizePreset="secondary"
                 variant="body"
@@ -309,11 +317,12 @@ function PresenceCard({
                     flexDirection="row"
                     alignItems="center"
                     width="fit"
+                    className="text-(--text-03)"
                   >
                     <Text font="secondary-body" color="text-03" nowrap>
                       {relativeTime(c.ts)}
                     </Text>
-                    <SvgArrowUpRight size={12} />
+                    <SvgArrowUpRight size={12} className="mx-[2px]" />
                   </Section>
                 }
                 onClick={() => onOpenCommit?.(c.sha)}
@@ -370,7 +379,18 @@ function AnchoredPanel({
       onPointerEnter={hover?.onEnter}
       onPointerLeave={hover?.onLeave}
     >
-      {children}
+      {/* Shared panel chrome (mock 1929:362227 "Policy Panel"; the hover
+          card and overflow panels carry the same surface). */}
+      <Section
+        gap={0}
+        justifyContent="start"
+        alignItems="stretch"
+        height="fit"
+        padding={0.25}
+        className="rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]"
+      >
+        {children}
+      </Section>
     </div>,
     document.body,
   );
@@ -439,7 +459,7 @@ function PolicyPopover({
       alignItems="stretch"
       height="fit"
       gap={0.25}
-      className="rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]"
+      className="w-full"
     >
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
         <InputHorizontal
@@ -464,7 +484,7 @@ function PolicyPopover({
             alignItems="stretch"
             height="fit"
             gap={0.5}
-            className="pt-2 pl-6"
+            className="mt-2 ml-6"
           >
             <InputHorizontal
               title="Update"
@@ -592,9 +612,15 @@ export function PresenceAvatars({
   const overflow = entries.slice(MAX_CHIPS);
 
   const clusterRef = useRef<HTMLDivElement | null>(null);
-  const [hoverId, setHoverId] = useState<string | null>(null);
-  const [overflowOpen, setOverflowOpen] = useState(false);
-  const [autoOpen, setAutoOpen] = useState(false);
+  // One panel at a time by construction: opening any panel replaces
+  // whatever was open, so the card, Auto popover, and overflow list can
+  // never stack (mocks show exactly one floating surface).
+  const [openPanel, setOpenPanel] = useState<
+    | { kind: "card"; userId: string }
+    | { kind: "auto" }
+    | { kind: "overflow" }
+    | null
+  >(null);
   const closeTimer = useRef<number>(0);
 
   const holdOpen = useCallback(
@@ -603,10 +629,7 @@ export function PresenceAvatars({
   );
   const closeSoon = useCallback(() => {
     window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => {
-      setHoverId(null);
-      setAutoOpen(false);
-    }, 150);
+    closeTimer.current = window.setTimeout(() => setOpenPanel(null), 150);
   }, []);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
@@ -615,9 +638,7 @@ export function PresenceAvatars({
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   useEffect(() => {
     setCommits(null);
-    setHoverId(null);
-    setOverflowOpen(false);
-    setAutoOpen(false);
+    setOpenPanel(null);
   }, [path]);
   const loadCommits = useCallback(() => {
     if (commits) return;
@@ -634,7 +655,15 @@ export function PresenceAvatars({
     [commits],
   );
 
-  const hovered = entries.find((e) => e.userId === hoverId);
+  const hovered =
+    openPanel?.kind === "card"
+      ? entries.find((e) => e.userId === openPanel.userId)
+      : undefined;
+  // A card whose user left the roster must not linger in state: the user
+  // re-entering later would silently re-mount the panel with no hover.
+  useEffect(() => {
+    if (openPanel?.kind === "card" && !hovered) setOpenPanel(null);
+  }, [openPanel, hovered]);
 
   // Ring color tracks the page's update-warn level (mock annotation
   // "Match warning level").
@@ -649,7 +678,7 @@ export function PresenceAvatars({
       width="fit"
       height="fit"
       gap={0.25}
-      className="px-[2px]"
+      padding={0.125}
     >
       {entries.length > 0 && (
         // DOM order runs last-chip-first so paint order stacks earlier
@@ -660,7 +689,8 @@ export function PresenceAvatars({
           alignItems="center"
           width="fit"
           height="fit"
-          className="isolate flex-row-reverse px-[2px]"
+          padding={0.125}
+          className="isolate flex-row-reverse"
         >
           {overflow.length > 0 && (
             // raw-ok: Tag is a non-interactive div, the click needs a button wrapper
@@ -668,8 +698,14 @@ export function PresenceAvatars({
               type="button"
               aria-label={`${overflow.length} more`}
               className="ml-[2px] cursor-pointer"
+              // holdOpen: a close timer pending from leaving a chip would
+              // otherwise dismiss the overflow panel right after this click.
+              onPointerEnter={holdOpen}
               onClick={() => {
-                setOverflowOpen((v) => !v);
+                holdOpen();
+                setOpenPanel((p) =>
+                  p?.kind === "overflow" ? null : { kind: "overflow" },
+                );
                 loadCommits();
               }}
             >
@@ -690,7 +726,7 @@ export function PresenceAvatars({
               className="relative"
               onPointerEnter={() => {
                 holdOpen();
-                setHoverId(e.userId);
+                setOpenPanel({ kind: "card", userId: e.userId });
                 loadCommits();
               }}
               onPointerLeave={closeSoon}
@@ -711,7 +747,7 @@ export function PresenceAvatars({
         </Section>
       )}
       {entries.length > 0 && (
-        <Section gap={0} height="fit" width="fit" className="h-4 self-center">
+        <Section gap={0} height={1} width="fit" className="self-center">
           <Divider
             orientation="vertical"
             paddingParallel="fit"
@@ -724,10 +760,12 @@ export function PresenceAvatars({
         type="button"
         aria-label="AI auto-edits"
         className="flex cursor-pointer items-center justify-center px-[2px]"
-        onClick={() => setAutoOpen((v) => !v)}
+        onClick={() =>
+          setOpenPanel((p) => (p?.kind === "auto" ? null : { kind: "auto" }))
+        }
         onPointerEnter={() => {
           holdOpen();
-          setAutoOpen(true);
+          setOpenPanel({ kind: "auto" });
         }}
         onPointerLeave={closeSoon}
       >
@@ -749,7 +787,7 @@ export function PresenceAvatars({
       {hovered && clusterRef.current && (
         <AnchoredPanel
           anchor={clusterRef.current}
-          onDismiss={() => setHoverId(null)}
+          onDismiss={() => setOpenPanel(null)}
           hover={{ onEnter: holdOpen, onLeave: closeSoon }}
         >
           <PresenceCard
@@ -760,10 +798,10 @@ export function PresenceAvatars({
           />
         </AnchoredPanel>
       )}
-      {overflowOpen && clusterRef.current && (
+      {openPanel?.kind === "overflow" && clusterRef.current && (
         <AnchoredPanel
           anchor={clusterRef.current}
-          onDismiss={() => setOverflowOpen(false)}
+          onDismiss={() => setOpenPanel(null)}
         >
           <Section
             justifyContent="start"
@@ -783,10 +821,10 @@ export function PresenceAvatars({
           </Section>
         </AnchoredPanel>
       )}
-      {autoOpen && clusterRef.current && (
+      {openPanel?.kind === "auto" && clusterRef.current && (
         <AnchoredPanel
           anchor={clusterRef.current}
-          onDismiss={() => setAutoOpen(false)}
+          onDismiss={() => setOpenPanel(null)}
           hover={{ onEnter: holdOpen, onLeave: closeSoon }}
         >
           <PolicyPopover
