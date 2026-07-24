@@ -209,7 +209,13 @@ const runColumns = (() => {
 
 function RunHistory() {
   const { runs } = useDetectionRuns(false);
-  if (runs.length === 0) return null;
+  // This card is the *sweep* history. Every run is a sweep today, but the
+  // runs API is trigger-agnostic — once on-create/on-write triggers exist,
+  // their per-page runs must not flood this table. (Server-side filtering
+  // belongs with that work: a client filter over a limited fetch would skew
+  // the page size.)
+  const sweeps = runs.filter((r) => r.trigger === "sweep");
+  if (sweeps.length === 0) return null;
 
   return (
     <div className="flex w-full flex-col gap-2">
@@ -221,7 +227,7 @@ function RunHistory() {
         description="What the last detection runs scanned and proposed."
       />
       <Table
-        data={runs.slice(0, 20)}
+        data={sweeps.slice(0, 20)}
         columns={runColumns}
         getRowId={(r) => r.id}
         variant="rows"
