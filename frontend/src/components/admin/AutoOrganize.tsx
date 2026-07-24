@@ -10,13 +10,8 @@ import {
   Text,
   createTableColumns,
 } from "@onyx-ai/opal/components";
-import {
-  SvgAlertCircle,
-  SvgCheckCircle,
-  SvgClock,
-  SvgSliders,
-} from "@onyx-ai/opal/icons";
-import { Content, ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
+import { SvgClock, SvgSliders } from "@onyx-ai/opal/icons";
+import { ContentAction, InputErrorText } from "@onyx-ai/opal/layouts";
 
 import {
   type AutoOrganizeSchedule,
@@ -122,30 +117,38 @@ function runTime(ts: string): string {
   });
 }
 
-const RUN_STATUS_ICON = {
-  completed: SvgCheckCircle,
-  failed: SvgAlertCircle,
-} as const;
-
 function startedCell(_value: string, row: DetectionRun) {
   return (
-    <Content
-      sizePreset="main-ui"
-      variant="section"
-      title={runTime(row.started_at)}
-      description={row.triggered_by_user_id === null ? "System" : "Manual"}
-    />
+    <Text font="main-ui-body" color="text-04">
+      {`${runTime(row.started_at)} · ${row.triggered_by_user_id === null ? "system" : "manual"}`}
+    </Text>
   );
 }
 
-function resultCell(_value: number, row: DetectionRun) {
-  if (row.status === "running") {
+function proposalsCell(_value: number, row: DetectionRun) {
+  if (row.status !== "completed") {
     return (
-      <Text font="main-ui-body" color="text-03">
-        Running…
+      <Text font="main-ui-body" color="text-02">
+        —
       </Text>
     );
   }
+  return (
+    <Text font="main-ui-body" color="text-04">
+      {`${row.proposals_emitted} proposal${row.proposals_emitted === 1 ? "" : "s"}`}
+    </Text>
+  );
+}
+
+function scannedCell(_value: number, row: DetectionRun) {
+  return (
+    <Text font="main-ui-body" color="text-03">
+      {row.status === "completed" ? `${row.paths_scanned} pages` : "—"}
+    </Text>
+  );
+}
+
+function statusCell(_value: string, row: DetectionRun) {
   if (row.status === "failed") {
     return (
       <Text font="main-ui-body" color="status-error-05">
@@ -154,34 +157,38 @@ function resultCell(_value: number, row: DetectionRun) {
     );
   }
   return (
-    <Content
-      sizePreset="main-ui"
-      variant="section"
-      title={`${row.proposals_emitted} proposal${row.proposals_emitted === 1 ? "" : "s"}`}
-      description={`${row.paths_scanned} pages scanned`}
-    />
+    <Text font="main-ui-body" color="text-03">
+      {row.status === "running" ? "Running…" : "Completed"}
+    </Text>
   );
 }
 
 const runColumns = (() => {
   const tc = createTableColumns<DetectionRun>();
   return [
-    tc.qualifier({
-      content: "icon",
-      getContent: (row) =>
-        RUN_STATUS_ICON[row.status as "completed" | "failed"] ?? SvgClock,
-    }),
     tc.column("started_at", {
       header: "Started",
-      weight: 20,
+      weight: 22,
       enableSorting: false,
       cell: startedCell,
     }),
     tc.column("proposals_emitted", {
-      header: "Result",
-      weight: 30,
+      header: "Proposals",
+      weight: 14,
       enableSorting: false,
-      cell: resultCell,
+      cell: proposalsCell,
+    }),
+    tc.column("paths_scanned", {
+      header: "Scanned",
+      weight: 14,
+      enableSorting: false,
+      cell: scannedCell,
+    }),
+    tc.column("status", {
+      header: "Status",
+      weight: 20,
+      enableSorting: false,
+      cell: statusCell,
     }),
   ];
 })();
@@ -200,9 +207,11 @@ function RunHistory() {
         description="What the last detection runs scanned and proposed."
       />
       <Table
-        data={runs.slice(0, 10)}
+        data={runs.slice(0, 20)}
         columns={runColumns}
         getRowId={(r) => r.id}
+        variant="rows"
+        size="md"
       />
     </div>
   );
