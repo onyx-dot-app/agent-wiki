@@ -83,6 +83,13 @@ class ProposalDraft(BaseModel):
     instruction: str | None = None
     proposed_bodies: dict[str, str] | None = None
     auto_approvable: bool = True
+    # Layer-1 identity: what makes two occurrences of this ask "the same
+    # ask" beyond (detector, op, pages) — the identity-side twin of
+    # ``validate``. Contributed by detectors whose premise is about specific
+    # content (body-dup: the shared blob sha; template-echo: the matched
+    # template body's blob); None for structural detectors, whose ask
+    # doesn't change when content does. See ``automanage/dedup.py``.
+    premise: str | None = None
 
     @property
     def dedupe_key(self) -> str:

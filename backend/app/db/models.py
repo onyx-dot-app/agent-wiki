@@ -1354,6 +1354,13 @@ class ChangeProposal(Base):
     base_shas: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    # {stable doc id: path at emit} — base_shas's identity twin: which
+    # *documents* the proposal is about. Keyed by the id (the stable term)
+    # so nothing can index this map by a since-moved path; the path value is
+    # a label of where the document was when proposed. Id-keyed also makes
+    # "proposals about doc X" a JSONB key-existence query. Reserved names
+    # that don't exist yet (a rename target) are absent. Null on legacy rows.
+    doc_ids: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     # Hash of the effective read/write audience before/after (audience-change
     # detection). Null until the ACL fingerprinting lands.
     acl_fingerprint_before: Mapped[str | None] = mapped_column(Text)
@@ -1363,6 +1370,19 @@ class ChangeProposal(Base):
     # execution applies while the base SHAs still match; drift goes stale and
     # regenerates. NULL for pure-structural ops (move/rename/folder ops).
     proposed_bodies: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Layer-1 dedup identity (see the Dedup design page + automanage/dedup.py):
+    # dedup_key = (detector, op, doc-id set, detector premise) — one finding,
+    # one row for life; cooldown_key is its content-free prefix, the unit the
+    # post-rejection cooldown quiets. Null on rows predating the columns.
+    dedup_key: Mapped[str | None] = mapped_column(Text)
+    # How many times this finding has come back (0 on create, +1 per
+    # revival) and when it was last emitted. Revival otherwise erases its
+    # own history — "keeps coming back" is a signal reviewers and
+    # detector-precision stats need, and it isn't reconstructable later.
+    revive_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    last_emitted_at: Mapped[str | None] = mapped_column(Text)
     # Human-facing one-liner for the queue card ("why this proposal").
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     # NL instruction for the content step (e.g. how to merge two bodies);
@@ -1413,6 +1433,7 @@ class ChangeProposal(Base):
             name="change_proposals_created_via_check",
         ),
         Index("idx_change_proposals_status", "status", "created_at"),
+        Index("idx_change_proposals_dedup_key", "dedup_key"),
     )
 
 

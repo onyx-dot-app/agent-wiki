@@ -82,6 +82,10 @@ def _to_dict(row: ChangeProposal) -> dict[str, Any]:
         "run_id": row.run_id,
         "acting_user_id": row.acting_user_id,
         "reviewed_by_user_id": row.reviewed_by_user_id,
+        "doc_ids": row.doc_ids,
+        "revive_count": row.revive_count,
+        "last_emitted_at": row.last_emitted_at,
+        "dedup_key": row.dedup_key,
         "status_reason": row.status_reason,
         "applied_sha": row.applied_sha,
         "created_at": row.created_at,
@@ -106,6 +110,8 @@ def create(
     acl_fingerprint_before: str | None = None,
     acl_fingerprint_after: str | None = None,
     expires_at: str | None = None,
+    dedup_key: str | None = None,
+    doc_ids: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Insert a ``pending`` proposal and return it.
 
@@ -142,6 +148,9 @@ def create(
             acting_user_id=acting_user_id,
             acl_fingerprint_before=acl_fingerprint_before,
             acl_fingerprint_after=acl_fingerprint_after,
+            dedup_key=dedup_key,
+            doc_ids=doc_ids,
+            last_emitted_at=now,
             created_at=now,
             updated_at=now,
             expires_at=expires_at,

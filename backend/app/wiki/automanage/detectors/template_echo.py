@@ -106,6 +106,9 @@ class _TemplateEchoDetector:
                         f"{template_name!r} template. Remove it with "
                         "trash_page (restorable). Do not write any content."
                     ),
+                    # Identity premise: the matched template body — echoing a
+                    # *different* (e.g. revised) template is a new ask.
+                    premise=blob,
                     auto_approvable=False,
                 )
             )
