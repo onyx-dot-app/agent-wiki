@@ -30,11 +30,22 @@ from typing import Any
 
 from app.auth.users import AI_USER_ID
 from app.wiki import git, update_policy
-from app.wiki.automanage import dedup, executor, fingerprint, review, runs, settings
+from app.wiki.automanage import (
+    dedup,
+    executor,
+    fingerprint,
+    review,
+    runs,
+    selection,
+    settings,
+)
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
     ProposalCreatedVia,
+    ProposalStatus,
+    list_by_status,
+    mark_stale,
 )
 from app.wiki.change_proposals import (
     create as create_proposal,
@@ -149,17 +160,18 @@ def run_detection(
     try:
         scope = Scope(trigger=trigger, paths=tuple(paths), run_id=run_id)
         deduper = dedup.Deduper(paths)
-        emitted = 0
-        capped = False
-        # Pairing detectors compare pages against each other; feeding them one
-        # permission bucket at a time means pages with different audiences are
-        # never mentioned in one proposal (which alone would leak a restricted
-        # page's existence to whoever sees the review surface). Buckets are
-        # computed once per run and only when a pairing detector will run.
+
+        # ---- Steps 1+2: detect all, dedup -------------------------------
+        # Collect every viable candidate before persisting anything, so
+        # selection composes the slate over the whole picture (a pure
+        # function of candidates + existing claims) instead of emitting
+        # as-you-go. Pairing detectors get one same-audience bucket at a
+        # time (a cross-audience proposal alone would leak a restricted
+        # page's existence to whoever sees the review surface).
+        candidates: list[tuple[Any, ProposalDraft, dedup.DedupDecision, bool]] = []
+        carried_ids: set[int] = set()
         buckets: list[Scope] | None = None
         for detector in DETECTORS:
-            if capped:
-                break
             if not detector.applicable(trigger):
                 continue
             if getattr(detector, "pairs_paths", False):
@@ -172,10 +184,10 @@ def run_detection(
             mgmt = _resolve_management(drafts)
             for draft in drafts:
                 draft_paths = draft.source_paths + draft.target_paths
-                # Emit safety: never persist a draft the executor can't apply —
-                # a detector landing ahead of its op's executor degrades to this
-                # loud skip instead of filling the queue with proposals that
-                # dead-end at approval (review re-checks the same set).
+                # Emit safety: never persist a draft the executor can't
+                # apply — a detector landing ahead of its op's executor
+                # degrades to this loud skip instead of filling the queue
+                # with proposals that dead-end at approval.
                 if draft.op.value not in executor.SUPPORTED_OPS:
                     log.error(
                         "detection run %s: detector %s emitted op %r with no "
@@ -188,109 +200,216 @@ def run_detection(
                     continue
                 if any(mgmt.get(p) is False for p in draft_paths):
                     continue  # explicitly hands-off scope
-                # Dedup is pure identity: a new premise on recently
-                # rejected pages CREATEs immediately by design. The
-                # post-rejection cooldown is a *selection*-step concern
-                # (persisted but unselectable — see the Dedup design page)
-                # and lands with the reconciliation work, not here.
                 decision = deduper.decide(detector.name, draft)
-                if decision.action not in (
-                    dedup.DedupAction.CREATE,
-                    dedup.DedupAction.REVIVE,
-                ):
-                    continue  # carried, or rejected-forever
-                if emitted >= MAX_PROPOSALS_PER_RUN:
-                    log.warning(
-                        "detection run %s hit per-run cap (%d); "
-                        "remaining drafts deferred to next run",
-                        run_id,
-                        MAX_PROPOSALS_PER_RUN,
-                    )
-                    capped = True
-                    break
-                base_shas = _base_shas(draft.source_paths, draft.target_paths)
-                if base_shas is None:
+                if decision.action is dedup.DedupAction.SKIP_REJECTED:
+                    continue  # same ask was declined — never again
+                if decision.action is dedup.DedupAction.SKIP_LIVE:
+                    if decision.existing_id is not None:
+                        carried_ids.add(decision.existing_id)
                     continue
-                # Audience snapshot at emit time — staleness re-checks can
-                # notice a permission change (e.g. group-membership drift)
-                # between proposal and execution.
-                acl_fp = fingerprint.combined_fingerprint(draft_paths)
-                resolution = deduper.resolution(draft)
-                if decision.action is dedup.DedupAction.REVIVE:
-                    if decision.existing_id is None:
-                        # Unreachable: DedupDecision enforces this at
-                        # construction. Skip loudly rather than crash a run.
-                        log.error(
-                            "detection run %s: REVIVE decision without a row "
-                            "(%s) — skipped",
-                            run_id,
-                            decision.dedup_key,
-                        )
-                        continue
-                    if not change_proposals_revive(
-                        decision.existing_id,
-                        source_paths=draft.source_paths,
-                        target_paths=draft.target_paths,
-                        base_shas=base_shas,
-                        summary=draft.summary,
-                        instruction=draft.instruction,
-                        proposed_bodies=draft.proposed_bodies,
-                        run_id=run_id,
-                        acl_fingerprint_before=acl_fp,
-                        doc_ids=resolution,
-                    ):
-                        # A race moved the row out of stale/expired since the
-                        # decision — whatever won represents the finding now.
-                        continue
-                    proposal = get_proposal(decision.existing_id)
-                    if proposal is None:
-                        continue
-                    log.info(
-                        "detection run %s: revived proposal %s (%s)",
-                        run_id,
-                        decision.existing_id,
-                        decision.dedup_key,
-                    )
-                else:
-                    proposal = create_proposal(
-                        op=draft.op,
-                        source_paths=draft.source_paths,
-                        target_paths=draft.target_paths,
-                        base_shas=base_shas,
-                        summary=draft.summary,
-                        created_via=created_via,
-                        detector=detector.name,
-                        instruction=draft.instruction,
-                        proposed_bodies=draft.proposed_bodies,
-                        run_id=run_id,
-                        acl_fingerprint_before=acl_fp,
-                        dedup_key=decision.dedup_key,
-                        doc_ids=resolution,
-                    )
-                emitted += 1
-                # Whole operation inside an AI-managed scope → auto-apply as the
-                # AI system user (no human queue). Otherwise it waits for a
-                # human in the pending-cleanups queue. The detector must also
-                # consent (`auto_approvable`) — probabilistic detectors emit
-                # False so their proposals always get a human even in
-                # AI-managed scopes.
-                if (
+                auto_ok = bool(
                     draft.auto_approvable
                     and draft_paths
                     and all(mgmt.get(p) is True for p in draft_paths)
-                ) and not review.auto_approve(
-                    proposal["id"], acting_user_id=AI_USER_ID
+                )
+                candidates.append((detector, draft, decision, auto_ok))
+
+        # ---- Reconciliation: retire pendings that stopped being true ----
+        # A full sweep re-derives ground truth, so a pending row whose
+        # finding neither carried nor revived is no longer true — a
+        # reviewer must never be shown an ask the wiki has outgrown.
+        # Full sweeps only: a partial scope's silence proves nothing.
+        # Approved rows are a human decision in flight — the executor's to
+        # re-validate, never the sweep's to retract.
+        invalidated = 0
+        # limit=None: reconciliation and claim-blocking must see the
+        # COMPLETE live set — a truncated read would leave obsolete
+        # pendings visible and admit claims that conflict with omitted
+        # rows.
+        pending_rows = list_by_status(ProposalStatus.PENDING, limit=None)
+        if trigger is TriggerKind.SWEEP:
+            revive_ids = {
+                d.existing_id for _, _, d, _ in candidates
+                if d.action is dedup.DedupAction.REVIVE
+            }
+            for row in pending_rows:
+                if row["id"] in carried_ids or row["id"] in revive_ids:
+                    continue
+                if mark_stale(
+                    row["id"], reason=f"not re-detected by run {run_id}"
                 ):
-                        # Shouldn't happen for a just-created proposal; if a race
-                        # transitioned it out of pending, it stays pending (a
-                        # human can still action it) — surface the anomaly loudly.
-                        log.warning(
-                            "detection run %s: auto-approve did not take for "
-                            "proposal %s (%s); left pending",
-                            run_id,
-                            proposal["id"],
-                            decision.dedup_key,
-                        )
+                    invalidated += 1
+            if invalidated:
+                log.info(
+                    "detection run %s: invalidated %d pending proposal(s) "
+                    "no longer detected",
+                    run_id,
+                    invalidated,
+                )
+
+        # ---- Step 3: selection — a slate of compatible claims -----------
+        # Stability-first: approved rows and carried pendings hold their
+        # claims (a surfaced ask is never bumped); new findings fill free
+        # pages in registry order. Everything else is persisted invalid —
+        # the ledger records every detected finding, and the row is the
+        # revival anchor once its page frees up.
+        blocked: set[str] = set()
+        for row in list_by_status(ProposalStatus.APPROVED, limit=None):
+            blocked |= selection.claim_of(row["source_paths"] + row["target_paths"])
+        for row in pending_rows:
+            if row["id"] in carried_ids:
+                blocked |= selection.claim_of(
+                    row["source_paths"] + row["target_paths"]
+                )
+
+        emitted = 0
+        persisted_invalid = 0
+        for detector, draft, decision, auto_ok in candidates:
+            # The cap bounds total ledger writes this run — selected AND
+            # persisted-invalid rows — so a pathological sweep can't flood
+            # the table through the invalid path either. Deferred drafts
+            # re-detect next sweep; nothing is lost.
+            if emitted + persisted_invalid >= MAX_PROPOSALS_PER_RUN:
+                log.warning(
+                    "detection run %s hit per-run write cap (%d: %d selected"
+                    " + %d invalid); remaining drafts deferred to next run",
+                    run_id,
+                    MAX_PROPOSALS_PER_RUN,
+                    emitted,
+                    persisted_invalid,
+                )
+                break
+            base_shas = _base_shas(draft.source_paths, draft.target_paths)
+            if base_shas is None:
+                continue
+            # Closure-visible narrowed binding (pyright doesn't narrow
+            # captured variables inside _persist_invalid).
+            anchors: dict[str, str] = base_shas
+            draft_paths = draft.source_paths + draft.target_paths
+            # Audience snapshot at emit time — staleness re-checks can
+            # notice a permission change (e.g. group-membership drift)
+            # between proposal and execution.
+            acl_fp = fingerprint.combined_fingerprint(draft_paths)
+            resolution = deduper.resolution(draft)
+            claim = selection.claim_of(draft_paths)
+
+            def _persist_invalid(reason: str) -> None:
+                row = create_proposal(
+                    op=draft.op,
+                    source_paths=draft.source_paths,
+                    target_paths=draft.target_paths,
+                    base_shas=anchors,
+                    summary=draft.summary,
+                    created_via=created_via,
+                    detector=detector.name,
+                    instruction=draft.instruction,
+                    proposed_bodies=draft.proposed_bodies,
+                    run_id=run_id,
+                    acl_fingerprint_before=acl_fp,
+                    dedup_key=decision.dedup_key,
+                    doc_ids=resolution,
+                )
+                mark_stale(row["id"], reason=reason)
+
+            # Post-rejection cooldown: a *new* premise on freshly declined
+            # pages stays quiet for the window — persisted (the ledger is
+            # the complete detection record; the row is the revival anchor)
+            # but unselectable. Checked for REVIVE too: the cooled row gets
+            # re-detected every sweep and must stay at rest until the
+            # window passes, not revive on the next pass.
+            until = selection.cooldown_until(decision.dedup_key)
+            if until is not None:
+                if decision.action is dedup.DedupAction.CREATE:
+                    _persist_invalid(
+                        f"in cooldown until {until} — these pages were "
+                        "recently declined"
+                    )
+                    persisted_invalid += 1
+                # REVIVE: the row already rests as persisted-invalid.
+                continue
+            if selection.conflicts(frozenset(claim), frozenset(blocked)):
+                if decision.action is dedup.DedupAction.CREATE:
+                    _persist_invalid(
+                        f"not selected by run {run_id} — a live proposal "
+                        "holds the page"
+                    )
+                    persisted_invalid += 1
+                # A REVIVE candidate stays at rest (stale/expired) — its
+                # row already is the persisted-invalid form.
+                continue
+
+            if decision.action is dedup.DedupAction.REVIVE:
+                if decision.existing_id is None:
+                    # Unreachable: DedupDecision enforces this at
+                    # construction. Skip loudly rather than crash a run.
+                    log.error(
+                        "detection run %s: REVIVE decision without a row "
+                        "(%s) — skipped",
+                        run_id,
+                        decision.dedup_key,
+                    )
+                    continue
+                if not change_proposals_revive(
+                    decision.existing_id,
+                    source_paths=draft.source_paths,
+                    target_paths=draft.target_paths,
+                    base_shas=anchors,
+                    summary=draft.summary,
+                    instruction=draft.instruction,
+                    proposed_bodies=draft.proposed_bodies,
+                    run_id=run_id,
+                    acl_fingerprint_before=acl_fp,
+                    doc_ids=resolution,
+                ):
+                    # A race moved the row out of stale/expired since the
+                    # decision — whatever won represents the finding now.
+                    continue
+                proposal = get_proposal(decision.existing_id)
+                if proposal is None:
+                    continue
+                log.info(
+                    "detection run %s: revived proposal %s (%s)",
+                    run_id,
+                    decision.existing_id,
+                    decision.dedup_key,
+                )
+            else:
+                proposal = create_proposal(
+                    op=draft.op,
+                    source_paths=draft.source_paths,
+                    target_paths=draft.target_paths,
+                    base_shas=anchors,
+                    summary=draft.summary,
+                    created_via=created_via,
+                    detector=detector.name,
+                    instruction=draft.instruction,
+                    proposed_bodies=draft.proposed_bodies,
+                    run_id=run_id,
+                    acl_fingerprint_before=acl_fp,
+                    dedup_key=decision.dedup_key,
+                    doc_ids=resolution,
+                )
+            blocked |= claim
+            emitted += 1
+            # Whole operation inside an AI-managed scope → auto-apply as the
+            # AI system user (no human queue). Otherwise it waits for a
+            # human in the pending-cleanups queue. The detector must also
+            # consent (`auto_approvable`) — probabilistic detectors emit
+            # False so their proposals always get a human even in
+            # AI-managed scopes.
+            if auto_ok and not review.auto_approve(
+                proposal["id"], acting_user_id=AI_USER_ID
+            ):
+                # Shouldn't happen for a just-created proposal; if a race
+                # transitioned it out of pending, it stays pending (a
+                # human can still action it) — surface the anomaly loudly.
+                log.warning(
+                    "detection run %s: auto-approve did not take for "
+                    "proposal %s (%s); left pending",
+                    run_id,
+                    proposal["id"],
+                    decision.dedup_key,
+                )
         runs.mark_completed(
             run_id, paths_scanned=len(paths), proposals_emitted=emitted
         )

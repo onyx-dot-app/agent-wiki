@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.db.models import ChangeProposal
 from app.db.session import execute_dml, session
@@ -204,6 +204,25 @@ def get_by_dedup_key(dedup_key: str) -> dict[str, Any] | None:
             select(ChangeProposal).where(ChangeProposal.dedup_key == dedup_key)
         ).one_or_none()
         return _to_dict(row) if row is not None else None
+
+
+def latest_rejection_with_dedup_prefix(prefix: str) -> tuple[int, str] | None:
+    """``(id, updated_at)`` of the most recent *rejected* row whose
+    ``dedup_key`` starts with ``prefix`` — the cooldown scope is the key's
+    content-free prefix (everything before the premise), so no separate
+    column is stored. ``starts_with`` is exact byte-prefix semantics —
+    immune to LIKE-metacharacter issues in path fallback terms."""
+    with session() as s:
+        row = s.execute(
+            select(ChangeProposal.id, ChangeProposal.updated_at)
+            .where(
+                func.starts_with(ChangeProposal.dedup_key, prefix),
+                ChangeProposal.status == ProposalStatus.REJECTED.value,
+            )
+            .order_by(ChangeProposal.updated_at.desc(), ChangeProposal.id.desc())
+            .limit(1)
+        ).first()
+        return (row[0], row[1]) if row is not None else None
 
 
 def revive(
