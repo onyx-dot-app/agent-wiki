@@ -24,9 +24,7 @@ only reflows its own row, not the whole table) but each row's *content* is
 still stored as opaque verbatim text, not decomposed into cells —
 deliberately simpler than per-cell reconstruction with recomputed column
 padding, and still achieves the byte-stability goal for every row that isn't
-touched. Real per-cell table editing, images, footnotes, and emoji
-shortcodes are explicitly out of scope for this pass (see
-``docs/AGENT_WIKI_MARKDOWN_STANDARD.md``'s deferred items); thematic break
+touched — cells aren't decomposed or individually editable. Thematic break
 and html block stay opaque verbatim, tagged ``_raw="1"``.
 
 Unrecognized inline constructs (an image, GFM strikethrough — anything this
@@ -607,8 +605,15 @@ def _serialize_code_block(node: XmlElement) -> str:
 # matches CommonMark's own marker grammar (see the list-building side,
 # `_build_list`, which reads `open_tok.attrs["start"]` rather than
 # re-deriving this pattern; this is the inverse direction, detecting the
-# pattern in already-serialized plain text).
-_ORDERED_MARKER_RE = re.compile(r"^\d{1,9}[.)](\s|$)")
+# pattern in already-serialized plain text). Digits captured in their own
+# group — unlike every other marker character this module escapes, a digit
+# is not ASCII punctuation, so a backslash placed before it is never
+# consumed as an escape on the next parse (confirmed against the forward
+# parse: `\1. item` keeps its backslash as a literal character instead of
+# protecting the marker). The delimiter (`.`/`)`) immediately after the
+# digits *is* punctuation, so that's the character that actually needs the
+# backslash — see the escape call site below.
+_ORDERED_MARKER_RE = re.compile(r"^(\d{1,9})([.)])(\s|$)")
 
 # A thematic break is a *whole line* of 3+ "-" (optionally space/tab
 # separated) and nothing else — "---" alone reactivates, but "--- and more
@@ -681,14 +686,19 @@ def _escape_block_start_ambiguity(text: str) -> str:
     breaks). ``*`` as a bullet marker doesn't need a case here — it's
     already escaped unconditionally by ``_wrap_run`` for the emphasis
     reason, which covers every line's start position too as a side
-    effect. The first line additionally gets the indented-code-block check
-    (``_INDENTED_CODE_FIRST_LINE_RE``), since that ambiguity only exists on
-    a block's first line, not on every line the way the marker checks do."""
+    effect.
+
+    The first line additionally gets the indented-code-block check
+    (``_INDENTED_CODE_FIRST_LINE_RE``) first, since that ambiguity only
+    exists on a block's first line, not on every line the way the marker
+    checks do — its leading whitespace run is stripped *before*
+    ``_escape_line_start`` runs on that line, so whatever's left (e.g. a
+    literal ``#`` that was hiding behind 4 leading spaces) still gets
+    marker-escaped by the same pass, rather than being left live."""
     lines = text.split("\n")
-    escaped = [_escape_line_start(line) for line in lines]
     if lines[0] and _INDENTED_CODE_FIRST_LINE_RE.match(lines[0]):
-        escaped[0] = "\\" + lines[0]
-    return "\n".join(escaped)
+        lines[0] = lines[0].lstrip(" \t")
+    return "\n".join(_escape_line_start(line) for line in lines)
 
 
 def _escape_line_start(line: str) -> str:
@@ -703,26 +713,44 @@ def _escape_line_start(line: str) -> str:
     # instead — a different, narrower case handled separately by
     # _INDENTED_CODE_FIRST_LINE_RE, so a line whose leading run is that long
     # is left alone here.
+    #
+    # The escape backslash below is placed immediately before the marker
+    # character (``rest``), not before the dropped indentation (``line``) —
+    # CommonMark's backslash escape applies only to punctuation, never to
+    # whitespace, so a backslash placed before a space is never consumed on
+    # the next parse; it would survive as a literal extra character instead
+    # of protecting anything. Escaping the marker in its own escapable
+    # position is the only construct that round-trips, at the documented
+    # cost of the leading whitespace itself not surviving (see
+    # AGENT_WIKI_MARKDOWN_STANDARD.md §6) — CommonMark strips that
+    # insignificant indentation on reparse regardless of whether this
+    # function keeps or drops it from the emitted text.
     indent_len = min(3, len(line) - len(line.lstrip(" ")))
     rest = line[indent_len:]
     if not rest or rest[0] in " \t":
         return line
     if rest[0] == "#":
-        return "\\" + line
+        return "\\" + rest
     if rest[0] in "-=" and _SETEXT_UNDERLINE_RE.match(rest):
-        return "\\" + line
+        return "\\" + rest
     if rest[0] == "-" and _THEMATIC_BREAK_DASH_RE.match(rest):
-        return "\\" + line
+        return "\\" + rest
     if rest[0] in "-+" and (len(rest) == 1 or rest[1].isspace()):
-        return "\\" + line
+        return "\\" + rest
     if rest[0] == ">":
-        return "\\" + line
-    if _ORDERED_MARKER_RE.match(rest):
-        return "\\" + line
-    if _TABLE_DELIMITER_ROW_RE.match(line):
-        return "\\" + line
+        return "\\" + rest
+    ordered_match = _ORDERED_MARKER_RE.match(rest)
+    if ordered_match:
+        # Backslash goes after the digits, before the delimiter — see
+        # _ORDERED_MARKER_RE's comment for why escaping the digits
+        # themselves (as every other call site here escapes its marker
+        # character) doesn't work for this one construct.
+        digits = ordered_match.group(1)
+        return digits + "\\" + rest[len(digits) :]
+    if _TABLE_DELIMITER_ROW_RE.match(rest):
+        return "\\" + rest
     if _FENCE_OPENER_RE.match(rest):
-        return "\\" + line
+        return "\\" + rest
     return line
 
 

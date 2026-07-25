@@ -76,3 +76,21 @@ The following constructs MUST NOT be supported:
    CommonMark construct — matched by a URI/email pattern, not the tag-name
    grammar above — and are unaffected by this exclusion; they MUST still
    render as links.
+
+## 6. Checkpoint Fidelity (Live-Editing Codec)
+
+`markdown_yjs.py`'s checkpoint serialization guarantees byte-for-byte
+stability only for blocks untouched since the last commit (see
+`markdown_splice.py`). A touched block's checkpoint MUST reparse to the same
+block type and content, but MAY normalize the following rather than
+preserve it byte-for-byte:
+
+1. Leading whitespace (1-3 columns) at the start of a paragraph line MAY be
+   trimmed when it precedes text that would otherwise reparse as a
+   block-start marker (heading `#`, blockquote `>`, list bullet `-`/`+`, an
+   ordered marker, a thematic break, a setext underline, or a fence
+   opener). CommonMark's backslash escape applies only to punctuation, never
+   to whitespace, so trimming that whitespace is the only way to guarantee
+   the line's block type is unchanged by the next parse — escaping just the
+   marker and leaving the whitespace in front of it round-trips the marker
+   characters as literal text but not the indentation that preceded them.

@@ -311,12 +311,35 @@ def test_escaped_block_start_markers_round_trip_as_literal_text() -> None:
         "\\+ not a bullet\n",
         "\\> not a quote\n",
         "\\* not a bullet\n",
+        "1\\. not a list\n",
+        "1\\) not a list\n",
     ]
     for raw in cases:
         once = reconstruct_body(seed_doc_from_markdown(raw))
         assert once == raw, f"expected stable round-trip for {raw!r}, got {once!r}"
         twice = reconstruct_body(seed_doc_from_markdown(once))
         assert twice == once
+
+
+def test_ordered_marker_escape_lands_on_the_delimiter_not_the_digits() -> None:
+    # Every other marker character this module escapes (#, >, -, +, ~, `)
+    # is ASCII punctuation, so a backslash placed directly before it is a
+    # valid CommonMark escape. A digit is not punctuation — a backslash
+    # before "1" is never consumed on reparse and survives as a literal
+    # extra character instead of protecting anything (confirmed against
+    # the forward parse: "\1. item" reparses to the *content* "\1. item",
+    # not "1. item"). The delimiter right after the digits ("." or ")")
+    # *is* punctuation, so that's where the escape has to go instead.
+    for text in ("First line\n1. item", "First line\n1) item", "First line\n10. item"):
+        doc = _build_live_paragraph(text)
+        once = reconstruct_body(doc)
+        reseeded = seed_doc_from_markdown(once)
+        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
+        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        twice = reconstruct_body(reseeded)
+        assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
+        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        assert content == text, f"expected content {text!r} preserved exactly, got {content!r}"
 
 
 def test_mid_text_block_marker_characters_are_left_alone() -> None:
@@ -561,35 +584,44 @@ def test_indented_block_markers_do_not_reactivate() -> None:
     # blockquote, bullet, ordered marker, thematic break, and fence opener
     # all still reactivate through 1-3 spaces of indent the same as at
     # column 0. _escape_line_start's checks used to require the marker at
-    # true column 0 and missed every one of these. The escape backslash
-    # lands before the line's leading spaces rather than before the marker
-    # itself, so (unlike the column-0 case) it isn't consumed as a
-    # single-character escape of the marker on the very next parse — the
-    # literal backslash it produces needs escaping in its own right, which
-    # doesn't happen until the round after. That's the same "correct but
-    # not byte-identical on the first round, stable from the second round
-    # on" tolerance already established elsewhere in this module (e.g.
-    # setext-to-ATX canonicalization) — checked here via the 2nd/3rd round
-    # comparison, not the 1st/2nd.
+    # true column 0 and missed every one of these.
+    #
+    # The escape backslash goes immediately before the marker character,
+    # not before the line's leading spaces — CommonMark's backslash escape
+    # only applies to punctuation, never to whitespace (confirmed against
+    # the spec and the forward parse), so a backslash before a space is
+    # never consumed and would survive into the reparsed content as a
+    # literal extra character instead of protecting anything. The
+    # documented tradeoff (AGENT_WIKI_MARKDOWN_STANDARD.md §6): the
+    # indentation itself doesn't survive the checkpoint — CommonMark
+    # strips it as insignificant regardless of what this module emits, so
+    # dropping it here is a no-op as far as final content goes, not an
+    # extra loss. Checked via round 1 vs round 2 (an earlier version of
+    # this fix escaped in a position CommonMark doesn't treat as an
+    # escape at all, so it took an extra round to settle and, worse,
+    # settled on content with a stray backslash baked in — round-1
+    # fidelity is the real bar, not eventual stability).
     cases = [
-        "First line\n  # Heading",
-        "First line\n > Quote",
-        "First line\n   - item",
-        "First line\n  + item",
-        "First line\n  1. item",
-        "First line\n   ---",
-        "First line\n  ~~~\ncode\n~~~",
+        ("First line\n  # Heading", "First line\n# Heading"),
+        ("First line\n > Quote", "First line\n> Quote"),
+        ("First line\n   - item", "First line\n- item"),
+        ("First line\n  + item", "First line\n+ item"),
+        ("First line\n  1. item", "First line\n1. item"),
+        ("First line\n   ---", "First line\n---"),
+        ("First line\n  ~~~\ncode\n~~~", "First line\n~~~\ncode\n~~~"),
     ]
-    for text in cases:
+    for text, expected_content in cases:
         doc = _build_live_paragraph(text)
         once = reconstruct_body(doc)
-        tags = [
-            c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
-        ]
+        reseeded = seed_doc_from_markdown(once)
+        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
         assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
-        twice = reconstruct_body(seed_doc_from_markdown(once))
-        thrice = reconstruct_body(seed_doc_from_markdown(twice))
-        assert twice == thrice, f"never stabilized for {text!r}: {twice!r} != {thrice!r}"
+        twice = reconstruct_body(reseeded)
+        assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
+        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        assert content == expected_content, (
+            f"expected the leading indentation trimmed for {text!r}, got {content!r}"
+        )
 
 
 def test_indented_first_line_does_not_reactivate_as_code_block() -> None:
@@ -597,17 +629,27 @@ def test_indented_first_line_does_not_reactivate_as_code_block() -> None:
     # or fewer spaces then a tab, which reaches the next 4-column stop)
     # reactivates as an indented code block — a different, narrower case
     # than the 1-3-space marker checks above, since indented code can't
-    # interrupt an already-started paragraph.
-    for text in ("    looks like code\nsecond line", "\ttab indented\nsecond line"):
+    # interrupt an already-started paragraph. There's no marker character
+    # here to escape at all (the ambiguity is the indentation itself, and
+    # CommonMark can't escape whitespace), so the leading run is dropped
+    # outright rather than backslash-prefixed — same documented tradeoff
+    # and same round-1 fidelity bar as the marker cases above.
+    cases = [
+        ("    looks like code\nsecond line", "looks like code\nsecond line"),
+        ("\ttab indented\nsecond line", "tab indented\nsecond line"),
+    ]
+    for text, expected_content in cases:
         doc = _build_live_paragraph(text)
         once = reconstruct_body(doc)
-        tags = [
-            c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
-        ]
+        reseeded = seed_doc_from_markdown(once)
+        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
         assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
-        twice = reconstruct_body(seed_doc_from_markdown(once))
-        thrice = reconstruct_body(seed_doc_from_markdown(twice))
-        assert twice == thrice, f"never stabilized for {text!r}: {twice!r} != {thrice!r}"
+        twice = reconstruct_body(reseeded)
+        assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
+        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        assert content == expected_content, (
+            f"expected the leading indentation trimmed for {text!r}, got {content!r}"
+        )
 
 
 def test_indented_continuation_line_stays_safe_without_escaping() -> None:
@@ -649,8 +691,7 @@ def test_unrecognized_inline_construct_raises_not_implemented() -> None:
     # GFM strikethrough isn't in _KNOWN_INLINE_TYPES (no strikethrough
     # plugin enabled on gfm_parser()), so markdown-it never emits the token
     # type in the first place — use an image instead, which markdown-it
-    # does emit and this codec deliberately doesn't support yet (see
-    # docs/AGENT_WIKI_MARKDOWN_STANDARD.md's deferred items).
+    # does emit and this codec has no encoder for.
     body = "A picture: ![alt](https://x.example/img.png) here.\n"
     with pytest.raises(NotImplementedError):
         seed_doc_from_markdown(body)
