@@ -228,3 +228,20 @@ def test_folder_claim_locks_pages_beneath_it(repo, monkeypatch):
     assert pending["detector"] == "det_folder"
     (invalid,) = list_by_status(ProposalStatus.STALE)
     assert invalid["detector"] == "det_page"
+
+
+def test_cap_bounds_total_writes_including_invalid(repo, monkeypatch):
+    """The per-run cap counts persisted-invalid rows too — a pathological
+    sweep can't flood the ledger through the not-selected path."""
+    monkeypatch.setattr(runner, "MAX_PROPOSALS_PER_RUN", 2)
+    contenders = [
+        _FixedDetector("det_one", [_stub_draft("team/a.md")]),
+        _FixedDetector("det_two", [_stub_draft("team/a.md", premise="x")]),
+        _FixedDetector("det_three", [_stub_draft("team/a.md", premise="y")]),
+        _FixedDetector("det_four", [_stub_draft("team/a.md", premise="z")]),
+    ]
+    result = _sweep(monkeypatch, contenders)
+
+    assert result["proposals_emitted"] == 1  # one selected
+    stale = list_by_status(ProposalStatus.STALE)
+    assert len(stale) == 1  # one invalid persisted, then the cap cut off

@@ -222,7 +222,11 @@ def run_detection(
         # Approved rows are a human decision in flight — the executor's to
         # re-validate, never the sweep's to retract.
         invalidated = 0
-        pending_rows = list_by_status(ProposalStatus.PENDING)
+        # limit=None: reconciliation and claim-blocking must see the
+        # COMPLETE live set — a truncated read would leave obsolete
+        # pendings visible and admit claims that conflict with omitted
+        # rows.
+        pending_rows = list_by_status(ProposalStatus.PENDING, limit=None)
         if trigger is TriggerKind.SWEEP:
             revive_ids = {
                 d.existing_id for _, _, d, _ in candidates
@@ -250,7 +254,7 @@ def run_detection(
         # the ledger records every detected finding, and the row is the
         # revival anchor once its page frees up.
         blocked: set[str] = set()
-        for row in list_by_status(ProposalStatus.APPROVED):
+        for row in list_by_status(ProposalStatus.APPROVED, limit=None):
             blocked |= selection.claim_of(row["source_paths"] + row["target_paths"])
         for row in pending_rows:
             if row["id"] in carried_ids:
@@ -259,13 +263,20 @@ def run_detection(
                 )
 
         emitted = 0
+        persisted_invalid = 0
         for detector, draft, decision, auto_ok in candidates:
-            if emitted >= MAX_PROPOSALS_PER_RUN:
+            # The cap bounds total ledger writes this run — selected AND
+            # persisted-invalid rows — so a pathological sweep can't flood
+            # the table through the invalid path either. Deferred drafts
+            # re-detect next sweep; nothing is lost.
+            if emitted + persisted_invalid >= MAX_PROPOSALS_PER_RUN:
                 log.warning(
-                    "detection run %s hit per-run cap (%d); "
-                    "remaining drafts deferred to next run",
+                    "detection run %s hit per-run write cap (%d: %d selected"
+                    " + %d invalid); remaining drafts deferred to next run",
                     run_id,
                     MAX_PROPOSALS_PER_RUN,
+                    emitted,
+                    persisted_invalid,
                 )
                 break
             base_shas = _base_shas(draft.source_paths, draft.target_paths)
@@ -313,6 +324,7 @@ def run_detection(
                         f"in cooldown until {until} — these pages were "
                         "recently declined"
                     )
+                    persisted_invalid += 1
                 # REVIVE: the row already rests as persisted-invalid.
                 continue
             if selection.conflicts(frozenset(claim), frozenset(blocked)):
@@ -321,6 +333,7 @@ def run_detection(
                         f"not selected by run {run_id} — a live proposal "
                         "holds the page"
                     )
+                    persisted_invalid += 1
                 # A REVIVE candidate stays at rest (stale/expired) — its
                 # row already is the persisted-invalid form.
                 continue
