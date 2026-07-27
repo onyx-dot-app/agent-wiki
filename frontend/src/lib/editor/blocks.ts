@@ -242,22 +242,58 @@ export const ThematicBreak = createOpaqueBlock("thematic_break").extend({
         return true;
       },
       // Backspace at the very start of a block immediately preceded by a
-      // divider deletes the *whole* divider in one step, cursor landing
-      // exactly where it was — not ProseMirror's default joinBackward,
-      // which (verified directly) merges into the divider's hidden text
-      // content instead of removing the node, since content: "text*"
-      // makes it a "textblock" for merge purposes same as any paragraph.
+      // divider — not ProseMirror's default joinBackward, which (verified
+      // directly) merges into the divider's hidden text content instead of
+      // removing the node, since content: "text*" makes it a "textblock"
+      // for merge purposes same as any paragraph.
+      //
+      // When the block the cursor is in is itself empty (the fresh
+      // paragraph the Enter handler above creates right after converting),
+      // this collapses *both* nodes — divider and that empty paragraph —
+      // into one paragraph holding the divider's own stored text
+      // (reconstructed from its text child, not hardcoded "---": a divider
+      // seeded from the backend could carry "***\n" or "- - -\n" instead),
+      // cursor at the end of it. Mirrors HeadingBackspace above: the
+      // conversion unwinds back to literal source text on the way out,
+      // continuing on from there as ordinary character-by-character
+      // backspacing. If the block isn't empty (the user typed real content
+      // after the divider), that reconstruction doesn't apply — just the
+      // divider itself is removed, leaving what was typed alone.
       Backspace: ({ editor }) => {
-        const { $from, empty } = editor.state.selection;
+        const { state } = editor;
+        const { $from, empty } = state.selection;
         if (!empty || $from.parentOffset !== 0) return false;
         const posBefore = $from.before($from.depth);
         if (posBefore === 0) return false;
-        const nodeBefore = editor.state.doc.resolve(posBefore).nodeBefore;
+        const nodeBefore = state.doc.resolve(posBefore).nodeBefore;
         if (!nodeBefore || nodeBefore.type.name !== "thematic_break")
           return false;
+        const dividerStart = posBefore - nodeBefore.nodeSize;
+
+        if (
+          $from.parent.type.name === "paragraph" &&
+          $from.parent.content.size === 0
+        ) {
+          const blockEnd = $from.after($from.depth);
+          const text = nodeBefore.textContent.replace(/\n$/, "");
+          const replacement =
+            text.length > 0
+              ? state.schema.nodes.paragraph!.create(
+                  null,
+                  state.schema.text(text),
+                )
+              : state.schema.nodes.paragraph!.create();
+          const tr = state.tr.replaceWith(dividerStart, blockEnd, replacement);
+          tr.setSelection(
+            TextSelection.create(tr.doc, dividerStart + 1 + text.length),
+          );
+          editor.view.dispatch(tr);
+          return true;
+        }
+
         return editor
           .chain()
-          .deleteRange({ from: posBefore - nodeBefore.nodeSize, to: posBefore })
+          .deleteRange({ from: dividerStart, to: posBefore })
           .run();
       },
     };
