@@ -8,7 +8,8 @@
  * out-of-band channel, and a `DecorationSet` remaps itself through edits via
  * `.map(tr.mapping, tr.doc)` instead of hand-mapping each offset). */
 import { Extension, type Editor } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { NodeSelection, Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { AnchoredHighlightTarget } from "@/lib/editor/types";
 
@@ -148,5 +149,48 @@ export const AnchoredHighlights = Extension.create({
   name: "anchoredHighlights",
   addProseMirrorPlugins() {
     return [commentHighlights.plugin, sourceHighlights.plugin];
+  },
+});
+
+/** Highlights whichever block the cursor is currently in — the innermost
+ * node (a taskItem's own paragraph, not the whole list; a table cell's row,
+ * not the whole table), matching "highlight my current line," not the
+ * backend's unrelated, coarser `_blockId` notion of "block"
+ * (`markdown_yjs.py`). Purely a live-editing affordance — never serialized,
+ * no schema/backend involvement, no plugin state needed at all: computed
+ * fresh from `state.selection` every time ProseMirror calls `decorations()`,
+ * which already happens on every selection change for free.
+ *
+ * A `NodeSelection` (the divider, a table, or any other atom clicked/
+ * selected as one unit) resolves `$from` to *before* that node, so
+ * `$from.parent` would be its container, not the node itself — handled
+ * separately rather than landing the highlight one level too high. */
+export const CurrentBlockHighlight = Extension.create({
+  name: "currentBlockHighlight",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          decorations(state) {
+            const { selection } = state;
+            let pos: number;
+            let node: PMNode;
+            if (selection instanceof NodeSelection) {
+              pos = selection.from;
+              node = selection.node;
+            } else {
+              const { $from } = selection;
+              pos = $from.before($from.depth);
+              node = $from.parent;
+            }
+            return DecorationSet.create(state.doc, [
+              Decoration.node(pos, pos + node.nodeSize, {
+                class: "current-block",
+              }),
+            ]);
+          },
+        },
+      }),
+    ];
   },
 });

@@ -222,6 +222,13 @@
   height: 0;
 }
 
+/* Current-block highlight — the innermost block the cursor is in, subtle
+   enough to not compete with comment/source highlights below. */
+.editor-prose .current-block {
+  background: var(--background-tint-01);
+  border-radius: var(--radius-04);
+}
+
 /* Comment/source highlights — same idle/active two-tier treatment as the
    CM6 version: idle threads at 30% amber (20% reads as unhighlighted on
    real content), hovered/selected at Highlight/Active (60%). Sources sit
