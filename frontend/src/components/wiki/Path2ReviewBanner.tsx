@@ -55,6 +55,12 @@ function scanAge(ts: string | null): string | null {
  * Verbs: approve (do it) · dismiss (clear the card — may return if the finding
  * is still detected) · reject (durable — won't be suggested again). The X only
  * closes the card for this visit; the proposals persist.
+ *
+ * Placement: a floating card pinned to the top-right of the content column
+ * (sticky inside the scroll container, zero layout height). The right inset
+ * follows `--cm-gutter` when the mount's container defines it (FileView's
+ * editor gutter) and falls back to 0 where the container's own padding
+ * already insets the content (folder view).
  */
 export function Path2ReviewBanner({ path, canWrite = true }: Props) {
   const { proposals, refresh } = useProposalsByPath(path, canWrite);
@@ -83,63 +89,65 @@ export function Path2ReviewBanner({ path, canWrite = true }: Props) {
   }
 
   return (
-    <div className="mb-3">
-      <MessageCard
-        variant="info"
-        title={`Auto Organize suggests ${n} change${n === 1 ? "" : "s"} here`}
-        description={age ? `Confirmed by the last scan · ${age}` : undefined}
-        onClose={() => setClosed(true)}
-        bottomChildren={
-          <Section flexDirection="column" gap={0.25} width="full">
-            {proposals.map((p) => (
-              <ProposalRow
-                key={p.id}
-                proposal={p}
-                onActioned={refresh}
-                actions={rowActions.current}
-              />
-            ))}
-            <Section
-              flexDirection="row"
-              gap={0.5}
-              alignItems="center"
-              justifyContent="between"
-              width="full"
-            >
-              <Section flexDirection="row" alignItems="center">
-                {user?.is_admin && (
+    <div className="pointer-events-none sticky top-0 z-30 h-0">
+      <div className="pointer-events-auto mr-[var(--cm-gutter,0px)] ml-auto w-[400px] max-w-full rounded-(--radius-12) bg-(--background-01) shadow-(--shadow-modal)">
+        <MessageCard
+          variant="info"
+          title={`Auto Organize suggests ${n} change${n === 1 ? "" : "s"} here`}
+          description={age ? `Confirmed by the last scan · ${age}` : undefined}
+          onClose={() => setClosed(true)}
+          bottomChildren={
+            <Section flexDirection="column" gap={0.25} width="full">
+              {proposals.map((p) => (
+                <ProposalRow
+                  key={p.id}
+                  proposal={p}
+                  onActioned={refresh}
+                  actions={rowActions.current}
+                />
+              ))}
+              <Section
+                flexDirection="row"
+                gap={0.5}
+                alignItems="center"
+                justifyContent="between"
+                width="full"
+              >
+                <Section flexDirection="row" alignItems="center">
+                  {user?.is_admin && (
+                    <Button
+                      icon={SvgSettings}
+                      size="sm"
+                      prominence="tertiary"
+                      tooltip="Auto Organize settings"
+                      onClick={() => router.push("/admin/auto-organize")}
+                    />
+                  )}
+                </Section>
+                <Section flexDirection="row" gap={0.5} alignItems="center">
                   <Button
-                    icon={SvgSettings}
+                    icon={SvgSlash}
                     size="sm"
-                    prominence="tertiary"
-                    tooltip="Auto Organize settings"
-                    onClick={() => router.push("/admin/auto-organize")}
-                  />
-                )}
-              </Section>
-              <Section flexDirection="row" gap={0.5} alignItems="center">
-                <Button
-                  icon={SvgSlash}
-                  size="sm"
-                  prominence="secondary"
-                  tooltip="Clear these suggestions — they may return if still detected"
-                  onClick={() => actAll("dismiss")}
-                >
-                  Dismiss all
-                </Button>
-                <Button
-                  icon={SvgCheckAll}
-                  size="sm"
-                  prominence="primary"
-                  onClick={() => actAll("approve")}
-                >
-                  Approve all
-                </Button>
+                    prominence="secondary"
+                    tooltip="Clear these suggestions — they may return if still detected"
+                    onClick={() => actAll("dismiss")}
+                  >
+                    Dismiss all
+                  </Button>
+                  <Button
+                    icon={SvgCheckAll}
+                    size="sm"
+                    prominence="primary"
+                    onClick={() => actAll("approve")}
+                  >
+                    Approve all
+                  </Button>
+                </Section>
               </Section>
             </Section>
-          </Section>
-        }
-      />
+          }
+        />
+      </div>
     </div>
   );
 }
@@ -286,7 +294,11 @@ function ProposalRow({
       titleMaxLines={2}
       auxIcon={outcome === "error" ? "error" : undefined}
       description={
-        outcome === "error" ? (error ?? undefined) : operationDetail(proposal)
+        outcome === "error"
+          ? (error ?? undefined)
+          : // Every row names its location, like the mock's path chip — ops
+            // with a target get the full spelled-out operation instead.
+            (operationDetail(proposal) ?? proposal.source_paths[0])
       }
       rightChildren={
         TERMINAL.includes(outcome) ? (

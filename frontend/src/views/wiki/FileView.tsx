@@ -1235,6 +1235,10 @@ export function FileView({ path }: FileViewProps) {
                     : "-mx-8 [--cm-gutter:2rem]"
                 }`}
               >
+                {/* Floating top-right of the content area (not the text
+                    column) — it positions itself; `--cm-gutter` above sets
+                    its right inset. */}
+                <Path2ReviewBanner path={path} canWrite={canWrite} />
                 <div
                   className={`rail-inset mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
                     isMobile ? "px-3" : ""
@@ -1244,7 +1248,6 @@ export function FileView({ path }: FileViewProps) {
                     path={path}
                     onOpenPolicy={() => openPanel("updates")}
                   />
-                  <Path2ReviewBanner path={path} canWrite={canWrite} />
                   {(() => {
                     // Cards visible while the body is still "empty enough"
                     // to discard without losing user work: truly blank, or
