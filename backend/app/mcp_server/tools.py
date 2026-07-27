@@ -50,6 +50,7 @@ MCP_ALLOWED_TOOLS: frozenset[str] = frozenset(
         "write_doc",
         "apply_patch",
         "move_path",
+        "delete_doc",
         "create_directory",
         "add_comment",
         "reply_comment",

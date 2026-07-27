@@ -1,0 +1,14 @@
+{
+  "name": "delete_doc",
+  "description": "Soft-delete a single wiki markdown page: moves it to Trash, where it is restorable for 30 days (same flow as deleting from the UI). Use when the user asks to delete/remove a page, or to clean up a page you created that turned out to be redundant. Pages only — folders cannot be deleted with this tool. Requires write access to the page. Not for consolidation: if the page's content should live on in another page, merge/update first, then delete.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path of the page to delete (e.g. `notes/old-draft.md`). Must end in `.md` and exist."
+      }
+    },
+    "required": ["path"]
+  }
+}
