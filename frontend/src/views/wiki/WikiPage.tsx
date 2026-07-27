@@ -80,7 +80,10 @@ import {
   usePathToId,
 } from "@/lib/wiki/hooks";
 import { useRequireAuth } from "@/lib/auth";
-import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
+import {
+  useHeaderActionsHost,
+  useRightPanelHost,
+} from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
 import { recordRecentDoc } from "@/lib/recents";
@@ -204,6 +207,7 @@ function Explorer({ dir }: ExplorerProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const rightHost = useRightPanelHost();
   const rowActions = useRowActions();
   const { entries, error: listError, mutate: mutatePaths } = useWikiTree();
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -768,10 +772,13 @@ function Explorer({ dir }: ExplorerProps) {
       </div>
 
       {/* Desktop: the folder's right rail is the tabbed panel (Updates |
-          Watching, mock 2240:59533). Mobile keeps the header button +
-          drawer. */}
-      {!isMobile && panelOpen && (
-        <aside className="flex w-[360px] shrink-0 flex-col overflow-y-auto">
+          Watching, mock 2240:59533). It portals into the right-panel host
+          so the column shifts the header, the doc page's composition.
+          Mobile keeps the header button + drawer. */}
+      {!isMobile &&
+        panelOpen &&
+        rightHost?.el &&
+        createPortal(
           <DocPanel
             tab={panelTab}
             onTabChange={setPanelTab}
@@ -794,9 +801,9 @@ function Explorer({ dir }: ExplorerProps) {
                 />
               </div>
             )}
-          </DocPanel>
-        </aside>
-      )}
+          </DocPanel>,
+          rightHost.el,
+        )}
       {policyOpen && isMobile && (
         <>
           <div
@@ -833,6 +840,7 @@ function NewDocView({ dir }: NewDocViewProps) {
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const rightHost = useRightPanelHost();
   const { setDrafting, requestExpand, registerDraftBridge } = useDrafting();
   // "Start writing with AI" hands a generated draft (+ the prompt) here via
   // sessionStorage, paired with ?ai=1. Read it synchronously so the editor and
