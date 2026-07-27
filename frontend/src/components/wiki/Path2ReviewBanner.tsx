@@ -1,14 +1,24 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, MessageCard, Text } from "@onyx-ai/opal/components";
+import {
+  SvgCheckAll,
+  SvgCheckCircle,
+  SvgSettings,
+  SvgSlash,
+} from "@onyx-ai/opal/icons";
 import { ContentAction, Section } from "@onyx-ai/opal/layouts";
+import { timeAgo } from "@onyx-ai/opal/time";
 
 import { ApiError } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import {
   type Proposal,
   approveProposal,
+  dismissProposal,
   fetchProposal,
   rejectProposal,
   useProposalsByPath,
@@ -23,30 +33,110 @@ interface Props {
   canWrite?: boolean;
 }
 
+type RowAction = "approve" | "reject" | "dismiss";
+
+/** UTC second-granular DB text ("YYYY-MM-DD HH:MM:SS") → relative age. */
+function scanAge(ts: string | null): string | null {
+  if (!ts) return null;
+  return timeAgo(ts.replace(" ", "T") + "Z");
+}
+
 /**
  * Path-2 review banner: surfaces the pending Auto Organize cleanup proposals
- * touching this page/folder to users who can act on them, with per-proposal
- * approve/reject. The list is write-scoped server-side (a read-only viewer gets
- * nothing), so we simply render nothing when it's empty. Execution is async, so
- * after an approve we poll the proposal to report the applied / went-stale
- * outcome rather than leaving it as a silent fire-and-forget.
+ * touching this page/folder to users who can act on them. A page carries at
+ * most one live proposal (sweep selection guarantees it); a folder aggregates
+ * its subtree, and the live set is pairwise-disjoint on claims, so the batch
+ * buttons can loop the rows in any order. The list is write-scoped server-side
+ * (a read-only viewer gets nothing), so we simply render nothing when it's
+ * empty. Execution is async, so after an approve we poll the proposal to
+ * report the applied / went-stale outcome rather than leaving it as a silent
+ * fire-and-forget.
+ *
+ * Verbs: approve (do it) · dismiss (clear the card — may return if the finding
+ * is still detected) · reject (durable — won't be suggested again). The X only
+ * closes the card for this visit; the proposals persist.
  */
 export function Path2ReviewBanner({ path, canWrite = true }: Props) {
   const { proposals, refresh } = useProposalsByPath(path, canWrite);
-  if (proposals.length === 0) return null;
+  const { user } = useAuth();
+  const router = useRouter();
+  const [closed, setClosed] = useState(false);
+  // Rows register their action dispatcher here so the footer's batch buttons
+  // can drive them without lifting each row's outcome state machine up.
+  const rowActions = useRef(new Map<number, (kind: RowAction) => void>());
+
+  if (closed || proposals.length === 0) return null;
 
   const n = proposals.length;
+  // Every sweep re-stamps carried pendings, so the newest stamp is "the last
+  // scan that confirmed these findings against current wiki state".
+  const newest = proposals.reduce<string | null>(
+    (acc, p) =>
+      (p.last_emitted_at ?? "") > (acc ?? "") ? p.last_emitted_at : acc,
+    null,
+  );
+  const age = scanAge(newest);
+
+  function actAll(kind: "approve" | "dismiss") {
+    // Rows that have already been actioned ignore the call (act() guards).
+    for (const act of rowActions.current.values()) act(kind);
+  }
+
   return (
     <div className="mb-3">
       <MessageCard
         variant="info"
-        title={`Auto Organize suggests ${n} cleanup${n === 1 ? "" : "s"} here`}
-        description="Approve a change to apply it, or reject to dismiss it (rejection is durable — it won't be suggested again)."
+        title={`Auto Organize suggests ${n} change${n === 1 ? "" : "s"} here`}
+        description={age ? `Confirmed by the last scan · ${age}` : undefined}
+        onClose={() => setClosed(true)}
         bottomChildren={
           <Section flexDirection="column" gap={0.25} width="full">
             {proposals.map((p) => (
-              <ProposalRow key={p.id} proposal={p} onActioned={refresh} />
+              <ProposalRow
+                key={p.id}
+                proposal={p}
+                onActioned={refresh}
+                actions={rowActions.current}
+              />
             ))}
+            <Section
+              flexDirection="row"
+              gap={0.5}
+              alignItems="center"
+              justifyContent="between"
+              width="full"
+            >
+              <div>
+                {user?.is_admin && (
+                  <Button
+                    icon={SvgSettings}
+                    size="sm"
+                    prominence="tertiary"
+                    tooltip="Auto Organize settings"
+                    onClick={() => router.push("/admin/auto-organize")}
+                  />
+                )}
+              </div>
+              <Section flexDirection="row" gap={0.5} alignItems="center">
+                <Button
+                  icon={SvgSlash}
+                  size="sm"
+                  prominence="secondary"
+                  tooltip="Clear these suggestions — they may return if still detected"
+                  onClick={() => actAll("dismiss")}
+                >
+                  Dismiss all
+                </Button>
+                <Button
+                  icon={SvgCheckAll}
+                  size="sm"
+                  prominence="primary"
+                  onClick={() => actAll("approve")}
+                >
+                  Approve all
+                </Button>
+              </Section>
+            </Section>
           </Section>
         }
       />
@@ -59,15 +149,23 @@ type Outcome =
   | "working"
   | "applied"
   | "rejected"
+  | "dismissed"
   | "stale"
   | "applying"
   | "error";
 
-const TERMINAL: Outcome[] = ["applied", "rejected", "stale", "applying"];
+const TERMINAL: Outcome[] = [
+  "applied",
+  "rejected",
+  "dismissed",
+  "stale",
+  "applying",
+];
 
 const STATUS_LABEL: Record<string, string> = {
   applied: "Applied ✓",
   rejected: "Rejected",
+  dismissed: "Dismissed",
   stale: "Skipped — the page changed since this was proposed",
   applying: "Applying…",
 };
@@ -97,9 +195,12 @@ function operationDetail(p: Proposal): string | undefined {
 function ProposalRow({
   proposal,
   onActioned,
+  actions,
 }: {
   proposal: Proposal;
   onActioned: () => void;
+  /** Shared registry the footer's batch buttons dispatch through. */
+  actions: Map<number, (kind: RowAction) => void>;
 }) {
   const [outcome, setOutcome] = useState<Outcome>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -113,7 +214,8 @@ function ProposalRow({
     if (
       outcome !== "applied" &&
       outcome !== "stale" &&
-      outcome !== "rejected"
+      outcome !== "rejected" &&
+      outcome !== "dismissed"
     ) {
       return;
     }
@@ -145,16 +247,20 @@ function ProposalRow({
     if (alive.current) onActioned(); // didn't settle in-window → refresh the list
   }
 
-  async function act(kind: "approve" | "reject") {
+  async function act(kind: RowAction) {
+    if (outcome !== "idle" && outcome !== "error") return; // already actioned
     setOutcome("working");
     setError(null);
     try {
       if (kind === "approve") {
         await approveProposal(proposal.id);
         if (alive.current) await pollApplied();
-      } else {
+      } else if (kind === "reject") {
         await rejectProposal(proposal.id);
         if (alive.current) setOutcome("rejected");
+      } else {
+        await dismissProposal(proposal.id);
+        if (alive.current) setOutcome("dismissed");
       }
     } catch (e) {
       if (!alive.current) return;
@@ -164,6 +270,13 @@ function ProposalRow({
       setError(e instanceof Error ? e.message : "failed");
     }
   }
+
+  // Keep the registry pointing at this render's `act` (it closes over
+  // `outcome`); drop the entry when the row unmounts.
+  useEffect(() => {
+    actions.set(proposal.id, (kind) => void act(kind));
+    return () => void actions.delete(proposal.id);
+  });
 
   return (
     <ContentAction
@@ -184,23 +297,23 @@ function ProposalRow({
             {STATUS_LABEL[outcome]}
           </Text>
         ) : (
-          <Section flexDirection="row" gap={0.5} alignItems="center">
+          <Section flexDirection="row" gap={0.25} alignItems="center">
             <Button
+              icon={SvgSlash}
               size="sm"
-              prominence="secondary"
+              prominence="tertiary"
               disabled={outcome === "working"}
+              tooltip="Reject — won't be suggested again"
               onClick={() => void act("reject")}
-            >
-              Reject
-            </Button>
+            />
             <Button
+              icon={SvgCheckCircle}
               size="sm"
-              prominence="primary"
+              prominence="tertiary"
               disabled={outcome === "working"}
+              tooltip="Approve — applies this change"
               onClick={() => void act("approve")}
-            >
-              {outcome === "working" ? "…" : "Approve"}
-            </Button>
+            />
           </Section>
         )
       }

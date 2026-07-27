@@ -91,6 +91,10 @@ export interface Proposal {
   created_via: string;
   run_id: string | null;
   created_at: string;
+  /** When a sweep last asserted this finding against current wiki state —
+   * every sweep re-stamps carried pendings, so this reads as "confirmed by
+   * the last scan". UTC DB text ("YYYY-MM-DD HH:MM:SS"). */
+  last_emitted_at: string | null;
 }
 
 /** Pending proposals touching `path` (a page or folder subtree) that the caller
@@ -133,6 +137,15 @@ export function approveProposal(id: number) {
 /** Reject a pending proposal — a durable "don't propose this again". */
 export function rejectProposal(id: number) {
   return apiFetch<{ status: string }>(`/automanage/proposals/${id}/reject`, {
+    method: "POST",
+  });
+}
+
+/** Dismiss a pending proposal — clears the card without reject's durable
+ * veto; it may return if the finding is still (or again) true at a later
+ * sweep. Rejects with `ApiError` (409 if it's no longer pending). */
+export function dismissProposal(id: number) {
+  return apiFetch<{ status: string }>(`/automanage/proposals/${id}/dismiss`, {
     method: "POST",
   });
 }
