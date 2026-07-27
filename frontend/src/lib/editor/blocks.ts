@@ -76,6 +76,53 @@ export const BlockIdentity = Extension.create({
   },
 });
 
+/** Backspace on an already-*empty* heading reverts it to a plain paragraph
+ * containing the literal `"#"` markers, instead of Tiptap core's default
+ * `clearNodes()` (bound via its own always-on `Keymap` extension, priority
+ * 100 — same mechanism as every other core Backspace fallback), which only
+ * changes the node's type back to paragraph and leaves it empty, with no
+ * idea what markdown prefix produced the heading in the first place.
+ *
+ * Deliberately not `undoInputRule` (Tiptap's one-shot "undo the exact
+ * conversion transaction" command, which core's Keymap also tries on
+ * Backspace, before clearNodes): that only works if Backspace is pressed
+ * *immediately* after the "# " conversion, before any other edit
+ * invalidates its tracked state — type so much as one character into the
+ * heading first and it can never fire again. This extension instead
+ * reconstructs `"#".repeat(level)` from the heading's own `level` attr
+ * every time, so backspacing out of an empty heading behaves the same way
+ * regardless of how much was typed and erased first. Priority 200 (same
+ * reasoning as ThematicBreak below) so this is checked before core's
+ * Keymap gets a chance to run clearNodes instead. */
+export const HeadingBackspace = Extension.create({
+  name: "headingBackspace",
+  priority: 200,
+  addKeyboardShortcuts() {
+    return {
+      Backspace: ({ editor }) => {
+        const { state } = editor;
+        const { $from, empty } = state.selection;
+        if (!empty || $from.parent.type.name !== "heading") return false;
+        if ($from.parentOffset !== 0 || $from.parent.content.size !== 0)
+          return false;
+        const hashes = "#".repeat($from.parent.attrs.level as number);
+        const blockStart = $from.before($from.depth);
+        const blockEnd = $from.after($from.depth);
+        const tr = state.tr.replaceWith(
+          blockStart,
+          blockEnd,
+          state.schema.nodes.paragraph!.create(null, state.schema.text(hashes)),
+        );
+        tr.setSelection(
+          TextSelection.create(tr.doc, blockStart + 1 + hashes.length),
+        );
+        editor.view.dispatch(tr);
+        return true;
+      },
+    };
+  },
+});
+
 function createOpaqueBlock(name: string) {
   return Node.create({
     name,

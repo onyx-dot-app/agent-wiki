@@ -8,6 +8,7 @@ import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import {
   BlockIdentity,
+  HeadingBackspace,
   HtmlBlock,
   OtherBlock,
   Table,
@@ -41,10 +42,19 @@ export function tiptapExtensions(
       // Replaced by ThematicBreak below — same content, but named to match
       // the backend's literal "thematic_break" Yjs XML tag (see blocks.ts).
       horizontalRule: false,
+      // Auto-inserts an empty paragraph whenever the doc's last block isn't
+      // already a paragraph — converting the last block in the doc to a
+      // heading or a divider spawned a spurious trailing blank line the
+      // instant the conversion landed, before the user typed anything to
+      // ask for one. The backend's markdown<->Yjs codec has no concept of
+      // this either (it round-trips exactly what's there) — nothing to
+      // reconcile it against, so it's just a wrong extra block.
+      trailingNode: false,
     }),
     TaskList,
     TaskItem.configure({ nested: true }),
     BlockIdentity,
+    HeadingBackspace,
     ThematicBreak,
     HtmlBlock,
     OtherBlock,
