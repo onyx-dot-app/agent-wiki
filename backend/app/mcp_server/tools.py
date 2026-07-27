@@ -25,6 +25,11 @@ import json
 import logging
 from typing import Any, cast
 
+import hashlib
+
+from app.auth import PermissionDenied, require_can
+from app.llm.agents.tools.errors import ToolError
+from app.wiki import agent_activity, git as wiki_git, utils as wiki_utils
 from app.llm.agents.tools import TOOL_SPECS, dispatch as registry_dispatch
 from app.mcp_server.session import McpSession
 
@@ -176,15 +181,10 @@ def _call_async_nl_update(
     # Local imports — these modules pull in the queue + worker which
     # we don't want loaded at module-import time for tools.py callers
     # that just want list_for_mcp.
-    import hashlib  # noqa: PLC0415
 
-    from app.auth import PermissionDenied, require_can  # noqa: PLC0415
-    from app.llm.agents.tools.errors import ToolError  # noqa: PLC0415
-    from app.wiki import utils as wiki_utils  # noqa: PLC0415
     from app.mcp_server import jobs as mcp_jobs  # noqa: PLC0415
     from app.mcp_server import pubsub as mcp_pubsub  # noqa: PLC0415
     from app.tasks.wiki_update import agent_update_document_nl  # noqa: PLC0415
-    from app.wiki import git as wiki_git  # noqa: PLC0415
 
     # ---- Validate ----
     raw_path = arguments.get("path")
@@ -247,7 +247,6 @@ def _call_async_nl_update(
     # Capture the per-key agent identity here so the worker can rebind
     # it before commit_and_fan_out — the bearer ContextVar is gone by
     # the time the worker runs.
-    from app.wiki import agent_activity  # noqa: PLC0415
 
     payload: dict[str, Any] = {
         "path": rel,

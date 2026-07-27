@@ -11,6 +11,9 @@ Ingest pipeline metrics must be updated manually at each pipeline stage.
 """
 from __future__ import annotations
 
+from app.db import page_embeddings
+from app.tasks.queues import QUEUES
+from app.wiki import update_policy
 import logging
 
 from fastapi import FastAPI
@@ -150,7 +153,6 @@ REGISTRY.register(_WikiPagesCollector())
 
 class _WikiAutoUpdateCollector:
     def collect(self):
-        from app.wiki import update_policy  # noqa: PLC0415
 
         total = fts.count_documents() or 0
         try:
@@ -174,7 +176,6 @@ class _PageEmbeddingCoverageCollector:
     candidate, so coverage below wiki_pages_total is silent recall loss."""
 
     def collect(self):
-        from app.db import page_embeddings  # noqa: PLC0415
 
         try:
             embedded = page_embeddings.count()
@@ -199,7 +200,6 @@ class _TaskQueueCollector:
     small."""
 
     def collect(self):
-        from app.tasks.queues import QUEUES  # noqa: PLC0415
 
         depth = GaugeMetricFamily(
             "task_queue_depth",

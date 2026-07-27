@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.auth import PermissionDenied, require_can
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
 from app.wiki import agent_activity, git as wiki_git, provenance, update_policy
@@ -27,7 +28,6 @@ def handle(args: dict[str, Any]) -> Any:
     if sha is None and not wiki_utils.file_exists(path):
         return {"error": f"file not found: {path}"}
 
-    from app.auth import PermissionDenied, require_can  # noqa: PLC0415
 
     try:
         require_can("read", path)

@@ -5,6 +5,7 @@ import re
 
 from pydantic import BaseModel
 
+from app.wiki import git
 from app.db import fts
 from app.db.fts import SearchHit
 
@@ -43,7 +44,6 @@ def search_folders(query: str, limit: int = 10) -> list[FolderHit]:
     Derived from git-tracked ``.md`` paths. Sorted so prefix matches and
     shorter paths come first.
     """
-    from app.wiki import git  # noqa: PLC0415
 
     norm_q = _normalize(query)
     if not norm_q:

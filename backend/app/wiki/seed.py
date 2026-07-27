@@ -22,6 +22,10 @@ CLI bypasses the marker because it's explicitly user-driven.
 """
 from __future__ import annotations
 
+from app.db.session import session
+from app.models.wiki import ChangeKind
+from app.wiki.git import commit_file, list_paths
+from app.wiki.notify import after_doc_write
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,9 +73,6 @@ def write_seed_pages(
     """
     # Local imports to avoid pulling DB/notify deps into modules that just
     # want SEED_SOURCE_DIR.
-    from app.wiki.git import commit_file  # noqa: PLC0415
-    from app.wiki.notify import after_doc_write  # noqa: PLC0415
-    from app.models.wiki import ChangeKind  # noqa: PLC0415
 
     processed = 0
     for rel, body in iter_seed_pages():
@@ -91,7 +92,6 @@ def write_seed_pages(
 
 def _read_seed_marker() -> str | None:
     """Return the ``seeded_at`` ISO timestamp, or None if not yet stamped."""
-    from app.db.session import session  # noqa: PLC0415
 
     with session() as s:
         row = s.execute(
@@ -102,7 +102,6 @@ def _read_seed_marker() -> str | None:
 
 def _stamp_seed_marker() -> None:
     """Stamp ``seeded_at`` to now (UTC, ISO). Upserts the singleton row."""
-    from app.db.session import session  # noqa: PLC0415
 
     now_iso = datetime.now(timezone.utc).isoformat()
     with session() as s:
@@ -136,7 +135,6 @@ def seed_if_empty(target_dir: str) -> bool:
     if not SEED_SOURCE_DIR.is_dir():
         log.debug("no bundled wiki seed at %s, skipping", SEED_SOURCE_DIR)
         return False
-    from app.wiki.git import list_paths  # noqa: PLC0415
 
     if any(p.endswith(".md") for p in list_paths()):
         # Pre-existing content (admin seeded another way, migrating from

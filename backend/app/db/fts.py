@@ -19,6 +19,8 @@ is not populated by the current write path).
 """
 from __future__ import annotations
 
+import re
+
 import logging
 import threading
 
@@ -44,7 +46,6 @@ class SearchHit(BaseModel):
 # --------------------------------------------------------------------------- #
 
 def _make_client(url: str) -> object:
-    import re  # noqa: PLC0415
 
     # urlparse mishandles passwords with special chars (e.g. '?') — use regex instead.
     m = re.match(

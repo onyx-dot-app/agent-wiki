@@ -60,6 +60,7 @@ from typing import Any
 
 from sqlalchemy import Column, LargeBinary, MetaData, Table, and_, select, update
 
+from app.utils.logging import setup_logging
 from app.db.crypto import EncryptedString, active_key_secret, decrypt_string, encrypt_string
 from app.db.models import Base
 from app.db.session import session
@@ -123,7 +124,6 @@ def rotate(old_secret: str, new_secret: str | None = None) -> int:
 
 
 def main() -> None:
-    from app.utils.logging import setup_logging  # noqa: PLC0415
 
     setup_logging()
     old = os.environ.get("OLD_ENCRYPTION_KEY_SECRET")
