@@ -14,14 +14,18 @@ import {
   SvgCheckCircle,
   SvgExpand,
   SvgFile,
+  SvgFiles,
   SvgFold,
   SvgFolder,
   SvgFolderIn,
+  SvgFolderPlus,
   SvgSettings,
-  SvgStopCircle,
+  SvgSidebar,
   SvgX,
 } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
+import { SvgFolderDashed, SvgSlashCircle } from "@/components/wiki/icons";
+import { pathKind } from "@/lib/wiki/utils";
 
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -43,16 +47,29 @@ type Outcome =
 
 const HANDLED = new Set<Outcome>(["applied", "dismissed", "stale"]);
 
-/** Per-op row glyph; unknown ops fall back to the page icon. */
-const OP_ICON: Record<string, IconFunctionComponent> = {
-  move: SvgFolderIn,
-  rename: SvgFolder,
-  merge: SvgFolderIn,
-  split: SvgFile,
-  create_folder: SvgFolder,
-  delete_empty_folder: SvgFolder,
-  delete_page: SvgFile,
-};
+/** Row glyph per the mock (2236:78296): merges show the scope being
+ * merged (pages icon for a page, folder for a folder), empty-folder
+ * deletes the dashed folder. Unknown ops fall back to the page icon. */
+function opIcon(op: string, sourcePath: string): IconFunctionComponent {
+  const pageScope = pathKind(sourcePath) === "page";
+  switch (op) {
+    case "merge":
+    case "split":
+      return pageScope ? SvgFiles : SvgFolder;
+    case "move":
+      return SvgFolderIn;
+    case "rename":
+      return pageScope ? SvgFile : SvgFolder;
+    case "create_folder":
+      return SvgFolderPlus;
+    case "delete_empty_folder":
+      return SvgFolderDashed;
+    case "delete_page":
+      return SvgFile;
+    default:
+      return SvgFile;
+  }
+}
 
 interface SuggestionsCardProps {
   /** Folder (or page) scope the proposals are listed for. */
@@ -240,7 +257,7 @@ export function SuggestionsCard({
               )}
               {onOpenPanel && (
                 <Button
-                  icon={SvgExpand}
+                  icon={SvgSidebar}
                   size="sm"
                   prominence="tertiary"
                   tooltip="Open in side panel"
@@ -258,6 +275,7 @@ export function SuggestionsCard({
               <Button
                 size="sm"
                 prominence="secondary"
+                rightIcon={SvgSlashCircle}
                 disabled={pendingIds.length === 0}
                 onClick={() => void actAll("dismiss")}
               >
@@ -265,7 +283,7 @@ export function SuggestionsCard({
               </Button>
               <Button
                 size="sm"
-                icon={SvgCheckCircle}
+                rightIcon={SvgCheckCircle}
                 disabled={pendingIds.length === 0}
                 onClick={() => void actAll("approve")}
               >
@@ -305,7 +323,7 @@ function SuggestionRow({
   onDismiss,
   onClick,
 }: SuggestionRowProps) {
-  const Icon = OP_ICON[proposal.op] ?? SvgFile;
+  const Icon = opIcon(proposal.op, proposal.source_paths[0] ?? "");
   const struck = outcome === "dismissed";
   const chipPath = proposal.source_paths[0] ?? proposal.target_paths[0] ?? "";
   return (
@@ -351,7 +369,7 @@ function SuggestionRow({
         {!outcome || outcome === "working" ? (
           <>
             <Button
-              icon={SvgStopCircle}
+              icon={SvgSlashCircle}
               size="sm"
               prominence="tertiary"
               tooltip="Dismiss"
