@@ -57,7 +57,7 @@ from pydantic import ValidationError
 from app.auth import User, require_can
 from app.auth.deps import require_user_ws
 from app.models.coedit import CheckpointMessage, CheckpointResultFrame, JoinedFrame, ParticipantOut
-from app.tasks.coedit_checkpoint import checkpoint_coedit_session
+from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
 from app.tasks.coedit_leave import leave_coedit_session, record_leave
 from app.wiki import acl, coedit, coedit_channel, coedit_room, git
 
@@ -212,9 +212,14 @@ async def _recv_loop(
                 CheckpointResultFrame(request_id=checkpoint_msg.request_id, ok=False).model_dump()
             )
             continue
-        await checkpoint_coedit_session(session_id)
-        outbox.put_nowait(
-            CheckpointResultFrame(request_id=checkpoint_msg.request_id, ok=True).model_dump()
+        # Enqueue rather than await in-process: the checkpoint engine no
+        # longer needs this (or any specific) process's live room, so
+        # there's no reason to block this connection's recv loop on it.
+        # The task itself publishes the CheckpointResultFrame ack once it
+        # completes (broadcast to the session, this connection included —
+        # see checkpoint_coedit_session_task).
+        await asyncio.to_thread(
+            checkpoint_coedit_session_task, session_id, request_id=checkpoint_msg.request_id
         )
 
 
@@ -284,6 +289,16 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     if room is None:
         body = await asyncio.to_thread(git.read_file_opt, sess.path, sess.base_sha or "HEAD")
         room = coedit_room.create_room(sess.id, sess.path, body or "", sess.base_sha)
+        # A Doc read (get_update) — must run inline on this task's own
+        # thread (the event loop, which just constructed the Doc), not via
+        # to_thread; see coedit_room.py. The DB write itself is plain bytes,
+        # offloaded normally. Conditional on ydoc_snapshot IS NULL
+        # (coedit.set_initial_snapshot), so this is safe to call every time
+        # a process creates a room for a session it didn't already know
+        # about — only the very first room, ever, for a brand-new session
+        # actually persists here.
+        snapshot = room.doc.get_update()
+        await asyncio.to_thread(coedit.set_initial_snapshot, sess.id, snapshot)
 
     # `_connect_sync` already registered the participant (`coedit.join`)
     # before returning, so from here on a disconnect — including one during

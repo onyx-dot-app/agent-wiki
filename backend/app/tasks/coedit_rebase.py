@@ -20,11 +20,12 @@ The engine (``app.wiki.coedit_rebase``) does the merge + doc re-seed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from app.realtime import bus
+from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
 from app.wiki import coedit, coedit_room
-from app.wiki.coedit_checkpoint import checkpoint_session
 from app.wiki.coedit_rebase import RebaseOutcome, rebase_session
 
 log = logging.getLogger(__name__)
@@ -35,10 +36,14 @@ _BUS_KIND = "coedit_rebase"
 async def _rebase_and_maybe_checkpoint(session_id: int, head_sha: str) -> None:
     outcome = await rebase_session(session_id, head_sha)
     if outcome == RebaseOutcome.CONFLICT:
-        # Overlap the plain 3-way merge couldn't resolve — hand it to the
-        # checkpoint engine's AI merge, which resolves, commits, and
-        # re-seeds the room from the result.
-        await checkpoint_session(session_id)
+        # Overlap the plain 3-way merge couldn't resolve — enqueue the
+        # checkpoint task instead of running the engine inline: it does
+        # real DB/git/LLM-merge work that would otherwise block this event
+        # loop, and (via checkpoint_coedit_session_task's own cross-process
+        # notify) reseeds this room from the result once it lands, the same
+        # as the checkpoint engine used to do directly before it stopped
+        # touching any room at all.
+        await asyncio.to_thread(checkpoint_coedit_session_task, session_id)
 
 
 def _try_local(session_id: int, head_sha: str) -> None:

@@ -370,11 +370,26 @@ export function useCoeditSession(opts: {
             id: myUserId,
             name: myUserDisplay ?? "Anonymous",
           });
-        freshAwareness.on("change", recomputePresence);
+        // Not the outer recomputePresence: this whole while loop runs
+        // inside one long-lived effect invocation (the effect's own deps,
+        // [enabled, path, retryToken], don't include `awareness`), so
+        // across reconnects within a single run, recomputePresence's
+        // useCallback closure stays pinned to whichever `awareness` state
+        // value existed when the effect body started — reading it here
+        // would derive presence from a stale, already-disconnected
+        // Awareness instance after setAwareness(freshAwareness) above.
+        // Closing over freshAwareness directly sidesteps the staleness
+        // instead of chasing it.
+        const recomputeForThisAwareness = () => {
+          setTyping(deriveTyping(freshAwareness));
+          const editor = editorRef.current;
+          if (editor) setPeers(derivePeers(editor, freshAwareness));
+        };
+        freshAwareness.on("change", recomputeForThisAwareness);
         firstConnect = false;
 
         const { expected } = await snap.closed;
-        freshAwareness.off("change", recomputePresence);
+        freshAwareness.off("change", recomputeForThisAwareness);
         if (cancelled || expected) return;
         await new Promise((r) => setTimeout(r, STREAM_RECONNECT_MS));
       }

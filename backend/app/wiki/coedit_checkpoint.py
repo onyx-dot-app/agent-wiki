@@ -1,19 +1,23 @@
 """Checkpoint a co-edit session's live Yjs doc back into git.
 
-The live doc lives in this process's in-memory ``coedit_room.Room`` (there
-is no cross-process room registry — see that module); a checkpoint is the
-Layer-2 boundary that reconstructs markdown from it and commits through the
-*existing* write gateway, reconciling any agent/ingest commit that landed
-meanwhile via the same 3-way + AI merge. Durability is the update log in
-Postgres (``coedit_updates``), so a checkpoint is about visibility (making
-the committed page fresh for readers/search/agents) and bounding merge size
-— not data safety.
+Rebuilds a throwaway ``pycrdt.Doc`` from the session's durable state —
+``ydoc_snapshot`` (a binary snapshot at ``ydoc_snapshot_seq``) plus every
+``coedit_updates`` row logged since — and commits through the *existing*
+write gateway, reconciling any agent/ingest commit that landed meanwhile via
+the same 3-way + AI merge. Durability is the update log + snapshot in
+Postgres, so a checkpoint is about visibility (making the committed page
+fresh for readers/search/agents) and bounding merge size — not data safety.
 
-Because the room only exists in this one process, ``checkpoint_session`` can
-only ever be called here, in-process — never dispatched to a worker queue
-(unlike the OT era's ``@coedit_queue.task()``). See ``app/tasks/
-coedit_checkpoint.py`` for what triggers it (periodic scan, last-participant-
-leave, explicit save), all now plain in-process calls.
+Deliberately never touches any process's live ``coedit_room.Room`` — the
+whole point of rebuilding from (snapshot, updates) instead. That's what lets
+this run as a plain ``coedit_queue`` task (``app/tasks/coedit_checkpoint.py``)
+dispatched to any worker, not just the one process (if any) holding the
+session's room live: a live room is thread-affine (PyO3-unsendable
+``Doc``/``Awareness`` — see ``coedit_room.py``), so touching one from here,
+on a worker's own thread, would be exactly the cross-thread violation this
+rearchitecture exists to remove. A room that *is* live somewhere still needs
+telling once a checkpoint lands elsewhere — see
+``app/tasks/coedit_checkpoint.py``'s notify step.
 
 Attribution: the commit author is the last editor (so git blame credits
 whoever last touched the doc); the other session participants are added as
@@ -23,18 +27,19 @@ whoever last touched the doc); the other session participants are added as
 
 from __future__ import annotations
 
-import asyncio
 import logging
+
+from pycrdt import Doc
+from pydantic import BaseModel, ConfigDict
 
 from app.auth import User, set_current_user
 from app.auth import users as users_repo
-from app.models.coedit import ResyncFrame
-from app.models.wiki import ChangeKind, CommitResult
-from app.wiki import coedit, coedit_channel, coedit_room, filesystem
+from app.models.wiki import ChangeKind
+from app.wiki import coedit, filesystem
 from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
-from app.wiki import markdown_splice
-from app.wiki.coedit_room import Room
+from app.wiki import markdown_splice, markdown_yjs
+from app.wiki.markdown_splice import TouchedTracker
 from app.wiki.utils import commit_and_fan_out
 
 log = logging.getLogger(__name__)
@@ -66,47 +71,69 @@ def _commit_message(session_id: int, *, primary_author_id: str | None) -> str:
     return "\n".join(lines)
 
 
-async def checkpoint_session(session_id: int) -> str | None:
-    """Commit a dirty session's doc to git; return the new sha (or None).
+def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTracker, int]:
+    """Rebuild a throwaway ``Doc`` from ``sess.ydoc_snapshot`` plus every
+    update logged since — never touches any process's live room.
 
-    No-op when the session is gone, clean (``ydoc_seq ==
-    ydoc_checkpointed_seq``), this process doesn't hold the session's room,
-    or the merge collapses to the current HEAD. Reconciles concurrent
-    agent/ingest commits via the gateway's 3-way + AI merge; when that
-    reconciliation changes the content the room's doc was holding, the room
-    is re-seeded from the merged result and connected clients are told to
-    resync (see ``coedit_room.reseed``).
+    Ordering matters and mirrors ``coedit_room.Room.__init__`` exactly: the
+    doc is seeded (here, from the snapshot) *before* the ``TouchedTracker``
+    is created, so ``base_body`` (the pre-replay text —
+    ``markdown_splice.checkpoint_body``'s diff base) is captured first, then
+    every replayed update is observed by the tracker exactly as it would be
+    for a live edit (``TouchedTracker.observe_deep`` sees any mutation
+    regardless of origin) — so the result is byte-identical to what a live
+    room holding the same sequence of edits would have produced.
+
+    Returns the seq actually replayed up to (the caller's own ``sess.ydoc_seq``
+    can be a moment stale by the time this runs — a fresh update can land
+    between that read and this one — so this is read fresh here via
+    ``updates_since``, and is what the caller must advance the checkpoint
+    watermark to, not ``sess.ydoc_seq``: understating it would leave
+    ``ydoc_snapshot_seq`` behind what the snapshot bytes actually capture).
     """
-    async with coedit_room.get_checkpoint_lock(session_id):
-        prep = await asyncio.to_thread(_prepare_and_commit, session_id)
-        if prep is None:
-            return None
-        room, path, body, result = prep
-        if result.new_body != body:
-            coedit_room.reseed(room, result.new_body, result.sha)
-            coedit_channel.publish_control(
-                session_id, ResyncFrame(session_id=session_id).model_dump()
-            )
-        else:
-            room.base_body = result.new_body
-            room.base_sha = result.sha
-            room.tracker.reset()
-        await asyncio.to_thread(_finish_bookkeeping, session_id, path, result)
-        return result.sha
+    doc = Doc()
+    assert sess.ydoc_snapshot is not None  # caller guarantees this (see checkpoint_session)
+    doc.apply_update(sess.ydoc_snapshot)
+    base_body = markdown_yjs.reconstruct_body(doc)
+    tracker = TouchedTracker(doc)
+    since = coedit.updates_since(sess.id, sess.ydoc_snapshot_seq)
+    for u in since.updates:
+        doc.apply_update(u.update_payload)
+    replayed_seq = since.head_seq if since.head_seq is not None else sess.ydoc_snapshot_seq
+    return doc, base_body, tracker, replayed_seq
 
 
-def _prepare_and_commit(session_id: int) -> tuple[Room, str, str, CommitResult] | None:
-    """Everything up to (and including) the git commit — blocking DB/git
-    work, no ``Doc`` access, safe to run on any thread. Holds the session's
-    checkpoint advisory lock (serializing across processes, in case that
-    ever again becomes possible — see ``coedit.checkpoint_lock``) for the
-    whole read-guard-commit sequence, same discipline as the OT-era engine
-    this replaces."""
+class CheckpointOutcome(BaseModel):
+    """What a successful checkpoint produced — enough for the caller
+    (``app/tasks/coedit_checkpoint.py``) to notify any process holding this
+    session's room live, without this module knowing anything about the
+    realtime bus (same domain/fan-out split as ``coedit_rebase.py`` vs.
+    ``app/tasks/coedit_rebase.py``). ``sha`` is the checkpoint's own commit —
+    also the session's new ``base_sha`` from here on, same value serving
+    both purposes."""
+
+    model_config = ConfigDict(frozen=True)
+
+    session_id: int
+    sha: str
+    body: str
+
+
+def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
+    """Commit a dirty session's doc to git; return the outcome (or None).
+
+    Pure sync — no asyncio, no Doc access outside the throwaway one this
+    function builds and discards. No-op when the session is gone, clean
+    (``ydoc_seq == ydoc_checkpointed_seq``), has no snapshot yet (a session
+    whose very first connection hasn't finished creating its room —
+    momentary, see ``coedit.set_initial_snapshot``), or the merge collapses
+    to the current HEAD.
+    """
     with coedit.checkpoint_lock(session_id) as acquired:
         if not acquired:
-            log.info("coedit checkpoint: session %s busy; skipping (scan retries)", session_id)
+            log.info("coedit checkpoint: session %s busy; skipping (retries)", session_id)
             return None
-        sess = coedit.get_session(session_id)
+        sess = coedit.get_session_for_checkpoint(session_id)
         if sess is None:
             return None  # gone
         if sess.status != coedit.SessionStatus.ACTIVE.value:
@@ -129,14 +156,10 @@ def _prepare_and_commit(session_id: int) -> tuple[Room, str, str, CommitResult] 
             return None
         if sess.ydoc_seq == sess.ydoc_checkpointed_seq:
             return None  # nothing new to commit
-
-        room = coedit_room.get_room(session_id)
-        if room is None:
-            # This process doesn't hold the session's room — a different
-            # process's connection does, or everyone connected here has since
-            # left. Nothing this process can checkpoint from; the trigger that
-            # fired in the room's own process (or the periodic scan there)
-            # handles it.
+        if sess.ydoc_snapshot is None:
+            # This session's very first connection hasn't finished
+            # set_initial_snapshot yet — momentary, the next trigger retries.
+            log.info("coedit checkpoint: session %s has no snapshot yet; skipping", session_id)
             return None
 
         path = sess.path
@@ -168,7 +191,8 @@ def _prepare_and_commit(session_id: int) -> tuple[Room, str, str, CommitResult] 
             coedit.close_session(session_id)
             return None
 
-        body = markdown_splice.checkpoint_body(room.base_body, room.doc, room.tracker)
+        doc, base_body, tracker, replayed_seq = _rebuild_doc(sess)
+        body = markdown_splice.checkpoint_body(base_body, doc, tracker)
         change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
 
         primary_id = coedit.last_update_author(session_id)
@@ -184,24 +208,24 @@ def _prepare_and_commit(session_id: int) -> tuple[Room, str, str, CommitResult] 
                 body,
                 message,
                 change_kind=change_kind,
-                base_body=room.base_body if sess.base_sha else None,
+                base_body=base_body if sess.base_sha else None,
                 ai_merge=True,
                 skip_acl=True,
                 record_activity=False,
                 # This is the session's own commit — don't fold it back into
-                # the session as an inbound rebase (the reseed above already
-                # syncs the merged result).
+                # the session as an inbound rebase (the notify step below
+                # already reconciles any live room directly).
                 trigger_coedit_rebase=False,
             )
 
         if result is None:
             # The merge produced exactly the current HEAD (doc already
-            # matches committed content). Still mark clean against current
-            # HEAD so we don't re-attempt this seq forever.
+            # matches committed content). Still advance the snapshot/watermark
+            # against current HEAD so we don't re-attempt this seq forever —
+            # the rebuilt doc's own state (post-replay) is the new snapshot,
+            # even though nothing was actually committed.
             head = wiki_git.head_sha_for_path(path)
-            if head is not None:
-                coedit.mark_checkpointed(session_id, base_sha=head, seq=sess.ydoc_seq)
-            else:
+            if head is None:
                 # Shouldn't happen — a no-op merge implies HEAD exists. Surface
                 # it rather than silently leaving the session dirty forever.
                 log.warning(
@@ -210,10 +234,24 @@ def _prepare_and_commit(session_id: int) -> tuple[Room, str, str, CommitResult] 
                     path,
                     session_id,
                 )
+                return None
+            coedit.advance_checkpoint(
+                session_id, seq=replayed_seq, snapshot=doc.get_update(), base_sha=head
+            )
             return None
-        return room, path, body, result
 
+        # If the AI/3-way merge changed the content beyond what this doc
+        # held (a concurrent external commit folded in), the *committed*
+        # result — not this doc's own state — is the correct new snapshot,
+        # so any future replay starts from what's actually on disk.
+        if result.new_body != body:
+            snap_doc = markdown_yjs.seed_doc_from_markdown(result.new_body)
+            snapshot = snap_doc.get_update()
+        else:
+            snapshot = doc.get_update()
 
-def _finish_bookkeeping(session_id: int, path: str, result: CommitResult) -> None:
-    coedit.rebase_onto(session_id, new_base_sha=result.sha, checkpointed=True)
-    wiki_drafts.clear_if_diverged(path, result.new_body)
+        coedit.advance_checkpoint(
+            session_id, seq=replayed_seq, snapshot=snapshot, base_sha=result.sha
+        )
+        wiki_drafts.clear_if_diverged(path, result.new_body)
+        return CheckpointOutcome(session_id=session_id, sha=result.sha, body=result.new_body)

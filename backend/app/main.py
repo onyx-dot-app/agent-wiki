@@ -65,7 +65,6 @@ from app.llm.errors import LLMError
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
 from app.db.session import init_db
 from app.tasks.agent_activity import schedule_all_pending_cleanups
-from app.tasks import coedit_checkpoint as coedit_checkpoint_scan
 from app.tasks.queues import QueueFullError
 from app.triggers import reconcile as triggers_reconcile
 from app.triggers import repo as triggers_repo
@@ -191,16 +190,17 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # Co-edit live documents (pycrdt.Doc) live only in this process's memory
     # (app/wiki/coedit_room.py) — bind this loop so a realtime-bus handler
     # firing on its own listener thread (live-rebase's cross-process
-    # fan-out) can schedule Doc-touching work back onto it, and start this
-    # process's own periodic checkpoint scan (idle/overdue sessions whose
-    # room lives here — never dispatched to a worker, see
-    # app/tasks/coedit_checkpoint.py).
+    # fan-out, or a checkpoint landing elsewhere that needs this process's
+    # own room reconciled — see app/tasks/coedit_checkpoint.py) can schedule
+    # Doc-touching work back onto it. Checkpointing itself is a coedit_queue
+    # task now (any worker can act on any session, see that module's
+    # docstring), so unlike the OT era this process doesn't run its own
+    # periodic checkpoint scan — that's the queue consumer's job
+    # (app/tasks/run_worker.py), same as every other periodic task.
     coedit_room.bind_main_loop(asyncio.get_running_loop())
-    coedit_checkpoint_scan.start()
 
     yield
 
-    await coedit_checkpoint_scan.stop()
     bus.stop_listener()
 
 

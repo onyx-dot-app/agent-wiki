@@ -44,6 +44,27 @@ def test_open_session_get_or_create(users):
     assert count_rows(CoeditSession) == 1
 
 
+def test_set_initial_snapshot(users):
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.set_initial_snapshot(s.id, b"snap0")
+    row = coedit.get_session_for_checkpoint(s.id)
+    assert row is not None
+    assert row.ydoc_snapshot == b"snap0"
+    assert row.ydoc_snapshot_seq == 0
+
+
+def test_set_initial_snapshot_only_writes_once(users):
+    # A second process creating its own room for a session that already has
+    # one (a checkpoint already ran, or another process's connection
+    # already stamped one) must not clobber the existing snapshot.
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.set_initial_snapshot(s.id, b"first")
+    coedit.set_initial_snapshot(s.id, b"second")
+    row = coedit.get_session_for_checkpoint(s.id)
+    assert row is not None
+    assert row.ydoc_snapshot == b"first"
+
+
 def test_get_active_session(users):
     assert coedit.get_active_session(_PATH) is None
     opened = coedit.open_session(_PATH, base_sha=None)
@@ -158,25 +179,51 @@ def test_participants_join_touch_leave(users):
     assert [r.user_id for r in coedit.list_participants(s.id)] == ["usr_b"]
 
 
-def test_mark_checkpointed(users):
+def test_advance_checkpoint(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
-    coedit.mark_checkpointed(s.id, base_sha="sha2", seq=3)
+    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
+    coedit.apply_update(s.id, update_bytes=b"b", author_user_id="usr_a")
+    coedit.advance_checkpoint(s.id, seq=2, snapshot=b"snap", base_sha="sha2")
     fetched = coedit.get_active_session(_PATH)
     assert fetched is not None
     assert fetched.base_sha == "sha2"
-    assert fetched.ydoc_checkpointed_seq == 3
+    assert fetched.ydoc_checkpointed_seq == 2
     assert fetched.last_checkpoint_at is not None
+    # Pruned everything <= 2 — both updates gone.
+    assert coedit.updates_since(s.id, 0).updates == []
+    checkpoint_row = coedit.get_session_for_checkpoint(s.id)
+    assert checkpoint_row is not None
+    assert checkpoint_row.ydoc_snapshot == b"snap"
+    assert checkpoint_row.ydoc_snapshot_seq == 2
 
 
-def test_mark_checkpointed_never_regresses(users):
+def test_advance_checkpoint_never_regresses(users):
     s = coedit.open_session(_PATH, base_sha=None)
-    coedit.mark_checkpointed(s.id, base_sha="sha6", seq=6)
+    coedit.advance_checkpoint(s.id, seq=6, snapshot=b"snap6", base_sha="sha6")
     # A slower concurrent checkpoint at a lower seq must not roll it back.
-    coedit.mark_checkpointed(s.id, base_sha="sha5", seq=5)
+    coedit.advance_checkpoint(s.id, seq=5, snapshot=b"snap5", base_sha="sha5")
     fetched = coedit.get_active_session(_PATH)
     assert fetched is not None
     assert fetched.ydoc_checkpointed_seq == 6
     assert fetched.base_sha == "sha6"
+    checkpoint_row = coedit.get_session_for_checkpoint(s.id)
+    assert checkpoint_row is not None
+    assert checkpoint_row.ydoc_snapshot == b"snap6"  # not regressed either
+
+
+def test_advance_checkpoint_prunes_only_up_to_seq(users):
+    # A later update (one that landed after this checkpoint's own read of
+    # the log) must survive pruning — exactly the bug the old
+    # rebase_onto(checkpointed=True)'s unconditional delete had: pruning and
+    # the snapshot watermark have to move in lockstep, never past what was
+    # actually captured.
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")  # seq 1
+    coedit.advance_checkpoint(s.id, seq=1, snapshot=b"snap1", base_sha="sha2")
+    # Landed after this checkpoint's own read of the log.
+    coedit.apply_update(s.id, update_bytes=b"b", author_user_id="usr_a")  # seq 2
+    remaining = coedit.updates_since(s.id, 0).updates
+    assert [u.seq for u in remaining] == [2]
 
 
 def _due_ids(**kw) -> set[int]:
@@ -256,7 +303,7 @@ def test_legacy_space_separated_created_at_normalized_not_overdue(users, monkeyp
 def test_due_excludes_session_clean_since_last_checkpoint(users):
     s = coedit.open_session(_PATH, base_sha=None)
     coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
-    coedit.mark_checkpointed(s.id, base_sha="sha", seq=1)
+    coedit.advance_checkpoint(s.id, seq=1, snapshot=b"snap", base_sha="sha")
     # ydoc_seq == ydoc_checkpointed_seq again → no longer dirty.
     assert _due_ids(idle_seconds=0, max_interval_seconds=0) == set()
 
@@ -264,7 +311,7 @@ def test_due_excludes_session_clean_since_last_checkpoint(users):
 def test_close_if_clean_closes_a_clean_session(users):
     s = coedit.open_session(_PATH, base_sha=None)
     coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
-    coedit.mark_checkpointed(s.id, base_sha="sha", seq=1)  # ydoc_seq == checkpointed
+    coedit.advance_checkpoint(s.id, seq=1, snapshot=b"snap", base_sha="sha")  # ydoc_seq == checkpointed
     assert coedit.close_if_clean(s.id) is True
     assert coedit.get_active_session(_PATH) is None
 
@@ -321,10 +368,11 @@ def test_purge_viewer_sessions_deletes_only_closed_never_edited(users):
     coedit.close_session(viewer_only.id)
 
     # Edited session: has an update, closed after checkpoint — must be
-    # retained (its coedit_updates history hangs off it).
+    # retained (ydoc_seq != 0, regardless of whether advance_checkpoint has
+    # since pruned its coedit_updates rows).
     edited = coedit.open_session("edited.md", base_sha=None)
     coedit.apply_update(edited.id, update_bytes=b"x", author_user_id="usr_a")
-    coedit.mark_checkpointed(edited.id, base_sha="sha", seq=1)
+    coedit.advance_checkpoint(edited.id, seq=1, snapshot=b"snap", base_sha="sha")
     coedit.close_session(edited.id)
 
     # Active viewer-only session: still occupied — must be retained.

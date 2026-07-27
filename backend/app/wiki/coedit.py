@@ -11,17 +11,18 @@ bookkeeping, on purpose, so the thread-affinity constraint stays confined to
 `coedit_room.py` and the WS route that drives it.
 
 `coedit_updates` is the durable, replayable log of every applied Yjs update
-(this session's analog of the old OT-era `coedit_ops`); `ydoc_snapshot` on
-`coedit_sessions` is a periodic point-in-time backup taken at checkpoint
-time, an optimization for future cold-start recovery rather than something
-this module reads today — a process that doesn't already hold a session's
-room re-seeds it from the last *git-committed* body
-(`coedit_room.get_or_create_room`), not from this snapshot. A restart's
-worst case is losing whatever was edited since the last checkpoint and
-never reached another process's room; bounded by checkpoint frequency, and
-a strictly worse durability story than the OT era's immediately-persisted
-`buffer_text` had — a known, deliberate scope boundary for this pass, not
-an oversight.
+(this session's analog of the old OT-era `coedit_ops`); `ydoc_snapshot` +
+`ydoc_snapshot_seq` on `coedit_sessions` is a point-in-time binary snapshot
+of the doc at that seq, set once at session creation (`set_initial_snapshot`,
+seeded from the page's HEAD) and advanced by every checkpoint
+(`advance_checkpoint`). Together they're what let a checkpoint run
+anywhere, not just in the process holding a session's live room: rebuild a
+throwaway `Doc` from the snapshot, replay every update in
+`(ydoc_snapshot_seq, ydoc_seq]` from this log onto it, and the result is
+byte-identical to what the live room would have produced — see
+`app/wiki/coedit_checkpoint.py`. This module still never imports `pycrdt`
+itself (that rebuild happens in the checkpoint engine); it only stores and
+serves the bytes.
 
 Git stays the source of truth for *committed* pages; this store only holds
 live-session bookkeeping. See
@@ -172,6 +173,45 @@ def get_session(session_id: int) -> SessionRow | None:
         return _session_row(row) if row is not None else None
 
 
+class CheckpointSessionRow(BaseModel):
+    """A row from `coedit_sessions` with the fields the checkpoint engine
+    specifically needs to rebuild a doc without touching any process's live
+    room — including `ydoc_snapshot`, the blob `SessionRow` deliberately
+    excludes for every other (hot-path) caller."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: int
+    path: str
+    status: str
+    base_sha: str | None
+    ydoc_seq: int
+    ydoc_checkpointed_seq: int
+    ydoc_snapshot: bytes | None
+    ydoc_snapshot_seq: int
+
+
+def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
+    """Look up a session by id for the checkpoint engine specifically — see
+    `CheckpointSessionRow`. Regardless of status: a closed-but-still-dirty
+    session is a real (if rare) case the engine itself decides how to
+    handle, not something to hide at the read layer."""
+    with session() as s:
+        row = s.get(CoeditSession, session_id)
+        if row is None:
+            return None
+        return CheckpointSessionRow(
+            id=row.id,
+            path=row.path,
+            status=row.status,
+            base_sha=row.base_sha,
+            ydoc_seq=row.ydoc_seq,
+            ydoc_checkpointed_seq=row.ydoc_checkpointed_seq,
+            ydoc_snapshot=row.ydoc_snapshot,
+            ydoc_snapshot_seq=row.ydoc_snapshot_seq,
+        )
+
+
 def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     """Get-or-create the active session row for ``path``.
 
@@ -219,6 +259,28 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
                 raise
             return _session_row(winner)
         return _session_row(fresh)
+
+
+def set_initial_snapshot(session_id: int, snapshot: bytes) -> None:
+    """Persist the very first ``ydoc_snapshot`` for a session — call once,
+    right after a process constructs the session's room for the first time
+    anywhere (``coedit_room.create_room`` in ``app/api/coedit.py:ws``), with
+    ``room.doc.get_update()`` taken on the same thread that just built the
+    ``Doc`` (required — see ``coedit_room.py``).
+
+    Conditional on ``ydoc_snapshot IS NULL`` so this is safe to call every
+    time a process creates a room for a session it didn't already know
+    about: a session that already has a snapshot (a checkpoint already ran,
+    or another process's connection already stamped one) leaves it alone —
+    only the very first room, for a brand-new session, ever actually
+    writes here.
+    """
+    with session() as s:
+        s.execute(
+            update(CoeditSession)
+            .where(CoeditSession.id == session_id, CoeditSession.ydoc_snapshot.is_(None))
+            .values(ydoc_snapshot=snapshot, ydoc_snapshot_seq=0)
+        )
 
 
 class UpdateRow(BaseModel):
@@ -349,29 +411,59 @@ def rebase_onto(session_id: int, *, new_base_sha: str, checkpointed: bool) -> Se
         return _session_row(row)
 
 
-def mark_checkpointed(session_id: int, *, base_sha: str, seq: int) -> None:
-    """Record that the doc at ``seq`` was committed to git at ``base_sha``.
+def advance_checkpoint(session_id: int, *, seq: int, snapshot: bytes, base_sha: str) -> None:
+    """Record a checkpoint's result — a real commit, or a no-op where the
+    doc's content already matched HEAD — moving the snapshot, the
+    checkpoint watermark, and the update-log pruning boundary together, in
+    one transaction: ``ydoc_snapshot``/``ydoc_snapshot_seq`` and
+    ``ydoc_checkpointed_seq`` all advance to ``seq``, and every
+    ``coedit_updates`` row with ``seq`` less-or-equal is pruned.
 
-    Advancing ``ydoc_checkpointed_seq`` to ``seq`` is what marks the session
-    clean — a later update bumps ``ydoc_seq`` past it, making it dirty
-    again. Conditional UPDATE (only advances) so a slow in-flight checkpoint
-    can't regress the watermark past what a faster concurrent one already
-    recorded.
+    The three have to move in lockstep — unlike ``rebase_onto``'s
+    unconditional clear (correct only for a rebase, which replaces the doc
+    wholesale so the *entire* pre-rebase log is meaningless regardless of
+    seq), a checkpoint's snapshot and its pruning boundary must always
+    agree, or a later checkpoint's replay-from-snapshot would be missing
+    updates between the (stale) snapshot and the (already-pruned) log —
+    exactly the class of bug this function exists to make structurally
+    impossible: there is no code path that prunes without also advancing
+    the snapshot to the same seq.
+
+    Conditional on ``ydoc_checkpointed_seq < seq`` so a slow in-flight
+    checkpoint can't clobber a faster concurrent one's more-advanced state
+    — belt-and-suspenders alongside ``coedit.checkpoint_lock``'s own
+    per-session serialization, not a substitute for it (matches the old
+    ``mark_checkpointed``'s regression guard, which this replaces —
+    snapshot advancement was never optional here, so there's no longer a
+    narrower "just advance the watermark" operation to keep around).
     """
+    now = _iso(_now())
     with session() as s:
-        s.execute(
+        # .returning(...).one_or_none() (not .rowcount) to detect whether the
+        # conditional UPDATE matched — matches this module's other
+        # conditional-UPDATE call sites (e.g. close_if_clean), and sidesteps
+        # a basedpyright strict-mode gap: SQLAlchemy's plain Result.rowcount
+        # isn't typed on the generic Result[Any] this execute() returns.
+        updated_id = s.scalars(
             update(CoeditSession)
-            .where(
-                CoeditSession.id == session_id,
-                CoeditSession.ydoc_checkpointed_seq < seq,
-            )
+            .where(CoeditSession.id == session_id, CoeditSession.ydoc_checkpointed_seq < seq)
             .values(
-                base_sha=base_sha,
+                ydoc_snapshot=snapshot,
+                ydoc_snapshot_seq=seq,
                 ydoc_checkpointed_seq=seq,
-                last_checkpoint_at=_iso(_now()),
+                base_sha=base_sha,
+                last_checkpoint_at=now,
+                updated_at=now,
             )
+            .returning(CoeditSession.id)
             .execution_options(synchronize_session=False)
-        )
+        ).one_or_none()
+        if updated_id is not None:
+            s.execute(
+                delete(CoeditUpdate).where(
+                    CoeditUpdate.session_id == session_id, CoeditUpdate.seq <= seq
+                )
+            )
 
 
 def sessions_due_for_checkpoint(
@@ -383,11 +475,12 @@ def sessions_due_for_checkpoint(
     (``updated_at``, ``last_checkpoint_at``, ``created_at``) are written in
     ``_iso`` format, so the lexicographic string comparisons are well-ordered.
 
-    Only meaningful for sessions whose room lives in *this* process — the
-    caller (``app/wiki/coedit_checkpoint.py``) filters against its own
-    in-process ``coedit_room`` registry before acting on any of these; a
-    session dirty here but rooted in another process is that process's scan
-    to pick up, not this one's.
+    Process-agnostic: a checkpoint no longer needs the process holding a
+    session's live room (it rebuilds its own throwaway ``Doc`` from
+    ``ydoc_snapshot`` + the update log — see
+    ``app/wiki/coedit_checkpoint.py``), so any worker that dequeues a
+    session id from here can act on it directly, regardless of which
+    process (if any) currently holds that session's room.
     """
     now = _now()
     idle_cutoff = _iso(now - timedelta(seconds=idle_seconds))

@@ -19,13 +19,15 @@ the leave bookkeeping was already applied, so the queued fallback may be a
 second run: the participant delete is delete-if-exists, the presence
 broadcast is harmless.
 
-The queued fallback runs on a *worker* process, which never holds the
-session's in-memory room (see ``app/wiki/coedit_room.py``) — so unlike
-``record_leave``, it never attempts a checkpoint; there is nothing local to
-checkpoint from. If the owning web process is mid-shutdown when this
-fallback fires, edits since the last checkpoint are lost, bounded by
-checkpoint frequency — the same accepted tradeoff documented in
-``app/wiki/coedit.py``'s module docstring.
+Both paths now enqueue the checkpoint the same way (rather than one
+attempting it in-process and the other skipping it): the checkpoint engine
+(``app/wiki/coedit_checkpoint.py``) rebuilds its own throwaway ``Doc`` from
+the session's persisted (snapshot, updates) and never touches any process's
+live room, so a worker process — which never holds one — checkpoints a
+session exactly as well as the process that does. That closes what used to
+be a real gap: previously, a shutdown landing between the cancellation and
+this fallback firing meant edits since the last checkpoint were lost
+outright, since the fallback had nothing local to checkpoint from.
 """
 
 from __future__ import annotations
@@ -33,7 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.tasks.coedit_checkpoint import checkpoint_coedit_session
+from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
 from app.tasks.queues import coedit_queue
 from app.wiki import coedit, coedit_channel
 
@@ -44,7 +46,7 @@ def _do_leave(session_id: int, user_id: str) -> bool:
     """Leave bookkeeping shared by both the normal and queued-fallback
     paths. Only acts when the user's last connection has closed, so a
     second tab doesn't evict them. Returns True if the departing user was
-    the last participant — the caller should attempt a checkpoint."""
+    the last participant — the caller should enqueue a checkpoint."""
     if coedit_channel.user_still_connected(session_id, user_id):
         return False
     coedit.leave(session_id, user_id)
@@ -53,25 +55,26 @@ def _do_leave(session_id: int, user_id: str) -> bool:
 
 
 async def record_leave(session_id: int, user_id: str) -> None:
-    """Mark ``user_id`` gone from ``session_id`` and checkpoint if they were
-    the last one out. Idempotent (see module docstring)."""
+    """Mark ``user_id`` gone from ``session_id`` and enqueue a checkpoint if
+    they were the last one out. Idempotent (see module docstring).
+
+    Enqueues rather than awaiting the checkpoint in-process: a plain Redis
+    send, not itself at risk of the same cancellation race this function
+    exists to guard the *leave* bookkeeping against, and the checkpoint no
+    longer needs to run in this specific process anyway (see module
+    docstring) — no reason to keep the WS teardown path blocked on it.
+    """
     last_out = await asyncio.to_thread(_do_leave, session_id, user_id)
-    if not last_out:
-        return
-    # Best-effort: the participant row is already gone, so a failed
-    # checkpoint must not fail the leave. The periodic scan is the backstop
-    # — the session is dirty, so it's recovered once idle.
-    try:
-        await checkpoint_coedit_session(session_id)
-    except Exception:
-        log.exception(
-            "coedit: checkpoint failed on last-leave for session %s", session_id
-        )
+    if last_out:
+        await asyncio.to_thread(checkpoint_coedit_session_task, session_id)
 
 
 @coedit_queue.task()
 def leave_coedit_session(session_id: int, user_id: str) -> None:
     """Queued leave — the WS handler's fallback when its own task is being
-    cancelled (see module docstring). No checkpoint attempt: this runs on a
-    worker process, which never holds the session's in-memory room."""
-    _do_leave(session_id, user_id)
+    cancelled (see module docstring). Enqueues a checkpoint too if this was
+    the last participant out, same as the normal path — no longer skipped:
+    the checkpoint engine never needed this process to hold the session's
+    room, it needed the fallback to still not have known that."""
+    if _do_leave(session_id, user_id):
+        checkpoint_coedit_session_task(session_id)

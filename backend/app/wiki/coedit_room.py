@@ -101,9 +101,9 @@ def create_room(session_id: int, path: str, body: str, base_sha: str | None) -> 
 
 def reseed(room: Room, body: str, base_sha: str | None) -> None:
     """Replace a room's live ``Doc`` wholesale with fresh content — a
-    live-rebase fold-in (``coedit_rebase.py``) or a checkpoint's commit-time
-    merge landing content the room's ``Doc`` doesn't have
-    (``coedit_checkpoint.py``).
+    live-rebase fold-in (``coedit_rebase.py``) or a checkpoint's committed
+    result landing content this room's ``Doc`` doesn't have
+    (``app/tasks/coedit_checkpoint.py``'s cross-process reconcile step).
 
     Must run on the room's own thread (the event loop — same constraint as
     ``create_room``, since this constructs a brand-new ``Doc``). Existing
@@ -127,28 +127,6 @@ def close_room(session_id: int) -> None:
     if any was due, has run). Idempotent."""
     with _lock:
         _rooms.pop(session_id, None)
-        _checkpoint_locks.pop(session_id, None)
-
-
-_checkpoint_locks: dict[int, asyncio.Lock] = {}
-
-
-def get_checkpoint_lock(session_id: int) -> asyncio.Lock:
-    """Per-session in-process lock serializing a room's checkpoint attempts
-    end-to-end (prepare -> commit -> reseed -> DB bookkeeping,
-    ``coedit_checkpoint.checkpoint_session``) — that sequence spans multiple
-    ``await`` points, so the DB-level advisory lock
-    (``coedit.checkpoint_lock``, scoped only to the commit's own
-    transaction) can't by itself stop two same-process triggers (the idle
-    scan and an explicit save landing together) from interleaving mid-
-    sequence and reseeding a room out from under each other. Get-or-create,
-    keyed like the room registry itself."""
-    with _lock:
-        lock = _checkpoint_locks.get(session_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            _checkpoint_locks[session_id] = lock
-        return lock
 
 
 # --------------------------------------------------------------------------- #

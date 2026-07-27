@@ -4,9 +4,10 @@
 (coedit_room) — rebase_session only ever acts on a session whose room lives
 in this process (see coedit_room.py).
 
-``rebase_session`` is ``async`` for the same reason ``checkpoint_session``
-is (see test_coedit_checkpoint.py's module docstring) — driven here via
-``asyncio.run``.
+``rebase_session`` is ``async`` — it touches a live room's ``Doc`` directly
+(unlike ``checkpoint_session``, which no longer does at all; see
+test_coedit_checkpoint.py's module docstring) and must stay on this
+process's own thread to do so — driven here via ``asyncio.run``.
 """
 from __future__ import annotations
 
@@ -42,14 +43,26 @@ def _root(doc):
 
 
 def _room(sess, body: str) -> coedit_room.Room:
-    return coedit_room.create_room(sess.id, sess.path, body, sess.base_sha)
+    # Includes the initial snapshot (coedit.set_initial_snapshot) even
+    # though rebase_session itself never reads it — only the checkpoint
+    # engine does, but this file's helpers are shared with the one test
+    # here that falls through to a real checkpoint
+    # (test_checkpoint_commit_does_not_self_trigger_rebase), which needs
+    # it; harmless overhead for the rebase-only tests. See
+    # test_coedit_checkpoint.py's _room for the same pattern.
+    room = coedit_room.create_room(sess.id, sess.path, body, sess.base_sha)
+    coedit.set_initial_snapshot(sess.id, room.doc.get_update())
+    return room
 
 
 def _edit(sess, room, uid: str, prefix: str) -> None:
+    """Logs the full post-edit Doc state as the update payload, not a
+    placeholder — real, applicable Yjs bytes, since a real checkpoint
+    (see above) now replays them. See test_coedit_checkpoint.py's _edit."""
     root = _root(room.doc)
     with room.doc.transaction():
         root.children[0].children[0].insert(0, prefix)
-    coedit.apply_update(sess.id, update_bytes=prefix.encode(), author_user_id=uid)
+    coedit.apply_update(sess.id, update_bytes=room.doc.get_update(), author_user_id=uid)
 
 
 def _run(coro):
@@ -181,15 +194,16 @@ def test_rebase_noop_when_merge_matches_live_doc(repo):
 
 def test_conflict_falls_back_to_checkpoint_engine(repo, monkeypatch):
     # The trigger (not the engine) hands a CONFLICT off to the checkpoint
-    # engine's AI merge — stubbed here so the test verifies the hand-off,
-    # not a real LLM call (that's the checkpoint engine's own concern).
+    # task — enqueued (via asyncio.to_thread, since the task itself is a
+    # plain sync call now) rather than run inline, stubbed here so the test
+    # verifies the hand-off, not a real LLM call (that's the checkpoint
+    # engine's own concern).
     calls: list[int] = []
 
-    async def fake_checkpoint(session_id: int) -> str | None:
+    def fake_checkpoint(session_id: int) -> None:
         calls.append(session_id)
-        return "fake-sha"
 
-    monkeypatch.setattr(coedit_rebase_task, "checkpoint_session", fake_checkpoint)
+    monkeypatch.setattr(coedit_rebase_task, "checkpoint_coedit_session_task", fake_checkpoint)
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sid, new_sha = _seed_conflict(uid)
 
@@ -201,7 +215,7 @@ def test_conflict_falls_back_to_checkpoint_engine(repo, monkeypatch):
 def test_applied_rebase_does_not_fall_back_to_checkpoint(repo, monkeypatch):
     calls: list[int] = []
     monkeypatch.setattr(
-        coedit_rebase_task, "checkpoint_session", lambda sid: calls.append(sid)
+        coedit_rebase_task, "checkpoint_coedit_session_task", lambda sid: calls.append(sid)
     )
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     doc = "one\ntwo\n"
@@ -314,7 +328,7 @@ def test_checkpoint_commit_does_not_self_trigger_rebase(repo, monkeypatch):
     room = _room(sess, "hello world")
     _edit(sess, room, uid, "hi ")
 
-    _run(coedit_checkpoint.checkpoint_session(sess.id))
+    coedit_checkpoint.checkpoint_session(sess.id)  # sync now — no _run wrapper needed
 
     # The checkpoint's commit passes trigger_coedit_rebase=False — its own
     # commit must not be folded back into the session as an inbound rebase.

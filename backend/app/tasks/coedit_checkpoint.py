@@ -1,30 +1,40 @@
-"""Checkpoint triggers — when the co-edit checkpoint engine fires.
+"""Trigger + cross-process fan-out for co-edit checkpointing.
 
-The engine (``app/wiki/coedit_checkpoint.py``) commits a session's live
-Yjs doc to git. This wires up *when* that happens: a periodic scan
-checkpoints dirty sessions that have gone idle or are overdue, and the
-last-participant-leave and explicit-save paths call the engine directly.
+The engine (``app/wiki/coedit_checkpoint.py``) commits a session's live Yjs
+doc to git by rebuilding a throwaway ``Doc`` from its persisted (snapshot,
+updates) — it never touches any process's live room, so unlike the OT era
+*and* unlike this module's own earlier in-process-only design, checkpointing
+now runs as a genuine ``coedit_queue`` task: any worker can dequeue and act
+on any session, regardless of which process (if any) currently holds its
+live room live.
 
-Unlike the OT era, none of this rides ``coedit_queue`` anymore. A session's
-live document only exists as one process's in-memory ``coedit_room.Room``
-(``pycrdt.Doc`` is thread-affine — see that module), so a checkpoint can
-only ever run in the process that holds the room; dispatching it to a
-worker via the queue would land on a process with no room to checkpoint
-from. Every trigger here is a plain in-process async call instead. The
-periodic scan is therefore a per-*web-process* ``asyncio`` task (started
-alongside the realtime bus listener in ``app/main.py``'s lifespan, one per
-replica, each scanning only its own local rooms) rather than a
-queue-registered cron — there is no meaningful "one process across the
-deployment" leader for this the way ``TaskQueue.periodic_task`` assumes.
+Three triggers, all just enqueue: a periodic scan (crontab, this queue)
+finds every dirty session process-wide and enqueues one checkpoint task
+each; explicit save and last-participant-leave (``app/api/coedit.py``,
+``app/tasks/coedit_leave.py``) enqueue directly, no longer blocking on an
+in-process await.
+
+A checkpoint's result still has to reach any process holding the session's
+room live, so it can reconcile its bookkeeping (or reseed, if the committed
+content diverged from what the room held — an out-of-band merge folded in
+concurrently). Fanned out over the realtime bus exactly like
+``coedit_rebase.py``'s own cross-process notify: "which process, if any,
+holds this session's room" is the identical resolution problem in both
+cases, so this reuses the same shape (``bus.register``/``bus.emit`` +
+``coedit_room.run_on_main_loop``, direct local check plus a bus emit since
+the bus doesn't echo to the sender).
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
-from app.wiki import coedit, coedit_room
-from app.wiki.coedit_checkpoint import checkpoint_session
+from app.models.coedit import CheckpointResultFrame, ResyncFrame
+from app.realtime import bus
+from app.tasks.queue import crontab
+from app.tasks.queues import coedit_queue
+from app.wiki import coedit, coedit_channel, coedit_room, markdown_yjs
+from app.wiki.coedit_checkpoint import CheckpointOutcome, checkpoint_session
 
 log = logging.getLogger(__name__)
 
@@ -42,80 +52,118 @@ log = logging.getLogger(__name__)
 # continuous editing — a safety valve so agents/readers reading git HEAD
 # don't see a multi-hour session's stale content indefinitely. Coarse on
 # purpose; a marathon session yields a handful of commits, not a stream.
-#
-# The scan runs every _SCAN_INTERVAL_SECONDS, so both fire "within that long
-# of" the threshold.
 _IDLE_SECONDS = 300
 _MAX_INTERVAL_SECONDS = 900
-_SCAN_INTERVAL_SECONDS = 60.0
+
+_CHECKPOINT_LANDED_BUS_KIND = "coedit_checkpoint_landed"
 
 
-async def checkpoint_coedit_session(session_id: int) -> None:
-    """Commit a session's doc, then close it if everyone has since left.
+@coedit_queue.task()
+def checkpoint_coedit_session_task(session_id: int, *, request_id: str | None = None) -> None:
+    """Checkpoint one session, notify any live room of the result, then
+    close it if everyone has since left and it's now clean.
 
-    Re-checks participants after committing so a rejoin during the commit
-    keeps the session open. Closes only if still clean, so a late update
-    landing after the checkpoint isn't sealed in a closed session (see
-    ``coedit.close_if_clean``)."""
-    await checkpoint_session(session_id)
-    participants = await asyncio.to_thread(coedit.list_participants, session_id)
-    if not participants:
-        await asyncio.to_thread(coedit.close_if_clean, session_id)
+    ``request_id`` set only for an explicit-save request: acknowledged via
+    a broadcast ``CheckpointResultFrame`` (the requesting connection's
+    process may not be this task's — there is no cross-process targeted
+    reply channel — so every connection in the session sees it and filters
+    by ``request_id`` client-side). ``ok`` reflects the task completing
+    without raising, same as the old in-process ``await`` semantics — not
+    "a commit was actually made" (a clean/no-op session is still ``ok``).
+
+    Re-checks participants *after* checkpointing so a rejoin during the
+    commit keeps the session open; closes only if still clean, so a late
+    update landing after the checkpoint isn't sealed in a closed session
+    (see ``coedit.close_if_clean``).
+    """
+    ok = False
+    try:
+        outcome = checkpoint_session(session_id)
+        ok = True
+        if outcome is not None:
+            _notify_checkpoint_landed(outcome)
+    finally:
+        if request_id is not None:
+            coedit_channel.publish_control(
+                session_id,
+                CheckpointResultFrame(request_id=request_id, ok=ok).model_dump(),
+            )
+    if not coedit.list_participants(session_id):
+        coedit.close_if_clean(session_id)
 
 
-async def scan_once() -> None:
-    """One pass of the periodic scan — checkpoint every locally-rooted
-    session that's due, and purge closed never-edited sessions. Public (not
-    ``_scan_once``) so it's independently callable/testable; ``_scan_loop``
-    is just this run on a timer."""
-    due = await asyncio.to_thread(
-        coedit.sessions_due_for_checkpoint,
-        idle_seconds=_IDLE_SECONDS,
-        max_interval_seconds=_MAX_INTERVAL_SECONDS,
+@coedit_queue.periodic_task(crontab())
+def scan_coedit_checkpoints() -> None:
+    """One pass of the periodic scan — enqueue a checkpoint task for every
+    dirty session process-wide (not just this process's own local rooms —
+    a worker can now act on any session regardless of where its room, if
+    any, lives), and purge closed never-edited sessions."""
+    due = coedit.sessions_due_for_checkpoint(
+        idle_seconds=_IDLE_SECONDS, max_interval_seconds=_MAX_INTERVAL_SECONDS
     )
-    # Only sessions whose room lives in *this* process are ours to act on —
-    # a dirty session rooted elsewhere is that process's own scan to pick
-    # up (see the module docstring).
-    local = [s for s in due if coedit_room.get_room(s.id) is not None]
-    for sess in local:
-        try:
-            await checkpoint_coedit_session(sess.id)
-        except Exception:
-            log.exception("coedit checkpoint scan: session %s failed", sess.id)
-    if local:
-        log.info("coedit checkpoint scan: checkpointed %d session(s)", len(local))
-    purged = await asyncio.to_thread(coedit.purge_viewer_sessions)
+    for sess in due:
+        checkpoint_coedit_session_task(sess.id)
+    if due:
+        log.info("coedit checkpoint scan: enqueued %d session(s)", len(due))
+    purged = coedit.purge_viewer_sessions()
     if purged:
         log.info("coedit checkpoint scan: purged %d viewer-only session(s)", purged)
 
 
-async def _scan_loop() -> None:
-    while True:
-        await asyncio.sleep(_SCAN_INTERVAL_SECONDS)
-        try:
-            await scan_once()
-        except Exception:
-            log.exception("coedit checkpoint scan: unhandled error")
+def _notify_checkpoint_landed(outcome: CheckpointOutcome) -> None:
+    _try_local_reconcile(outcome)
+    bus.emit(
+        {
+            "kind": _CHECKPOINT_LANDED_BUS_KIND,
+            "session_id": outcome.session_id,
+            "base_sha": outcome.sha,
+            "body": outcome.body,
+        }
+    )
 
 
-_scan_task: asyncio.Task[None] | None = None
-
-
-def start() -> None:
-    """Start this process's periodic checkpoint scan. Called once from
-    ``app/main.py``'s lifespan, alongside ``bus.start_listener()``."""
-    global _scan_task
-    _scan_task = asyncio.create_task(_scan_loop())
-
-
-async def stop() -> None:
-    """Cancel the scan loop. Called from the lifespan's shutdown path."""
-    global _scan_task
-    if _scan_task is None:
+def _try_local_reconcile(outcome: CheckpointOutcome) -> None:
+    """Reconcile this process's own room, if it holds one for the session —
+    a no-op dict lookup otherwise (cheap enough to call unconditionally
+    from every process a checkpoint's fan-out reaches, including the
+    checkpointing worker itself, which typically holds no rooms at all)."""
+    if coedit_room.get_room(outcome.session_id) is None:
         return
-    _scan_task.cancel()
-    try:
-        await _scan_task
-    except asyncio.CancelledError:
-        pass
-    _scan_task = None
+    coedit_room.run_on_main_loop(_reconcile_room(outcome))
+
+
+async def _reconcile_room(outcome: CheckpointOutcome) -> None:
+    # A Doc read — must run inline on this task's own thread (the event
+    # loop), not via to_thread; see coedit_room.py.
+    room = coedit_room.get_room(outcome.session_id)
+    if room is None:
+        return  # left/evicted between the schedule and this running
+    if markdown_yjs.reconstruct_body(room.doc) == outcome.body:  # type: ignore[reportUnknownMemberType]
+        # This room's content is exactly what got committed — nothing to
+        # reconcile, just advance the bookkeeping in place.
+        room.base_body = outcome.body
+        room.base_sha = outcome.sha
+        return
+    # This room has content the checkpoint didn't see (an edit landed here
+    # after the worker read the update log, or the committed result folded
+    # in an out-of-band merge this room never had) — reseed from what's
+    # actually committed and have connected clients resync. Never loses the
+    # divergent edits themselves: anything applied here already bumped
+    # ydoc_seq and is durably logged, so it's simply still-dirty relative to
+    # the new base and picked up by the next checkpoint.
+    coedit_room.reseed(room, outcome.body, outcome.sha)
+    coedit_channel.publish_control(
+        outcome.session_id, ResyncFrame(session_id=outcome.session_id).model_dump()
+    )
+
+
+def _handle_remote_checkpoint_landed(payload: dict[str, object]) -> None:
+    outcome = CheckpointOutcome(
+        session_id=int(payload["session_id"]),  # type: ignore[arg-type]
+        sha=str(payload["base_sha"]),
+        body=str(payload["body"]),
+    )
+    _try_local_reconcile(outcome)
+
+
+bus.register(_CHECKPOINT_LANDED_BUS_KIND, _handle_remote_checkpoint_landed)

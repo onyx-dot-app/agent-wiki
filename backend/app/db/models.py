@@ -952,10 +952,22 @@ class CoeditSession(Base):
     # path (enforced by the partial unique index below).
     path: Mapped[str] = mapped_column(Text, nullable=False)
     # The Yjs doc's last-persisted binary state (``Doc.get_update()``/
-    # equivalent snapshot), so a session's document survives a process
-    # restart. Null until the first checkpoint — the live ``pycrdt.Doc`` in
-    # the owning process's memory is the source of truth in between.
+    # equivalent snapshot) at ``ydoc_snapshot_seq`` — set once at session
+    # creation (seeded from the page's HEAD, seq 0) and advanced by every
+    # checkpoint after that, so a session's document survives a process
+    # restart or a checkpoint running on a process that never held the live
+    # room. See ``app/wiki/coedit_checkpoint.py``: a checkpoint rebuilds a
+    # throwaway ``Doc`` from this snapshot plus every ``CoeditUpdate`` in
+    # ``(ydoc_snapshot_seq, ydoc_seq]``, rather than touching any process's
+    # in-memory room directly.
     ydoc_snapshot: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # The ``ydoc_seq`` the current ``ydoc_snapshot`` bytes represent —
+    # updates with ``seq > ydoc_snapshot_seq`` are exactly the ones a
+    # checkpoint still needs to replay onto the snapshot to reach current
+    # state.
+    ydoc_snapshot_seq: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     # Monotonic sequence, bumped on every applied Yjs update. Clients/late
     # joiners use it to ask "updates since N" for catch-up.
     ydoc_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
