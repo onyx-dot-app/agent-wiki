@@ -1236,9 +1236,14 @@ export function FileView({ path }: FileViewProps) {
                 }`}
               >
                 {/* Floating top-right of the content area (not the text
-                    column) — it positions itself; `--cm-gutter` above sets
-                    its right inset. */}
-                <Path2ReviewBanner path={path} canWrite={canWrite} />
+                    column) — absolute against the doc row's `relative` (the
+                    editor scrolls internally, so sticky would never pin);
+                    `--cm-gutter` above sets its right inset. */}
+                <Path2ReviewBanner
+                  path={path}
+                  canWrite={canWrite}
+                  pin="absolute"
+                />
                 <div
                   className={`rail-inset mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
                     isMobile ? "px-3" : ""

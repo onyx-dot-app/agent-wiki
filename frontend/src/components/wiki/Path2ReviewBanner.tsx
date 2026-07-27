@@ -31,6 +31,12 @@ interface Props {
    * viewers — the server write-scopes the list regardless, so this is an
    * optimization, not the authority. Defaults to true (always fetch). */
   canWrite?: boolean;
+  /** How the floating card pins to the top-right of the content area.
+   * `"sticky"` (default) suits a mount at the top of a scrolling container
+   * (folder view). `"absolute"` suits a mount inside a `relative` doc area
+   * whose scrolling happens in a nested element (FileView — sticky there
+   * would sit at the mount's natural flow position instead of the top). */
+  pin?: "sticky" | "absolute";
 }
 
 type RowAction = "approve" | "reject" | "dismiss";
@@ -62,7 +68,11 @@ function scanAge(ts: string | null): string | null {
  * editor gutter) and falls back to 0 where the container's own padding
  * already insets the content (folder view).
  */
-export function Path2ReviewBanner({ path, canWrite = true }: Props) {
+export function Path2ReviewBanner({
+  path,
+  canWrite = true,
+  pin = "sticky",
+}: Props) {
   const { proposals, refresh } = useProposalsByPath(path, canWrite);
   const { user } = useAuth();
   const router = useRouter();
@@ -89,7 +99,11 @@ export function Path2ReviewBanner({ path, canWrite = true }: Props) {
   }
 
   return (
-    <div className="pointer-events-none sticky top-0 z-30 h-0">
+    <div
+      className={`pointer-events-none z-30 ${
+        pin === "absolute" ? "absolute inset-x-0 top-0" : "sticky top-0 h-0"
+      }`}
+    >
       <div className="pointer-events-auto mr-[var(--cm-gutter,0px)] ml-auto w-[400px] max-w-full rounded-(--radius-12) bg-(--background-01) shadow-(--shadow-modal)">
         <MessageCard
           variant="info"
