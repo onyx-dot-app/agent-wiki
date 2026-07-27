@@ -106,7 +106,7 @@ export function Path2ReviewBanner({ path, canWrite = true }: Props) {
               justifyContent="between"
               width="full"
             >
-              <div>
+              <Section flexDirection="row" alignItems="center">
                 {user?.is_admin && (
                   <Button
                     icon={SvgSettings}
@@ -116,7 +116,7 @@ export function Path2ReviewBanner({ path, canWrite = true }: Props) {
                     onClick={() => router.push("/admin/auto-organize")}
                   />
                 )}
-              </div>
+              </Section>
               <Section flexDirection="row" gap={0.5} alignItems="center">
                 <Button
                   icon={SvgSlash}
