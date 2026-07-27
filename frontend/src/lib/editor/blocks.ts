@@ -140,24 +140,31 @@ export const UniqueBlockIdentity = Extension.create({
   },
 });
 
-/** Backspace on an already-*empty* heading reverts it to a plain paragraph
- * containing the literal `"#"` markers, instead of Tiptap core's default
- * `clearNodes()` (bound via its own always-on `Keymap` extension, priority
- * 100 — same mechanism as every other core Backspace fallback), which only
- * changes the node's type back to paragraph and leaves it empty, with no
- * idea what markdown prefix produced the heading in the first place.
+/** Backspace on an already-*empty* heading deletes the heading styling
+ * outright — converts straight to a plain empty paragraph, cursor left in
+ * place on the same line, never reverting to literal `"#"` markers first
+ * (backspace-delete-text-styling, per EDITOR_STYLING_TRIGGERS.md §2 — same
+ * choice as `TaskItemBackspace` below, for the same reason: less technical,
+ * no markdown syntax exposed mid-edit for a construct with nothing left
+ * typed in it). A *second* Backspace needs no special handling here at
+ * all: once the node is a plain empty paragraph, Tiptap core's own default
+ * Backspace chain (`joinBackward`) already merges an empty paragraph into
+ * whatever precedes it — exactly "kill this line, cursor lands on the
+ * previous one" for that second press, for free.
  *
- * Deliberately not `undoInputRule` (Tiptap's one-shot "undo the exact
- * conversion transaction" command, which core's Keymap also tries on
- * Backspace, before clearNodes): that only works if Backspace is pressed
- * *immediately* after the "# " conversion, before any other edit
- * invalidates its tracked state — type so much as one character into the
- * heading first and it can never fire again. This extension instead
- * reconstructs `"#".repeat(level)` from the heading's own `level` attr
- * every time, so backspacing out of an empty heading behaves the same way
- * regardless of how much was typed and erased first. Priority 200 (same
- * reasoning as ThematicBreak below) so this is checked before core's
- * Keymap gets a chance to run clearNodes instead. */
+ * Still has to be its own priority-200 extension rather than leaving even
+ * the *first* step to that same core default: core's Keymap tries
+ * `undoInputRule` before any of its merge/clear fallbacks, and that command
+ * would revert to literal `"# "` text instead — but only in the narrow
+ * window where Backspace is the very next keystroke after the "# "
+ * conversion, before any other edit invalidates its tracked state; past
+ * that window something else in the chain takes over instead. Same
+ * inconsistent, timing-dependent trap `TaskItemBackspace` below already
+ * documents avoiding for checkboxes — this extension avoids it the same
+ * way, by outranking `undoInputRule` outright so the outcome never depends
+ * on timing. Priority 200, same reasoning as `ThematicBreak` below (which
+ * keeps the *other* behavior, backspace-undo-text-styling, deliberately —
+ * see its own docstring). */
 export const HeadingBackspace = Extension.create({
   name: "headingBackspace",
   priority: 200,
@@ -169,17 +176,14 @@ export const HeadingBackspace = Extension.create({
         if (!empty || $from.parent.type.name !== "heading") return false;
         if ($from.parentOffset !== 0 || $from.parent.content.size !== 0)
           return false;
-        const hashes = "#".repeat($from.parent.attrs.level as number);
         const blockStart = $from.before($from.depth);
         const blockEnd = $from.after($from.depth);
         const tr = state.tr.replaceWith(
           blockStart,
           blockEnd,
-          state.schema.nodes.paragraph!.create(null, state.schema.text(hashes)),
+          state.schema.nodes.paragraph!.create(),
         );
-        tr.setSelection(
-          TextSelection.create(tr.doc, blockStart + 1 + hashes.length),
-        );
+        tr.setSelection(TextSelection.create(tr.doc, blockStart + 1));
         editor.view.dispatch(tr);
         return true;
       },
@@ -191,7 +195,10 @@ export const HeadingBackspace = Extension.create({
  * styling outright — converts straight to a plain empty paragraph, never
  * reverting to literal `[ ] ` text (backspace-delete-text-styling, per
  * EDITOR_STYLING_TRIGGERS.md §2 — deliberately the opposite choice from
- * HeadingBackspace/ThematicBreak's backspace-undo-text-styling above).
+ * ThematicBreak's backspace-undo-text-styling below — see its docstring;
+ * HeadingBackspace above used to make the same choice but was switched to
+ * backspace-delete-text-styling too, for the same reason this construct
+ * uses it).
  *
  * Neither `@tiptap/extension-task-item` nor `@tiptap/extension-task-list`
  * register any keyboard shortcuts of their own (confirmed directly against

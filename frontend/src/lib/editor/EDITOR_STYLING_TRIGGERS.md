@@ -31,14 +31,16 @@ has to decide what happens when Backspace empties it back out. Two named
 behaviors:
 
 - **backspace-undo-text-styling** — reverts the construct back to the
-  literal characters that triggered it (an emptied heading becomes
-  `"#".repeat(level)` as plain text; an emptied divider becomes its own
+  literal characters that triggered it (an emptied divider becomes its own
   stored `---`/`***`/`___` source text), continuing from there as ordinary
-  character-by-character backspacing. Used by `HeadingBackspace` and
-  `ThematicBreak` in `blocks.ts`.
+  character-by-character backspacing. Used by `ThematicBreak` in
+  `blocks.ts`.
 - **backspace-delete-text-styling** — deletes the styling outright: converts
-  straight to a plain empty paragraph, no source text ever reappears. Used
-  by task list/checkbox (`TaskItemBackspace` in `blocks.ts`).
+  straight to a plain empty paragraph (cursor staying on the same line), no
+  source text ever reappears — a second Backspace then kills that line the
+  same way backspacing any other empty paragraph does. Used by headings
+  (`HeadingBackspace` in `blocks.ts`) and task list/checkbox
+  (`TaskItemBackspace` in `blocks.ts`).
 
 Neither is inherently more correct than the other — it's a per-construct
 product decision, not a technical default. Left undecided, Tiptap core's own
@@ -59,7 +61,7 @@ happens to land on.
 | Bold / italic                  | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
 | Strikethrough                  | Text-shortcut           | Implemented on the frontend; **backend cannot round-trip it yet** — see open gap below                                                                                                     |
 | Inline code span               | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
-| Headings (`#` … `######`)      | Text-shortcut           | Implemented, custom state machine (`HeadingBackspace` in `blocks.ts`) — backspace-undo-text-styling                                                                                        |
+| Headings (`#` … `######`)      | Text-shortcut           | Implemented, custom state machine (`HeadingBackspace` in `blocks.ts`) — backspace-delete-text-styling                                                                                      |
 | Thematic break / ruler (`---`) | Text-shortcut           | Implemented, custom state machine (`ThematicBreak` in `blocks.ts`) — backspace-undo-text-styling                                                                                           |
 | Blockquote (`>`)               | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
 | Bullet list / ordered list     | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
