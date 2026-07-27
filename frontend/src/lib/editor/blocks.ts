@@ -37,7 +37,13 @@
  * not an oversight. No cell-editing UX (tab-between-cells, resize, merge)
  * follows from there being no cell structure to hang it off.
  */
-import { Extension, Node, mergeAttributes } from "@tiptap/core";
+import {
+  Extension,
+  InputRule,
+  Mark,
+  Node,
+  mergeAttributes,
+} from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
 
@@ -120,6 +126,89 @@ export const HeadingBackspace = Extension.create({
         return true;
       },
     };
+  },
+});
+
+/** Inline code with its flanking backtick characters kept as literal text
+ * under the mark — not consumed syntax, unlike `@tiptap/extension-code`
+ * (disabled in `extensions.ts`). A mark's boundary is a zero-width,
+ * ambiguous caret position: two distinct ProseMirror positions render at
+ * the same visual spot, a real ProseMirror/contenteditable limitation, not
+ * something a mark option can fix. Keeping the backticks as real characters
+ * gives that boundary actual width — a real DOM text node the browser's
+ * native caret placement lands against unambiguously — so ordinary
+ * character-by-character typing/backspacing needs no revert state machine
+ * the way HeadingBackspace/ThematicBreak above do: deleting a backtick is
+ * just deleting a character, since nothing here discards source characters
+ * on conversion for a revert to ever have to reconstruct.
+ *
+ * `inclusive: false` (not set on the default extension) is what stops
+ * typing immediately after the closing backtick from continuing to extend
+ * the mark — a real, narrow ProseMirror mark-spec option, not custom logic.
+ * `code: true` is load-bearing, not decorative: `prosemirror-inputrules`
+ * skips every *other* input rule while the cursor carries a `code`-flagged
+ * mark, which is what stops `**`/`~~`/etc. from firing inside a code span —
+ * matching CommonMark's own rule that a code span can't contain nested
+ * emphasis. */
+export const InlineCode = Mark.create({
+  name: "code",
+  excludes: "_",
+  code: true,
+  inclusive: false,
+  parseHTML() {
+    return [{ tag: "code" }];
+  },
+  renderHTML() {
+    return ["code", 0];
+  },
+  addCommands() {
+    return {
+      setCode:
+        () =>
+        ({ commands }: { commands: { setMark: (name: string) => boolean } }) =>
+          commands.setMark(this.name),
+      toggleCode:
+        () =>
+        ({
+          commands,
+        }: {
+          commands: { toggleMark: (name: string) => boolean };
+        }) =>
+          commands.toggleMark(this.name),
+      unsetCode:
+        () =>
+        ({
+          commands,
+        }: {
+          commands: { unsetMark: (name: string) => boolean };
+        }) =>
+          commands.unsetMark(this.name),
+    };
+  },
+  addKeyboardShortcuts() {
+    return {
+      "Mod-e": () => this.editor.commands.toggleCode(),
+    };
+  },
+  addInputRules() {
+    return [
+      new InputRule({
+        // Same shape as the default extension's own regex: an optional
+        // single leading non-backtick context character (or start-of-line),
+        // then a run with no interior backticks, closed by one backtick not
+        // itself followed by another (so `` `` ``/``` ``` don't misfire
+        // this). Unlike the default, the whole span — both backticks
+        // included — becomes the mark's range; nothing gets deleted.
+        find: /(^|[^`])`([^`]+)`(?!`)$/,
+        handler: ({ state, range, match }) => {
+          const leading = match[1] ?? "";
+          const codeStart = range.from + leading.length;
+          const { tr } = state;
+          tr.addMark(codeStart, range.to, this.type.create());
+          tr.removeStoredMark(this.type);
+        },
+      }),
+    ];
   },
 });
 
@@ -284,9 +373,9 @@ export const ThematicBreak = createOpaqueBlock("thematic_break").extend({
                 )
               : state.schema.nodes.paragraph!.create();
           const tr = state.tr.replaceWith(dividerStart, blockEnd, replacement);
-          tr.setSelection(
-            TextSelection.create(tr.doc, dividerStart + 1 + text.length),
-          );
+          // tr.setSelection(
+          //   TextSelection.create(tr.doc, dividerStart + 1 + text.length),
+          // );
           editor.view.dispatch(tr);
           return true;
         }
