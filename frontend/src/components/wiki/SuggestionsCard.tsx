@@ -137,9 +137,12 @@ export function SuggestionsCard({
       }
     } catch (e) {
       if (!alive.current) return;
-      // 409: someone else already actioned it. The refresh drops it.
-      if (e instanceof ApiError && e.status === 409)
-        return setOutcome(id, "rejected");
+      // 409: someone else already actioned it. Sync to the server's
+      // reality instead of guessing which outcome won.
+      if (e instanceof ApiError && e.status === 409) {
+        void refresh();
+        return;
+      }
       setOutcome(id, "error");
     }
   }
