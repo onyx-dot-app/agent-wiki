@@ -5,6 +5,8 @@ Pages only; write-gated; folder paths and missing files are errors.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from app.auth import User, set_current_user
 from app.llm.agents.tools import dispatch as registry_dispatch
 from app.wiki import git as wiki_git
@@ -13,7 +15,7 @@ from app.wiki import utils as wiki_utils
 from tests._seed import seed_user
 
 
-def _delete(path: str) -> dict:
+def _delete(path: str) -> dict[str, Any]:
     return registry_dispatch("delete_doc", {"path": path})
 
 
