@@ -34,6 +34,11 @@ import logging
 from app.db import fts, page_dirs, provenance as db_provenance
 from app.mcp_server import pubsub as mcp_pubsub
 from app.tasks import coedit_rebase as coedit_rebase_trigger
+# Module import, not name import: automanage tasks -> runner -> executor ->
+# notify is a cycle, and a name import here breaks whichever side loads
+# second. The attribute resolves at call time (same pattern as
+# coedit_rebase below).
+from app.tasks import automanage as automanage_tasks
 from app.tasks.reindex import drop_page_embedding, index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
@@ -121,6 +126,14 @@ def after_doc_write(
         acl.on_page_created(rel_path, owner_user_id=owner_user_id)
         # Mint a stable id for the page (and seed rows for its ancestor folders).
         doc_ids.mint_for_page(rel_path)
+        # Focused Auto Organize check on the new page (case collision, exact
+        # duplicate). Only for attributable creations — a human or an agent
+        # acting for one (chat/MCP/API all pass the current user). System
+        # channels (ingestion, seeds) pass owner_user_id=None and are skipped:
+        # they arrive in bursts and have their own reconciliation; the sweep
+        # covers whatever they leave behind.
+        if owner_user_id is not None:
+            automanage_tasks.run_detection_on_create(rel_path, owner_user_id)
     index_path(rel_path)
     fan_out_trigger_eval(rel_path, sha, change_kind, actor)
     # Ingestion churn → check the page's 24h update frequency against the

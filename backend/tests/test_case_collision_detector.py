@@ -37,7 +37,7 @@ from app.wiki.change_proposals import (
     get as get_proposal,
     list_by_status,
 )
-from tests._seed import seed_user
+from tests._seed import plumb_commit, seed_user
 
 _A = "# Setup\n\nInstall steps for the app.\n" + "a" * 120
 _B = "# setup (draft)\n\nCompletely different notes.\n" + "b" * 120
@@ -58,36 +58,13 @@ def _fs_case_insensitive(tmp_path_factory=None) -> bool:
         return os.path.exists(os.path.join(d, "caseprobe"))
 
 
-def _plumb_commit(path: str, body: str) -> None:
-    """Commit ``path`` via git plumbing (index + objects only): the one way to
-    stage case-colliding paths on a case-insensitive dev filesystem, where a
-    worktree write would silently overwrite the other casing. Test seeding
-    only — the detector itself reads the index/objects, never the worktree."""
-    cwd = app.config.CONFIG.wiki_dir
-    def run(*args: str, inp: str | None = None) -> str:
-        return subprocess.run(
-            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
-            input=inp,
-        ).stdout.strip()
-    blob = run("hash-object", "-w", "--stdin", inp=body)
-    run("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
-    tree = run("write-tree")
-    head = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD"], cwd=cwd,
-        capture_output=True, text=True,
-    ).stdout.strip()
-    parent = ["-p", head] if head else []
-    commit = run("commit-tree", tree, *parent, "-m", f"seed {path}")
-    run("update-ref", "HEAD", commit)
-
-
 def _scope(*paths: str) -> Scope:
     return Scope(trigger=TriggerKind.SWEEP, paths=tuple(paths))
 
 
 def test_distinct_content_collision_proposes_rename(repo):
-    _plumb_commit("docs/Setup.md", _A)
-    _plumb_commit("docs/setup.md", _B)
+    plumb_commit("docs/Setup.md", _A)
+    plumb_commit("docs/setup.md", _B)
 
     drafts = _CaseCollisionDetector().detect(_scope("docs/Setup.md", "docs/setup.md"))
 
@@ -105,16 +82,16 @@ def test_distinct_content_collision_proposes_rename(repo):
 
 
 def test_identical_content_collision_is_left_to_body_dup(repo):
-    _plumb_commit("docs/Guide.md", _A)
-    _plumb_commit("docs/guide.md", _A)
+    plumb_commit("docs/Guide.md", _A)
+    plumb_commit("docs/guide.md", _A)
 
     assert _CaseCollisionDetector().detect(_scope("docs/Guide.md", "docs/guide.md")) == []
 
 
 def test_deconflicted_name_avoids_new_collisions(repo):
-    _plumb_commit("n/Page.md", _A)
-    _plumb_commit("n/page.md", _B)
-    _plumb_commit("n/PAGE-2.md", "occupied " + "c" * 120)
+    plumb_commit("n/Page.md", _A)
+    plumb_commit("n/page.md", _B)
+    plumb_commit("n/PAGE-2.md", "occupied " + "c" * 120)
 
     (d,) = _CaseCollisionDetector().detect(
         _scope("n/Page.md", "n/page.md", "n/PAGE-2.md")
@@ -123,8 +100,8 @@ def test_deconflicted_name_avoids_new_collisions(repo):
 
 
 def test_validate_tracks_the_premise(repo):
-    _plumb_commit("v/Doc.md", _A)
-    _plumb_commit("v/doc.md", _B)
+    plumb_commit("v/Doc.md", _A)
+    plumb_commit("v/doc.md", _B)
     det = _CaseCollisionDetector()
     (d,) = det.detect(_scope("v/Doc.md", "v/doc.md"))
     proposal: dict[str, Any] = {
@@ -162,15 +139,15 @@ def test_validate_tracks_the_premise(repo):
 def test_validate_stays_valid_when_pages_converge(repo):
     """Pages that became identical while pending don't stale the proposal —
     the applier's merge branch resolves them."""
-    _plumb_commit("c/Doc.md", _A)
-    _plumb_commit("c/doc.md", _B)
+    plumb_commit("c/Doc.md", _A)
+    plumb_commit("c/doc.md", _B)
     det = _CaseCollisionDetector()
     (d,) = det.detect(_scope("c/Doc.md", "c/doc.md"))
     proposal: dict[str, Any] = {
         "source_paths": d.source_paths,
         "target_paths": d.target_paths,
     }
-    _plumb_commit("c/doc.md", _A)  # now byte-identical to the kept page
+    plumb_commit("c/doc.md", _A)  # now byte-identical to the kept page
     assert det.validate(proposal) is None
 
 
@@ -184,8 +161,8 @@ def test_rename_executes_end_to_end(repo, monkeypatch):
     via move_page, and the moved id — live at its new path — passes the
     forward check (enabler 2)."""
     monkeypatch.setattr(runner, "DETECTORS", [_CaseCollisionDetector()])
-    _plumb_commit("e/Notes.md", _A)
-    _plumb_commit("e/notes.md", _B)
+    plumb_commit("e/Notes.md", _A)
+    plumb_commit("e/notes.md", _B)
     subprocess.run(["git", "checkout", "--", "."], cwd=app.config.CONFIG.wiki_dir, check=True, capture_output=True)
     loser_id = doc_ids.get_or_mint("e/notes.md")
 
@@ -286,7 +263,7 @@ def test_file_read_falls_back_to_git_when_worktree_misses(repo):
     from app.main import create_app
     from tests._auth import login_fastapi
 
-    _plumb_commit("wt/miss.md", _A)  # in git, never materialized on disk
+    plumb_commit("wt/miss.md", _A)  # in git, never materialized on disk
     client = TestClient(create_app())
     uid = seed_user(uid="rd", email="rd@x.com", is_admin=True)
     login_fastapi(client, uid)
