@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.auth import PermissionDenied, require_can
 from app.models.wiki import PathMove
 from app.wiki import git as wiki_git
 from app.wiki import notify, trash
@@ -24,8 +25,6 @@ def handle(args: dict[str, Any]) -> Any:
 
     if not wiki_utils.file_exists(path):
         return {"error": f"file not found: {path}"}
-
-    from app.auth import PermissionDenied, require_can
 
     try:
         require_can("write", path)
