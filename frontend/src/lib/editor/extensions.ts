@@ -10,6 +10,7 @@ import {
   BlockIdentity,
   HeadingBackspace,
   HtmlBlock,
+  InlineCode,
   OtherBlock,
   Table,
   TableRow,
@@ -44,6 +45,10 @@ export function tiptapExtensions(
       // conflict with it, not coexist alongside it.
       undoRedo: false,
       link: { openOnClick: false },
+      // Replaced by InlineCode below — same mark name ("code"), but keeps
+      // its flanking backticks as literal rendered text instead of hidden
+      // syntax; see blocks.ts for why.
+      code: false,
       // Replaced by ThematicBreak below — same content, but named to match
       // the backend's literal "thematic_break" Yjs XML tag (see blocks.ts).
       horizontalRule: false,
@@ -63,6 +68,7 @@ export function tiptapExtensions(
     UniqueBlockIdentity,
     HeadingBackspace,
     ThematicBreak,
+    InlineCode,
     HtmlBlock,
     OtherBlock,
     Table,

@@ -73,7 +73,12 @@ _KNOWN_INLINE_TYPES = {
 # combination is meaningfully round-trippable in CommonMark (e.g. code spans
 # can't semantically nest other marks), but this never raises — an
 # unsupported *combination* degrades to best-effort markup, only a fully
-# unrecognized inline *construct* (see _KNOWN_INLINE_TYPES) raises.
+# unrecognized inline *construct* (see _KNOWN_INLINE_TYPES) raises. "code" is
+# still listed here for that documentation value (and skipped defensively if
+# it ever does combine with something else), but in practice it's handled
+# entirely by `_wrap_code_run` before this loop runs — see `_wrap_run` — not
+# by a plain wrap-with-backticks step the way the other three are, since its
+# delimiter is stored as literal text already, not synthesized here.
 _MARK_WRAP_ORDER = ("link", "bold", "italic", "code")
 
 # A text segment ("text", plain_text, mark_runs) or a hard-break leaf
@@ -125,7 +130,18 @@ def _inline_runs(inline_token: Any) -> list[_Segment]:
         elif child.type == "em_close":
             active = {k: v for k, v in active.items() if k != "italic"}
         elif child.type == "code_inline":
-            _emit(child.content, {**active, "code": True})
+            # The flanking backtick fence is stored as literal text inside
+            # the mark, not stripped - matching the frontend's own
+            # InlineCode mark (blocks.ts), which keeps the backticks as
+            # real DOM characters on purpose (a mark's boundary is an
+            # otherwise zero-width, ambiguous caret position). Both ends of
+            # the shared Yjs doc need to agree on this shape, since a live
+            # session's doc *is* the same CRDT structure this seeds.
+            # `child.markup` is the exact fence markdown-it matched (1+
+            # backticks - a longer one only when the source deliberately
+            # used it, e.g. content containing an inner single backtick).
+            fence = child.markup or "`"
+            _emit(f"{fence}{child.content}{fence}", {**active, "code": True})
         elif child.type == "link_open":
             # y-prosemirror treats a mark's XmlText-format value as that
             # mark's *attrs object* — verified directly against the real
@@ -152,22 +168,83 @@ def _escape_inline_text(text: str) -> str:
     return text
 
 
+def _contains_backtick_run(text: str, length: int) -> bool:
+    """Whether ``text`` contains a contiguous run of backticks at least
+    ``length`` long anywhere inside it — the condition that makes a fence of
+    exactly ``length`` backticks ambiguous as a delimiter (the next parse's
+    leftmost-match scan would close on that interior run instead of the
+    intended trailing fence)."""
+    run = 0
+    for ch in text:
+        run = run + 1 if ch == "`" else 0
+        if run >= length:
+            return True
+    return False
+
+
+def _wrap_code_run(text: str) -> str:
+    """Serializes a code-marked run. ``text`` is normally already a
+    complete, self-delimited code span (``fence + content + fence``, one
+    contiguous run of backticks on each end) — matching what ``_inline_runs``
+    builds when seeding from markdown and what the frontend's own
+    ``InlineCode`` mark builds on live typing (``blocks.ts``): keeping the
+    delimiters as real characters is deliberate there, so the common case
+    here is to pass ``text`` straight through unchanged, not add another
+    layer of backticks on top.
+
+    Two cases need real handling instead of pass-through:
+
+    - ``text`` has no backtick at all: the "code" mark reached this run
+      without ever going through a backtick-based conversion (e.g. via the
+      ``toggleCode``/``Mod-e`` command on already-existing plain text) — a
+      fresh fence has to be added.
+    - ``text``'s own leading/trailing backticks no longer safely delimit —
+      e.g. a live edit landed a new backtick inside an already-marked span
+      (typing while the cursor sits between two already-marked characters
+      picks up the active marks like any other character), so the stored
+      text's interior now contains a run as long as its own edges. Repaired
+      with the same fence-length-bumping idea ``_serialize_code_block``
+      uses for fenced code blocks: strip the (no-longer-trustworthy) edges
+      and rebuild a fence guaranteed longer than anything left inside.
+
+    Not handled: markdown deliberately using a longer fence than strictly
+    needed so its content can itself start/end with fewer backticks than
+    the fence (e.g. fence "``" wrapping content "`x`"). Flattened into one
+    literal string, that's indistinguishable on the next parse from a
+    single longer run — a narrow, pre-existing ambiguity in representing a
+    code span as flat text at all, not something introduced here."""
+    leading = len(text) - len(text.lstrip("`"))
+    trailing = len(text) - len(text.rstrip("`"))
+    if leading and leading == trailing and len(text) >= 2 * leading:
+        inner = text[leading : len(text) - trailing]
+        if not _contains_backtick_run(inner, leading):
+            return text
+    else:
+        inner = text
+    inner = inner.strip("`")
+    fence = "`"
+    while fence in inner:
+        fence += "`"
+    pad = " " if inner[:1] == "`" or inner[-1:] == "`" else ""
+    return f"{fence}{pad}{inner}{pad}{fence}"
+
+
 def _wrap_run(text: str, attrs: dict[str, Any] | None) -> str:
     attrs = attrs or {}
     # Inline code spans are verbatim — CommonMark never processes escapes
     # inside them, so escaping here would corrupt the code's actual text
     # (a literal backslash would become part of the visible content).
-    if "code" not in attrs:
+    if "code" in attrs:
+        text = _wrap_code_run(text)
+    else:
         text = _escape_inline_text(text)
     if not attrs:
         return text
     result = text
     for mark in reversed(_MARK_WRAP_ORDER):
-        if mark not in attrs:
+        if mark not in attrs or mark == "code":
             continue
-        if mark == "code":
-            result = f"`{result}`"
-        elif mark == "italic":
+        if mark == "italic":
             result = f"*{result}*"
         elif mark == "bold":
             result = f"**{result}**"

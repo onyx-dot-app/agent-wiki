@@ -249,11 +249,7 @@ export const TaskItemBackspace = Extension.create({
  * the same visual spot, a real ProseMirror/contenteditable limitation, not
  * something a mark option can fix. Keeping the backticks as real characters
  * gives that boundary actual width — a real DOM text node the browser's
- * native caret placement lands against unambiguously — so ordinary
- * character-by-character typing/backspacing needs no revert state machine
- * the way HeadingBackspace/ThematicBreak above do: deleting a backtick is
- * just deleting a character, since nothing here discards source characters
- * on conversion for a revert to ever have to reconstruct.
+ * native caret placement lands against unambiguously.
  *
  * `inclusive: false` (not set on the default extension) is what stops
  * typing immediately after the closing backtick from continuing to extend
@@ -317,8 +313,79 @@ export const InlineCode = Mark.create({
           const leading = match[1] ?? "";
           const codeStart = range.from + leading.length;
           const { tr } = state;
-          tr.addMark(codeStart, range.to, this.type.create());
+          // The trigger character (the closing backtick that just matched
+          // the regex above) has NOT been inserted into the doc yet at
+          // this point — an InputRule's handler fully owns the keystroke's
+          // effect (confirmed directly against prosemirror-view's
+          // handleTextInput call sites: they only fall back to their own
+          // `deflt()` insertion when the plugin does *not* handle the
+          // input), so it has to be inserted explicitly here or it's
+          // silently dropped — a real bug this once had, not a
+          // hypothetical: `tr.addMark` alone marked the already-existing
+          // "`code" span but never inserted the "`" that triggered it,
+          // leaving only the opening backtick ever visible.
+          tr.insertText("`", range.to);
+          tr.addMark(codeStart, range.to + 1, this.type.create());
           tr.removeStoredMark(this.type);
+        },
+      }),
+    ];
+  },
+  addProseMirrorPlugins() {
+    // Safety net: a code-marked run's own first and last characters must
+    // still be a real backtick, or the mark comes off — same
+    // "appendTransaction runs after every transaction regardless of cause"
+    // reasoning as UniqueBlockIdentity above, and needed for the same kind
+    // of reason: ProseMirror marks are independent of the text carrying
+    // them, so backspacing out a flanking backtick (or Delete, cut, an
+    // undo, a drag — any doc-changing transaction, not just one specific
+    // keyboard shortcut) shrinks the marked range but does not itself
+    // remove the mark from whatever's left. Left unhandled, deleting just
+    // the "`" leaves the remaining text still styled as code with no visible
+    // delimiter at all - confusing, and it wouldn't reparse as code either
+    // (markdown_yjs.py's _wrap_code_run would reconstruct a *fresh* fence
+    // around it on the next checkpoint, silently reintroducing the backtick
+    // the user just deleted). Matches this file's backspace-delete-text-
+    // styling convention (TaskItemBackspace, HeadingBackspace above): once
+    // the delimiter breaks, the styling goes, immediately, not just on the
+    // next full deletion.
+    const codeType = this.type;
+    return [
+      new Plugin({
+        appendTransaction(transactions, _oldState, newState) {
+          if (!transactions.some((tr) => tr.docChanged)) return null;
+          let tr: Transaction | null = null;
+          newState.doc.descendants((node, pos) => {
+            if (!node.isTextblock) return true;
+            let runStart = -1;
+            let runText = "";
+            const flush = (runEnd: number) => {
+              if (runStart < 0) return;
+              if (
+                runText.length < 2 ||
+                !runText.startsWith("`") ||
+                !runText.endsWith("`")
+              ) {
+                tr = (tr ?? newState.tr).removeMark(runStart, runEnd, codeType);
+              }
+              runStart = -1;
+              runText = "";
+            };
+            let contentSize = 0;
+            node.forEach((child, offset) => {
+              const childPos = pos + 1 + offset;
+              if (child.isText && codeType.isInSet(child.marks)) {
+                if (runStart < 0) runStart = childPos;
+                runText += child.text ?? "";
+              } else {
+                flush(childPos);
+              }
+              contentSize = offset + child.nodeSize;
+            });
+            flush(pos + 1 + contentSize);
+            return false;
+          });
+          return tr;
         },
       }),
     ];

@@ -87,6 +87,63 @@ def test_reconstruct_body_round_trips_bold_italic_code_link() -> None:
     assert reconstruct_body(doc) == body
 
 
+def test_inline_code_stores_backticks_as_literal_text() -> None:
+    # The flanking backticks must be real characters in the stored XmlText,
+    # not stripped-then-resynthesized on serialize — matching the frontend's
+    # InlineCode mark (blocks.ts), which relies on that for caret placement.
+    # A pure string round-trip test wouldn't catch a regression back to the
+    # old "hidden syntax" shape (same output string either way), so this
+    # asserts the doc's own stored content directly.
+    doc = seed_doc_from_markdown("Some `code` here.\n")
+    para = _root(doc).children[0]
+    text_content = "".join(t for t, _ in para.children[0].diff())
+    assert text_content == "Some `code` here."
+
+
+def test_inline_code_with_interior_backtick_uses_longer_fence() -> None:
+    # CommonMark requires a longer fence when the content itself contains a
+    # backtick, e.g. content "a`b" needs a double-backtick fence.
+    body = "Code with a backtick: ``a`b`` end.\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+    para = _root(doc).children[0]
+    text_content = "".join(t for t, _ in para.children[0].diff())
+    assert "``a`b``" in text_content
+
+
+def test_inline_code_mark_on_plain_text_without_backticks_gets_a_fresh_fence() -> None:
+    # Reachable via toggleCode/Mod-e on already-selected plain text (blocks.ts)
+    # - the "code" mark can land on a run with zero embedded backtick
+    # characters, unlike a run built from the backtick InputRule. Built via
+    # _build_live_paragraph since only a live editing session, not the
+    # forward markdown parser, can produce this shape.
+    doc = _build_live_paragraph("hello")
+    with doc.transaction():
+        _root(doc).children[0].children[0].format(0, 5, {"code": True})  # type: ignore[union-attr]
+    assert reconstruct_body(doc) == "`hello`\n"
+
+
+def test_inline_code_repairs_an_interior_backtick_from_a_live_edit() -> None:
+    # A live edit can land a new backtick inside an already-marked span
+    # (typing while the cursor sits between two already-marked characters
+    # carries the active marks over like any other character), breaking the
+    # stored text's own embedded fence - "`co`de`" naively reparses with the
+    # first "`" pair as the span ("co") and "de`" spilling out as plain text.
+    # Must repair to a longer fence instead of reparsing wrong or crashing.
+    doc = _build_live_paragraph("`co`de`")
+    with doc.transaction():
+        _root(doc).children[0].children[0].format(0, 7, {"code": True})  # type: ignore[union-attr]
+    once = reconstruct_body(doc)
+    reseeded = seed_doc_from_markdown(once)
+    reseeded_para = _root(reseeded).children[0]
+    assert reseeded_para.tag == "paragraph"
+    text_content = "".join(t for t, _ in reseeded_para.children[0].diff())
+    assert text_content == once.rstrip("\n")
+    # And the content must actually still read "co`de" - not "co" with
+    # "de`" silently dropped or spilled out as unmarked plain text.
+    assert "co`de" in once
+
+
 def test_reconstruct_body_round_trips_table() -> None:
     body = "| a | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n"
     doc = seed_doc_from_markdown(body)
