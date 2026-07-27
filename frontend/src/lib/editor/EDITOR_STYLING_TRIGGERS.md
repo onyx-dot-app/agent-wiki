@@ -36,12 +36,20 @@ RFC 2119.
 | Blockquote (`>`)               | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                         |
 | Bullet list / ordered list     | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                         |
 | Fenced code block (` ``` `)    | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                         |
-| Task list / checkbox (`- [ ]`) | Text-shortcut           | Implemented (`TaskItem` default input rule)                                                                                                                                              |
+| Task list / checkbox (`[ ] `)  | Text-shortcut           | Implemented (`TaskItem` default input rule) — triggers on bare `[ ] `/`[x] `, not `- [ ] `; see note below                                                                               |
 | Emoji shortcode (`:name:`)     | Text-shortcut           | Not yet implemented (neither the parser nor the editor recognizes shortcodes today)                                                                                                      |
 | Links                          | UI-only (slash command) | **Not yet compliant** — `Link`'s `autolink`/`linkOnPaste` are still on, and there's no slash-command entry to create one deliberately. Open follow-up.                                   |
 | Tables                         | UI-only (slash command) | No text-shortcut exists (correct), but there's also no slash-command entry yet — the opaque-row table shape has no sensible "insert blank table" seed to build one from. Open follow-up. |
 | Images                         | UI-only (slash command) | Deferred entirely — not implemented on either end                                                                                                                                        |
 | Footnotes                      | UI-only (slash command) | Deferred entirely — not implemented on either end                                                                                                                                        |
+
+Note on the checkbox trigger: bullet list's own shortcut (`- ` alone) fires
+the instant that two-character sequence is typed, before `[ ] ` can ever
+follow it — there's no lookahead in a live `InputRule`. So `- [ ] ` and bare
+`[ ] ` can't both work as independent shortcuts; the editor uses bare
+`[ ] `/`[x] ` (same convention Notion/Slack use for the same reason). The
+backend still always emits correct `- [ ] `/`- [x] ` GFM syntax on
+checkpoint regardless of which shortcut produced the checkbox.
 
 ## 3. Rationale for the split
 
