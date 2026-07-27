@@ -26,6 +26,15 @@ def run_detection_sweep(triggered_by_user_id: str | None) -> None:
     runner.run_sweep(triggered_by_user_id=triggered_by_user_id)
 
 
+@automanage_offline_queue.task()
+def run_detection_on_create(path: str, creator_user_id: str | None) -> None:
+    """Focused detection for a just-created page (see ``runner.run_on_create``).
+    Offline: the creator isn't blocked on it, and it rides the same queue as
+    the sweeps whose detectors it reuses. ``creator_user_id`` is recorded as
+    the run's trigger attribution."""
+    runner.run_on_create(path, triggered_by_user_id=creator_user_id)
+
+
 @automanage_nearline_queue.task()
 def execute_approved_proposal(proposal_id: int) -> None:
     """Apply a **human-approved** proposal (commits to git). Nearline — a human

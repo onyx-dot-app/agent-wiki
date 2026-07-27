@@ -61,7 +61,10 @@ class _CaseCollisionDetector:
     pairs_paths = True  # names both colliding pages; pair within one audience
 
     def applicable(self, trigger: TriggerKind) -> bool:
-        return trigger == TriggerKind.SWEEP
+        # On-create too: the collision appears exactly when the name is
+        # chosen, and it's instant-truth — catching it at birth beats
+        # catching it at the weekly sweep.
+        return trigger in (TriggerKind.SWEEP, TriggerKind.ON_CREATE)
 
     def detect(self, scope: Scope) -> list[ProposalDraft]:
         pages = {p for p in scope.paths if p.endswith(".md")}
