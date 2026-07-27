@@ -26,12 +26,14 @@ def run_detection_sweep(triggered_by_user_id: str | None) -> None:
     runner.run_sweep(triggered_by_user_id=triggered_by_user_id)
 
 
-@automanage_offline_queue.task()
+@automanage_nearline_queue.task()
 def run_detection_on_create(path: str, creator_user_id: str | None) -> None:
     """Focused detection for a just-created page (see ``runner.run_on_create``).
-    Offline: the creator isn't blocked on it, and it rides the same queue as
-    the sweeps whose detectors it reuses. ``creator_user_id`` is recorded as
-    the run's trigger attribution.
+    Nearline: someone is effectively waiting — an agent mid-conversation picks
+    the finding up on its next tool call (the AI-create advisory), and the
+    creator's page banner should show it during the creation visit, not after
+    a queued sweep drains. The runs fit the lane: sub-second, LLM-free.
+    ``creator_user_id`` is recorded as the run's trigger attribution.
 
     State-based on purpose: the run checks ``path`` against wiki state at
     execution time, not a snapshot from the creation event. A proposal is a

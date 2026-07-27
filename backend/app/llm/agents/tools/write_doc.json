@@ -1,6 +1,6 @@
 {
   "name": "write_doc",
-  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. When CREATING a new page, optionally pass `template_id` (from `list_templates`) to seed the page's update policy from that template (auto-update default + update instruction). Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces.",
+  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. When CREATING a new page, optionally pass `template_id` (from `list_templates`) to seed the page's update policy from that template (auto-update default + update instruction). Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces. A CREATE may come back `paused` (nothing committed) when the page would case-collide with an existing path or is byte-identical to an existing page — follow the suggestion (update the existing page / pick a distinct name), or re-call with `proceed_despite_conflict=true` to create anyway.",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -35,6 +35,10 @@
       "ingestion_auto_update_disabled": {
         "type": "boolean",
         "description": "Optional, CREATE only. true = the page starts with connector/ingestion auto-update OFF; false = ON. Overrides the template default. Omit to keep the template's (or Blank's) default."
+      },
+      "proceed_despite_conflict": {
+        "type": "boolean",
+        "description": "Optional, CREATE only. When a create comes back paused with a conflict (case collision or byte-identical duplicate), set true to create the page anyway. Prefer adapting instead: update the existing page the pause names, or pick a distinct name."
       }
     },
     "required": ["path", "body", "commit_message"]

@@ -7,14 +7,19 @@ from __future__ import annotations
 
 from typing import Any
 
+import logging
+
 from app.auth import current_user
 from app.wiki import templates as templates_repo
 from app.wiki import update_policy
 from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
+from app.wiki.automanage import preflight
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
+
+log = logging.getLogger(__name__)
 
 
 def _seed_create_policy(
@@ -76,6 +81,9 @@ def handle(args: dict[str, Any]) -> Any:
         auto_update_disabled = args.get("ingestion_auto_update_disabled")
         if auto_update_disabled is not None and not isinstance(auto_update_disabled, bool):
             raise ToolError("ingestion_auto_update_disabled must be a boolean when provided")
+        proceed_despite_conflict = args.get("proceed_despite_conflict", False)
+        if not isinstance(proceed_despite_conflict, bool):
+            raise ToolError("proceed_despite_conflict must be a boolean when provided")
 
         existed = wiki_utils.file_exists(path)
         # Validate a create-from-template id up front — before any commit — so a
@@ -137,6 +145,30 @@ def handle(args: dict[str, Any]) -> Any:
                 "broken_links": wiki_utils.broken_links(path, result.new_body),
             }
         else:
+            # Creation preflight — pause-and-suggest, not refuse: on an
+            # instant-truth conflict (case collision, byte-identical
+            # duplicate) nothing is committed and the result carries the
+            # suggestion; the agent adapts or re-calls with
+            # proceed_despite_conflict=true. Fail-open: a broken check must
+            # never block a write (the post-commit on-create trigger and the
+            # page banner are the safety net).
+            if not proceed_despite_conflict:
+                try:
+                    conflicts = preflight.check_creation(path, body)
+                except Exception:
+                    log.exception("creation preflight failed for %s", path)
+                    conflicts = []
+                if conflicts:
+                    return {
+                        "paused": True,
+                        "conflicts": [c.model_dump() for c in conflicts],
+                        "message": (
+                            "creation paused — "
+                            + " ".join(c.suggestion for c in conflicts)
+                            + " To create the page anyway, call write_doc "
+                            "again with proceed_despite_conflict=true."
+                        ),
+                    }
             # New file: no base to merge against, so this always commits.
             result = wiki_utils.commit_and_fan_out(
                 path=path, body=body, message=commit_message.strip(),

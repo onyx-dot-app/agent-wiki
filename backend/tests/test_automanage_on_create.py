@@ -9,7 +9,7 @@ pass ``owner_user_id=None`` and are skipped; the sweep covers them.
 from __future__ import annotations
 
 from app.models.wiki import ChangeKind
-from app.tasks.queues import automanage_offline_queue
+from app.tasks.queues import automanage_nearline_queue
 from app.wiki import git as wiki_git
 from app.wiki import notify
 from app.wiki.automanage import runner, runs
@@ -148,7 +148,7 @@ def test_create_hook_enqueues_for_attributable_creations_only(tmp_repo):
 
     # System channel (owner_user_id=None): no focused run.
     sha = wiki_git.commit_file("team/sys-copy.md", _BODY, "ingest", author=None)
-    with automanage_offline_queue.immediate_mode():
+    with automanage_nearline_queue.immediate_mode():
         notify.after_doc_write(
             "team/sys-copy.md", sha, ChangeKind.CREATE, None, owner_user_id=None
         )
@@ -156,7 +156,7 @@ def test_create_hook_enqueues_for_attributable_creations_only(tmp_repo):
 
     # Attributable creation: the hook runs focused detection.
     sha = wiki_git.commit_file("team/user-copy.md", _BODY, "create", author=None)
-    with automanage_offline_queue.immediate_mode():
+    with automanage_nearline_queue.immediate_mode():
         notify.after_doc_write(
             "team/user-copy.md", sha, ChangeKind.CREATE, None, owner_user_id=uid
         )
