@@ -58,6 +58,9 @@ class ProposalView(BaseModel):
     created_via: str
     run_id: str | None
     created_at: str
+    # When a sweep last asserted this finding against current wiki state —
+    # created/revived/carried all stamp it. Backs the card's freshness line.
+    last_emitted_at: str | None = None
 
 
 class ProposalsResponse(BaseModel):
@@ -65,8 +68,8 @@ class ProposalsResponse(BaseModel):
 
 
 class ProposalActionResponse(BaseModel):
-    """Result of approving/rejecting a proposal. On approve, execution is
-    enqueued on the detection queue, so ``status`` reflects the decision, not
-    the applied state."""
+    """Result of actioning a proposal. On approve, execution is enqueued on
+    the detection queue, so ``status`` reflects the decision, not the
+    applied state."""
 
-    status: Literal["approved", "rejected"]
+    status: Literal["approved", "rejected", "dismissed"]

@@ -258,6 +258,10 @@ def revive(
             .values(
                 status=ProposalStatus.PENDING.value,
                 status_reason=None,
+                # A past dismissal's reviewer must not linger: the auto-apply
+                # visibility gate reads reviewed_by IS NULL as "no human saw
+                # this", and a revived finding is a fresh ask.
+                reviewed_by_user_id=None,
                 source_paths=source_paths,
                 target_paths=target_paths,
                 base_shas=base_shas,
@@ -339,6 +343,39 @@ def reject(proposal_id: int, *, user_id: str, reason: str | None = None) -> bool
         reviewed_by_user_id=user_id,
         status_reason=reason,
     )
+
+
+def dismiss(proposal_id: int, *, user_id: str) -> bool:
+    """``pending → stale`` by a human — the middle verb between approve and
+    reject. Machine-invalidation semantics on purpose: no durable veto, so
+    the finding may revive if the situation is still (or again) true at a
+    later sweep. Right for "I fixed this myself, clear it now" and for
+    "not now"."""
+    return _transition(
+        proposal_id,
+        from_statuses=(ProposalStatus.PENDING,),
+        to=ProposalStatus.STALE,
+        reviewed_by_user_id=user_id,
+        status_reason="dismissed by reviewer",
+    )
+
+
+def touch_last_emitted(proposal_ids: list[int]) -> None:
+    """Stamp ``last_emitted_at`` on carried pending rows — the sweep just
+    re-confirmed these findings against current wiki state, and the banner's
+    freshness line ("confirmed by the last scan …") must reflect that, not
+    the original emit time."""
+    if not proposal_ids:
+        return
+    with session() as s:
+        s.execute(
+            update(ChangeProposal)
+            .where(
+                ChangeProposal.id.in_(proposal_ids),
+                ChangeProposal.status == ProposalStatus.PENDING.value,
+            )
+            .values(last_emitted_at=_now())
+        )
 
 
 def mark_applied(proposal_id: int, *, applied_sha: str) -> bool:
