@@ -57,7 +57,7 @@ import {
   PolicyPopover,
 } from "@/components/wiki/policyPanels";
 import { useProposalsByPath } from "@/lib/autoOrganize";
-import type { Trigger } from "@/lib/triggers";
+import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";
 import { useRowActions } from "@/providers/WikiItemActionsProvider";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -411,6 +411,7 @@ function Explorer({ dir }: ExplorerProps) {
 
   // Folder-level actions portal into the single pinned header (mock
   // 705:142993).
+  const { refresh: refreshTriggers } = useTriggers();
   const { health } = useUpdateHealth(dir || null);
   const warnLevel = updateWarnLevel(health);
   const { proposals } = useProposalsByPath(dir, !!dir);
@@ -526,6 +527,10 @@ function Explorer({ dir }: ExplorerProps) {
               variant="section"
               onClick={() => {
                 setMoreOpen(false);
+                if (!isMobile) {
+                  setPanelOpen(true);
+                  setPanelTab("watching");
+                }
                 setWatcherEditor({ trigger: null });
               }}
             />
@@ -567,13 +572,21 @@ function Explorer({ dir }: ExplorerProps) {
       <div
         className={`min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
       >
-        <TriggerPanel
-          open={watcherEditor !== null}
-          initial={watcherEditor?.trigger ?? { scope_path: dir || "/" }}
-          lockScope={!watcherEditor?.trigger}
-          onClose={() => setWatcherEditor(null)}
-          onSaved={(t) => setTriggerStatus(`Saved trigger for ${t.scope_path}`)}
-        />
+        {/* Desktop docks the editor inside the Watching tab; the modal is
+            the mobile path only. */}
+        {isMobile && (
+          <TriggerPanel
+            open={watcherEditor !== null}
+            initial={watcherEditor?.trigger ?? { scope_path: dir || "/" }}
+            lockScope={!watcherEditor?.trigger}
+            onClose={() => setWatcherEditor(null)}
+            onSaved={(t) => {
+              setWatcherEditor(null);
+              void refreshTriggers();
+              setTriggerStatus(`Saved trigger for ${t.scope_path}`);
+            }}
+          />
+        )}
 
         {triggerStatus && (
           <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
@@ -799,12 +812,53 @@ function Explorer({ dir }: ExplorerProps) {
                 )}
               </div>
             ) : (
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
-                <WatchingPanel
-                  path={dir}
-                  onNew={() => setWatcherEditor({ trigger: null })}
-                  onEdit={(t) => setWatcherEditor({ trigger: t })}
-                />
+              <div
+                className={`flex min-h-0 flex-1 flex-col px-2 py-1 ${
+                  watcherEditor
+                    ? "scroll-y-hidden overflow-y-auto"
+                    : "overflow-y-auto"
+                }`}
+              >
+                {watcherEditor ? (
+                  <TriggerPanel
+                    open
+                    docked
+                    initial={
+                      watcherEditor.trigger ?? { scope_path: dir || "/" }
+                    }
+                    lockScope={!watcherEditor.trigger}
+                    onClose={() => setWatcherEditor(null)}
+                    onSaved={(t) => {
+                      setWatcherEditor(null);
+                      void refreshTriggers();
+                      setTriggerStatus(`Saved trigger for ${t.scope_path}`);
+                    }}
+                    onDelete={
+                      watcherEditor.trigger
+                        ? async () => {
+                            const t = watcherEditor.trigger as Trigger;
+                            if (
+                              !(await confirmDialog({
+                                title: "Delete this watcher?",
+                                body: `"${t.nl_description}"`,
+                                confirmLabel: "Delete",
+                              }))
+                            )
+                              return;
+                            await deleteTrigger(t.id);
+                            await refreshTriggers();
+                            setWatcherEditor(null);
+                          }
+                        : undefined
+                    }
+                  />
+                ) : (
+                  <WatchingPanel
+                    path={dir}
+                    onNew={() => setWatcherEditor({ trigger: null })}
+                    onEdit={(t) => setWatcherEditor({ trigger: t })}
+                  />
+                )}
               </div>
             )}
           </DocPanel>,
