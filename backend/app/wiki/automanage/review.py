@@ -110,16 +110,6 @@ def auto_approve(proposal_id: int, *, acting_user_id: str) -> bool:
     return True
 
 
-def dismiss(proposal_id: int, *, user_id: str) -> bool:
-    """Dismiss a pending proposal — clear the card without reject's durable
-    veto (it may revive if the finding is still/again true at a later
-    sweep). Returns False if it wasn't pending, or if Auto Organize is
-    disabled."""
-    if not settings.is_enabled():
-        return False
-    return change_proposals.dismiss(proposal_id, user_id=user_id)
-
-
 def reject(proposal_id: int, *, user_id: str, reason: str | None = None) -> bool:
     """Reject a pending proposal (durable do-not-propose). No execution.
     Returns False if it wasn't pending, or if Auto Organize is disabled (pending

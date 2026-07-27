@@ -258,9 +258,9 @@ def revive(
             .values(
                 status=ProposalStatus.PENDING.value,
                 status_reason=None,
-                # A past dismissal's reviewer must not linger: the auto-apply
-                # visibility gate reads reviewed_by IS NULL as "no human saw
-                # this", and a revived finding is a fresh ask.
+                # A revived finding is a fresh ask — no stale reviewer mark
+                # may linger (the auto-apply visibility gate reads
+                # reviewed_by IS NULL as "no human saw this").
                 reviewed_by_user_id=None,
                 source_paths=source_paths,
                 target_paths=target_paths,
@@ -342,21 +342,6 @@ def reject(proposal_id: int, *, user_id: str, reason: str | None = None) -> bool
         to=ProposalStatus.REJECTED,
         reviewed_by_user_id=user_id,
         status_reason=reason,
-    )
-
-
-def dismiss(proposal_id: int, *, user_id: str) -> bool:
-    """``pending → stale`` by a human — the middle verb between approve and
-    reject. Machine-invalidation semantics on purpose: no durable veto, so
-    the finding may revive if the situation is still (or again) true at a
-    later sweep. Right for "I fixed this myself, clear it now" and for
-    "not now"."""
-    return _transition(
-        proposal_id,
-        from_statuses=(ProposalStatus.PENDING,),
-        to=ProposalStatus.STALE,
-        reviewed_by_user_id=user_id,
-        status_reason="dismissed by reviewer",
     )
 
 

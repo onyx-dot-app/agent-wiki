@@ -185,16 +185,3 @@ def reject_one(
     if not review.reject(proposal_id, user_id=user.id):
         raise HTTPException(status_code=409, detail="proposal is not pending")
     return ProposalActionResponse(status="rejected")
-
-
-@router.post("/proposals/{proposal_id}/dismiss", response_model=ProposalActionResponse)
-def dismiss_one(
-    proposal_id: int, user: User = Depends(require_user)
-) -> ProposalActionResponse:
-    """Dismiss a pending proposal — clears the card without reject's durable
-    veto; it may return if the finding is still (or again) true at a later
-    sweep. 409 if not pending."""
-    _require_writable(proposal_id, user)
-    if not review.dismiss(proposal_id, user_id=user.id):
-        raise HTTPException(status_code=409, detail="proposal is not pending")
-    return ProposalActionResponse(status="dismissed")

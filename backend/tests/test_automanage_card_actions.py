@@ -1,11 +1,11 @@
-"""The card's human verbs and freshness stamp (backend).
+"""The card's freshness stamp and revival hygiene (backend).
 
-Verb ladder: approve (do it) · dismiss (clear the card, machine-invalidation
-semantics — revivable while the finding stays true) · reject (never again,
-content-scoped). Freshness: carried
-pendings get `last_emitted_at` re-stamped each sweep, so the banner's
-"confirmed by the last scan" line reflects the run that just re-verified
-the finding, not the original emit.
+Verbs are approve (do it) and reject (never again, content-scoped) — the
+card's X is client-side only. Freshness: carried pendings get
+`last_emitted_at` re-stamped each sweep, so the banner's "confirmed by the
+last scan" line reflects the run that just re-verified the finding, not the
+original emit. Revival hygiene: a revived finding is a fresh ask, so no
+reviewer mark may linger on the row.
 """
 from __future__ import annotations
 
@@ -68,54 +68,31 @@ def _pending_one() -> dict:
     return row
 
 
-def test_dismiss_clears_without_veto_and_revives_while_true(client, monkeypatch):
+def test_revival_clears_a_lingering_reviewer_mark(client, monkeypatch):
+    """A revived finding is a fresh ask: no reviewer mark may linger on the
+    row (the auto-apply visibility gate reads reviewed_by IS NULL as 'no
+    human decision'). No verb produces a reviewed stale row today, so this
+    guards the defensive clear in revive()."""
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import ChangeProposal
+    from app.db.session import session
+
     det = _FixedDetector("det_one", [_stub_draft("team/a.md")])
     _sweep(monkeypatch, [det])
     row = _pending_one()
-
     uid = seed_user(uid="u1", email="u@x.com")
-    login_fastapi(client, uid)
-    resp = client.post(f"/api/automanage/proposals/{row['id']}/dismiss")
-    assert resp.status_code == 200 and resp.json()["status"] == "dismissed"
+    with session() as s:
+        s.execute(
+            sa_update(ChangeProposal)
+            .where(ChangeProposal.id == row["id"])
+            .values(status="stale", reviewed_by_user_id=uid)
+        )
 
-    dismissed = get(row["id"])
-    assert dismissed is not None
-    assert dismissed["status"] == "stale"
-    assert "dismissed" in (dismissed["status_reason"] or "")
-
-    # Machine-invalidation semantics: the finding is still true, so the
-    # next sweep revives the same row — no snooze in v1 (dial open).
     _sweep(monkeypatch, [det])
     revived = get(row["id"])
     assert revived is not None and revived["status"] == "pending"
     assert revived["revive_count"] == 1
-
-
-def test_dismiss_is_pending_only(client, monkeypatch):
-    det = _FixedDetector("det_one", [_stub_draft("team/a.md")])
-    _sweep(monkeypatch, [det])
-    row = _pending_one()
-    uid = seed_user(uid="u1", email="u@x.com")
-    login_fastapi(client, uid)
-    assert client.post(f"/api/automanage/proposals/{row['id']}/dismiss").status_code == 200
-    # Second dismiss: no longer pending.
-    assert client.post(f"/api/automanage/proposals/{row['id']}/dismiss").status_code == 409
-
-
-def test_revival_clears_the_dismissers_mark(client, monkeypatch):
-    """A revived finding is a fresh ask: the past dismissal's reviewer must
-    not linger on the row (the auto-apply visibility gate reads
-    reviewed_by IS NULL as 'no human decision')."""
-    det = _FixedDetector("det_one", [_stub_draft("team/a.md")])
-    _sweep(monkeypatch, [det])
-    row = _pending_one()
-    uid = seed_user(uid="u1", email="u@x.com")
-    login_fastapi(client, uid)
-    client.post(f"/api/automanage/proposals/{row['id']}/dismiss")
-
-    _sweep(monkeypatch, [det])
-    revived = get(row["id"])
-    assert revived is not None
     assert revived["reviewed_by_user_id"] is None
 
 
