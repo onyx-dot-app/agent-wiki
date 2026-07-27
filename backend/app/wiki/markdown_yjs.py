@@ -80,7 +80,9 @@ _MARK_WRAP_ORDER = ("link", "bold", "italic", "code")
 # A text segment ("text", plain_text, mark_runs) or a hard-break leaf
 # ("hardbreak", None, None) — see module docstring for why a hard break is a
 # sibling element, not foldable into a text run's marks.
-_Segment = tuple[Literal["text", "hardbreak"], str | None, list[tuple[int, int, dict[str, Any]]] | None]
+_Segment = tuple[
+    Literal["text", "hardbreak"], str | None, list[tuple[int, int, dict[str, Any]]] | None
+]
 
 
 def _inline_runs(inline_token: Any) -> list[_Segment]:
@@ -204,6 +206,22 @@ def _serialize_inline_children(children: list[Any]) -> str:
     return "".join(parts)
 
 
+def _serialize_paragraph_text(children: list[Any]) -> str:
+    """A paragraph's own serialized text, block-start-escaped. Strips a
+    leading/trailing literal "\\n" first — the only way one ends up there is
+    a stranded softbreak character: splitting a multi-line paragraph
+    (Enter mid-text, not through any of this editor's own state machines —
+    just Tiptap's default paragraph split) leaves the *old* softbreak's
+    "\\n" as an ordinary leading/trailing character in whichever half didn't
+    consume it, since that split has no markdown-syntax awareness at all.
+    Left in, it stacks with ``markdown_splice._SYNTHESIZED_GAP``'s own
+    separator newline to produce an extra, unwanted blank line around the
+    split point. A leading/trailing "\\n" is never meaningful paragraph
+    content either way (an *interior* one still is — a real softbreak —
+    and is untouched here, since ``str.strip`` only touches the ends)."""
+    return _escape_block_start_ambiguity(_serialize_inline_children(children).strip("\n"))
+
+
 def _element_from_segments(
     tag: str, attrs: dict[str, str], segments: list[_Segment]
 ) -> tuple[XmlElement, list[Any]]:
@@ -267,7 +285,9 @@ def _build_paragraph_from_inline(inline_token: Any) -> tuple[XmlElement, list[An
     return _element_from_segments("paragraph", {}, _inline_runs(inline_token))
 
 
-def _build_block_sequence(tokens: list[Any], start: int, end: int) -> tuple[list[XmlElement], list[Any]]:
+def _build_block_sequence(
+    tokens: list[Any], start: int, end: int
+) -> tuple[list[XmlElement], list[Any]]:
     """Build a sequence of paragraph/list/blockquote child elements from a
     flat markdown-it token range ``[start, end)`` — used for list-item and
     blockquote content, recursing into ``_build_list``/``_build_blockquote``
@@ -310,7 +330,9 @@ def _build_block_sequence(tokens: list[Any], start: int, end: int) -> tuple[list
 _TASK_MARKER_RE = re.compile(r"^\[([ xX])\](?:\s+|$)")
 
 
-def _list_item_task_marker(tokens: list[Any], item_start: int, item_end: int) -> re.Match[str] | None:
+def _list_item_task_marker(
+    tokens: list[Any], item_start: int, item_end: int
+) -> re.Match[str] | None:
     """If a list item's first block is a paragraph beginning with a
     checkbox marker, the match against that paragraph's leading text run;
     else ``None``. ``item_start``/``item_end`` bracket the item's own
@@ -394,9 +416,7 @@ def _build_blockquote(
 def _build_code_block(raw: str, attrs: dict[str, str]) -> XmlElement:
     tok = next(t for t in gfm_parser().parse(raw) if t.type in ("fence", "code_block"))
     language = tok.info.strip() if tok.type == "fence" else ""
-    return XmlElement(
-        "codeBlock", {**attrs, "language": language}, contents=[XmlText(tok.content)]
-    )
+    return XmlElement("codeBlock", {**attrs, "language": language}, contents=[XmlText(tok.content)])
 
 
 def _build_heading(raw: str, attrs: dict[str, str]) -> tuple[XmlElement, list[Any]]:
@@ -429,6 +449,20 @@ def _build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list
     raw = body[block.start : block.end]
     trailing_nl = raw.endswith("\n")
     nl_attr = "1" if trailing_nl else "0"
+
+    if block.kind is BlockKind.BLANK_LINE:
+        # Always an empty paragraph with no trailing-newline attr, regardless
+        # of `raw`/`nl_attr` above (`raw` is just the one blank-line
+        # character this pseudo-block occupies, not real paragraph content)
+        # - matches exactly what a live Enter-press on an empty paragraph
+        # already produces, so it round-trips through the same, unmodified
+        # `serialize_block` paragraph branch with no special-casing there.
+        return (
+            XmlElement(
+                "paragraph", {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: "0"}, contents=[XmlText("")]
+            ),
+            [],
+        )
 
     if block.kind is BlockKind.HEADING:
         return _build_heading(raw, {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr})
@@ -538,9 +572,7 @@ def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
             # line is just as much a fresh block-start position as the
             # top of the document, so a literal leading "-"/">"/"#"/"---"
             # needs the same escaping, not just the top-level case.
-            parts.append(
-                _escape_block_start_ambiguity(_serialize_inline_children(list(child.children)))
-            )
+            parts.append(_serialize_paragraph_text(list(child.children)))
         elif child.tag in ("bulletList", "orderedList", "taskList"):
             parts.append(_serialize_list(child).rstrip("\n"))
         elif child.tag == "blockquote":
@@ -763,7 +795,7 @@ def serialize_block(node: XmlElement) -> str:
         text = _serialize_inline_children(list(node.children))
         return "#" * level + " " + text + ("\n" if trailing else "")
     if node.tag == "paragraph":
-        text = _escape_block_start_ambiguity(_serialize_inline_children(list(node.children)))
+        text = _serialize_paragraph_text(list(node.children))
         return text + ("\n" if trailing else "")
     if node.tag in ("bulletList", "orderedList", "taskList"):
         text = _serialize_list(node)

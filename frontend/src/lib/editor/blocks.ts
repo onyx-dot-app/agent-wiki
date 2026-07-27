@@ -45,7 +45,7 @@ import {
   mergeAttributes,
 } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
-import { TextSelection } from "@tiptap/pm/state";
+import { Plugin, TextSelection, type Transaction } from "@tiptap/pm/state";
 
 /** Internal bookkeeping attrs never rendered into the DOM (`rendered:
  * false`) — they exist purely for the Yjs XML round trip, not for display
@@ -78,6 +78,64 @@ export const BlockIdentity = Extension.create({
           _nl: hiddenAttr(),
         },
       },
+    ];
+  },
+});
+
+/** Safety net: no two top-level blocks may ever carry the same `_blockId` —
+ * it's `markdown_splice.checkpoint_body`'s sole key for matching a live
+ * block back to its position in the committed markdown
+ * (`orig_by_id.get(block_id)`), and two top-level nodes sharing one id
+ * resolve to the *same* original range, producing duplicated/extra content
+ * on checkpoint (confirmed directly against the real backend — splitting a
+ * paragraph containing a soft break, e.g. via Enter mid-text, is the most
+ * common trigger).
+ *
+ * This isn't hypothetical, and it isn't narrowly a "handle Enter specially"
+ * fix either: ProseMirror's default node-splitting copies a node's own
+ * attrs onto *both* resulting halves unconditionally — there is no per-
+ * attribute "clear on split" hook for node attrs the way marks have
+ * `keepOnSplit`. Rather than chase every keyboard shortcut that could ever
+ * cause a top-level split (today: plain Enter; tomorrow: anything else),
+ * this corrects the invariant directly, in an `appendTransaction` that
+ * runs after *every* transaction regardless of cause. Only the first
+ * top-level node keeps a duplicated id; every later one is treated as new
+ * content instead (matching exactly how a genuinely new, freshly-typed
+ * block already behaves — `_blockId: null` routes it through
+ * `checkpoint_body`'s `orig is None` fast path, the same path a fresh
+ * empty paragraph already takes safely). */
+export const UniqueBlockIdentity = Extension.create({
+  name: "uniqueBlockIdentity",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        appendTransaction(transactions, _oldState, newState) {
+          if (!transactions.some((tr) => tr.docChanged)) return null;
+          const seen = new Set<string>();
+          let tr: Transaction | null = null;
+          newState.doc.forEach((node, offset) => {
+            const blockId = node.attrs._blockId as string | null | undefined;
+            if (!blockId) return;
+            if (seen.has(blockId)) {
+              tr = (tr ?? newState.tr).setNodeAttribute(
+                offset,
+                "_blockId",
+                null,
+              );
+              // Not every top-level node type declares `_nl` (e.g. `table`
+              // only has `_blockId`) - only clear it where the schema
+              // actually has it, matching how a fresh node's attrs shape
+              // looks.
+              if ("_nl" in node.attrs) {
+                tr = tr.setNodeAttribute(offset, "_nl", null);
+              }
+            } else {
+              seen.add(blockId);
+            }
+          });
+          return tr;
+        },
+      }),
     ];
   },
 });
@@ -363,7 +421,14 @@ export const ThematicBreak = createOpaqueBlock("thematic_break").extend({
         const blockStart = $from.before($from.depth);
         const blockEnd = $from.after($from.depth);
         const divider = state.schema.nodes.thematic_break!.create(
-          null,
+          // _raw: "1" matches what the backend stamps on every opaque block
+          // it seeds from existing markdown (`_build_block_element` in
+          // markdown_yjs.py) - serialize_block's opaque-block fallback
+          // checks for this exact string, so a divider created live here
+          // without it fails that check and falls through to serialize_block's
+          // final `raise NotImplementedError` the next time a checkpoint
+          // tries to serialize it.
+          { _raw: "1" },
           state.schema.text("---\n"),
         );
         const freshParagraph = state.schema.nodes.paragraph!.create();

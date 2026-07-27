@@ -16,9 +16,13 @@ import {
   TableSeparator,
   TaskItemBackspace,
   ThematicBreak,
+  UniqueBlockIdentity,
 } from "@/lib/editor/blocks";
 import { CommandMenu } from "@/lib/editor/commandMenu";
-import { AnchoredHighlights } from "@/lib/editor/highlights";
+import {
+  AnchoredHighlights,
+  CurrentBlockHighlight,
+} from "@/lib/editor/highlights";
 import { presenceExtension } from "@/lib/editor/presence";
 
 /**
@@ -56,6 +60,7 @@ export function tiptapExtensions(
     TaskItem.configure({ nested: true }),
     TaskItemBackspace,
     BlockIdentity,
+    UniqueBlockIdentity,
     HeadingBackspace,
     ThematicBreak,
     HtmlBlock,
@@ -75,6 +80,7 @@ export function tiptapExtensions(
     }),
     Placeholder.configure({ placeholder: placeholder ?? "" }),
     AnchoredHighlights,
+    CurrentBlockHighlight,
     presenceExtension(awareness),
     CommandMenu,
   ];

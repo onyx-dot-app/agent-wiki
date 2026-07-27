@@ -31,6 +31,16 @@ class BlockKind(str, Enum):
     # <-> Yjs codec is the layer that must fail loud (NotImplementedError)
     # rather than silently mis-serialize one.
     OTHER = "other"
+    # A single *extra* blank line within a longer run between two blocks —
+    # see top_level_block_ranges. Blank lines produce no markdown-it token at
+    # all (confirmed: a run of them is invisible to the tokenizer), so
+    # without this they're silently dropped every time a doc is re-seeded
+    # from committed markdown, even though a live edit session preserves them
+    # fine (each is a real, separately-addressable empty paragraph node the
+    # whole time it's live). One blank line is already the implicit default
+    # gap every block gets via its own leading-gap slice — this kind only
+    # exists for anything beyond that.
+    BLANK_LINE = "blank_line"
 
 
 _KIND_BY_TOKEN_TYPE: dict[str, BlockKind] = {
@@ -132,18 +142,38 @@ def top_level_block_ranges(body: str) -> list[BlockRange]:
     manual open/close tracking needed. Table blocks additionally carry
     per-row ``RowRange``s (matching ``tr_open`` tokens carry ``.map`` too,
     confirmed against the installed markdown-it-py).
+
+    A run of 2+ blank lines before a block (including before the very first
+    one) also gets a ``BlockRange`` per *extra* blank line beyond the
+    implicit single-blank-line default — see ``BlockKind.BLANK_LINE``. Not
+    applied after the last block: trailing-at-EOF content already survives
+    checkpointing unconditionally (``markdown_splice.checkpoint_body``'s
+    verbatim tail slice), so there's nothing lossy to fix there.
     """
     if not body.strip():
         return []
     tokens = gfm_parser().parse(body)
     offsets = _line_offsets(body)
     blocks: list[BlockRange] = []
+    prev_end = 0
     for idx, token in enumerate(tokens):
         if token.level != 0 or token.map is None:
             continue
         start_line, end_line = token.map
         start, end = offsets[start_line], offsets[end_line]
         end = _trim_trailing_blank_lines(body, start, end)
+
+        gap_blank_lines = body[prev_end:start].count("\n")
+        for i in range(gap_blank_lines - 1):
+            blocks.append(
+                BlockRange(
+                    block_id=f"b{len(blocks)}",
+                    kind=BlockKind.BLANK_LINE,
+                    start=prev_end + i,
+                    end=prev_end + i + 1,
+                )
+            )
+
         kind = _KIND_BY_TOKEN_TYPE.get(token.type, BlockKind.OTHER)
         block_id = f"b{len(blocks)}"
 
@@ -161,9 +191,7 @@ def top_level_block_ranges(body: str) -> list[BlockRange]:
                 if t.type == "tr_open" and t.map is not None:
                     r_start, r_end = offsets[t.map[0]], offsets[t.map[1]]
                     row_ranges.append(
-                        RowRange(
-                            row_id=f"{block_id}:r{len(row_ranges)}", start=r_start, end=r_end
-                        )
+                        RowRange(row_id=f"{block_id}:r{len(row_ranges)}", start=r_start, end=r_end)
                     )
             rows = tuple(row_ranges)
             if rows:
@@ -177,4 +205,5 @@ def top_level_block_ranges(body: str) -> list[BlockRange]:
                 block_id=block_id, kind=kind, start=start, end=end, rows=rows, separator=separator
             )
         )
+        prev_end = end
     return blocks
