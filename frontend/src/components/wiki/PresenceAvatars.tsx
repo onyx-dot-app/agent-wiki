@@ -514,8 +514,8 @@ function PolicyPopover({
       </Section>
       <Divider />
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
-        {/* ContentAction over InputHorizontal: only the former forwards
-            descriptionMaxLines (mock annotation: real value, 3 lines). */}
+        {/* ContentAction is the only layout that forwards descriptionMaxLines
+            (mock annotation: real value, 3 lines). */}
         <ContentAction
           icon={SvgAddLines}
           title="Page Instructions"

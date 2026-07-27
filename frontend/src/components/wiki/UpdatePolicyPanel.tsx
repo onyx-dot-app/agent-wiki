@@ -340,14 +340,17 @@ export function UpdatePolicyPanel({
                 {/* Collapsed, the row's description is the instruction when
                     one exists (mock 1855:273683), clamped to 5 lines. While
                     the editor is open the row shows the generic hint (mock
-                    1855:273690). ContentAction over InputHorizontal: only
-                    the former forwards descriptionMaxLines. */}
+                    1855:273690). ContentAction is the only layout that
+                    forwards descriptionMaxLines. */}
                 <ContentAction
                   icon={SvgAddLines}
                   title="Page Instructions"
+                  // While the editor is open the guidance renders below the
+                  // input (node 2185:50866), so the row carries no
+                  // description of its own.
                   description={
                     editing
-                      ? `Instruct the wiki on how to update this ${kind}.`
+                      ? undefined
                       : ownInstruction ||
                         effInstruction ||
                         `Instruct the wiki on how to update this ${kind}.`
@@ -395,7 +398,7 @@ export function UpdatePolicyPanel({
                       resizable={false}
                       value={draft}
                       autoFocus
-                      placeholder={`How should this ${kind} be updated?`}
+                      placeholder="e.g. This page covers engineering onboarding. Keep setup steps current, removing ones that no longer apply. Keep it sequential and high-level, linking out to sources instead of duplicating other docs."
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
                         // Enter saves through the blur path and collapses
@@ -417,6 +420,15 @@ export function UpdatePolicyPanel({
                         );
                       }}
                     />
+                    {/* Guidance below the input (node 2185:50866 "Message
+                        Section"); the copy is verbatim from the mock. */}
+                    <div className="px-2 pt-1 pb-2">
+                      <Text font="secondary-body" color="text-03" as="p">
+                        Describe what this page covers and what is out of scope;
+                        what information to keep current; how detailed it should
+                        be and in what format.
+                      </Text>
+                    </div>
                   </div>
                 )}
               </div>
