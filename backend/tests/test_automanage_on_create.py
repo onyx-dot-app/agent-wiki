@@ -8,9 +8,6 @@ pass ``owner_user_id=None`` and are skipped; the sweep covers them.
 """
 from __future__ import annotations
 
-import subprocess
-
-import app.config
 from app.models.wiki import ChangeKind
 from app.tasks.queues import automanage_offline_queue
 from app.wiki import git as wiki_git
@@ -25,40 +22,11 @@ from app.wiki.change_proposals import (
     list_by_status,
     reject,
 )
-from tests._seed import seed_user
+from tests._seed import plumb_commit, seed_user
 
 # Bodies comfortably above body-dup's placeholder floor.
 _BODY = "# Setup\n\nInstall steps for the app.\n" + "content " * 40
 _OTHER = "# Notes\n\nEntirely different material.\n" + "words " * 40
-
-
-def _plumb_commit(path: str, body: str) -> None:
-    """Commit ``path`` via git plumbing (index + objects only) — the one way
-    to stage case-colliding paths on a case-insensitive dev filesystem."""
-    cwd = app.config.CONFIG.wiki_dir
-
-    def run(*args: str, inp: str | None = None) -> str:
-        return subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            check=True,
-            capture_output=True,
-            text=True,
-            input=inp,
-        ).stdout.strip()
-
-    blob = run("hash-object", "-w", "--stdin", inp=body)
-    run("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
-    tree = run("write-tree")
-    head = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD"],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    parent = ["-p", head] if head else []
-    commit = run("commit-tree", tree, *parent, "-m", f"seed {path}")
-    run("update-ref", "HEAD", commit)
 
 
 def _pendings() -> list[dict]:
@@ -95,7 +63,7 @@ def test_common_create_skips_the_run_entirely(tmp_repo):
 
 def test_case_collision_on_create(tmp_repo):
     wiki_git.commit_file("docs/Setup.md", _BODY, "seed", author=None)
-    _plumb_commit("docs/setup.md", _OTHER)
+    plumb_commit("docs/setup.md", _OTHER)
 
     result = runner.run_on_create("docs/setup.md", triggered_by_user_id=None)
 

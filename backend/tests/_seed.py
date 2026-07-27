@@ -162,6 +162,7 @@ __all__ = [
     "count_rows",
     "insert_event",
     "list_events",
+    "plumb_commit",
     "seed_trigger",
     "seed_user",
 ]
@@ -173,3 +174,40 @@ def seed_docs(*paths: str) -> None:
 
     for path in paths:
         wiki_git.commit_file(path, f"# {path}\n\nseeded\n", "seed", author=None)
+
+
+def plumb_commit(path: str, body: str) -> None:
+    """Commit ``path`` via git plumbing (index + objects only) — the one way
+    to stage case-colliding paths on a case-insensitive dev filesystem, where
+    a worktree write would silently overwrite the other casing (the exact
+    hazard the case-collision detector exists for). Test seeding only: the
+    app's git wrapper deliberately has no such primitive, and the detectors
+    read the index/objects, never the worktree."""
+    import subprocess
+
+    import app.config
+
+    cwd = app.config.CONFIG.wiki_dir
+
+    def run(*args: str, inp: str | None = None) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+            input=inp,
+        ).stdout.strip()
+
+    blob = run("hash-object", "-w", "--stdin", inp=body)
+    run("update-index", "--add", "--cacheinfo", f"100644,{blob},{path}")
+    tree = run("write-tree")
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    parent = ["-p", head] if head else []
+    commit = run("commit-tree", tree, *parent, "-m", f"seed {path}")
+    run("update-ref", "HEAD", commit)
