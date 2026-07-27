@@ -12,7 +12,8 @@ from typing import Any
 from app.auth import PermissionDenied, require_can
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
-from app.wiki import agent_activity, git as wiki_git, update_policy
+from app.tasks.page_views import record_page_view
+from app.wiki import agent_activity, git as wiki_git, page_views, update_policy
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -29,6 +30,9 @@ def handle(args: dict[str, Any]) -> Any:
         require_can("read", path)
     except PermissionDenied as exc:
         return {"error": str(exc)}
+
+    if page_views.should_enqueue(path):
+        record_page_view(path)
 
     try:
         body = wiki_git.read_file(path)

@@ -43,7 +43,7 @@ from app.tasks.reindex import drop_page_embedding, index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
-from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, doc_ids, drafts, update_policy
+from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, doc_ids, drafts, page_views, update_policy
 from app.wiki.comment_remap import remap_comments
 from app.wiki.provenance_remap import remap_source_ranges
 from app.models.wiki import ChangeKind, PathMove
@@ -185,6 +185,8 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     drop_page_embedding(rel_path)
     acl.on_page_deleted(rel_path)
     update_policy.on_page_deleted(rel_path)
+    # A recreated page at this path is a new document — no inherited views.
+    page_views.on_page_deleted(rel_path)
     # Tombstone the id (kept, not dropped) so it still resolves — to a deleted
     # state — and a later restore can re-bind it.
     doc_ids.on_deleted(rel_path)
@@ -231,6 +233,7 @@ def after_doc_trashed(
     """
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
+    page_views.on_path_moved(moves)
     coedit.on_path_moved(moves)
     # Tombstone the id(s) at the *original* root rather than following the move
     # into `.trash/` — the id keeps resolving (to a deleted state), and restore
@@ -301,6 +304,7 @@ def after_path_move(
     """
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
+    page_views.on_path_moved(moves)
     doc_ids.on_path_moved(moves, root_move=root_move)
     coedit.on_path_moved(moves)
     list_changed = False

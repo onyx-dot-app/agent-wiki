@@ -52,6 +52,7 @@ _TASK_MODULES = (
     "app.tasks.ingest_eval_retention",
     "app.tasks.mcp_session_cleanup",
     "app.tasks.notify_emails",
+    "app.tasks.page_views",
     "app.tasks.periodic",
     "app.tasks.reindex",
     "app.tasks.trash_purge",
