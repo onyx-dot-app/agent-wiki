@@ -461,3 +461,18 @@ body {
   font-size: 14px;
   line-height: 20px;
 }
+
+/* Suggestions-card row highlight (mock annotation "Click to highlight
+   folder"): a brief tint flash on the targeted listing row. */
+.wiki-row-flash {
+  animation: wiki-row-flash 2s ease-out;
+}
+@keyframes wiki-row-flash {
+  0%,
+  60% {
+    background-color: var(--background-tint-03);
+  }
+  100% {
+    background-color: transparent;
+  }
+}

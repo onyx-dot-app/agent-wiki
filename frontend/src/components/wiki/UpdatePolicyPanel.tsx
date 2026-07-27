@@ -8,7 +8,7 @@ import {
   Text,
   Tooltip,
 } from "@onyx-ai/opal/components";
-import { InputHorizontal, Section } from "@onyx-ai/opal/layouts";
+import { ContentAction, InputHorizontal, Section } from "@onyx-ai/opal/layouts";
 import {
   SvgAddLines,
   SvgAlertTriangle,
@@ -34,6 +34,7 @@ import {
 } from "@/lib/updatePolicy";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
 import type { UpdateHealth } from "@/lib/wiki/types";
+import { pathKind, updateWarnLevel } from "@/lib/wiki/utils";
 import { absoluteTime } from "@/lib/time";
 
 interface Props {
@@ -56,7 +57,7 @@ interface Props {
 }
 
 function capNote(health: UpdateHealth): string {
-  if (health.cap_24h > 0 && health.count_24h >= health.cap_24h) {
+  if (updateWarnLevel(health) === "over") {
     return health.cap_resets_at
       ? `Daily auto-edit limit reached. Updates will resume at ${absoluteTime(health.cap_resets_at)}.`
       : "Daily auto-edit limit reached. Updates will resume within 24 hours.";
@@ -64,10 +65,33 @@ function capNote(health: UpdateHealth): string {
   if (health.cap_24h > 0) {
     return "Approaching daily auto-edit limit. Updates will pause when the limit is reached.";
   }
+  // The threshold guard stays local: the message prints the threshold, so
+  // a zero threshold must fall through to the generic note.
   if (health.threshold_24h > 0 && health.count_24h >= health.threshold_24h) {
     return `Reached the alert threshold of ${health.threshold_24h} auto-edits in 24 hours.`;
   }
   return "Auto-updating frequently.";
+}
+
+interface OrganizeComingSoonRowProps {
+  kind: string;
+}
+
+/** The Organize policy row, disabled until the backend grows the field. */
+export function OrganizeComingSoonRow({ kind }: OrganizeComingSoonRowProps) {
+  return (
+    <InputHorizontal
+      title="Organize"
+      description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
+    >
+      <Tooltip tooltip="Coming soon" side="left">
+        {/* raw-ok: a disabled control emits no pointer events, so Tooltip needs this enabled span as its hover target */}
+        <span className="inline-flex">
+          <Switch checked={false} disabled />
+        </span>
+      </Tooltip>
+    </InputHorizontal>
+  );
 }
 
 function errorMessage(e: unknown): string {
@@ -86,7 +110,7 @@ export function UpdatePolicyPanel({
   historyList,
   totalEdits,
 }: Props) {
-  const kind = path.endsWith(".md") ? "page" : "folder";
+  const kind = pathKind(path);
 
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false); // first fetch succeeded
@@ -219,13 +243,9 @@ export function UpdatePolicyPanel({
   }
 
   // Health state drives the history card's chrome (mock 1790:52516/52531).
-  const overCap =
-    !!health && health.cap_24h > 0 && health.count_24h >= health.cap_24h;
-  const nearCap =
-    !!health &&
-    !overCap &&
-    health.count_24h > 0 &&
-    health.count_24h >= health.threshold_24h;
+  const warnLevel = updateWarnLevel(health);
+  const overCap = warnLevel === "over";
+  const nearCap = warnLevel === "near";
   const historyCardChrome = overCap
     ? "border-(--status-warning-02) bg-(--status-warning-00)"
     : nearCap
@@ -310,19 +330,7 @@ export function UpdatePolicyPanel({
                       () => void save({ ingestion_auto_update_disabled: null }),
                     )}
                   </InputHorizontal>
-                  <InputHorizontal
-                    title="Organize"
-                    description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
-                  >
-                    <Tooltip tooltip="Coming soon" side="left">
-                      {/* The span keeps hover alive: a disabled control
-                          swallows pointer events, so the tooltip would never
-                          fire on it. */}
-                      <span className="inline-flex">
-                        <Switch checked={false} disabled />
-                      </span>
-                    </Tooltip>
-                  </InputHorizontal>
+                  <OrganizeComingSoonRow kind={kind} />
                 </div>
               </div>
 
@@ -330,34 +338,44 @@ export function UpdatePolicyPanel({
 
               <div className="flex flex-col gap-1 p-2">
                 {/* Collapsed, the row's description is the instruction when
-                    one exists (mock 1855:273683). While the editor is open
-                    the row shows the generic hint (mock 1855:273690). */}
-                <InputHorizontal
+                    one exists (mock 1855:273683), clamped to 5 lines.
+                    ContentAction rather than InputHorizontal, which has no
+                    description clamp. */}
+                <ContentAction
                   icon={SvgAddLines}
                   title="Page Instructions"
+                  // While the editor is open the guidance renders below the
+                  // input (node 2185:50866), so the row carries no
+                  // description of its own.
                   description={
                     editing
-                      ? `Instruct the wiki on how to update this ${kind}.`
+                      ? undefined
                       : ownInstruction ||
                         effInstruction ||
                         `Instruct the wiki on how to update this ${kind}.`
                   }
-                >
-                  <Button
-                    icon={editing ? SvgFold : SvgExpand}
-                    prominence="tertiary"
-                    size="md"
-                    tooltip={editing ? "Collapse" : "Edit instructions"}
-                    onClick={() => {
-                      if (editing) {
-                        setEditing(false);
-                        return;
-                      }
-                      setDraft(ownInstruction);
-                      setEditing(true);
-                    }}
-                  />
-                </InputHorizontal>
+                  descriptionMaxLines={5}
+                  sizePreset="main-ui"
+                  variant="section"
+                  width="full"
+                  padding="fit"
+                  rightChildren={
+                    <Button
+                      icon={editing ? SvgFold : SvgExpand}
+                      prominence="tertiary"
+                      size="md"
+                      tooltip={editing ? "Collapse" : "Edit instructions"}
+                      onClick={() => {
+                        if (editing) {
+                          setEditing(false);
+                          return;
+                        }
+                        setDraft(ownInstruction);
+                        setEditing(true);
+                      }}
+                    />
+                  }
+                />
 
                 {!editing && !ownInstruction && effInstruction && (
                   <Text font="secondary-body" color="text-03">
@@ -369,12 +387,17 @@ export function UpdatePolicyPanel({
                   // Implicit save per the mock: blur persists, collapse only
                   // hides. A failed save reopens with the draft intact.
                   <div className="instructions-editor">
+                    {/* rows = maxRows pins the editor at 8 lines (Opal's
+                        autoResize clamps between the two). Longer content
+                        scrolls in place instead of resizing the panel. */}
                     <InputTextArea
-                      rows={5}
-                      resizable
+                      rows={8}
+                      autoResize
+                      maxRows={8}
+                      resizable={false}
                       value={draft}
                       autoFocus
-                      placeholder={`How should this ${kind} be updated?`}
+                      placeholder="e.g. This page covers engineering onboarding. Keep setup steps current, removing ones that no longer apply. Keep it sequential and high-level, linking out to sources instead of duplicating other docs."
                       onChange={(e) => setDraft(e.target.value)}
                       onKeyDown={(e) => {
                         // Enter saves through the blur path and collapses
@@ -396,6 +419,15 @@ export function UpdatePolicyPanel({
                         );
                       }}
                     />
+                    {/* Guidance below the input (node 2185:50866 "Message
+                        Section"); the copy is verbatim from the mock. */}
+                    <div className="px-2 pt-1 pb-2">
+                      <Text font="secondary-body" color="text-03" as="p">
+                        Describe what this page covers and what is out of scope;
+                        what information to keep current; how detailed it should
+                        be and in what format.
+                      </Text>
+                    </div>
                   </div>
                 )}
               </div>

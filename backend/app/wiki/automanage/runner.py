@@ -46,6 +46,7 @@ from app.wiki.change_proposals import (
     ProposalStatus,
     list_by_status,
     mark_stale,
+    touch_last_emitted,
 )
 from app.wiki.change_proposals import (
     create as create_proposal,
@@ -117,9 +118,20 @@ def _partition_by_audience(scope: Scope) -> list[Scope]:
 
 
 def run_detection(
-    *, trigger: TriggerKind, triggered_by_user_id: str | None, paths: list[str]
+    *,
+    trigger: TriggerKind,
+    triggered_by_user_id: str | None,
+    paths: list[str],
+    focus_paths: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """Run every applicable detector over ``paths`` and emit proposals.
+
+    ``focus_paths`` scopes a focused run's *output*: drafts touching none of
+    the focus paths are dropped after detection. The scope's ``paths`` stay
+    wider than the focus (detectors pair within scope — a single-page scope
+    could never see the colliding sibling), and any incidental finding among
+    the neighbors is left for the sweep — a focused run only asks about the
+    event that triggered it.
 
     Records a ``detection_runs`` row (running → completed/failed) and returns
     ``{run_id, paths_scanned, proposals_emitted}``. Raises on failure after
@@ -180,6 +192,14 @@ def run_detection(
                 drafts = [d for sub in buckets for d in detector.detect(sub)]
             else:
                 drafts = detector.detect(scope)
+            if focus_paths is not None:
+                drafts = [
+                    d
+                    for d in drafts
+                    if any(
+                        p in focus_paths for p in d.source_paths + d.target_paths
+                    )
+                ]
             # One policy query per detector, not one per path per draft.
             mgmt = _resolve_management(drafts)
             for draft in drafts:
@@ -227,6 +247,12 @@ def run_detection(
         # pendings visible and admit claims that conflict with omitted
         # rows.
         pending_rows = list_by_status(ProposalStatus.PENDING, limit=None)
+        # Carried pendings were just re-confirmed against current wiki
+        # state — stamp them so the banner's freshness line ("confirmed by
+        # the last scan …") reflects this run, not the original emit.
+        touch_last_emitted(
+            [row["id"] for row in pending_rows if row["id"] in carried_ids]
+        )
         if trigger is TriggerKind.SWEEP:
             revive_ids = {
                 d.existing_id for _, _, d, _ in candidates
@@ -429,6 +455,52 @@ def run_detection(
         "paths_scanned": len(paths),
         "proposals_emitted": emitted,
     }
+
+
+def _creation_neighborhood(path: str) -> list[str]:
+    """The candidate set an on-create run pairs the new page against: pages
+    sharing its exact blob (body-dup's grouping unit) and pages colliding
+    with its path case-insensitively (case-collision's grouping unit). Two
+    git listings, no fingerprint pass over the whole space — the per-create
+    cost stays flat as the wiki grows.
+
+    This is the scope expansion the ``Scope`` contract requires of partial
+    triggers: detectors pair strictly *within* scope, so the trigger must
+    include every page its detectors could legitimately pair the seed with.
+    """
+    blobs = git.list_paths_with_blob_sha()
+    seed_blob = dict(blobs).get(path)
+    seed_lower = path.lower()
+    neighborhood = {path}
+    for p, blob in blobs:
+        if p.lower() == seed_lower or (seed_blob is not None and blob == seed_blob):
+            neighborhood.add(p)
+    return sorted(neighborhood)
+
+
+def run_on_create(path: str, *, triggered_by_user_id: str | None) -> dict[str, Any]:
+    """Focused detection for a just-created page — the on-create trigger.
+
+    Runs only the detectors that opted into ``ON_CREATE`` (instant-truth
+    checks: case-collision, body-dup; detectors whose findings need the page
+    to settle — stub, template-echo — stay sweep-only) over the page's
+    creation neighborhood, and emits only findings that involve the new page.
+    Reconciliation/invalidation stays sweep-only: a focused run's silence
+    proves nothing about the rest of the ledger.
+
+    The common create collides with nothing and duplicates nothing — its
+    neighborhood is just itself, no detector can pair it, and the run is
+    skipped before it writes a ``detection_runs`` row.
+    """
+    neighborhood = _creation_neighborhood(path)
+    if len(neighborhood) < 2:
+        return {"run_id": None, "paths_scanned": 0, "proposals_emitted": 0}
+    return run_detection(
+        trigger=TriggerKind.ON_CREATE,
+        triggered_by_user_id=triggered_by_user_id,
+        paths=neighborhood,
+        focus_paths=frozenset({path}),
+    )
 
 
 def run_sweep(*, triggered_by_user_id: str | None) -> dict[str, Any]:

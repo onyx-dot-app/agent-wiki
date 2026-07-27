@@ -51,7 +51,10 @@ class _BodyDupDetector:
         self._min_bytes = min_body_bytes
 
     def applicable(self, trigger: TriggerKind) -> bool:
-        return trigger == TriggerKind.SWEEP
+        # On-create too: a new page duplicating an existing one is the
+        # canonical redundant-creation failure, and the check is one blob
+        # listing — instant-truth, no quiet window needed.
+        return trigger in (TriggerKind.SWEEP, TriggerKind.ON_CREATE)
 
     def detect(self, scope: Scope) -> list[ProposalDraft]:
         in_scope = {p for p in scope.paths if p.endswith(".md")}

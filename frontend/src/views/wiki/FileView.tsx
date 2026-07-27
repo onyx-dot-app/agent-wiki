@@ -1248,12 +1248,6 @@ export function FileView({ path }: FileViewProps) {
                     onOpenPolicy={() => openPanel("updates")}
                   />
                   <Path2ReviewBanner path={path} canWrite={canWrite} />
-                  <CoeditPresenceBar
-                    participants={coedit.participants}
-                    peers={coedit.peers}
-                    typing={coedit.typing}
-                    selfUserId={user?.id ?? null}
-                  />
                   {(() => {
                     // Cards visible while the body is still "empty enough"
                     // to discard without losing user work: truly blank, or
