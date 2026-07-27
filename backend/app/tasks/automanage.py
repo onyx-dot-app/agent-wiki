@@ -31,7 +31,16 @@ def run_detection_on_create(path: str, creator_user_id: str | None) -> None:
     """Focused detection for a just-created page (see ``runner.run_on_create``).
     Offline: the creator isn't blocked on it, and it rides the same queue as
     the sweeps whose detectors it reuses. ``creator_user_id`` is recorded as
-    the run's trigger attribution."""
+    the run's trigger attribution.
+
+    State-based on purpose: the run checks ``path`` against wiki state at
+    execution time, not a snapshot from the creation event. A proposal is a
+    claim about *current* state — if the page was edited into uniqueness,
+    deleted, or moved before a delayed task runs, there is respectively
+    nothing true to propose, nothing to scan (singleton neighborhood
+    no-ops), or a skipped check the next sweep covers. Anchoring to
+    creation-time content would emit exactly the stale-premise proposals
+    the validate()/base-sha machinery exists to retire."""
     runner.run_on_create(path, triggered_by_user_id=creator_user_id)
 
 
