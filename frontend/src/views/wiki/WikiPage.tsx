@@ -416,16 +416,22 @@ function Explorer({ dir }: ExplorerProps) {
   const warnLevel = updateWarnLevel(health);
   const { proposals } = useProposalsByPath(dir, !!dir);
   // The suggestions popup self-opens when pending proposals exist (mock
-  // 2236:78296) until the X hides it for this visit.
+  // 2236:78296) until the X hides it for this visit — but never while the
+  // side panel already shows the card (one surface at a time).
+  const panelVisible = !isMobile && panelOpen;
   useEffect(() => {
     popupHidden.current = false;
     setFolderPanel(null);
   }, [dir]);
   useEffect(() => {
+    if (panelVisible) {
+      setFolderPanel((p) => (p === "popup" ? null : p));
+      return;
+    }
     if (proposals.length > 0 && !popupHidden.current) {
       setFolderPanel((prev) => (prev === null ? "popup" : prev));
     }
-  }, [proposals.length]);
+  }, [proposals.length, panelVisible]);
   const openSidePanel = useCallback(() => {
     setFolderPanel(null);
     if (isMobile) setPolicyOpen(true);
