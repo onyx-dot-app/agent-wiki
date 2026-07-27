@@ -23,12 +23,15 @@ import {
   SvgAddLines,
   SvgArrowUpRight,
   SvgExpand,
+  SvgOnyxOctagon,
   SvgSparkle,
+  SvgTextLinesSmall,
 } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
-import { SvgClaude, SvgOnyxLogo, SvgOpenai } from "@onyx-ai/opal/logos";
+import { SvgAnthropic, SvgOpenai } from "@onyx-ai/opal/logos";
 
 import { toast } from "@/hooks/useToast";
+import { OrganizeComingSoonRow } from "@/components/wiki/UpdatePolicyPanel";
 import {
   getUpdatePolicy,
   patchUpdatePolicy,
@@ -36,8 +39,9 @@ import {
 } from "@/lib/updatePolicy";
 import { relativeTime } from "@/lib/users";
 import { fetchFileHistory } from "@/lib/wiki/svc";
+import { useUpdateHealth } from "@/lib/wiki/hooks";
 import type { CommitInfo } from "@/lib/wiki/types";
-import { parseCommitAuthor } from "@/lib/wiki/utils";
+import { parseCommitAuthor, updateWarnLevel } from "@/lib/wiki/utils";
 import type { CoeditParticipant, CoeditPeer } from "@/lib/editor/types";
 import type { DocumentActivity } from "@/types";
 
@@ -54,12 +58,41 @@ const USER_COLORS = [
 
 const MAX_CHIPS = 5;
 
+interface AutoGlyphProps {
+  size?: number;
+}
+
+/** The Auto mark (mock 2079:379954): the octagon outline holding the blue
+ * lines glyph, composed from Opal icons since no single asset ships it. */
+function AutoGlyph({ size = 16 }: AutoGlyphProps) {
+  return (
+    <Section
+      gap={0}
+      width="fit"
+      height="fit"
+      className="relative text-(--text-05)"
+    >
+      <SvgOnyxOctagon size={size} />
+      <Section
+        gap={0}
+        width="full"
+        height="full"
+        alignItems="center"
+        justifyContent="center"
+        className="absolute inset-0 text-(--theme-blue-05)"
+      >
+        <SvgTextLinesSmall size={Math.round(size * 0.55)} />
+      </Section>
+    </Section>
+  );
+}
+
 function agentGlyph(name: string | null): IconFunctionComponent | null {
   const key = name?.trim().toLowerCase();
   if (!key) return null;
-  if (key.includes("claude")) return SvgClaude;
+  if (key.includes("claude")) return SvgAnthropic;
   if (key.includes("codex") || key.includes("openai")) return SvgOpenai;
-  if (key.includes("onyx") || key.includes("craft")) return SvgOnyxLogo;
+  if (key.includes("onyx") || key.includes("craft")) return SvgOnyxOctagon;
   return null;
 }
 
@@ -98,13 +131,13 @@ interface AvatarCircleProps {
   size: "main-content" | "main-ui" | "secondary";
 }
 
-/** The identity-colored 1px ring: Opal's avatar circles carry no color
+/** The identity-colored ring: Opal's avatar circles carry no color
  * prop, so the ring overlays without touching the primitive's box. */
 function IdentityRing({ color }: { color: string }) {
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute inset-0 rounded-full border"
+      className="pointer-events-none absolute inset-0 rounded-full border-2"
       style={{ borderColor: color }}
     />
   );
@@ -112,10 +145,10 @@ function IdentityRing({ color }: { color: string }) {
 
 function AvatarCircle({ entry, size }: AvatarCircleProps) {
   return (
-    <span className="relative flex shrink-0">
+    <Section gap={0} width="fit" height="fit" className="relative shrink-0">
       <IconContainer size={size} avatar="user" name={entry.display} />
       <IdentityRing color={entry.color} />
-    </span>
+    </Section>
   );
 }
 
@@ -123,10 +156,15 @@ function AgentBadge({ entry, size }: AvatarCircleProps) {
   const Glyph = agentGlyph(entry.agentName);
   if (!Glyph) return null;
   return (
-    <span className="relative flex shrink-0">
+    <Section
+      gap={0}
+      width="fit"
+      height="fit"
+      className="relative shrink-0 text-(--text-05)"
+    >
       <IconContainer size={size} avatar="icon" icon={Glyph} />
       <IdentityRing color={entry.color} />
-    </span>
+    </Section>
   );
 }
 
@@ -147,40 +185,77 @@ function PresenceCard({
 }: PresenceCardProps) {
   const edits = commits.slice(0, 3);
   const scrollable = entry.editing && entry.caretHead !== null;
+  // Unmapped agent names get a subtitle but no badge. Gating the slot on
+  // the glyph keeps the title row from holding a blank 16px box.
+  const hasBadge = !!agentGlyph(entry.agentName);
   return (
-    <Section justifyContent="start" alignItems="stretch" height="fit">
+    // Mock anatomy (node 2079:380115 "Activity Panel"): the elevated white
+    // title card sits on the shared panel surface, and the Recent Edits
+    // list renders BELOW the card on the panel background.
+    <Section
+      gap={0}
+      justifyContent="start"
+      alignItems="stretch"
+      height="fit"
+      data-presence-card={entry.userId}
+      className="w-full"
+    >
       <Section
         flexDirection="row"
         justifyContent="start"
         alignItems="start"
         height="fit"
         gap={0.25}
-        data-presence-card={entry.userId}
-        // Mock card chrome: white surface lifted off the panel body.
-        className={`w-full rounded-(--radius-08) bg-(--background-tint-00) p-1 shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)] ${
-          scrollable ? "cursor-pointer" : ""
-        }`}
+        padding={0.5}
+        className={`w-full rounded-(--radius-08) bg-(--background-tint-00) shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)] ${scrollable ? "cursor-pointer" : ""}`}
         onClick={
           scrollable
             ? () => onScrollToOffset?.(entry.caretHead as number)
             : undefined
         }
       >
+        {/* Node 2079:380987: three nested 4/2/2 insets collapse to p-2,
+            putting the avatar pair 8px off the card edge. */}
         <Section
+          gap={0}
           flexDirection="row"
           alignItems="center"
           width="fit"
           height="fit"
-          className="shrink-0 p-[2px]"
+          padding={0.125}
+          className="shrink-0"
         >
-          <AvatarCircle entry={entry} size="main-ui" />
-          {entry.agentName && <AgentBadge entry={entry} size="main-ui" />}
+          {/* 16px slots under the 20px circles give the avatar/badge
+              pair the header stack's 4px overlap. */}
+          <Section
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="center"
+            width={1}
+            height="fit"
+            gap={0}
+          >
+            <AvatarCircle entry={entry} size="main-ui" />
+          </Section>
+          {hasBadge && (
+            <Section
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="center"
+              width={1}
+              height="fit"
+              gap={0}
+            >
+              <AgentBadge entry={entry} size="main-ui" />
+            </Section>
+          )}
         </Section>
         <Section
+          gap={0}
           justifyContent="start"
           alignItems="stretch"
           height="fit"
-          className="min-w-0 flex-1 px-[2px]"
+          className="min-w-0 flex-1"
         >
           <Text font="main-ui-action" color="text-04" as="p" nowrap>
             {entry.display}
@@ -192,18 +267,19 @@ function PresenceCard({
           )}
         </Section>
         <Section
+          gap={0.125}
           flexDirection="row"
           alignItems="center"
           width="fit"
-          height="fit"
-          className="shrink-0 gap-[2px] pt-[2px]"
+          height={1.25}
+          className="shrink-0 text-(--status-text-info-05)"
         >
           {/* raw-ok: no Opal Text color maps to the mock's status-text-info-05 state chip */}
-          <span className="px-[2px] text-[12px] leading-4 text-(--status-text-info-05)">
+          <span className="px-[2px] text-[12px] leading-4">
             {entry.editing ? "Editing" : "Viewing"}
           </span>
           {entry.editing ? (
-            <SvgArrowUpRight size={12} />
+            <SvgArrowUpRight size={12} className="mx-[2px]" />
           ) : (
             <span className="mx-[2px] size-[6px] rounded-full bg-(--status-text-info-05)" />
           )}
@@ -211,37 +287,42 @@ function PresenceCard({
       </Section>
       {edits.length > 0 && (
         <Section
+          gap={0}
           justifyContent="start"
           alignItems="stretch"
           height="fit"
-          className="py-1"
+          className="my-1"
         >
           <Divider title="Recent Edits" />
           {edits.map((c) => {
             const { agentLabel } = parseCommitAuthor(c.author);
             const changed = c.added + c.removed;
             const lines = `${changed} line${changed === 1 ? "" : "s"}`;
+            // Pure additions read "Added", anything else "Updated"
+            // (mock rows "Added 40 lines" / "Updated 45 lines with Codex").
+            const verb = c.removed === 0 ? "Added" : "Updated";
             return (
               <LineItemButton
                 key={c.sha}
                 title={
                   agentLabel
-                    ? `Updated ${lines} with ${agentLabel}`
-                    : `Updated ${lines}`
+                    ? `${verb} ${lines} with ${agentLabel}`
+                    : `${verb} ${lines}`
                 }
                 sizePreset="secondary"
                 variant="body"
                 rightChildren={
                   <Section
+                    gap={0.125}
                     flexDirection="row"
                     alignItems="center"
                     width="fit"
-                    className="gap-[2px]"
+                    className="text-(--text-03)"
                   >
                     <Text font="secondary-body" color="text-03" nowrap>
                       {relativeTime(c.ts)}
                     </Text>
-                    <SvgArrowUpRight size={12} />
+                    <SvgArrowUpRight size={12} className="mx-[2px]" />
                   </Section>
                 }
                 onClick={() => onOpenCommit?.(c.sha)}
@@ -293,16 +374,20 @@ function AnchoredPanel({
     // raw-ok: Popover.Anchor exists but Popover.Content bakes neutral-00/rounded-12/shadow-md chrome (WithoutStyles, no escape) that the mock's tint-01 policy panel and chromeless floating cards contradict, and this wrapper also needs runtime viewport coordinates
     <div
       ref={panelRef}
-      className="fixed z-50"
+      className="fixed z-50 w-(--block-width-panel-medium-small)"
       style={{ top: rect.bottom + 8, right: window.innerWidth - rect.right }}
       onPointerEnter={hover?.onEnter}
       onPointerLeave={hover?.onLeave}
     >
+      {/* Shared panel chrome (mock 1929:362227 "Policy Panel"; the hover
+          card and overflow panels carry the same surface). */}
       <Section
+        gap={0}
         justifyContent="start"
         alignItems="stretch"
         height="fit"
-        className="w-(--block-width-panel-medium-small)"
+        padding={0.25}
+        className="rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]"
       >
         {children}
       </Section>
@@ -319,8 +404,8 @@ interface PolicyPopoverProps {
   onOpenUpdatesPanel?: () => void;
 }
 
-/** The Auto popover (mock 1929:362227 "Policy Panel"): the AI Auto-Edits
- * switch and the page's update instruction, both live on the update
+/** The Auto popover (mock 1929:362227 "Policy Panel"): the AI auto-edit
+ * toggles and the page's update instruction, all live on the update
  * policy the full panel edits. */
 function PolicyPopover({
   path,
@@ -349,20 +434,17 @@ function PolicyPopover({
   const loaded = policy?.forPath === path ? policy.effective : null;
 
   const allowed = !!loaded?.ai_management_allowed;
-  const toggle = async () => {
+  const autoUpdateDisabled = !!loaded?.ingestion_auto_update_disabled;
+  const patchField = async (patch: Partial<EffectivePolicy>) => {
     if (!loaded) return;
     setSaving(true);
-    setPolicy({
-      forPath: path,
-      effective: { ...loaded, ai_management_allowed: !allowed },
-    });
+    setPolicy({ forPath: path, effective: { ...loaded, ...patch } });
     try {
-      await patchUpdatePolicy(path, { ai_management_allowed: !allowed });
+      await patchUpdatePolicy(path, patch);
     } catch (e) {
-      setPolicy({
-        forPath: path,
-        effective: { ...loaded, ai_management_allowed: allowed },
-      });
+      // The pre-patch snapshot is still in `loaded`; putting it back
+      // rolls the optimistic write off.
+      setPolicy({ forPath: path, effective: loaded });
       toast.error(
         e instanceof Error ? e.message : "Couldn't update the page's policy",
       );
@@ -377,9 +459,9 @@ function PolicyPopover({
       alignItems="stretch"
       height="fit"
       gap={0.25}
-      className="rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]"
+      className="w-full"
     >
-      <Section height="fit" alignItems="stretch" padding={0.5}>
+      <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
         <InputHorizontal
           icon={SvgSparkle}
           title="AI Auto-Edits"
@@ -391,12 +473,39 @@ function PolicyPopover({
             // null default would persist a wrong override) and while a
             // save is in flight (a second click would race the PATCH).
             disabled={!canWrite || !loaded || saving}
-            onCheckedChange={() => void toggle()}
+            onCheckedChange={() =>
+              void patchField({ ai_management_allowed: !allowed })
+            }
           />
         </InputHorizontal>
+        {allowed && (
+          <Section
+            justifyContent="start"
+            alignItems="stretch"
+            height="fit"
+            gap={0.5}
+            className="mt-2 ml-6"
+          >
+            <InputHorizontal
+              title="Update"
+              description="Periodically scan ingested data sources to add relevant new information."
+            >
+              <Switch
+                checked={!autoUpdateDisabled}
+                disabled={!canWrite || !loaded || saving}
+                onCheckedChange={() =>
+                  void patchField({
+                    ingestion_auto_update_disabled: !autoUpdateDisabled,
+                  })
+                }
+              />
+            </InputHorizontal>
+            <OrganizeComingSoonRow kind="page" />
+          </Section>
+        )}
       </Section>
       <Divider />
-      <Section height="fit" alignItems="stretch" padding={0.5}>
+      <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
         <InputHorizontal
           icon={SvgAddLines}
           title="Page Instructions"
@@ -503,9 +612,15 @@ export function PresenceAvatars({
   const overflow = entries.slice(MAX_CHIPS);
 
   const clusterRef = useRef<HTMLDivElement | null>(null);
-  const [hoverId, setHoverId] = useState<string | null>(null);
-  const [overflowOpen, setOverflowOpen] = useState(false);
-  const [autoOpen, setAutoOpen] = useState(false);
+  // One panel at a time by construction: opening any panel replaces
+  // whatever was open, so the card, Auto popover, and overflow list can
+  // never stack (mocks show exactly one floating surface).
+  const [openPanel, setOpenPanel] = useState<
+    | { kind: "card"; userId: string }
+    | { kind: "auto" }
+    | { kind: "overflow" }
+    | null
+  >(null);
   const closeTimer = useRef<number>(0);
 
   const holdOpen = useCallback(
@@ -514,7 +629,7 @@ export function PresenceAvatars({
   );
   const closeSoon = useCallback(() => {
     window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(() => setHoverId(null), 150);
+    closeTimer.current = window.setTimeout(() => setOpenPanel(null), 150);
   }, []);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
@@ -523,9 +638,7 @@ export function PresenceAvatars({
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   useEffect(() => {
     setCommits(null);
-    setHoverId(null);
-    setOverflowOpen(false);
-    setAutoOpen(false);
+    setOpenPanel(null);
   }, [path]);
   const loadCommits = useCallback(() => {
     if (commits) return;
@@ -542,7 +655,20 @@ export function PresenceAvatars({
     [commits],
   );
 
-  const hovered = entries.find((e) => e.userId === hoverId);
+  const hovered =
+    openPanel?.kind === "card"
+      ? entries.find((e) => e.userId === openPanel.userId)
+      : undefined;
+  // A card whose user left the roster must not linger in state: the user
+  // re-entering later would silently re-mount the panel with no hover.
+  useEffect(() => {
+    if (openPanel?.kind === "card" && !hovered) setOpenPanel(null);
+  }, [openPanel, hovered]);
+
+  // Ring color tracks the page's update-warn level (mock annotation
+  // "Match warning level").
+  const { health } = useUpdateHealth(path);
+  const warnLevel = updateWarnLevel(health);
 
   return (
     <Section
@@ -552,26 +678,35 @@ export function PresenceAvatars({
       width="fit"
       height="fit"
       gap={0.25}
-      className="px-[2px]"
+      padding={0.125}
     >
       {entries.length > 0 && (
         // DOM order runs last-chip-first so paint order stacks earlier
         // chips on top (the mock), row-reverse restores the visual order.
         <Section
+          gap={0}
           flexDirection="row"
           alignItems="center"
           width="fit"
           height="fit"
-          className="isolate flex-row-reverse px-[2px]"
+          padding={0.125}
+          className="isolate flex-row-reverse"
         >
           {overflow.length > 0 && (
             // raw-ok: Tag is a non-interactive div, the click needs a button wrapper
             <button
               type="button"
               aria-label={`${overflow.length} more`}
+              aria-expanded={openPanel?.kind === "overflow"}
               className="ml-[2px] cursor-pointer"
+              // holdOpen: a close timer pending from leaving a chip would
+              // otherwise dismiss the overflow panel right after this click.
+              onPointerEnter={holdOpen}
               onClick={() => {
-                setOverflowOpen((v) => !v);
+                holdOpen();
+                setOpenPanel((p) =>
+                  p?.kind === "overflow" ? null : { kind: "overflow" },
+                );
                 loadCommits();
               }}
             >
@@ -585,20 +720,22 @@ export function PresenceAvatars({
               flexDirection="row"
               alignItems="center"
               justifyContent="center"
-              width="fit"
+              width={1.25}
               height="fit"
+              gap={0}
               data-presence-chip={e.display}
-              className="relative w-5"
+              className="relative"
               onPointerEnter={() => {
                 holdOpen();
-                setHoverId(e.userId);
+                setOpenPanel({ kind: "card", userId: e.userId });
                 loadCommits();
               }}
               onPointerLeave={closeSoon}
             >
               <AvatarCircle entry={e} size="main-content" />
-              {e.agentName && (
+              {agentGlyph(e.agentName) && (
                 <Section
+                  gap={0}
                   width="fit"
                   height="fit"
                   className="absolute top-[12px] left-[10px]"
@@ -611,7 +748,7 @@ export function PresenceAvatars({
         </Section>
       )}
       {entries.length > 0 && (
-        <Section height="fit" width="fit" className="h-4 self-center">
+        <Section gap={0} height={1} width="fit" className="self-center">
           <Divider
             orientation="vertical"
             paddingParallel="fit"
@@ -619,26 +756,40 @@ export function PresenceAvatars({
           />
         </Section>
       )}
-      {/* raw-ok: the Auto trigger is the mock's blue-ringed avatar circle, not a standard icon button */}
+      {/* raw-ok: the Auto trigger is the mock's ringed avatar circle, not a standard icon button */}
       <button
         type="button"
         aria-label="AI auto-edits"
+        aria-expanded={openPanel?.kind === "auto"}
         className="flex cursor-pointer items-center justify-center px-[2px]"
-        onClick={() => setAutoOpen((v) => !v)}
+        onClick={() =>
+          setOpenPanel((p) => (p?.kind === "auto" ? null : { kind: "auto" }))
+        }
+        onPointerEnter={() => {
+          holdOpen();
+          setOpenPanel({ kind: "auto" });
+        }}
+        onPointerLeave={closeSoon}
       >
-        <span className="relative flex">
-          <IconContainer size="main-content" avatar="icon" icon={SvgOnyxLogo} />
+        <Section gap={0} width="fit" height="fit" className="relative">
+          <IconContainer size="main-content" avatar="icon" icon={AutoGlyph} />
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-full border border-(--theme-blue-05)"
+            className={`pointer-events-none absolute inset-0 rounded-full border ${
+              warnLevel === "over"
+                ? "border-(--status-warning-02)"
+                : warnLevel === "near"
+                  ? "border-(--theme-amber-02)"
+                  : "border-(--theme-blue-05)"
+            }`}
           />
-        </span>
+        </Section>
       </button>
 
       {hovered && clusterRef.current && (
         <AnchoredPanel
           anchor={clusterRef.current}
-          onDismiss={() => setHoverId(null)}
+          onDismiss={() => setOpenPanel(null)}
           hover={{ onEnter: holdOpen, onLeave: closeSoon }}
         >
           <PresenceCard
@@ -649,10 +800,10 @@ export function PresenceAvatars({
           />
         </AnchoredPanel>
       )}
-      {overflowOpen && clusterRef.current && (
+      {openPanel?.kind === "overflow" && clusterRef.current && (
         <AnchoredPanel
           anchor={clusterRef.current}
-          onDismiss={() => setOverflowOpen(false)}
+          onDismiss={() => setOpenPanel(null)}
         >
           <Section
             justifyContent="start"
@@ -672,10 +823,11 @@ export function PresenceAvatars({
           </Section>
         </AnchoredPanel>
       )}
-      {autoOpen && clusterRef.current && (
+      {openPanel?.kind === "auto" && clusterRef.current && (
         <AnchoredPanel
           anchor={clusterRef.current}
-          onDismiss={() => setAutoOpen(false)}
+          onDismiss={() => setOpenPanel(null)}
+          hover={{ onEnter: holdOpen, onLeave: closeSoon }}
         >
           <PolicyPopover
             path={path}

@@ -34,6 +34,7 @@ import {
 } from "@/lib/updatePolicy";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
 import type { UpdateHealth } from "@/lib/wiki/types";
+import { updateWarnLevel } from "@/lib/wiki/utils";
 import { absoluteTime } from "@/lib/time";
 
 interface Props {
@@ -56,7 +57,7 @@ interface Props {
 }
 
 function capNote(health: UpdateHealth): string {
-  if (health.cap_24h > 0 && health.count_24h >= health.cap_24h) {
+  if (updateWarnLevel(health) === "over") {
     return health.cap_resets_at
       ? `Daily auto-edit limit reached. Updates will resume at ${absoluteTime(health.cap_resets_at)}.`
       : "Daily auto-edit limit reached. Updates will resume within 24 hours.";
@@ -64,10 +65,33 @@ function capNote(health: UpdateHealth): string {
   if (health.cap_24h > 0) {
     return "Approaching daily auto-edit limit. Updates will pause when the limit is reached.";
   }
+  // Threshold guard stays local: the message prints the threshold, so a
+  // zero threshold must fall through to the generic note.
   if (health.threshold_24h > 0 && health.count_24h >= health.threshold_24h) {
     return `Reached the alert threshold of ${health.threshold_24h} auto-edits in 24 hours.`;
   }
   return "Auto-updating frequently.";
+}
+
+interface OrganizeComingSoonRowProps {
+  kind: string;
+}
+
+/** The Organize policy row, disabled until the backend grows the field. */
+export function OrganizeComingSoonRow({ kind }: OrganizeComingSoonRowProps) {
+  return (
+    <InputHorizontal
+      title="Organize"
+      description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
+    >
+      <Tooltip tooltip="Coming soon" side="left">
+        {/* raw-ok: a disabled control emits no pointer events, so Tooltip needs this enabled span as its hover target */}
+        <span className="inline-flex">
+          <Switch checked={false} disabled />
+        </span>
+      </Tooltip>
+    </InputHorizontal>
+  );
 }
 
 function errorMessage(e: unknown): string {
@@ -219,13 +243,9 @@ export function UpdatePolicyPanel({
   }
 
   // Health state drives the history card's chrome (mock 1790:52516/52531).
-  const overCap =
-    !!health && health.cap_24h > 0 && health.count_24h >= health.cap_24h;
-  const nearCap =
-    !!health &&
-    !overCap &&
-    health.count_24h > 0 &&
-    health.count_24h >= health.threshold_24h;
+  const warnLevel = updateWarnLevel(health);
+  const overCap = warnLevel === "over";
+  const nearCap = warnLevel === "near";
   const historyCardChrome = overCap
     ? "border-(--status-warning-02) bg-(--status-warning-00)"
     : nearCap
@@ -310,19 +330,7 @@ export function UpdatePolicyPanel({
                       () => void save({ ingestion_auto_update_disabled: null }),
                     )}
                   </InputHorizontal>
-                  <InputHorizontal
-                    title="Organize"
-                    description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
-                  >
-                    <Tooltip tooltip="Coming soon" side="left">
-                      {/* The span keeps hover alive: a disabled control
-                          swallows pointer events, so the tooltip would never
-                          fire on it. */}
-                      <span className="inline-flex">
-                        <Switch checked={false} disabled />
-                      </span>
-                    </Tooltip>
-                  </InputHorizontal>
+                  <OrganizeComingSoonRow kind={kind} />
                 </div>
               </div>
 
