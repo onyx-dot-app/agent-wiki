@@ -1,42 +1,28 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Divider,
   IconContainer,
   LineItemButton,
-  Switch,
   Tag,
   Text,
 } from "@onyx-ai/opal/components";
-import { InputHorizontal, Section } from "@onyx-ai/opal/layouts";
+import { Section } from "@onyx-ai/opal/layouts";
 import {
-  SvgAddLines,
   SvgArrowUpRight,
-  SvgExpand,
   SvgOnyxOctagon,
-  SvgSparkle,
   SvgTextLinesSmall,
 } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { SvgAnthropic, SvgOpenai } from "@onyx-ai/opal/logos";
 
-import { toast } from "@/hooks/useToast";
-import { OrganizeComingSoonRow } from "@/components/wiki/UpdatePolicyPanel";
 import {
-  getUpdatePolicy,
-  patchUpdatePolicy,
-  type EffectivePolicy,
-} from "@/lib/updatePolicy";
+  AnchoredPanel,
+  AutoGlyph,
+  PolicyPopover,
+} from "@/components/wiki/policyPanels";
 import { relativeTime } from "@/lib/users";
 import { fetchFileHistory } from "@/lib/wiki/svc";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
@@ -57,35 +43,6 @@ const USER_COLORS = [
 ];
 
 const MAX_CHIPS = 5;
-
-interface AutoGlyphProps {
-  size?: number;
-}
-
-/** The Auto mark (mock 2079:379954): the octagon outline holding the blue
- * lines glyph, composed from Opal icons since no single asset ships it. */
-function AutoGlyph({ size = 16 }: AutoGlyphProps) {
-  return (
-    <Section
-      gap={0}
-      width="fit"
-      height="fit"
-      className="relative text-(--text-05)"
-    >
-      <SvgOnyxOctagon size={size} />
-      <Section
-        gap={0}
-        width="full"
-        height="full"
-        alignItems="center"
-        justifyContent="center"
-        className="absolute inset-0 text-(--theme-blue-05)"
-      >
-        <SvgTextLinesSmall size={Math.round(size * 0.55)} />
-      </Section>
-    </Section>
-  );
-}
 
 function agentGlyph(name: string | null): IconFunctionComponent | null {
   const key = name?.trim().toLowerCase();
@@ -335,197 +292,6 @@ function PresenceCard({
   );
 }
 
-interface AnchoredPanelProps {
-  anchor: HTMLElement;
-  onDismiss: () => void;
-  /** Hover panels stay open while the pointer is inside them. */
-  hover?: { onEnter: () => void; onLeave: () => void };
-  children: ReactNode;
-}
-
-/** Anchors a floating panel to the header cluster: fixed-position, right
- * edges aligned, just below the anchor. */
-function AnchoredPanel({
-  anchor,
-  onDismiss,
-  hover,
-  children,
-}: AnchoredPanelProps) {
-  const [rect, setRect] = useState(() => anchor.getBoundingClientRect());
-  useEffect(() => {
-    setRect(anchor.getBoundingClientRect());
-  }, [anchor]);
-  const panelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (hover) return;
-    const onDown = (e: PointerEvent) => {
-      const el = panelRef.current;
-      if (
-        el &&
-        !el.contains(e.target as Node) &&
-        !anchor.contains(e.target as Node)
-      )
-        onDismiss();
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    return () => window.removeEventListener("pointerdown", onDown, true);
-  }, [anchor, hover, onDismiss]);
-  return createPortal(
-    // raw-ok: Popover.Anchor exists but Popover.Content bakes neutral-00/rounded-12/shadow-md chrome (WithoutStyles, no escape) that the mock's tint-01 policy panel and chromeless floating cards contradict, and this wrapper also needs runtime viewport coordinates
-    <div
-      ref={panelRef}
-      className="fixed z-50 w-(--block-width-panel-medium-small)"
-      style={{ top: rect.bottom + 8, right: window.innerWidth - rect.right }}
-      onPointerEnter={hover?.onEnter}
-      onPointerLeave={hover?.onLeave}
-    >
-      {/* Shared panel chrome (mock 1929:362227 "Policy Panel"; the hover
-          card and overflow panels carry the same surface). */}
-      <Section
-        gap={0}
-        justifyContent="start"
-        alignItems="stretch"
-        height="fit"
-        padding={0.25}
-        className="rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) shadow-[0px_2px_12px_0px_var(--shadow-02),0px_0px_4px_1px_var(--shadow-01)]"
-      >
-        {children}
-      </Section>
-    </div>,
-    document.body,
-  );
-}
-
-interface PolicyPopoverProps {
-  path: string;
-  /** The policy PATCH is write-gated, so read-only viewers get a
-   * disabled switch instead of a doomed request. */
-  canWrite: boolean;
-  onOpenUpdatesPanel?: () => void;
-}
-
-/** The Auto popover (mock 1929:362227 "Policy Panel"): the AI auto-edit
- * toggles and the page's update instruction, all live on the update
- * policy the full panel edits. */
-function PolicyPopover({
-  path,
-  canWrite,
-  onOpenUpdatesPanel,
-}: PolicyPopoverProps) {
-  // The policy carries the path it was fetched for: a mismatch reads as
-  // unloaded in the same render a navigation lands, so a stale page's
-  // value can never be shown or PATCHed against the new path.
-  const [policy, setPolicy] = useState<{
-    forPath: string;
-    effective: EffectivePolicy;
-  } | null>(null);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    getUpdatePolicy(path)
-      .then(
-        (p) => alive && setPolicy({ forPath: path, effective: p.effective }),
-      )
-      .catch(() => alive && setPolicy(null));
-    return () => {
-      alive = false;
-    };
-  }, [path]);
-  const loaded = policy?.forPath === path ? policy.effective : null;
-
-  const allowed = !!loaded?.ai_management_allowed;
-  const autoUpdateDisabled = !!loaded?.ingestion_auto_update_disabled;
-  const patchField = async (patch: Partial<EffectivePolicy>) => {
-    if (!loaded) return;
-    setSaving(true);
-    setPolicy({ forPath: path, effective: { ...loaded, ...patch } });
-    try {
-      await patchUpdatePolicy(path, patch);
-    } catch (e) {
-      // The pre-patch snapshot is still in `loaded`; putting it back
-      // rolls the optimistic write off.
-      setPolicy({ forPath: path, effective: loaded });
-      toast.error(
-        e instanceof Error ? e.message : "Couldn't update the page's policy",
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Section
-      justifyContent="start"
-      alignItems="stretch"
-      height="fit"
-      gap={0.25}
-      className="w-full"
-    >
-      <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
-        <InputHorizontal
-          icon={SvgSparkle}
-          title="AI Auto-Edits"
-          description="Let AI update/organize this page on its own."
-        >
-          <Switch
-            checked={allowed}
-            // Held until this path's policy loads (toggling against the
-            // null default would persist a wrong override) and while a
-            // save is in flight (a second click would race the PATCH).
-            disabled={!canWrite || !loaded || saving}
-            onCheckedChange={() =>
-              void patchField({ ai_management_allowed: !allowed })
-            }
-          />
-        </InputHorizontal>
-        {allowed && (
-          <Section
-            justifyContent="start"
-            alignItems="stretch"
-            height="fit"
-            gap={0.5}
-            className="mt-2 ml-6"
-          >
-            <InputHorizontal
-              title="Update"
-              description="Periodically scan ingested data sources to add relevant new information."
-            >
-              <Switch
-                checked={!autoUpdateDisabled}
-                disabled={!canWrite || !loaded || saving}
-                onCheckedChange={() =>
-                  void patchField({
-                    ingestion_auto_update_disabled: !autoUpdateDisabled,
-                  })
-                }
-              />
-            </InputHorizontal>
-            <OrganizeComingSoonRow kind="page" />
-          </Section>
-        )}
-      </Section>
-      <Divider />
-      <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
-        <InputHorizontal
-          icon={SvgAddLines}
-          title="Page Instructions"
-          description={
-            loaded?.update_instruction || "How should this page be updated?"
-          }
-        >
-          <Button
-            icon={SvgExpand}
-            size="md"
-            prominence="tertiary"
-            tooltip="Open in panel"
-            onClick={onOpenUpdatesPanel}
-          />
-        </InputHorizontal>
-      </Section>
-    </Section>
-  );
-}
-
 /**
  * The header's "who is on this page" cluster (mocks 2079:379824,
  * 2079:381324, 2079:383512, 1929:361938): every coedit participant as
@@ -760,11 +526,14 @@ export function PresenceAvatars({
       <button
         type="button"
         aria-label="AI auto-edits"
-        aria-expanded={openPanel?.kind === "auto"}
         className="flex cursor-pointer items-center justify-center px-[2px]"
-        onClick={() =>
-          setOpenPanel((p) => (p?.kind === "auto" ? null : { kind: "auto" }))
-        }
+        // Hover previews the popover; click commits to the side panel
+        // (mock annotation: "Clicking on the auto icon or panel will open
+        // in the side panel").
+        onClick={() => {
+          setOpenPanel(null);
+          onOpenUpdatesPanel?.();
+        }}
         onPointerEnter={() => {
           holdOpen();
           setOpenPanel({ kind: "auto" });
@@ -832,7 +601,12 @@ export function PresenceAvatars({
           <PolicyPopover
             path={path}
             canWrite={canWrite}
-            onOpenUpdatesPanel={onOpenUpdatesPanel}
+            // The popover hands off to the side panel in place: same UI,
+            // so it dismisses as the panel opens.
+            onOpenUpdatesPanel={() => {
+              setOpenPanel(null);
+              onOpenUpdatesPanel?.();
+            }}
           />
         </AnchoredPanel>
       )}

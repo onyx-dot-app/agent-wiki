@@ -95,7 +95,7 @@ export interface Proposal {
 
 /** Pending proposals touching `path` (a page or folder subtree) that the caller
  * can act on — the server write-scopes to edit access, so a read-only viewer
- * gets an empty list. Backs the Path-2 review banner on the page/folder.
+ * gets an empty list.
  *
  * `enabled` (default true) gates the fetch — pass the caller's known write
  * capability to skip polling for viewers; the server remains the authority. */
@@ -133,6 +133,14 @@ export function approveProposal(id: number) {
 /** Reject a pending proposal — a durable "don't propose this again". */
 export function rejectProposal(id: number) {
   return apiFetch<{ status: string }>(`/automanage/proposals/${id}/reject`, {
+    method: "POST",
+  });
+}
+
+/** Dismiss a pending proposal: clears it from review surfaces without the
+ * durable veto a reject carries (the sweep may re-propose it later). */
+export function dismissProposal(id: number) {
+  return apiFetch<{ status: string }>(`/automanage/proposals/${id}/dismiss`, {
     method: "POST",
   });
 }

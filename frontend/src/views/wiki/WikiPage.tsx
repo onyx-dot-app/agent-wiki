@@ -14,10 +14,15 @@ import {
   Button,
   Divider,
   EmptyMessageCard,
+  IconContainer,
   InputTypeIn,
+  LineItemButton,
   MessageCard,
+  Popover,
+  PopoverMenu,
   Text,
 } from "@onyx-ai/opal/components";
+import { Section } from "@onyx-ai/opal/layouts";
 import { cn } from "@onyx-ai/opal/utils";
 import {
   SvgAlertTriangle,
@@ -27,10 +32,10 @@ import {
   SvgDocFile,
   SvgFolder,
   SvgFolderPlus,
-  SvgLock,
   SvgMoreHorizontal,
+  SvgShare,
+  SvgSidebar,
   SvgPlus,
-  SvgShield,
   SvgTrash,
   SvgWorkflow,
   SvgZap,
@@ -38,11 +43,21 @@ import {
 import { useConfirm } from "@/components/common/ConfirmDialog";
 import { LoadingSpinner } from "@/components/common/LoadingSpinner";
 import { TriggerPanel } from "@/components/triggers/TriggerPanel";
-import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { WikiHome } from "@/components/wiki/WikiHome";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { StartNewPage } from "@/components/wiki/StartNewPage";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
+import { DocPanel, type DocPanelTab } from "@/components/wiki/DocPanel";
+import { SuggestionsCard } from "@/components/wiki/SuggestionsCard";
+import { WatchingPanel } from "@/components/wiki/WatchingPanel";
+import {
+  AnchoredPanel,
+  AutoGlyph,
+  PanelSurface,
+  PolicyPopover,
+} from "@/components/wiki/policyPanels";
+import { useProposalsByPath } from "@/lib/autoOrganize";
+import type { Trigger } from "@/lib/triggers";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";
 import { useRowActions } from "@/providers/WikiItemActionsProvider";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -57,15 +72,19 @@ import {
   FilenameRow,
 } from "@/views/wiki/FileView";
 import { AI_DRAFT_KEY } from "@/lib/wiki/constants";
-import { pageTitle } from "@/lib/wiki/utils";
+import { pageTitle, updateWarnLevel } from "@/lib/wiki/utils";
 import {
+  useUpdateHealth,
   useWikiTree,
   useDeletedTombstone,
   useDocIdResolve,
   usePathToId,
 } from "@/lib/wiki/hooks";
 import { useRequireAuth } from "@/lib/auth";
-import { useHeaderActionsHost } from "@/providers/WikiHeaderActionsProvider";
+import {
+  useHeaderActionsHost,
+  useRightPanelHost,
+} from "@/providers/WikiHeaderActionsProvider";
 import { useDrafting } from "@/lib/drafting";
 import { rememberWikiPath } from "@/lib/lastViewed";
 import { recordRecentDoc } from "@/lib/recents";
@@ -189,6 +208,7 @@ function Explorer({ dir }: ExplorerProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const rightHost = useRightPanelHost();
   const rowActions = useRowActions();
   const { entries, error: listError, mutate: mutatePaths } = useWikiTree();
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -210,7 +230,6 @@ function Explorer({ dir }: ExplorerProps) {
   const [creating, setCreating] = useState<"folder" | null>(null);
   const [newName, setNewName] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
-  const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
   const [sort, setSort] = useState<SortMode>("name-asc");
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -218,6 +237,29 @@ function Explorer({ dir }: ExplorerProps) {
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [sharePath, setSharePath] = useState<string | null>(null);
   const [policyOpen, setPolicyOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState<DocPanelTab>("updates");
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [moreOpen, setMoreOpen] = useState(false);
+  // Single editor state, FileView's shape: null = closed, trigger null =
+  // creating, trigger set = editing an existing watcher.
+  const [watcherEditor, setWatcherEditor] = useState<{
+    trigger: Trigger | null;
+  } | null>(null);
+  const [hoverOpen, setHoverOpen] = useState(false);
+  // X only hides the popup for this visit; suggestions persist in the
+  // side panel and the popup returns on the next page open.
+  const [popupHidden, setPopupHidden] = useState(false);
+  const clusterRef = useRef<HTMLDivElement | null>(null);
+  const closeTimer = useRef<number>(0);
+  const holdOpen = useCallback(
+    () => window.clearTimeout(closeTimer.current),
+    [],
+  );
+  const closeSoon = useCallback(() => {
+    window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setHoverOpen(false), 150);
+  }, []);
+  useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
   const { subdirs, files } = useMemo(() => {
     const prefix = dir ? dir + "/" : "";
@@ -368,9 +410,50 @@ function Explorer({ dir }: ExplorerProps) {
   }
 
   // Folder-level actions portal into the single pinned header (mock
-  // 705:142993): New Page + new-folder, then share / trigger / launch-agent
-  // past a divider. The update policy lives inline in the side column. Mobile
-  // keeps it behind a header button + drawer instead.
+  // 705:142993).
+  const { health } = useUpdateHealth(dir || null);
+  const warnLevel = updateWarnLevel(health);
+  const { proposals } = useProposalsByPath(dir, !!dir);
+  // The suggestions popup self-shows while proposals exist (mock
+  // 2236:78296) until the X hides it for the visit — never while the side
+  // panel already shows the card, and it yields to the hover popover.
+  const panelVisible = !isMobile && panelOpen;
+  useEffect(() => {
+    setPopupHidden(false);
+    setHoverOpen(false);
+  }, [dir]);
+  const showPopup = !popupHidden && !panelVisible && proposals.length > 0;
+  const openSidePanel = useCallback(() => {
+    setHoverOpen(false);
+    if (isMobile) setPolicyOpen(true);
+    else {
+      setPanelOpen(true);
+      setPanelTab("updates");
+    }
+  }, [isMobile]);
+  // Mock annotation "Click to highlight folder": flash the listing row for
+  // the proposal's first path segment under this folder.
+  const highlightPath = useCallback(
+    (paths: string[]) => {
+      const target = paths.find((x) => x.startsWith(dir ? dir + "/" : ""));
+      if (!target) return;
+      const rel = dir ? target.slice(dir.length + 1) : target;
+      const childPath = (dir ? dir + "/" : "") + rel.split("/")[0];
+      const el = document.querySelector(
+        `[data-wiki-row="${CSS.escape(childPath)}"]`,
+      );
+      if (!el) return;
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.classList.add("wiki-row-flash");
+      el.addEventListener(
+        "animationend",
+        () => el.classList.remove("wiki-row-flash"),
+        { once: true },
+      );
+    },
+    [dir],
+  );
+
   const headerActions = (
     <>
       <Button
@@ -390,33 +473,85 @@ function Explorer({ dir }: ExplorerProps) {
         }}
       />
       <span aria-hidden className="mx-2 h-5 w-px bg-(--border-01)" />
+      <Section ref={clusterRef} gap={0} width="fit" height="fit">
+        {/* raw-ok: the Auto trigger is the mock's ringed avatar circle, not a standard icon button */}
+        <button
+          type="button"
+          aria-label="AI auto-edits"
+          className="flex cursor-pointer items-center justify-center px-[2px]"
+          onClick={openSidePanel}
+          onPointerEnter={() => {
+            holdOpen();
+            setHoverOpen(true);
+          }}
+          onPointerLeave={closeSoon}
+        >
+          <Section gap={0} width="fit" height="fit" className="relative">
+            <IconContainer size="main-content" avatar="icon" icon={AutoGlyph} />
+            <span
+              aria-hidden
+              className={`pointer-events-none absolute inset-0 rounded-full border ${
+                warnLevel === "over"
+                  ? "border-(--status-warning-02)"
+                  : warnLevel === "near"
+                    ? "border-(--theme-amber-02)"
+                    : "border-(--theme-blue-05)"
+              }`}
+            />
+          </Section>
+        </button>
+      </Section>
       <Button
+        icon={SvgShare}
         prominence="tertiary"
-        rightIcon={SvgLock}
+        tooltip="Share"
         onClick={() => setSharePath(dir)}
-      >
-        Share
-      </Button>
-      <Button
-        icon={SvgWorkflow}
-        prominence="tertiary"
-        tooltip="Trigger"
-        onClick={() => setTriggerModalOpen(true)}
       />
+      <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+        <Popover.Trigger asChild>
+          <span className="inline-flex">
+            <Button
+              icon={SvgMoreHorizontal}
+              prominence="tertiary"
+              tooltip="More"
+            />
+          </span>
+        </Popover.Trigger>
+        <Popover.Content width="fit" align="end">
+          <PopoverMenu>
+            <LineItemButton
+              title="Trigger"
+              icon={SvgWorkflow}
+              sizePreset="main-ui"
+              variant="section"
+              onClick={() => {
+                setMoreOpen(false);
+                setWatcherEditor({ trigger: null });
+              }}
+            />
+            <LineItemButton
+              title="Launch Agent"
+              icon={SvgZap}
+              sizePreset="main-ui"
+              variant="section"
+              onClick={() => {
+                setMoreOpen(false);
+                rowActions.launchAgent(dir);
+              }}
+            />
+          </PopoverMenu>
+        </Popover.Content>
+      </Popover>
       <Button
-        icon={SvgZap}
+        icon={SvgSidebar}
         prominence="tertiary"
-        tooltip="Launch Agent"
-        onClick={() => rowActions.launchAgent(dir)}
+        tooltip={
+          isMobile ? "Update Policy" : panelOpen ? "Close panel" : "Open panel"
+        }
+        onClick={() =>
+          isMobile ? setPolicyOpen(true) : setPanelOpen((v) => !v)
+        }
       />
-      {isMobile && (
-        <Button
-          icon={SvgShield}
-          prominence="tertiary"
-          tooltip="Update Policy"
-          onClick={() => setPolicyOpen(true)}
-        />
-      )}
     </>
   );
 
@@ -433,18 +568,12 @@ function Explorer({ dir }: ExplorerProps) {
         className={`min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
       >
         <TriggerPanel
-          open={triggerModalOpen}
-          initial={{ scope_path: dir || "/" }}
-          lockScope
-          onClose={() => setTriggerModalOpen(false)}
-          onSaved={(t) =>
-            setTriggerStatus(`Created trigger for ${t.scope_path}`)
-          }
+          open={watcherEditor !== null}
+          initial={watcherEditor?.trigger ?? { scope_path: dir || "/" }}
+          lockScope={!watcherEditor?.trigger}
+          onClose={() => setWatcherEditor(null)}
+          onSaved={(t) => setTriggerStatus(`Saved trigger for ${t.scope_path}`)}
         />
-
-        {/* Auto Organize review banner for this folder's subtree (not root —
-            a wiki-wide review is the admin queue's job). */}
-        {dir && <Path2ReviewBanner path={dir} />}
 
         {triggerStatus && (
           <div className="mb-3 text-xs text-(--text-04)">{triggerStatus}</div>
@@ -610,16 +739,77 @@ function Explorer({ dir }: ExplorerProps) {
             onClose={() => setSharePath(null)}
           />
         )}
+
+        {(hoverOpen || showPopup) && clusterRef.current && (
+          // Mock 2283:84706: hovering Auto stacks the policy panel ABOVE
+          // the persistent suggestions popup; the popup itself self-shows
+          // and only the X (or the side panel) removes it.
+          <AnchoredPanel
+            anchor={clusterRef.current}
+            onDismiss={() =>
+              hoverOpen ? setHoverOpen(false) : setPopupHidden(true)
+            }
+            hover={
+              hoverOpen ? { onEnter: holdOpen, onLeave: closeSoon } : undefined
+            }
+            chrome={false}
+          >
+            <Section gap={0.25} height="fit" alignItems="stretch">
+              {hoverOpen && (
+                <PanelSurface>
+                  <PolicyPopover
+                    path={dir}
+                    canWrite
+                    onOpenUpdatesPanel={openSidePanel}
+                  />
+                </PanelSurface>
+              )}
+              {showPopup && (
+                <SuggestionsCard
+                  path={dir}
+                  onClose={() => setPopupHidden(true)}
+                  onOpenPanel={openSidePanel}
+                  onHighlight={highlightPath}
+                />
+              )}
+            </Section>
+          </AnchoredPanel>
+        )}
       </div>
 
-      {/* Folder policy applies to every page under this folder. Desktop shows
-          it inline in the side column (mock 1673:32813). Mobile keeps the
-          header button + drawer. */}
-      {!isMobile && (
-        <aside className="w-[360px] shrink-0 overflow-y-auto p-2">
-          <UpdatePolicyPanel path={dir} />
-        </aside>
-      )}
+      {/* Desktop: the folder's right rail is the tabbed panel (Updates |
+          Watching, mock 2240:59533). It portals into the right-panel host
+          so the column shifts the header, the doc page's composition.
+          Mobile keeps the header button + drawer. */}
+      {!isMobile &&
+        panelOpen &&
+        rightHost?.el &&
+        createPortal(
+          <DocPanel
+            tab={panelTab}
+            onTabChange={setPanelTab}
+            tabs={["updates", "watching"]}
+          >
+            {panelTab === "updates" ? (
+              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-1">
+                <UpdatePolicyPanel path={dir} />
+                {/* Not at root — a wiki-wide review is the admin queue's job. */}
+                {dir && (
+                  <SuggestionsCard path={dir} onHighlight={highlightPath} />
+                )}
+              </div>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
+                <WatchingPanel
+                  path={dir}
+                  onNew={() => setWatcherEditor({ trigger: null })}
+                  onEdit={(t) => setWatcherEditor({ trigger: t })}
+                />
+              </div>
+            )}
+          </DocPanel>,
+          rightHost.el,
+        )}
       {policyOpen && isMobile && (
         <>
           <div
@@ -628,11 +818,18 @@ function Explorer({ dir }: ExplorerProps) {
             className="fixed inset-0 z-[60] bg-(--mask-03)"
           />
           <div className="fixed top-0 right-0 bottom-0 z-[70] flex w-[min(400px,100vw)] shadow-(--shadow-panel)">
-            <UpdatePolicyPanel
-              path={dir}
-              onClose={() => setPolicyOpen(false)}
-              fullHeight
-            />
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto bg-(--background-tint-00)">
+              <UpdatePolicyPanel
+                path={dir}
+                onClose={() => setPolicyOpen(false)}
+                fullHeight
+              />
+              {dir && (
+                <div className="px-2 pb-2">
+                  <SuggestionsCard path={dir} />
+                </div>
+              )}
+            </div>
           </div>
         </>
       )}
@@ -649,6 +846,7 @@ function NewDocView({ dir }: NewDocViewProps) {
   const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
+  const rightHost = useRightPanelHost();
   const { setDrafting, requestExpand, registerDraftBridge } = useDrafting();
   // "Start writing with AI" hands a generated draft (+ the prompt) here via
   // sessionStorage, paired with ?ai=1. Read it synchronously so the editor and
@@ -1063,6 +1261,7 @@ function Row({
   // double-fire row navigation.
   return (
     <li
+      data-wiki-row={path}
       draggable={!renaming}
       onClick={(e) => {
         if (renaming) return;

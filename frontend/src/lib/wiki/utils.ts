@@ -26,6 +26,11 @@ export function lastSegment(path: string): string {
   return seg.endsWith(".md") ? seg.slice(0, -3) : seg;
 }
 
+/** Scope flavor for policy copy: .md paths are pages, all else folders. */
+export function pathKind(path: string): "page" | "folder" {
+  return path.endsWith(".md") ? "page" : "folder";
+}
+
 /** Strip the directory prefix and `.md` extension from a wiki file path to
  * get the human-readable page title. See also {@link lastSegment} for the
  * generic (possibly folder/root) path case. */
