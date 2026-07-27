@@ -58,15 +58,27 @@ class ProposalView(BaseModel):
     created_via: str
     run_id: str | None
     created_at: str
+    # When a sweep last asserted this finding against current wiki state —
+    # created/revived/carried all stamp it. Backs the card's freshness line.
+    last_emitted_at: str | None = None
 
 
 class ProposalsResponse(BaseModel):
     proposals: list[ProposalView]
 
 
-class ProposalActionResponse(BaseModel):
-    """Result of approving/rejecting a proposal. On approve, execution is
-    enqueued on the detection queue, so ``status`` reflects the decision, not
-    the applied state."""
+class RejectRequest(BaseModel):
+    """Optional body for reject. ``dont_ask_again`` also sets the
+    do-not-consolidate marker (``ai_management_allowed=False``) on every
+    page the proposal touches, so detectors skip them entirely from now
+    on — the durable, explicit "never ask about these pages"."""
 
-    status: Literal["approved", "rejected"]
+    dont_ask_again: bool = False
+
+
+class ProposalActionResponse(BaseModel):
+    """Result of actioning a proposal. On approve, execution is enqueued on
+    the detection queue, so ``status`` reflects the decision, not the
+    applied state."""
+
+    status: Literal["approved", "rejected", "dismissed"]

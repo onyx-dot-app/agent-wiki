@@ -46,6 +46,7 @@ from app.wiki.change_proposals import (
     ProposalStatus,
     list_by_status,
     mark_stale,
+    touch_last_emitted,
 )
 from app.wiki.change_proposals import (
     create as create_proposal,
@@ -227,6 +228,12 @@ def run_detection(
         # pendings visible and admit claims that conflict with omitted
         # rows.
         pending_rows = list_by_status(ProposalStatus.PENDING, limit=None)
+        # Carried pendings were just re-confirmed against current wiki
+        # state — stamp them so the banner's freshness line ("confirmed by
+        # the last scan …") reflects this run, not the original emit.
+        touch_last_emitted(
+            [row["id"] for row in pending_rows if row["id"] in carried_ids]
+        )
         if trigger is TriggerKind.SWEEP:
             revive_ids = {
                 d.existing_id for _, _, d, _ in candidates
