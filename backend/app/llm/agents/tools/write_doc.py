@@ -7,19 +7,14 @@ from __future__ import annotations
 
 from typing import Any
 
-import logging
-
 from app.auth import current_user
 from app.wiki import templates as templates_repo
 from app.wiki import update_policy
 from app.wiki import utils as wiki_utils
 from app.wiki import git as wiki_git
-from app.wiki.automanage import preflight
 from app.llm.agents.tools.errors import ToolError
 from app.llm.errors import LLMError
 from app.models.wiki import ChangeKind, CommitMaxRetriesError
-
-log = logging.getLogger(__name__)
 
 
 def _seed_create_policy(
@@ -142,18 +137,6 @@ def handle(args: dict[str, Any]) -> Any:
                 "broken_links": wiki_utils.broken_links(path, result.new_body),
             }
         else:
-            # Creation preflight — surface, never block: the create always
-            # proceeds (the human owns the cleanup decision and may ignore
-            # it), but instant-truth conflicts (case collision,
-            # byte-identical duplicate) annotate the result so the agent can
-            # tell the human, and Auto Organize's focused run turns the same
-            # finding into the on-page proposal the human can act on.
-            # Fail-open: a broken check never touches the write.
-            try:
-                conflicts = preflight.check_creation(path, body)
-            except Exception:
-                log.exception("creation preflight failed for %s", path)
-                conflicts = []
             # New file: no base to merge against, so this always commits.
             result = wiki_utils.commit_and_fan_out(
                 path=path, body=body, message=commit_message.strip(),
@@ -171,15 +154,6 @@ def handle(args: dict[str, Any]) -> Any:
                 "diff": wiki_utils.unified_diff("", body, path),
                 "broken_links": wiki_utils.broken_links(path, body),
             }
-            if conflicts:
-                out["conflicts"] = [c.model_dump() for c in conflicts]
-                out["message"] = (
-                    "created, but note: "
-                    + " ".join(c.suggestion for c in conflicts)
-                    + " An Auto Organize suggestion will appear on the "
-                    "page for the user to accept or ignore — mention this "
-                    "to them."
-                )
             if warning:
                 out["warning"] = warning
             return out

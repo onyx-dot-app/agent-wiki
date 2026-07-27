@@ -1,6 +1,6 @@
 {
   "name": "write_doc",
-  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. When CREATING a new page, optionally pass `template_id` (from `list_templates`) to seed the page's update policy from that template (auto-update default + update instruction). Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces. A CREATE that case-collides with an existing path or is byte-identical to an existing page still succeeds, but the result carries `conflicts` and a note — relay it to the user (an Auto Organize suggestion will appear on the page; they can accept or ignore it).",
+  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. When CREATING a new page, optionally pass `template_id` (from `list_templates`) to seed the page's update policy from that template (auto-update default + update instruction). Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces.",
   "input_schema": {
     "type": "object",
     "properties": {
