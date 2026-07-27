@@ -17,6 +17,9 @@ const tabIndex = (tab: DocPanelTab) => TABS.findIndex((t) => t.value === tab);
 interface DocPanelProps {
   tab: DocPanelTab;
   onTabChange: (tab: DocPanelTab) => void;
+  /** Which tabs the strip offers, in TABS order. Folder pages show a
+   * subset (Updates | Watching, mock 2240:59533); omit for all four. */
+  tabs?: DocPanelTab[];
   /** Active tab's surface. The page renders it so cross-tab state (comment
    * threads, trigger status) lives above the panel and survives tab moves. */
   children: ReactNode;
@@ -26,7 +29,8 @@ interface DocPanelProps {
  * Sources | Watching tab strip over the active surface. The rail holds one
  * occupant at a time, so the tabbed surfaces render inside this panel
  * rather than as their own rail columns. */
-export function DocPanel({ tab, onTabChange, children }: DocPanelProps) {
+export function DocPanel({ tab, onTabChange, tabs, children }: DocPanelProps) {
+  const shown = tabs ? TABS.filter((t) => tabs.includes(t.value)) : TABS;
   // The incoming surface slides from the side the underline travels toward.
   // Adjust-during-render binds the direction to the committed tree, safe
   // under StrictMode double renders and abandoned concurrent renders.
@@ -49,7 +53,7 @@ export function DocPanel({ tab, onTabChange, children }: DocPanelProps) {
           onValueChange={(v) => onTabChange(v as DocPanelTab)}
         >
           <Tabs.List>
-            {TABS.map((t) => (
+            {shown.map((t) => (
               <Tabs.Trigger key={t.value} value={t.value}>
                 {t.label}
               </Tabs.Trigger>

@@ -136,3 +136,11 @@ export function rejectProposal(id: number) {
     method: "POST",
   });
 }
+
+/** Dismiss a pending proposal — clears it from review surfaces without the
+ * durable veto a reject carries (the sweep may re-propose it later). */
+export function dismissProposal(id: number) {
+  return apiFetch<{ status: string }>(`/automanage/proposals/${id}/dismiss`, {
+    method: "POST",
+  });
+}
