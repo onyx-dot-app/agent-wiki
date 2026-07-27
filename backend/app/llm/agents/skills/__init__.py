@@ -56,6 +56,7 @@ SKILLS: dict[str, Skill] = {
             "multi_edit",
             "apply_patch",
             "move_path",
+            "delete_doc",
             "create_directory",
             "update_doc_nl",
             "list_history",
