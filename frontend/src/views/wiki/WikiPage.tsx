@@ -53,7 +53,6 @@ import { WatchingPanel } from "@/components/wiki/WatchingPanel";
 import {
   AnchoredPanel,
   AutoGlyph,
-  PanelSurface,
   PolicyPopover,
 } from "@/components/wiki/policyPanels";
 import { useProposalsByPath } from "@/lib/autoOrganize";
@@ -746,29 +745,20 @@ function Explorer({ dir }: ExplorerProps) {
         )}
 
         {folderPanel === "hover" && clusterRef.current && (
-          // Mock 2283:84706: the policy panel stacked over the suggestions
-          // card, each with its own surface.
+          // Hover previews the policy popover only; suggestions never
+          // ride the hover — they self-show as the dismissible popup and
+          // live in the side panel (Nik, 2026-07-27).
           <AnchoredPanel
             anchor={clusterRef.current}
             onDismiss={() => setFolderPanel(null)}
             hover={{ onEnter: holdOpen, onLeave: closeSoon }}
-            chrome={false}
           >
-            <Section gap={0.25} height="fit" alignItems="stretch">
-              <PanelSurface>
-                <PolicyPopover
-                  path={dir}
-                  canWrite
-                  kind="folder"
-                  onOpenUpdatesPanel={openSidePanel}
-                />
-              </PanelSurface>
-              <SuggestionsCard
-                path={dir}
-                onOpenPanel={openSidePanel}
-                onHighlight={highlightPath}
-              />
-            </Section>
+            <PolicyPopover
+              path={dir}
+              canWrite
+              kind="folder"
+              onOpenUpdatesPanel={openSidePanel}
+            />
           </AnchoredPanel>
         )}
         {folderPanel === "popup" && clusterRef.current && (

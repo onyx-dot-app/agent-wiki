@@ -83,7 +83,10 @@ export function SuggestionsCard({
   const [open, setOpen] = useState(true);
   const [outcomes, setOutcomes] = useState<Record<number, Outcome>>({});
   const alive = useRef(true);
-  useEffect(() => () => void (alive.current = false), []);
+  useEffect(() => {
+    alive.current = true;
+    return () => void (alive.current = false);
+  }, []);
 
   const setOutcome = (id: number, o: Outcome) =>
     alive.current && setOutcomes((prev) => ({ ...prev, [id]: o }));
@@ -104,6 +107,9 @@ export function SuggestionsCard({
         // transient failure (or the row was purged) — keep polling
       }
     }
+    // Didn't settle in-window: the row has left `pending` server-side, so
+    // a refresh reconciles it rather than freezing it at "Applying…".
+    if (alive.current) void refresh();
   }
 
   async function act(id: number, kind: "approve" | "reject" | "dismiss") {
@@ -285,6 +291,8 @@ const OUTCOME_LABEL: Record<string, string> = {
   applying: "Applying…",
   applied: "Applied",
   stale: "Skipped",
+  rejected: "Rejected",
+  dismissed: "Dismissed",
   error: "Failed",
 };
 
@@ -349,7 +357,7 @@ function SuggestionRow({
         // Row clicks highlight the target; the action buttons must not.
         onClick={(e) => e.stopPropagation()}
       >
-        {outcome && outcome !== "working" && outcome !== "rejected" ? (
+        {outcome && outcome !== "working" ? (
           outcome === "applied" || outcome === "applying" ? (
             <Section
               gap={0.125}
