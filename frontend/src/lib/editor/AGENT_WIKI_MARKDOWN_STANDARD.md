@@ -60,6 +60,15 @@ referenced standards:
 2. Emoji shortcodes (`:emoji-name:`). Literal Unicode emoji characters require
    no separate support — CommonMark text content is Unicode, so a literal
    emoji character is already ordinary text.
+3. Blank-line count between two blocks MUST survive a checkpoint round trip
+   (save, then reopen), even though CommonMark attaches no semantic meaning
+   to it — 1 blank line and 5 blank lines between two paragraphs parse to
+   the identical AST and render identically, so a strict CommonMark parser
+   has nowhere to record how many there were. Each _extra_ blank line beyond
+   the implicit single-line default becomes its own trackable pseudo-block
+   (`BlockKind.BLANK_LINE` in `markdown_blocks.py`), seeded as a real, empty,
+   directly-editable paragraph node — indistinguishable from one the user
+   typed by pressing Enter an extra time.
 
 ## 5. Explicitly Excluded
 
@@ -94,3 +103,12 @@ preserve it byte-for-byte:
    the line's block type is unchanged by the next parse — escaping just the
    marker and leaving the whitespace in front of it round-trips the marker
    characters as literal text but not the indentation that preceded them.
+
+2. A trailing newline at the very end of the file MAY be absent after a
+   checkpoint, if the last block is new/touched and was never stamped with
+   a trailing-newline marker (a brand-new node has none until something
+   sets it). Unlike item 1 above, this one isn't a reparse-safety
+   requirement — CommonMark attaches no meaning to whether a file ends in
+   `\n` (see §4 item 3 — a different, related case where the same "not
+   semantically meaningful" property is instead handled as full
+   preservation rather than an accepted loss).
