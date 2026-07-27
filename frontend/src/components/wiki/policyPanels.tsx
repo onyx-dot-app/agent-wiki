@@ -1,8 +1,8 @@
 "use client";
 
-/** The Auto policy surfaces shared by the doc header cluster and the folder
- * page: the composite Auto mark, the anchored floating-panel positioner, and
- * the hover policy popover (mock 1929:362227). */
+/** The Auto policy surfaces: the composite Auto mark, the anchored
+ * floating-panel positioner, and the hover policy popover (mock
+ * 1929:362227). */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button, Divider, Switch } from "@onyx-ai/opal/components";
@@ -17,6 +17,7 @@ import {
 
 import { toast } from "@/hooks/useToast";
 import { OrganizeComingSoonRow } from "@/components/wiki/UpdatePolicyPanel";
+import { pathKind } from "@/lib/wiki/utils";
 import {
   getUpdatePolicy,
   patchUpdatePolicy,
@@ -131,8 +132,6 @@ interface PolicyPopoverProps {
   /** The policy PATCH is write-gated, so read-only viewers get a
    * disabled switch instead of a doomed request. */
   canWrite: boolean;
-  /** "page" for docs, "folder" for directory scopes — drives row copy. */
-  kind?: "page" | "folder";
   onOpenUpdatesPanel?: () => void;
 }
 
@@ -142,9 +141,9 @@ interface PolicyPopoverProps {
 export function PolicyPopover({
   path,
   canWrite,
-  kind = "page",
   onOpenUpdatesPanel,
 }: PolicyPopoverProps) {
+  const kind = pathKind(path);
   // The policy carries the path it was fetched for: a mismatch reads as
   // unloaded in the same render a navigation lands, so a stale page's
   // value can never be shown or PATCHed against the new path.
@@ -247,8 +246,8 @@ export function PolicyPopover({
       </Section>
       <Divider />
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
-        {/* ContentAction is the only layout that forwards descriptionMaxLines
-            (mock annotation: real value, 3 lines). */}
+        {/* ContentAction rather than InputHorizontal for the
+            descriptionMaxLines clamp (mock annotation: real value, 3 lines). */}
         <ContentAction
           icon={SvgAddLines}
           title="Page Instructions"

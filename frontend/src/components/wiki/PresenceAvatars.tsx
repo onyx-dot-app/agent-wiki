@@ -9,7 +9,7 @@ import {
   Tag,
   Text,
 } from "@onyx-ai/opal/components";
-import { ContentAction, InputHorizontal, Section } from "@onyx-ai/opal/layouts";
+import { Section } from "@onyx-ai/opal/layouts";
 import {
   SvgArrowUpRight,
   SvgOnyxOctagon,

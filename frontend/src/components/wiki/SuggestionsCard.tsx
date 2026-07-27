@@ -1,9 +1,9 @@
 "use client";
 
 /** Auto-Organize suggestions card (mocks 2236:78296 / 2240:59533): pending
- * change proposals for a folder subtree with per-row approve/reject, bulk
- * actions, and the admin shortcut. Acted-on rows stay visible with their
- * outcome for a few seconds before the list refreshes them away (mock
+ * change proposals for a folder subtree with per-row approve/dismiss, bulk
+ * actions, and the admin shortcut. Rows keep their outcome in place. Once
+ * all rows are handled the list refreshes them away after a beat (mock
  * annotation: leave time for user confirmation). */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -30,7 +30,6 @@ import {
   approveProposal,
   dismissProposal,
   fetchProposal,
-  rejectProposal,
   useProposalsByPath,
 } from "@/lib/autoOrganize";
 
@@ -38,12 +37,11 @@ type Outcome =
   | "working"
   | "applying"
   | "applied"
-  | "rejected"
   | "dismissed"
   | "stale"
   | "error";
 
-const HANDLED: Outcome[] = ["applied", "rejected", "dismissed", "stale"];
+const HANDLED = new Set<Outcome>(["applied", "dismissed", "stale"]);
 
 /** Per-op row glyph; unknown ops fall back to the page icon. */
 const OP_ICON: Record<string, IconFunctionComponent> = {
@@ -59,12 +57,10 @@ const OP_ICON: Record<string, IconFunctionComponent> = {
 interface SuggestionsCardProps {
   /** Folder (or page) scope the proposals are listed for. */
   path: string;
-  /** Skip fetching for viewers; the server write-scopes regardless. */
-  canWrite?: boolean;
   /** Popover hosting: shows the open-in-side-panel action. */
   onOpenPanel?: () => void;
-  /** Popover hosting: the header X. Hides the popup only — suggestions
-   * persist and re-show (mock annotation). */
+  /** Popover hosting: the header X. Hides this surface only, proposals
+   * stay pending (mock annotation). */
   onClose?: () => void;
   /** Row click, with the proposal's source paths (mock: highlight folder). */
   onHighlight?: (paths: string[]) => void;
@@ -72,16 +68,17 @@ interface SuggestionsCardProps {
 
 export function SuggestionsCard({
   path,
-  canWrite = true,
   onOpenPanel,
   onClose,
   onHighlight,
 }: SuggestionsCardProps) {
   const router = useRouter();
   const { user } = useAuth();
-  const { proposals, refresh } = useProposalsByPath(path, canWrite);
+  const { proposals, refresh } = useProposalsByPath(path);
   const [open, setOpen] = useState(true);
-  const [outcomes, setOutcomes] = useState<Record<number, Outcome>>({});
+  const [outcomes, setOutcomes] = useState<Partial<Record<number, Outcome>>>(
+    {},
+  );
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -92,8 +89,7 @@ export function SuggestionsCard({
     alive.current && setOutcomes((prev) => ({ ...prev, [id]: o }));
 
   // Execution runs async on the automanage worker: show "Applying…" and
-  // poll to a terminal status. Transient failures keep polling; an
-  // unsettled poll falls back to the delayed refresh below.
+  // poll to a terminal status. Transient failures keep polling.
   async function pollApplied(id: number) {
     setOutcome(id, "applying");
     for (let i = 0; i < 20; i++) {
@@ -112,22 +108,19 @@ export function SuggestionsCard({
     if (alive.current) void refresh();
   }
 
-  async function act(id: number, kind: "approve" | "reject" | "dismiss") {
+  async function act(id: number, kind: "approve" | "dismiss") {
     setOutcome(id, "working");
     try {
       if (kind === "approve") {
         await approveProposal(id);
         if (alive.current) void pollApplied(id);
-      } else if (kind === "reject") {
-        await rejectProposal(id);
-        setOutcome(id, "rejected");
       } else {
         await dismissProposal(id);
         setOutcome(id, "dismissed");
       }
     } catch (e) {
       if (!alive.current) return;
-      // 409: someone else already actioned it; the refresh will drop it.
+      // 409: someone else already actioned it. The refresh drops it.
       if (e instanceof ApiError && e.status === 409)
         return setOutcome(id, "dismissed");
       setOutcome(id, "error");
@@ -141,8 +134,9 @@ export function SuggestionsCard({
     })
     .map((p) => p.id);
 
-  // Bulk actions hit every not-yet-handled row (mock annotation: "apply to
-  // any that is not already selected"); rows show their outcomes in place.
+  // Bulk actions hit every untouched or failed row (mock annotation:
+  // "apply to any that is not already selected"). Rows show their
+  // outcomes in place.
   async function actAll(kind: "approve" | "dismiss") {
     for (const id of pendingIds) await act(id, kind);
   }
@@ -151,7 +145,10 @@ export function SuggestionsCard({
   // refresh so the settled rows drop out (they have left `pending`).
   const allHandled =
     proposals.length > 0 &&
-    proposals.every((p) => HANDLED.includes(outcomes[p.id] as Outcome));
+    proposals.every((p) => {
+      const o = outcomes[p.id];
+      return !!o && HANDLED.has(o);
+    });
   useEffect(() => {
     if (!allHandled) return;
     const t = setTimeout(() => {
@@ -175,7 +172,7 @@ export function SuggestionsCard({
     >
       <Section gap={0} height="fit" alignItems="stretch" padding={0.25}>
         <ContentAction
-          icon={AutoSuggestIcon}
+          icon={SvgCheckCircle}
           title={`AI Auto-Edit suggests ${n} change${n === 1 ? "" : "s"}.`}
           description="based on your admin auto-organize settings."
           sizePreset="main-ui"
@@ -211,7 +208,7 @@ export function SuggestionsCard({
               proposal={p}
               outcome={outcomes[p.id]}
               onApprove={() => void act(p.id, "approve")}
-              onReject={() => void act(p.id, "reject")}
+              onDismiss={() => void act(p.id, "dismiss")}
               onClick={
                 onHighlight ? () => onHighlight(p.source_paths) : undefined
               }
@@ -282,16 +279,10 @@ export function SuggestionsCard({
   );
 }
 
-/** The card's header mark reuses the octagon Auto glyph family. */
-function AutoSuggestIcon({ size = 16 }: { size?: number }) {
-  return <SvgCheckCircle size={size} />;
-}
-
-const OUTCOME_LABEL: Record<string, string> = {
+const OUTCOME_LABEL: Partial<Record<Outcome, string>> = {
   applying: "Applying…",
   applied: "Applied",
   stale: "Skipped",
-  rejected: "Rejected",
   dismissed: "Dismissed",
   error: "Failed",
 };
@@ -300,22 +291,22 @@ interface SuggestionRowProps {
   proposal: Proposal;
   outcome?: Outcome;
   onApprove: () => void;
-  onReject: () => void;
+  onDismiss: () => void;
   onClick?: () => void;
 }
 
 /** One suggestion (mock Line, 56px): op icon, summary over the path chip,
- * reject/approve controls. Handled rows keep their place with the outcome
- * shown (strikethrough for rejected/dismissed, check for applied). */
+ * dismiss/approve controls. Handled rows keep their place with the outcome
+ * shown (strikethrough for dismissed, check for applied). */
 function SuggestionRow({
   proposal,
   outcome,
   onApprove,
-  onReject,
+  onDismiss,
   onClick,
 }: SuggestionRowProps) {
   const Icon = OP_ICON[proposal.op] ?? SvgFile;
-  const struck = outcome === "rejected" || outcome === "dismissed";
+  const struck = outcome === "dismissed";
   const chipPath = proposal.source_paths[0] ?? proposal.target_paths[0] ?? "";
   return (
     <Section
@@ -341,7 +332,7 @@ function SuggestionRow({
       >
         {/* raw-ok: Text drops className, so the strikethrough state wraps it */}
         <span className={struck ? "line-through opacity-60" : ""}>
-          <Text font="main-ui-action" color="text-04" nowrap maxLines={1}>
+          <Text font="main-ui-action" color="text-04" maxLines={1}>
             {proposal.summary}
           </Text>
         </span>
@@ -357,27 +348,7 @@ function SuggestionRow({
         // Row clicks highlight the target; the action buttons must not.
         onClick={(e) => e.stopPropagation()}
       >
-        {outcome && outcome !== "working" ? (
-          outcome === "applied" || outcome === "applying" ? (
-            <Section
-              gap={0.125}
-              flexDirection="row"
-              alignItems="center"
-              width="fit"
-              height="fit"
-              className="text-(--theme-blue-05)"
-            >
-              <Text font="secondary-body" color="inherit" nowrap>
-                {OUTCOME_LABEL[outcome]}
-              </Text>
-              <SvgCheckCircle size={16} />
-            </Section>
-          ) : (
-            <Text font="secondary-body" color="text-03" nowrap>
-              {OUTCOME_LABEL[outcome] ?? ""}
-            </Text>
-          )
-        ) : (
+        {!outcome || outcome === "working" ? (
           <>
             <Button
               icon={SvgStopCircle}
@@ -385,7 +356,7 @@ function SuggestionRow({
               prominence="tertiary"
               tooltip="Dismiss"
               disabled={outcome === "working"}
-              onClick={onReject}
+              onClick={onDismiss}
             />
             <Button
               icon={SvgCheckCircle}
@@ -396,6 +367,24 @@ function SuggestionRow({
               onClick={onApprove}
             />
           </>
+        ) : outcome === "applied" || outcome === "applying" ? (
+          <Section
+            gap={0.125}
+            flexDirection="row"
+            alignItems="center"
+            width="fit"
+            height="fit"
+            className="text-(--theme-blue-05)"
+          >
+            <Text font="secondary-body" color="inherit" nowrap>
+              {OUTCOME_LABEL[outcome]}
+            </Text>
+            <SvgCheckCircle size={16} />
+          </Section>
+        ) : (
+          <Text font="secondary-body" color="text-03" nowrap>
+            {OUTCOME_LABEL[outcome]}
+          </Text>
         )}
       </Section>
     </Section>

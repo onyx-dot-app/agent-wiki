@@ -17,15 +17,14 @@ const tabIndex = (tab: DocPanelTab) => TABS.findIndex((t) => t.value === tab);
 interface DocPanelProps {
   tab: DocPanelTab;
   onTabChange: (tab: DocPanelTab) => void;
-  /** Which tabs the strip offers, in TABS order. Folder pages show a
-   * subset (Updates | Watching, mock 2240:59533); omit for all four. */
+  /** Which tabs the strip offers, in TABS order. Omit for all four. */
   tabs?: DocPanelTab[];
   /** Active tab's surface. The page renders it so cross-tab state (comment
    * threads, trigger status) lives above the panel and survives tab moves. */
   children: ReactNode;
 }
 
-/** The doc page's right-rail panel (mock 1790:52200): an Updates | Comments |
+/** The right-rail panel (mock 1790:52200): an Updates | Comments |
  * Sources | Watching tab strip over the active surface. The rail holds one
  * occupant at a time, so the tabbed surfaces render inside this panel
  * rather than as their own rail columns. */

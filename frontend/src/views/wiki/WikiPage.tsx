@@ -32,9 +32,9 @@ import {
   SvgDocFile,
   SvgFolder,
   SvgFolderPlus,
+  SvgMoreHorizontal,
   SvgShare,
   SvgSidebar,
-  SvgMoreHorizontal,
   SvgPlus,
   SvgTrash,
   SvgWorkflow,
@@ -225,7 +225,6 @@ function Explorer({ dir }: ExplorerProps) {
   const [creating, setCreating] = useState<"folder" | null>(null);
   const [newName, setNewName] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
-  const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [triggerStatus, setTriggerStatus] = useState<string | null>(null);
   const [sort, setSort] = useState<SortMode>("name-asc");
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -236,15 +235,15 @@ function Explorer({ dir }: ExplorerProps) {
   const [panelTab, setPanelTab] = useState<DocPanelTab>("updates");
   const [panelOpen, setPanelOpen] = useState(true);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [editTrigger, setEditTrigger] = useState<Trigger | null>(null);
-  // One floating surface at a time: the on-load suggestions popup or the
-  // hover policy/suggestions stack (mocks 2236:78296 / 2283:84706).
-  const [folderPanel, setFolderPanel] = useState<"hover" | "popup" | null>(
-    null,
-  );
+  // Single editor state, FileView's shape: null = closed, trigger null =
+  // creating, trigger set = editing an existing watcher.
+  const [watcherEditor, setWatcherEditor] = useState<{
+    trigger: Trigger | null;
+  } | null>(null);
+  const [hoverOpen, setHoverOpen] = useState(false);
   // X only hides the popup for this visit; suggestions persist in the
   // side panel and the popup returns on the next page open.
-  const popupHidden = useRef(false);
+  const [popupHidden, setPopupHidden] = useState(false);
   const clusterRef = useRef<HTMLDivElement | null>(null);
   const closeTimer = useRef<number>(0);
   const holdOpen = useCallback(
@@ -253,10 +252,7 @@ function Explorer({ dir }: ExplorerProps) {
   );
   const closeSoon = useCallback(() => {
     window.clearTimeout(closeTimer.current);
-    closeTimer.current = window.setTimeout(
-      () => setFolderPanel((p) => (p === "hover" ? null : p)),
-      150,
-    );
+    closeTimer.current = window.setTimeout(() => setHoverOpen(false), 150);
   }, []);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
 
@@ -409,31 +405,22 @@ function Explorer({ dir }: ExplorerProps) {
   }
 
   // Folder-level actions portal into the single pinned header (mock
-  // 705:142993): New Page + new-folder, then share / trigger / launch-agent
-  // past a divider. The update policy lives inline in the side column. Mobile
-  // keeps it behind a header button + drawer instead.
+  // 705:142993).
   const { health } = useUpdateHealth(dir || null);
   const warnLevel = updateWarnLevel(health);
   const { proposals } = useProposalsByPath(dir, !!dir);
-  // The suggestions popup self-opens when pending proposals exist (mock
-  // 2236:78296) until the X hides it for this visit — but never while the
-  // side panel already shows the card (one surface at a time).
+  // The suggestions popup self-shows while proposals exist (mock
+  // 2236:78296) until the X hides it for the visit — never while the side
+  // panel already shows the card, and it yields to the hover popover.
   const panelVisible = !isMobile && panelOpen;
   useEffect(() => {
-    popupHidden.current = false;
-    setFolderPanel(null);
+    setPopupHidden(false);
+    setHoverOpen(false);
   }, [dir]);
-  useEffect(() => {
-    if (panelVisible) {
-      setFolderPanel((p) => (p === "popup" ? null : p));
-      return;
-    }
-    if (proposals.length > 0 && !popupHidden.current) {
-      setFolderPanel((prev) => (prev === null ? "popup" : prev));
-    }
-  }, [proposals.length, panelVisible]);
+  const showPopup =
+    !hoverOpen && !popupHidden && !panelVisible && proposals.length > 0;
   const openSidePanel = useCallback(() => {
-    setFolderPanel(null);
+    setHoverOpen(false);
     if (isMobile) setPolicyOpen(true);
     else {
       setPanelOpen(true);
@@ -454,7 +441,11 @@ function Explorer({ dir }: ExplorerProps) {
       if (!el) return;
       el.scrollIntoView({ block: "center", behavior: "smooth" });
       el.classList.add("wiki-row-flash");
-      window.setTimeout(() => el.classList.remove("wiki-row-flash"), 2000);
+      el.addEventListener(
+        "animationend",
+        () => el.classList.remove("wiki-row-flash"),
+        { once: true },
+      );
     },
     [dir],
   );
@@ -487,7 +478,7 @@ function Explorer({ dir }: ExplorerProps) {
           onClick={openSidePanel}
           onPointerEnter={() => {
             holdOpen();
-            setFolderPanel("hover");
+            setHoverOpen(true);
           }}
           onPointerLeave={closeSoon}
         >
@@ -531,7 +522,7 @@ function Explorer({ dir }: ExplorerProps) {
               variant="section"
               onClick={() => {
                 setMoreOpen(false);
-                setTriggerModalOpen(true);
+                setWatcherEditor({ trigger: null });
               }}
             />
             <LineItemButton
@@ -573,16 +564,11 @@ function Explorer({ dir }: ExplorerProps) {
         className={`min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
       >
         <TriggerPanel
-          open={triggerModalOpen}
-          initial={editTrigger ?? { scope_path: dir || "/" }}
-          lockScope={!editTrigger}
-          onClose={() => {
-            setTriggerModalOpen(false);
-            setEditTrigger(null);
-          }}
-          onSaved={(t) =>
-            setTriggerStatus(`Created trigger for ${t.scope_path}`)
-          }
+          open={watcherEditor !== null}
+          initial={watcherEditor?.trigger ?? { scope_path: dir || "/" }}
+          lockScope={!watcherEditor?.trigger}
+          onClose={() => setWatcherEditor(null)}
+          onSaved={(t) => setTriggerStatus(`Saved trigger for ${t.scope_path}`)}
         />
 
         {triggerStatus && (
@@ -750,35 +736,30 @@ function Explorer({ dir }: ExplorerProps) {
           />
         )}
 
-        {folderPanel === "hover" && clusterRef.current && (
-          // Hover previews the policy popover only; suggestions never
-          // ride the hover — they self-show as the dismissible popup and
-          // live in the side panel (Nik, 2026-07-27).
+        {hoverOpen && clusterRef.current && (
+          // Hover previews the policy popover only. Suggestions self-show
+          // as the dismissible popup and live in the side panel.
           <AnchoredPanel
             anchor={clusterRef.current}
-            onDismiss={() => setFolderPanel(null)}
+            onDismiss={() => setHoverOpen(false)}
             hover={{ onEnter: holdOpen, onLeave: closeSoon }}
           >
             <PolicyPopover
               path={dir}
               canWrite
-              kind="folder"
               onOpenUpdatesPanel={openSidePanel}
             />
           </AnchoredPanel>
         )}
-        {folderPanel === "popup" && clusterRef.current && (
+        {showPopup && clusterRef.current && (
           <AnchoredPanel
             anchor={clusterRef.current}
-            onDismiss={() => setFolderPanel(null)}
+            onDismiss={() => setPopupHidden(true)}
             chrome={false}
           >
             <SuggestionsCard
               path={dir}
-              onClose={() => {
-                popupHidden.current = true;
-                setFolderPanel(null);
-              }}
+              onClose={() => setPopupHidden(true)}
               onOpenPanel={openSidePanel}
               onHighlight={highlightPath}
             />
@@ -786,9 +767,9 @@ function Explorer({ dir }: ExplorerProps) {
         )}
       </div>
 
-      {/* Folder policy applies to every page under this folder. Desktop shows
-          it inline in the side column (mock 1673:32813). Mobile keeps the
-          header button + drawer. */}
+      {/* Desktop: the folder's right rail is the tabbed panel (Updates |
+          Watching, mock 2240:59533). Mobile keeps the header button +
+          drawer. */}
       {!isMobile && panelOpen && (
         <aside className="flex w-[360px] shrink-0 flex-col overflow-y-auto">
           <DocPanel
@@ -799,17 +780,17 @@ function Explorer({ dir }: ExplorerProps) {
             {panelTab === "updates" ? (
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-1">
                 <UpdatePolicyPanel path={dir} />
-                <SuggestionsCard path={dir} onHighlight={highlightPath} />
+                {/* Not at root — a wiki-wide review is the admin queue's job. */}
+                {dir && (
+                  <SuggestionsCard path={dir} onHighlight={highlightPath} />
+                )}
               </div>
             ) : (
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
                 <WatchingPanel
                   path={dir}
-                  onNew={() => setTriggerModalOpen(true)}
-                  onEdit={(t) => {
-                    setEditTrigger(t);
-                    setTriggerModalOpen(true);
-                  }}
+                  onNew={() => setWatcherEditor({ trigger: null })}
+                  onEdit={(t) => setWatcherEditor({ trigger: t })}
                 />
               </div>
             )}
@@ -830,9 +811,11 @@ function Explorer({ dir }: ExplorerProps) {
                 onClose={() => setPolicyOpen(false)}
                 fullHeight
               />
-              <div className="px-2 pb-2">
-                <SuggestionsCard path={dir} />
-              </div>
+              {dir && (
+                <div className="px-2 pb-2">
+                  <SuggestionsCard path={dir} />
+                </div>
+              )}
             </div>
           </div>
         </>

@@ -34,7 +34,7 @@ import {
 } from "@/lib/updatePolicy";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
 import type { UpdateHealth } from "@/lib/wiki/types";
-import { updateWarnLevel } from "@/lib/wiki/utils";
+import { pathKind, updateWarnLevel } from "@/lib/wiki/utils";
 import { absoluteTime } from "@/lib/time";
 
 interface Props {
@@ -65,8 +65,8 @@ function capNote(health: UpdateHealth): string {
   if (health.cap_24h > 0) {
     return "Approaching daily auto-edit limit. Updates will pause when the limit is reached.";
   }
-  // Threshold guard stays local: the message prints the threshold, so a
-  // zero threshold must fall through to the generic note.
+  // The threshold guard stays local: the message prints the threshold, so
+  // a zero threshold must fall through to the generic note.
   if (health.threshold_24h > 0 && health.count_24h >= health.threshold_24h) {
     return `Reached the alert threshold of ${health.threshold_24h} auto-edits in 24 hours.`;
   }
@@ -110,7 +110,7 @@ export function UpdatePolicyPanel({
   historyList,
   totalEdits,
 }: Props) {
-  const kind = path.endsWith(".md") ? "page" : "folder";
+  const kind = pathKind(path);
 
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false); // first fetch succeeded
@@ -338,10 +338,9 @@ export function UpdatePolicyPanel({
 
               <div className="flex flex-col gap-1 p-2">
                 {/* Collapsed, the row's description is the instruction when
-                    one exists (mock 1855:273683), clamped to 5 lines. While
-                    the editor is open the row shows the generic hint (mock
-                    1855:273690). ContentAction is the only layout that
-                    forwards descriptionMaxLines. */}
+                    one exists (mock 1855:273683), clamped to 5 lines.
+                    ContentAction rather than InputHorizontal, which has no
+                    description clamp. */}
                 <ContentAction
                   icon={SvgAddLines}
                   title="Page Instructions"
@@ -389,7 +388,7 @@ export function UpdatePolicyPanel({
                   // hides. A failed save reopens with the draft intact.
                   <div className="instructions-editor">
                     {/* rows = maxRows pins the editor at 8 lines (Opal's
-                        autoResize clamps between the two); longer content
+                        autoResize clamps between the two). Longer content
                         scrolls in place instead of resizing the panel. */}
                     <InputTextArea
                       rows={8}
