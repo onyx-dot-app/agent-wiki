@@ -1,11 +1,13 @@
 """Creation preflight — the synchronous half of the on-create check.
 
-Agent creates (chat/MCP ``write_doc``) run this *before* committing: if the
-would-be page collides case-insensitively with an existing path or is
-byte-identical to an existing page, the create pauses and the tool result
-carries the suggestion — the agent adapts (update the existing page, pick a
-distinct name) or explicitly proceeds. Pause-and-suggest, not refuse: the
-agent keeps agency, the wiki never gains a mess it has to clean up later.
+Agent creates (chat/MCP ``write_doc``) run this alongside the commit: if the
+new page collides case-insensitively with an existing path or is
+byte-identical to an existing page, the create still succeeds and the tool
+result carries the finding — the agent can fix it itself (retire its copy,
+update the original) or tell the human, who may act on the on-page proposal
+or simply ignore it. Surface, never block: the cleanup decision belongs to
+the human (or, on auto-managed pages, to the auto-apply path), and an
+ignorable suggestion must not stop the work.
 
 The checks are the same instant-truth facts the on-create trigger detects
 post-commit (case-collision, body-dup with template-echo precedence) —

@@ -1,9 +1,9 @@
-"""Creation preflight — the blocking half of the on-create check.
+"""Creation preflight — surface, never block.
 
-Agent creates pause (nothing committed) on instant-truth conflicts and the
-result carries the suggestion; the agent adapts or explicitly proceeds.
-Human/API creates are not gated; the async on-create trigger and the page
-banner remain the safety net for everything the gate doesn't see.
+Agent creates always commit; instant-truth conflicts annotate the result so
+the agent can self-correct or tell the human, who acts on the on-page
+proposal or ignores it. Human/API creates are untouched; the async on-create
+trigger and the page banner remain the durable surface.
 """
 from __future__ import annotations
 
@@ -26,8 +26,9 @@ _OTHER = "# Notes\n\nEntirely different material.\n" + "words " * 40
 def _fs_case_insensitive() -> bool:
     """True on filesystems (macOS/Windows defaults) where the other casing of
     a path resolves to the same file — there `write_doc` sees the colliding
-    page as *existing* and takes the overwrite branch before the create gate;
-    the gate is only reachable on case-sensitive filesystems (prod, CI)."""
+    page as *existing* and takes the overwrite branch before the create
+    check; the check is only reachable on case-sensitive filesystems (prod,
+    CI)."""
     with tempfile.TemporaryDirectory() as d:
         probe = os.path.join(d, "CaseProbe")
         open(probe, "w").write("x")
@@ -93,57 +94,49 @@ def test_template_instance_is_not_a_duplicate(tmp_repo):
 
 
 # --------------------------------------------------------------------------- #
-# write_doc pause protocol                                                    #
+# write_doc annotation protocol                                               #
 # --------------------------------------------------------------------------- #
 
 
-def test_create_pauses_on_duplicate_and_commits_nothing(tmp_repo):
+def test_duplicate_create_commits_and_annotates(tmp_repo):
     wiki_git.commit_file("team/original.md", _BODY, "seed", author=None)
 
     out = _write("team/copy.md", _BODY)
 
-    assert out["paused"] is True
+    assert out.get("created") is True  # never blocked
+    assert wiki_utils.file_exists("team/copy.md")
     (conflict,) = out["conflicts"]
     assert conflict["kind"] == "duplicate"
     assert conflict["existing_path"] == "team/original.md"
-    assert "proceed_despite_conflict" in out["message"]
-    assert not wiki_utils.file_exists("team/copy.md")  # nothing committed
+    assert "Auto Organize suggestion" in out["message"]
 
 
 @_needs_case_sensitive_fs
-def test_create_pauses_on_case_collision(tmp_repo):
+def test_case_collision_create_commits_and_annotates(tmp_repo):
     wiki_git.commit_file("docs/Setup.md", _BODY, "seed", author=None)
     out = _write("docs/setup.md", _OTHER)
-    assert out["paused"] is True
-    assert out["conflicts"][0]["kind"] == "case_collision"
-    assert not wiki_utils.file_exists("docs/setup.md")
-
-
-def test_proceed_despite_conflict_creates(tmp_repo):
-    wiki_git.commit_file("team/original.md", _BODY, "seed", author=None)
-    out = _write("team/copy.md", _BODY, proceed_despite_conflict=True)
     assert out.get("created") is True
-    assert wiki_utils.file_exists("team/copy.md")
+    assert out["conflicts"][0]["kind"] == "case_collision"
 
 
-def test_clean_create_is_untouched_by_the_gate(tmp_repo):
+def test_clean_create_carries_no_annotation(tmp_repo):
     out = _write("team/fresh.md", _BODY)
     assert out.get("created") is True
-    assert "paused" not in out
+    assert "conflicts" not in out
 
 
-def test_overwrite_path_never_pays_the_gate(tmp_repo):
+def test_overwrite_path_never_pays_the_check(tmp_repo):
     """Edits can't introduce a collision and dup-on-edit is the sweep's
     business — only creates are checked."""
     wiki_git.commit_file("team/original.md", _BODY, "seed", author=None)
     sha = wiki_git.commit_file("team/page.md", _OTHER, "seed", author=None)
     out = _write("team/page.md", _BODY, base_sha=sha)
     assert out.get("created") is False  # became a duplicate, but committed
-    assert "paused" not in out
+    assert "conflicts" not in out
 
 
 def test_preflight_failure_fails_open(tmp_repo, monkeypatch):
-    """A broken check must never block a write — the async trigger and the
+    """A broken check must never touch a write — the async trigger and the
     banner are the safety net."""
     wiki_git.commit_file("team/original.md", _BODY, "seed", author=None)
     monkeypatch.setattr(
@@ -151,16 +144,17 @@ def test_preflight_failure_fails_open(tmp_repo, monkeypatch):
     )
     out = _write("team/copy.md", _BODY)
     assert out.get("created") is True
+    assert "conflicts" not in out
 
 
 @_needs_case_sensitive_fs
-def test_case_collision_seeded_via_plumbing_pauses(tmp_repo):
+def test_case_collision_seeded_via_plumbing_annotates(tmp_repo):
     """The collision partner staged the plumbing way (case-insensitive dev
     filesystems), matching how the wiki actually gets into this state."""
     wiki_git.commit_file("n/Page.md", _BODY, "seed", author=None)
     plumb_commit("n/page.md", _OTHER)
     out = _write("n/PAGE.md", "# distinct\n" + "x " * 80)
-    assert out["paused"] is True
+    assert out.get("created") is True
     kinds = {c["kind"] for c in out["conflicts"]}
     assert kinds == {"case_collision"}
     assert len(out["conflicts"]) == 2  # both existing casings named

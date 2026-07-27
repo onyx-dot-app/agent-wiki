@@ -81,9 +81,6 @@ def handle(args: dict[str, Any]) -> Any:
         auto_update_disabled = args.get("ingestion_auto_update_disabled")
         if auto_update_disabled is not None and not isinstance(auto_update_disabled, bool):
             raise ToolError("ingestion_auto_update_disabled must be a boolean when provided")
-        proceed_despite_conflict = args.get("proceed_despite_conflict", False)
-        if not isinstance(proceed_despite_conflict, bool):
-            raise ToolError("proceed_despite_conflict must be a boolean when provided")
 
         existed = wiki_utils.file_exists(path)
         # Validate a create-from-template id up front — before any commit — so a
@@ -145,30 +142,18 @@ def handle(args: dict[str, Any]) -> Any:
                 "broken_links": wiki_utils.broken_links(path, result.new_body),
             }
         else:
-            # Creation preflight — pause-and-suggest, not refuse: on an
-            # instant-truth conflict (case collision, byte-identical
-            # duplicate) nothing is committed and the result carries the
-            # suggestion; the agent adapts or re-calls with
-            # proceed_despite_conflict=true. Fail-open: a broken check must
-            # never block a write (the post-commit on-create trigger and the
-            # page banner are the safety net).
-            if not proceed_despite_conflict:
-                try:
-                    conflicts = preflight.check_creation(path, body)
-                except Exception:
-                    log.exception("creation preflight failed for %s", path)
-                    conflicts = []
-                if conflicts:
-                    return {
-                        "paused": True,
-                        "conflicts": [c.model_dump() for c in conflicts],
-                        "message": (
-                            "creation paused — "
-                            + " ".join(c.suggestion for c in conflicts)
-                            + " To create the page anyway, call write_doc "
-                            "again with proceed_despite_conflict=true."
-                        ),
-                    }
+            # Creation preflight — surface, never block: the create always
+            # proceeds (the human owns the cleanup decision and may ignore
+            # it), but instant-truth conflicts (case collision,
+            # byte-identical duplicate) annotate the result so the agent can
+            # tell the human, and Auto Organize's focused run turns the same
+            # finding into the on-page proposal the human can act on.
+            # Fail-open: a broken check never touches the write.
+            try:
+                conflicts = preflight.check_creation(path, body)
+            except Exception:
+                log.exception("creation preflight failed for %s", path)
+                conflicts = []
             # New file: no base to merge against, so this always commits.
             result = wiki_utils.commit_and_fan_out(
                 path=path, body=body, message=commit_message.strip(),
@@ -186,6 +171,15 @@ def handle(args: dict[str, Any]) -> Any:
                 "diff": wiki_utils.unified_diff("", body, path),
                 "broken_links": wiki_utils.broken_links(path, body),
             }
+            if conflicts:
+                out["conflicts"] = [c.model_dump() for c in conflicts]
+                out["message"] = (
+                    "created, but note: "
+                    + " ".join(c.suggestion for c in conflicts)
+                    + " An Auto Organize suggestion will appear on the "
+                    "page for the user to accept or ignore — mention this "
+                    "to them."
+                )
             if warning:
                 out["warning"] = warning
             return out
