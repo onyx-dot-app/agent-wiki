@@ -129,6 +129,54 @@ export const HeadingBackspace = Extension.create({
   },
 });
 
+/** Backspace on an already-*empty* task item deletes the checkbox/list
+ * styling outright — converts straight to a plain empty paragraph, never
+ * reverting to literal `[ ] ` text (backspace-delete-text-styling, per
+ * EDITOR_STYLING_TRIGGERS.md §2 — deliberately the opposite choice from
+ * HeadingBackspace/ThematicBreak's backspace-undo-text-styling above).
+ *
+ * Neither `@tiptap/extension-task-item` nor `@tiptap/extension-task-list`
+ * register any keyboard shortcuts of their own (confirmed directly against
+ * the installed packages — neither file so much as mentions "Backspace").
+ * `ListKeymap` (the sibling extension that *would* handle this, via its own
+ * `handleBackspace` helper) isn't part of either package and isn't
+ * registered in `extensions.ts`, so today Backspace on a task item falls
+ * through entirely to Tiptap core's always-on `Keymap` extension, which
+ * tries `undoInputRule` first on every Backspace — a one-shot "undo the
+ * exact conversion transaction" that only fires if Backspace is the very
+ * next keystroke after the `[ ] ` conversion, with zero edits in between.
+ * In that narrow window it reverts to literal `[ ] ` text; past it, the
+ * chain's later fallbacks (`clearNodes`, `joinBackward`) happen to already
+ * land on a plain paragraph instead — an inconsistent mix depending purely
+ * on timing, not a deliberate choice. Priority 200 (same reasoning as
+ * HeadingBackspace/ThematicBreak) means this handler is checked first, so
+ * `undoInputRule` never gets a chance to run for this construct — the
+ * outcome is the same regardless of timing.
+ *
+ * `liftListItem` (Tiptap core, wrapping `prosemirror-schema-list`'s own
+ * command of the same name) already handles first/middle/last-item
+ * splitting correctly — not hand-rolled, since `prosemirror-schema-list` is
+ * the well-tested primitive for exactly this "exit the list" operation,
+ * and it's available as a core command regardless of whether `ListKeymap`
+ * is installed. */
+export const TaskItemBackspace = Extension.create({
+  name: "taskItemBackspace",
+  priority: 200,
+  addKeyboardShortcuts() {
+    return {
+      Backspace: ({ editor }) => {
+        const { state } = editor;
+        const { $from, empty } = state.selection;
+        if (!empty || $from.parent.type.name !== "paragraph") return false;
+        if ($from.parentOffset !== 0 || $from.parent.content.size !== 0)
+          return false;
+        if ($from.node($from.depth - 1)?.type.name !== "taskItem") return false;
+        return editor.chain().liftListItem("taskItem").run();
+      },
+    };
+  },
+});
+
 /** Inline code with its flanking backtick characters kept as literal text
  * under the mark — not consumed syntax, unlike `@tiptap/extension-code`
  * (disabled in `extensions.ts`). A mark's boundary is a zero-width,

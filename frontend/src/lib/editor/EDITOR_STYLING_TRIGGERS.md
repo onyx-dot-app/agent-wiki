@@ -37,9 +37,8 @@ behaviors:
   character-by-character backspacing. Used by `HeadingBackspace` and
   `ThematicBreak` in `blocks.ts`.
 - **backspace-delete-text-styling** — deletes the styling outright: converts
-  straight to a plain empty paragraph, no source text ever reappears.
-  Intended for task list/checkbox — not yet consistently implemented (see
-  the table below).
+  straight to a plain empty paragraph, no source text ever reappears. Used
+  by task list/checkbox (`TaskItemBackspace` in `blocks.ts`).
 
 Neither is inherently more correct than the other — it's a per-construct
 product decision, not a technical default. Left undecided, Tiptap core's own
@@ -55,22 +54,22 @@ happens to land on.
 
 ## 3. Policy
 
-| Construct                      | Trigger                 | Status                                                                                                                                                                                                                                                    |
-| ------------------------------ | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bold / italic                  | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                                                                                          |
-| Strikethrough                  | Text-shortcut           | Implemented on the frontend; **backend cannot round-trip it yet** — see open gap below                                                                                                                                                                    |
-| Inline code span               | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                                                                                          |
-| Headings (`#` … `######`)      | Text-shortcut           | Implemented, custom state machine (`HeadingBackspace` in `blocks.ts`) — backspace-undo-text-styling                                                                                                                                                       |
-| Thematic break / ruler (`---`) | Text-shortcut           | Implemented, custom state machine (`ThematicBreak` in `blocks.ts`) — backspace-undo-text-styling                                                                                                                                                          |
-| Blockquote (`>`)               | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                                                                                          |
-| Bullet list / ordered list     | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                                                                                          |
-| Fenced code block (` ``` `)    | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                                                                                          |
-| Task list / checkbox (`[ ] `)  | Text-shortcut           | Implemented (`TaskItem` default input rule) — triggers on bare `[ ] `/`[x] `, not `- [ ] `; see note below. Backspace behavior is currently the unresolved default mix (see §2) — target is backspace-delete-text-styling, not yet built. Open follow-up. |
-| Emoji shortcode (`:name:`)     | Text-shortcut           | Not yet implemented (neither the parser nor the editor recognizes shortcodes today)                                                                                                                                                                       |
-| Links                          | UI-only (slash command) | **Not yet compliant** — `Link`'s `autolink`/`linkOnPaste` are still on, and there's no slash-command entry to create one deliberately. Open follow-up.                                                                                                    |
-| Tables                         | UI-only (slash command) | No text-shortcut exists (correct), but there's also no slash-command entry yet — the opaque-row table shape has no sensible "insert blank table" seed to build one from. Open follow-up.                                                                  |
-| Images                         | UI-only (slash command) | Deferred entirely — not implemented on either end                                                                                                                                                                                                         |
-| Footnotes                      | UI-only (slash command) | Deferred entirely — not implemented on either end                                                                                                                                                                                                         |
+| Construct                      | Trigger                 | Status                                                                                                                                                                                     |
+| ------------------------------ | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Bold / italic                  | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
+| Strikethrough                  | Text-shortcut           | Implemented on the frontend; **backend cannot round-trip it yet** — see open gap below                                                                                                     |
+| Inline code span               | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
+| Headings (`#` … `######`)      | Text-shortcut           | Implemented, custom state machine (`HeadingBackspace` in `blocks.ts`) — backspace-undo-text-styling                                                                                        |
+| Thematic break / ruler (`---`) | Text-shortcut           | Implemented, custom state machine (`ThematicBreak` in `blocks.ts`) — backspace-undo-text-styling                                                                                           |
+| Blockquote (`>`)               | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
+| Bullet list / ordered list     | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
+| Fenced code block (` ``` `)    | Text-shortcut           | Implemented (StarterKit default)                                                                                                                                                           |
+| Task list / checkbox (`[ ] `)  | Text-shortcut           | Implemented (`TaskItem` default input rule) — triggers on bare `[ ] `/`[x] `, not `- [ ] `; see note below. Backspace: `TaskItemBackspace` in `blocks.ts` — backspace-delete-text-styling. |
+| Emoji shortcode (`:name:`)     | Text-shortcut           | Not yet implemented (neither the parser nor the editor recognizes shortcodes today)                                                                                                        |
+| Links                          | UI-only (slash command) | **Not yet compliant** — `Link`'s `autolink`/`linkOnPaste` are still on, and there's no slash-command entry to create one deliberately. Open follow-up.                                     |
+| Tables                         | UI-only (slash command) | No text-shortcut exists (correct), but there's also no slash-command entry yet — the opaque-row table shape has no sensible "insert blank table" seed to build one from. Open follow-up.   |
+| Images                         | UI-only (slash command) | Deferred entirely — not implemented on either end                                                                                                                                          |
+| Footnotes                      | UI-only (slash command) | Deferred entirely — not implemented on either end                                                                                                                                          |
 
 Note on the checkbox trigger: bullet list's own shortcut (`- ` alone) fires
 the instant that two-character sequence is typed, before `[ ] ` can ever

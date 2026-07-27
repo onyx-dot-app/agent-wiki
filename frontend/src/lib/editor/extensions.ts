@@ -14,6 +14,7 @@ import {
   Table,
   TableRow,
   TableSeparator,
+  TaskItemBackspace,
   ThematicBreak,
 } from "@/lib/editor/blocks";
 import { CommandMenu } from "@/lib/editor/commandMenu";
@@ -53,6 +54,7 @@ export function tiptapExtensions(
     }),
     TaskList,
     TaskItem.configure({ nested: true }),
+    TaskItemBackspace,
     BlockIdentity,
     HeadingBackspace,
     ThematicBreak,
