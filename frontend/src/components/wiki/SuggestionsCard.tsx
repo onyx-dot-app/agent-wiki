@@ -137,9 +137,16 @@ export function SuggestionsCard({
       }
     } catch (e) {
       if (!alive.current) return;
-      // 409: someone else already actioned it. Sync to the server's
-      // reality instead of guessing which outcome won.
+      // 409: someone else already actioned it. Clear the local outcome so
+      // the row cannot strand at working if the refresh fails, then sync
+      // to the server's reality instead of guessing which outcome won.
       if (e instanceof ApiError && e.status === 409) {
+        if (!alive.current) return;
+        setOutcomes((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
         void refresh();
         return;
       }
