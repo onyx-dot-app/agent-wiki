@@ -16,7 +16,10 @@ import {
   EmptyMessageCard,
   IconContainer,
   InputTypeIn,
+  LineItemButton,
   MessageCard,
+  Popover,
+  PopoverMenu,
   Text,
 } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
@@ -29,10 +32,10 @@ import {
   SvgDocFile,
   SvgFolder,
   SvgFolderPlus,
-  SvgLock,
+  SvgShare,
+  SvgSidebar,
   SvgMoreHorizontal,
   SvgPlus,
-  SvgShield,
   SvgTrash,
   SvgWorkflow,
   SvgZap,
@@ -232,6 +235,8 @@ function Explorer({ dir }: ExplorerProps) {
   const [sharePath, setSharePath] = useState<string | null>(null);
   const [policyOpen, setPolicyOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<DocPanelTab>("updates");
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [editTrigger, setEditTrigger] = useState<Trigger | null>(null);
   // One floating surface at a time: the on-load suggestions popup or the
   // hover policy/suggestions stack (mocks 2236:78296 / 2283:84706).
@@ -425,7 +430,10 @@ function Explorer({ dir }: ExplorerProps) {
   const openSidePanel = useCallback(() => {
     setFolderPanel(null);
     if (isMobile) setPolicyOpen(true);
-    else setPanelTab("updates");
+    else {
+      setPanelOpen(true);
+      setPanelTab("updates");
+    }
   }, [isMobile]);
   // Mock annotation "Click to highlight folder": flash the listing row for
   // the proposal's first path segment under this folder.
@@ -493,34 +501,57 @@ function Explorer({ dir }: ExplorerProps) {
           </Section>
         </button>
       </Section>
-      <span aria-hidden className="mx-2 h-5 w-px bg-(--border-01)" />
       <Button
+        icon={SvgShare}
         prominence="tertiary"
-        rightIcon={SvgLock}
+        tooltip="Share"
         onClick={() => setSharePath(dir)}
-      >
-        Share
-      </Button>
-      <Button
-        icon={SvgWorkflow}
-        prominence="tertiary"
-        tooltip="Trigger"
-        onClick={() => setTriggerModalOpen(true)}
       />
+      <Popover open={moreOpen} onOpenChange={setMoreOpen}>
+        <Popover.Trigger asChild>
+          <span className="inline-flex">
+            <Button
+              icon={SvgMoreHorizontal}
+              prominence="tertiary"
+              tooltip="More"
+            />
+          </span>
+        </Popover.Trigger>
+        <Popover.Content width="fit" align="end">
+          <PopoverMenu>
+            <LineItemButton
+              title="Trigger"
+              icon={SvgWorkflow}
+              sizePreset="main-ui"
+              variant="section"
+              onClick={() => {
+                setMoreOpen(false);
+                setTriggerModalOpen(true);
+              }}
+            />
+            <LineItemButton
+              title="Launch Agent"
+              icon={SvgZap}
+              sizePreset="main-ui"
+              variant="section"
+              onClick={() => {
+                setMoreOpen(false);
+                rowActions.launchAgent(dir);
+              }}
+            />
+          </PopoverMenu>
+        </Popover.Content>
+      </Popover>
       <Button
-        icon={SvgZap}
+        icon={SvgSidebar}
         prominence="tertiary"
-        tooltip="Launch Agent"
-        onClick={() => rowActions.launchAgent(dir)}
+        tooltip={
+          isMobile ? "Update Policy" : panelOpen ? "Close panel" : "Open panel"
+        }
+        onClick={() =>
+          isMobile ? setPolicyOpen(true) : setPanelOpen((v) => !v)
+        }
       />
-      {isMobile && (
-        <Button
-          icon={SvgShield}
-          prominence="tertiary"
-          tooltip="Update Policy"
-          onClick={() => setPolicyOpen(true)}
-        />
-      )}
     </>
   );
 
@@ -762,7 +793,7 @@ function Explorer({ dir }: ExplorerProps) {
       {/* Folder policy applies to every page under this folder. Desktop shows
           it inline in the side column (mock 1673:32813). Mobile keeps the
           header button + drawer. */}
-      {!isMobile && (
+      {!isMobile && panelOpen && (
         <aside className="flex w-[360px] shrink-0 flex-col overflow-y-auto">
           <DocPanel
             tab={panelTab}
