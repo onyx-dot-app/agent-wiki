@@ -94,13 +94,14 @@
 .editor-prose code {
   font-family: var(--font-dm-mono), ui-monospace;
   background: var(--background-tint-01);
-  border-radius: var(--border-radius-04);
+  border-radius: var(--radius-04);
   padding: 0.1em 0.3em;
 }
 .editor-prose pre {
   font-family: var(--font-dm-mono), ui-monospace;
-  background: var(--background-tint-01);
-  border-radius: var(--border-radius-08);
+  /* bg-black for now, per explicit request — not an Opal token. */
+  background: black;
+  border-radius: var(--radius-16);
   padding: 0.75rem;
   overflow-x: auto;
 }
@@ -181,7 +182,7 @@
 }
 .editor-prose [data-type="table"] {
   margin: 0.5rem 0;
-  border-radius: var(--border-radius-08);
+  border-radius: var(--radius-08);
   border: 1px solid var(--border-02);
   overflow: hidden;
 }
