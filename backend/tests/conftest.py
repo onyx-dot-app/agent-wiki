@@ -61,6 +61,7 @@ from app.db.session import (
 from app.mcp_server import session as _mcp_session
 from app.realtime import bus as _bus
 from app.tasks.queue import get_redis, reset_redis_for_tests
+from app.wiki import coedit_room
 from app.wiki.git import ensure_wiki_repo
 
 # --------------------------------------------------------------------------- #
@@ -326,6 +327,12 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
 
     # Each test rebuilds the engine so it points at the new database.
     reset_engine_for_tests()
+
+    # Every test's coedit_sessions id sequence restarts at 1 (a fresh clone
+    # of the empty-table template) — without this, a room left behind by an
+    # earlier test (never explicitly closed) would be adopted by a later,
+    # unrelated test that happens to reuse the same session id.
+    coedit_room.reset_for_tests()
 
     yield cfg
 

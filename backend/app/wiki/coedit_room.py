@@ -129,6 +129,19 @@ def close_room(session_id: int) -> None:
         _rooms.pop(session_id, None)
 
 
+def reset_for_tests() -> None:
+    """Clear the in-process room registry. Each test gets a fresh Postgres
+    database whose ``coedit_sessions`` id sequence restarts at 1 (see
+    ``tests/conftest.py``), so without this a room left behind by an earlier
+    test (never explicitly ``close_room``'d) would be adopted by a later,
+    unrelated test that happens to reuse the same session id — the
+    ``tmp_config`` fixture calls this for every test that needs a database,
+    same as ``app.mcp_server.session.reset_for_tests`` handles its own
+    module-level registry leaking across tests on the same xdist worker."""
+    with _lock:
+        _rooms.clear()
+
+
 # --------------------------------------------------------------------------- #
 # Cross-thread scheduling — for callers that don't already run on this        #
 # process's event loop (the realtime bus listener thread, notably)            #

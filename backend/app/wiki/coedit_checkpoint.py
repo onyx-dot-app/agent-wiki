@@ -40,7 +40,6 @@ from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
 from app.wiki import markdown_splice, markdown_yjs
 from app.wiki.markdown_splice import TouchedTracker
-from app.wiki.utils import commit_and_fan_out
 
 log = logging.getLogger(__name__)
 
@@ -75,14 +74,22 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     """Rebuild a throwaway ``Doc`` from ``sess.ydoc_snapshot`` plus every
     update logged since — never touches any process's live room.
 
-    Ordering matters and mirrors ``coedit_room.Room.__init__`` exactly: the
-    doc is seeded (here, from the snapshot) *before* the ``TouchedTracker``
-    is created, so ``base_body`` (the pre-replay text —
-    ``markdown_splice.checkpoint_body``'s diff base) is captured first, then
-    every replayed update is observed by the tracker exactly as it would be
-    for a live edit (``TouchedTracker.observe_deep`` sees any mutation
-    regardless of origin) — so the result is byte-identical to what a live
-    room holding the same sequence of edits would have produced.
+    ``base_body`` — the pre-replay text ``markdown_splice.checkpoint_body``
+    diffs against — is read from git at ``sess.base_sha``, *not* reconstructed
+    from the doc: ``advance_checkpoint`` always advances ``ydoc_snapshot`` and
+    ``base_sha`` together, so the git blob at ``base_sha`` is always exactly
+    the raw markdown ``ydoc_snapshot`` was seeded from (same invariant
+    ``coedit_room.Room.__init__`` relies on, which stores the raw string it
+    was seeded from directly rather than round-tripping through
+    ``reconstruct_body``). Round-tripping through the doc instead would drift
+    from the original formatting on every untouched block, defeating
+    ``checkpoint_body``'s verbatim-slice diffing.
+
+    The ``TouchedTracker`` is created right after the doc is seeded, before
+    replay, so every replayed update is observed by the tracker exactly as
+    it would be for a live edit (``TouchedTracker.observe_deep`` sees any
+    mutation regardless of origin) — matching ``coedit_room.Room.__init__``'s
+    own seed-then-track ordering.
 
     Returns the seq actually replayed up to (the caller's own ``sess.ydoc_seq``
     can be a moment stale by the time this runs — a fresh update can land
@@ -94,13 +101,13 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     doc = Doc()
     assert sess.ydoc_snapshot is not None  # caller guarantees this (see checkpoint_session)
     doc.apply_update(sess.ydoc_snapshot)
-    base_body = markdown_yjs.reconstruct_body(doc)
+    base_body = wiki_git.read_file_opt(sess.path, sess.base_sha) if sess.base_sha else ""
     tracker = TouchedTracker(doc)
     since = coedit.updates_since(sess.id, sess.ydoc_snapshot_seq)
     for u in since.updates:
         doc.apply_update(u.update_payload)
     replayed_seq = since.head_seq if since.head_seq is not None else sess.ydoc_snapshot_seq
-    return doc, base_body, tracker, replayed_seq
+    return doc, base_body or "", tracker, replayed_seq
 
 
 class CheckpointOutcome(BaseModel):
@@ -198,6 +205,11 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         primary_id = coedit.last_update_author(session_id)
         author = _user(primary_id) if primary_id else None
         message = _commit_message(session_id, primary_author_id=primary_id)
+
+        # Local import: app.wiki.utils (indirectly, via notify -> tasks) imports
+        # back into this module through app.tasks.coedit_checkpoint, so a
+        # module-level import here is circular.
+        from app.wiki.utils import commit_and_fan_out
 
         # System-initiated write: editors' write permission was already
         # enforced when they joined/applied updates, so skip the ACL gate;
