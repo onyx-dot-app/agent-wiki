@@ -67,15 +67,6 @@ class ProposalsResponse(BaseModel):
     proposals: list[ProposalView]
 
 
-class RejectRequest(BaseModel):
-    """Optional body for reject. ``dont_ask_again`` also sets the
-    do-not-consolidate marker (``ai_management_allowed=False``) on every
-    page the proposal touches, so detectors skip them entirely from now
-    on — the durable, explicit "never ask about these pages"."""
-
-    dont_ask_again: bool = False
-
-
 class ProposalActionResponse(BaseModel):
     """Result of actioning a proposal. On approve, execution is enqueued on
     the detection queue, so ``status`` reflects the decision, not the

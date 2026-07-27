@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.auth import User, require_can
 from app.auth.deps import require_admin, require_user
 from app.models.automanage import (
-    RejectRequest,
     DetectionRunView,
     DetectionSettingsUpdate,
     DetectionSettingsView,
@@ -24,7 +23,7 @@ from app.models.automanage import (
     SweepTriggerResponse,
 )
 from app.tasks.automanage import run_detection_sweep
-from app.wiki import acl, update_policy
+from app.wiki import acl
 from app.wiki.automanage import review, runs, settings
 from app.wiki.change_proposals import (
     ProposalStatus,
@@ -179,23 +178,10 @@ def approve_one(
 
 @router.post("/proposals/{proposal_id}/reject", response_model=ProposalActionResponse)
 def reject_one(
-    proposal_id: int,
-    req: RejectRequest | None = None,
-    user: User = Depends(require_user),
+    proposal_id: int, user: User = Depends(require_user)
 ) -> ProposalActionResponse:
-    """Reject a pending proposal (durable do-not-propose). 409 if not pending.
-    With ``dont_ask_again``, also stamps the do-not-consolidate marker on
-    every touched page — the caller just proved write on all of them."""
+    """Reject a pending proposal (durable do-not-propose). 409 if not pending."""
     _require_writable(proposal_id, user)
-    proposal = get_proposal(proposal_id)
-    # Markers before the transition: set_policy is idempotent, so if a write
-    # fails mid-way the proposal is still pending and the call is retryable.
-    # The reverse order would strand partial markers behind a 409.
-    if req is not None and req.dont_ask_again and proposal is not None:
-        for path in list(proposal["source_paths"]) + list(proposal["target_paths"]):
-            update_policy.set_policy(
-                path, ai_management_allowed=False, actor_user_id=user.id
-            )
     if not review.reject(proposal_id, user_id=user.id):
         raise HTTPException(status_code=409, detail="proposal is not pending")
     return ProposalActionResponse(status="rejected")

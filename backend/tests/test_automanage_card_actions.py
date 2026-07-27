@@ -1,8 +1,8 @@
 """The card's human verbs and freshness stamp (backend).
 
 Verb ladder: approve (do it) · dismiss (clear the card, machine-invalidation
-semantics — revivable while the finding stays true) · reject (never again;
-optionally also stamps the do-not-consolidate marker). Freshness: carried
+semantics — revivable while the finding stays true) · reject (never again,
+content-scoped). Freshness: carried
 pendings get `last_emitted_at` re-stamped each sweep, so the banner's
 "confirmed by the last scan" line reflects the run that just re-verified
 the finding, not the original emit.
@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from app.wiki import git as wiki_git
-from app.wiki import update_policy
 from app.wiki.automanage import runner
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import (
@@ -118,41 +117,6 @@ def test_revival_clears_the_dismissers_mark(client, monkeypatch):
     revived = get(row["id"])
     assert revived is not None
     assert revived["reviewed_by_user_id"] is None
-
-
-def test_reject_with_dont_ask_again_stamps_the_marker(client, monkeypatch):
-    det = _FixedDetector("det_one", [_stub_draft("team/a.md")])
-    _sweep(monkeypatch, [det])
-    row = _pending_one()
-    uid = seed_user(uid="u1", email="u@x.com")
-    login_fastapi(client, uid)
-
-    resp = client.post(
-        f"/api/automanage/proposals/{row['id']}/reject",
-        json={"dont_ask_again": True},
-    )
-    assert resp.status_code == 200
-
-    # Assert the EXPLICIT row, not the resolved view — resolution fills
-    # defaults, so a resolved False wouldn't prove the marker was stamped.
-    explicit = update_policy.get("team/a.md")
-    assert explicit is not None and explicit["ai_management_allowed"] is False
-
-    # The marker keeps even *new* findings on that page from emitting.
-    result = _sweep(monkeypatch, [det])
-    assert result["proposals_emitted"] == 0
-    assert len(list_by_status(ProposalStatus.PENDING)) == 0
-
-
-def test_plain_reject_stamps_no_marker(client, monkeypatch):
-    det = _FixedDetector("det_one", [_stub_draft("team/a.md")])
-    _sweep(monkeypatch, [det])
-    row = _pending_one()
-    uid = seed_user(uid="u1", email="u@x.com")
-    login_fastapi(client, uid)
-    assert client.post(f"/api/automanage/proposals/{row['id']}/reject").status_code == 200
-    explicit = update_policy.get("team/a.md")
-    assert explicit is None or explicit["ai_management_allowed"] is None
 
 
 def test_carried_pending_gets_freshness_restamped(client, monkeypatch):
