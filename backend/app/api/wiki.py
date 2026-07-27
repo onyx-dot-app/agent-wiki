@@ -872,7 +872,7 @@ def generate_draft(
     user: User = Depends(require_user),
 ) -> GenerateDraftResponse:
     """Generate a draft (title + body) from a free-text prompt for review."""
-    from app.llm.agents import draft_generator
+    from app.llm.agents import draft_generator  # noqa: PLC0415
 
     result = draft_generator.generate(req.prompt)
     return GenerateDraftResponse(title=result["title"], body=result["body"])
@@ -884,7 +884,7 @@ def revise_draft(
     user: User = Depends(require_user),
 ) -> ReviseDraftResponse:
     """Apply an instruction to an unsaved draft body; return the revised body."""
-    from app.llm.agents import draft_reviser
+    from app.llm.agents import draft_reviser  # noqa: PLC0415
 
     return ReviseDraftResponse(body=draft_reviser.revise(req.body, req.instruction))
 

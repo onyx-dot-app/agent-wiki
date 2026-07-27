@@ -48,7 +48,7 @@ def _executable(proposal_id: int) -> bool:
 def _dispatch_human_execution(proposal_id: int) -> None:
     """Enqueue a human-approved execution on the *nearline* queue — it applies
     promptly, never behind an in-flight sweep or AI auto-apply batch."""
-    from app.tasks.automanage import execute_approved_proposal
+    from app.tasks.automanage import execute_approved_proposal  # noqa: PLC0415
 
     execute_approved_proposal(proposal_id)
 
@@ -56,7 +56,7 @@ def _dispatch_human_execution(proposal_id: int) -> None:
 def _dispatch_ai_execution(proposal_id: int) -> None:
     """Enqueue an AI-auto-approved execution on the *offline* queue, alongside
     the sweeps — batch, nobody waits."""
-    from app.tasks.automanage import execute_auto_approved_proposal
+    from app.tasks.automanage import execute_auto_approved_proposal  # noqa: PLC0415
 
     execute_auto_approved_proposal(proposal_id)
 

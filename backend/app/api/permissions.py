@@ -296,8 +296,8 @@ def delete_acl_entry(
 ) -> Response:
     # We need the entry's resource_path to know whose owner-check to
     # apply. Fetch via the same code path the listing uses.
-    from app.db.models import AclEntry
-    from app.db.session import session
+    from app.db.models import AclEntry  # noqa: PLC0415
+    from app.db.session import session  # noqa: PLC0415
 
     with session() as s:
         e = s.get(AclEntry, entry_id)

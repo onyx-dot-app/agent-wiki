@@ -135,7 +135,7 @@ def subscribe_resource(sess: McpSession, uri: str) -> dict[str, Any]:
         job_id = _strip_job_uri(uri)
         job = mcp_jobs.get(job_id)
         if job is None or job["user_id"] != sess.user_id:
-            from app.auth import PermissionDenied
+            from app.auth import PermissionDenied  # noqa: PLC0415
 
             raise PermissionDenied(f"forbidden: cannot subscribe to {uri}")
         mcp_pubsub.subscribe_job(sess.id, job_id)

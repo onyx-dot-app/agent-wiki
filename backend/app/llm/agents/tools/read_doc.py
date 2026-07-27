@@ -27,7 +27,7 @@ def handle(args: dict[str, Any]) -> Any:
     if sha is None and not wiki_utils.file_exists(path):
         return {"error": f"file not found: {path}"}
 
-    from app.auth import PermissionDenied, require_can
+    from app.auth import PermissionDenied, require_can  # noqa: PLC0415
 
     try:
         require_can("read", path)

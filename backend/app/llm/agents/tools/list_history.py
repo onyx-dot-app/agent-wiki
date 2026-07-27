@@ -28,7 +28,7 @@ def handle(args: dict[str, Any]) -> Any:
         limit = DEFAULT_LIMIT
     limit = max(1, min(limit, MAX_LIMIT))
 
-    from app.auth import PermissionDenied, require_can
+    from app.auth import PermissionDenied, require_can  # noqa: PLC0415
 
     try:
         require_can("read", path)

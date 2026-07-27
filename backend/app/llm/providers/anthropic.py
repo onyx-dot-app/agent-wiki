@@ -246,7 +246,7 @@ def _message(m: dict[str, Any]) -> dict[str, Any]:
 def _translate_error(exc: Exception) -> LLMError:
     """Map an Anthropic SDK exception to an LLMError. Imports the SDK locally
     so the failure path is the only place we touch the SDK error types."""
-    import anthropic
+    import anthropic  # noqa: PLC0415
 
     if isinstance(exc, anthropic.AuthenticationError):
         return LLMError(

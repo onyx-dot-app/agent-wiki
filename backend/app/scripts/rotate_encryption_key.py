@@ -123,7 +123,7 @@ def rotate(old_secret: str, new_secret: str | None = None) -> int:
 
 
 def main() -> None:
-    from app.utils.logging import setup_logging
+    from app.utils.logging import setup_logging  # noqa: PLC0415
 
     setup_logging()
     old = os.environ.get("OLD_ENCRYPTION_KEY_SECRET")

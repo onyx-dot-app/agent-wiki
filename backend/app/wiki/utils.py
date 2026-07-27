@@ -207,7 +207,7 @@ def commit_and_fan_out(
     # Creating a new page is always allowed for the calling user — they
     # become the owner via the seeding hook in ``after_doc_write``.
     if change_kind == ChangeKind.EDIT and not skip_acl:
-        from app.auth import PermissionDenied, require_can
+        from app.auth import PermissionDenied, require_can  # noqa: PLC0415
 
         try:
             require_can("write", path)
@@ -315,12 +315,12 @@ def _commit_resolved(
     # Resolve the acting agent once: an explicit agent_name_var wins, else a
     # driving launcher session's tool_id, so the activity rail and the
     # provenance ledger both attribute the edit to "claude-code" / "codex".
-    from app.launchers.current_session import current_agent_session_id
+    from app.launchers.current_session import current_agent_session_id  # noqa: PLC0415
 
     launcher_sid = current_agent_session_id()
     agent_name = agent_activity.agent_name_var.get()
     if launcher_sid is not None and agent_name is None:
-        from app.db import agent_sessions as _sessions
+        from app.db import agent_sessions as _sessions  # noqa: PLC0415
 
         sess_row = _sessions.get(launcher_sid)
         if sess_row is not None:
@@ -364,7 +364,7 @@ def _commit_resolved(
             upsert_kwargs["ttl"] = activity_ttl
         expires_at = agent_activity.upsert_activity(**upsert_kwargs)
         # Local import: avoids loading the tasks package at tool-load time.
-        from app.tasks.agent_activity import schedule_cleanup_for_natural_key
+        from app.tasks.agent_activity import schedule_cleanup_for_natural_key  # noqa: PLC0415
 
         schedule_cleanup_for_natural_key(
             user_id=user.id,
@@ -394,8 +394,8 @@ def mark_doc_read(path: str) -> None:
         return
     agent_name = agent_activity.agent_name_var.get()
     # derive agent_name from launcher session if not set.
-    from app.launchers.current_session import current_agent_session_id
-    from app.db import agent_sessions as _sessions
+    from app.launchers.current_session import current_agent_session_id  # noqa: PLC0415
+    from app.db import agent_sessions as _sessions  # noqa: PLC0415
 
     launcher_sid = current_agent_session_id()
     if launcher_sid is not None and agent_name is None:
@@ -411,7 +411,7 @@ def mark_doc_read(path: str) -> None:
         description=None,
         agent_session_id=launcher_sid,
     )
-    from app.tasks.agent_activity import schedule_cleanup_for_natural_key
+    from app.tasks.agent_activity import schedule_cleanup_for_natural_key  # noqa: PLC0415
 
     schedule_cleanup_for_natural_key(
         user_id=user.id,

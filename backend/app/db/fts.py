@@ -44,7 +44,7 @@ class SearchHit(BaseModel):
 # --------------------------------------------------------------------------- #
 
 def _make_client(url: str) -> object:
-    import re
+    import re  # noqa: PLC0415
 
     # urlparse mishandles passwords with special chars (e.g. '?') — use regex instead.
     m = re.match(
@@ -79,7 +79,7 @@ def _get_client() -> object | None:
     with _client_lock:
         if _client_ready:
             return _client
-        from app.config import CONFIG
+        from app.config import CONFIG  # noqa: PLC0415
 
         url = CONFIG.opensearch_url
         if not url:
@@ -144,7 +144,7 @@ _MAPPING = {
 }
 
 def _index_name() -> str:
-    from app.config import CONFIG
+    from app.config import CONFIG  # noqa: PLC0415
     return CONFIG.opensearch_index
 
 def _ensure_index(client: object) -> None:
@@ -341,6 +341,6 @@ def _visible_paths(
     """
     if is_admin or not paths:
         return paths
-    from app.wiki import acl
+    from app.wiki import acl  # noqa: PLC0415
 
     return set(acl.filter_paths_in_python(user_id, is_admin, paths))

@@ -109,7 +109,7 @@ def _maybe_auto_subscribe(
     if not isinstance(rel, str) or not rel:
         return
     # Local import — pubsub depends on this module transitively.
-    from app.mcp_server import pubsub as mcp_pubsub
+    from app.mcp_server import pubsub as mcp_pubsub  # noqa: PLC0415
 
     mcp_pubsub.subscribe_doc(sess.id, rel)
 
@@ -176,15 +176,15 @@ def _call_async_nl_update(
     # Local imports — these modules pull in the queue + worker which
     # we don't want loaded at module-import time for tools.py callers
     # that just want list_for_mcp.
-    import hashlib
+    import hashlib  # noqa: PLC0415
 
-    from app.auth import PermissionDenied, require_can
-    from app.llm.agents.tools.errors import ToolError
-    from app.wiki import utils as wiki_utils
-    from app.mcp_server import jobs as mcp_jobs
-    from app.mcp_server import pubsub as mcp_pubsub
-    from app.tasks.wiki_update import agent_update_document_nl
-    from app.wiki import git as wiki_git
+    from app.auth import PermissionDenied, require_can  # noqa: PLC0415
+    from app.llm.agents.tools.errors import ToolError  # noqa: PLC0415
+    from app.wiki import utils as wiki_utils  # noqa: PLC0415
+    from app.mcp_server import jobs as mcp_jobs  # noqa: PLC0415
+    from app.mcp_server import pubsub as mcp_pubsub  # noqa: PLC0415
+    from app.tasks.wiki_update import agent_update_document_nl  # noqa: PLC0415
+    from app.wiki import git as wiki_git  # noqa: PLC0415
 
     # ---- Validate ----
     raw_path = arguments.get("path")
@@ -247,7 +247,7 @@ def _call_async_nl_update(
     # Capture the per-key agent identity here so the worker can rebind
     # it before commit_and_fan_out — the bearer ContextVar is gone by
     # the time the worker runs.
-    from app.wiki import agent_activity
+    from app.wiki import agent_activity  # noqa: PLC0415
 
     payload: dict[str, Any] = {
         "path": rel,
@@ -296,7 +296,7 @@ def _compute_stale_paths(sess: McpSession) -> list[str]:
     poll-based fallback for clients that aren't holding a stream open
     — empty in the steady state for a connected, attentive client.
     """
-    from app.mcp_server import pubsub as mcp_pubsub
+    from app.mcp_server import pubsub as mcp_pubsub  # noqa: PLC0415
 
     q = mcp_pubsub.queue_for(sess.id)
     drained: list[Any] = []

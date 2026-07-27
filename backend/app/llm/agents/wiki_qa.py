@@ -33,9 +33,9 @@ def run(query: str, *, model: str | None = None) -> dict[str, Any]:
     # module load, which loads ask_nl_question.py, which imports this
     # module. Deferring the chat / registry imports until call time keeps
     # the import graph acyclic.
-    from app.llm.agents import chat as chat_agent
-    from app.llm.agents import skills as skill_registry
-    from app.llm.agents import tools as tool_registry
+    from app.llm.agents import chat as chat_agent  # noqa: PLC0415
+    from app.llm.agents import skills as skill_registry  # noqa: PLC0415
+    from app.llm.agents import tools as tool_registry  # noqa: PLC0415
 
     system_prompt = load_prompt("wiki_qa.system")
     # Read-only sub-agent: base toolset only, no `load_skill` (cannot escalate
@@ -114,7 +114,7 @@ def _extract_path(content: Any) -> str | None:
     if not isinstance(content, str):
         return None
     # Cheap path extraction — avoids loading json for the common shape.
-    import json
+    import json  # noqa: PLC0415
     try:
         parsed: Any = json.loads(content)
     except (TypeError, ValueError):
