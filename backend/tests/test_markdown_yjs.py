@@ -40,14 +40,27 @@ def test_seed_doc_produces_one_element_per_top_level_block() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     root = _root(doc)
     tags = [c.tag for c in root.children]
-    assert tags == ["heading", "paragraph", "bulletList", "table", "paragraph"]
+    # Every blank line between blocks is its own element too (an empty
+    # paragraph, BlockKind.BLANK_LINE's element shape) - no newline is ever
+    # an implicit, "free" gap.
+    assert tags == [
+        "heading",
+        "paragraph",
+        "paragraph",
+        "paragraph",
+        "bulletList",
+        "paragraph",
+        "table",
+        "paragraph",
+        "paragraph",
+    ]
 
 
 def test_block_ids_are_positional_and_stable() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     root = _root(doc)
     ids = [dict(c.attributes).get(BLOCK_ID_ATTR) for c in root.children]
-    assert ids == ["b0", "b1", "b2", "b3", "b4"]
+    assert ids == ["b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8"]
 
 
 def test_reconstruct_body_round_trips_simple_body() -> None:
@@ -155,7 +168,9 @@ def test_task_list_nesting_and_inside_blockquote() -> None:
     nested = list(top_list.children[0].children)
     assert [c.tag for c in nested] == ["paragraph", "taskList"]
 
-    bq = root.children[1]
+    # root.children[1] is the blank-line block between the two top-level
+    # constructs - every blank line is its own block now.
+    bq = root.children[2]
     assert bq.tag == "blockquote"
     assert bq.children[0].tag == "taskList"
 
@@ -334,11 +349,16 @@ def test_ordered_marker_escape_lands_on_the_delimiter_not_the_digits() -> None:
         doc = _build_live_paragraph(text)
         once = reconstruct_body(doc)
         reseeded = seed_doc_from_markdown(once)
-        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
-        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        children = list(reseeded.get(ROOT_XML_KEY, type=XmlFragment).children)
+        tags = [c.tag for c in children]
+        # Every newline is its own block boundary now (no soft breaks within
+        # one block) - the soft-break line becomes its own paragraph.
+        assert tags == ["paragraph", "paragraph"], (
+            f"expected two paragraphs for {text!r}, got tags={tags}"
+        )
         twice = reconstruct_body(reseeded)
         assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
-        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        content = "\n".join("".join(t for t, _ in c.children[0].diff()) for c in children)
         assert content == text, f"expected content {text!r} preserved exactly, got {content!r}"
 
 
@@ -515,7 +535,7 @@ def _build_live_paragraph(text: str) -> Doc:
     already (correctly) parse it as a table, not a paragraph."""
     doc = Doc()
     root = doc.get(ROOT_XML_KEY, type=XmlFragment)
-    para = XmlElement("paragraph", {BLOCK_ID_ATTR: "b0", "_nl": "1"}, contents=[])
+    para = XmlElement("paragraph", {BLOCK_ID_ATTR: "b0"}, contents=[])
     with doc.transaction():
         root.children.append(para)
     with doc.transaction():
@@ -534,8 +554,12 @@ def test_paragraph_reactivates_as_table_without_escaping() -> None:
     once = reconstruct_body(doc)
     reseeded = seed_doc_from_markdown(once)
     tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
-    assert tags == ["paragraph"], (
-        f"expected the checkpointed text to stay a single paragraph, "
+    # Every newline is its own block boundary now, so the two lines split
+    # into two paragraphs - neither reactivates as a table (the dash run
+    # is escaped as a thematic break, which also blocks the delimiter-row
+    # read, coincidentally but correctly).
+    assert tags == ["paragraph", "paragraph"], (
+        f"expected two paragraphs, no table reactivation, "
         f"got tags={tags} for body={once!r}"
     )
 
@@ -550,7 +574,7 @@ def test_table_delimiter_row_escaping_is_stable() -> None:
             c.tag
             for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
         ]
-        assert tags == ["paragraph"]
+        assert tags == ["paragraph", "paragraph"]
 
 
 def test_paragraph_line_of_tildes_does_not_reactivate_as_a_fence() -> None:
@@ -565,7 +589,9 @@ def test_paragraph_line_of_tildes_does_not_reactivate_as_a_fence() -> None:
     twice = reconstruct_body(seed_doc_from_markdown(once))
     assert once == twice
     tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
-    assert tags == ["paragraph"]
+    # Every newline is its own block boundary now - three lines, three
+    # paragraphs, none of them reactivating as a fence.
+    assert tags == ["paragraph", "paragraph", "paragraph"]
 
 
 def test_paragraph_line_of_backticks_does_not_reactivate_as_a_fence() -> None:
@@ -576,7 +602,7 @@ def test_paragraph_line_of_backticks_does_not_reactivate_as_a_fence() -> None:
     doc = _build_live_paragraph("some text:\n```\nmore text")
     once = reconstruct_body(doc)
     tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
-    assert tags == ["paragraph"]
+    assert tags == ["paragraph", "paragraph", "paragraph"]
 
 
 def test_indented_block_markers_do_not_reactivate() -> None:
@@ -614,11 +640,15 @@ def test_indented_block_markers_do_not_reactivate() -> None:
         doc = _build_live_paragraph(text)
         once = reconstruct_body(doc)
         reseeded = seed_doc_from_markdown(once)
-        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
-        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        children = list(reseeded.get(ROOT_XML_KEY, type=XmlFragment).children)
+        tags = [c.tag for c in children]
+        # Every newline is its own block boundary now - each line the
+        # original text split into is its own paragraph.
+        expected_tags = ["paragraph"] * expected_content.count("\n") + ["paragraph"]
+        assert tags == expected_tags, f"expected {expected_tags} for {text!r}, got tags={tags}"
         twice = reconstruct_body(reseeded)
         assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
-        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        content = "\n".join("".join(t for t, _ in c.children[0].diff()) for c in children)
         assert content == expected_content, (
             f"expected the leading indentation trimmed for {text!r}, got {content!r}"
         )
@@ -642,11 +672,14 @@ def test_indented_first_line_does_not_reactivate_as_code_block() -> None:
         doc = _build_live_paragraph(text)
         once = reconstruct_body(doc)
         reseeded = seed_doc_from_markdown(once)
-        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
-        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        children = list(reseeded.get(ROOT_XML_KEY, type=XmlFragment).children)
+        tags = [c.tag for c in children]
+        assert tags == ["paragraph", "paragraph"], (
+            f"expected two paragraphs for {text!r}, got tags={tags}"
+        )
         twice = reconstruct_body(reseeded)
         assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
-        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        content = "\n".join("".join(t for t, _ in c.children[0].diff()) for c in children)
         assert content == expected_content, (
             f"expected the leading indentation trimmed for {text!r}, got {content!r}"
         )
@@ -664,7 +697,12 @@ def test_indented_continuation_line_stays_safe_without_escaping() -> None:
     once = reconstruct_body(doc)
     assert once == text + "\n"
     tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
-    assert tags == ["paragraph"]
+    # Every newline is its own block boundary now - the continuation line
+    # becomes its own paragraph. It stays safe without any backslash escape
+    # (there's nothing to escape - the ambiguity is 4+ leading columns of
+    # indentation, which _strip_indented_code_ambiguity_for_parse strips
+    # on reparse, same documented tradeoff as the marker-escape cases).
+    assert tags == ["paragraph", "paragraph"]
 
 
 def test_find_by_block_id() -> None:
@@ -763,7 +801,17 @@ def test_reconstruct_body_with_block_map_spans_match_serialized_text() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     body, spans = reconstruct_body_with_block_map(doc)
     assert body == reconstruct_body(doc)
-    assert [s.block_id for s in spans] == ["b0", "b1", "b2", "b3", "b4"]
+    assert [s.block_id for s in spans] == [
+        "b0",
+        "b1",
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7",
+        "b8",
+    ]
     for s in spans:
         assert body[s.start : s.end]
     # Spans are in document order and non-overlapping, same invariant as
@@ -775,5 +823,6 @@ def test_reconstruct_body_with_block_map_spans_match_serialized_text() -> None:
 def test_reconstruct_body_with_block_map_finds_offset_within_touched_block() -> None:
     doc = seed_doc_from_markdown("First paragraph.\n\nSecond paragraph.\n")
     body, spans = reconstruct_body_with_block_map(doc)
-    second = next(s for s in spans if s.block_id == "b1")
+    # b1 is the blank-line block between the two paragraphs now.
+    second = next(s for s in spans if s.block_id == "b2")
     assert body[second.start : second.end] == "Second paragraph.\n"

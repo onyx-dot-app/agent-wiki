@@ -45,16 +45,6 @@ from app.wiki.markdown_yjs import (
 
 _ROW_TAGS = ("tableRow", "tableSeparator")
 
-# Synthesized separator inserted before a touched/new block when no original
-# gap is available to reuse verbatim (see checkpoint_body) — one blank line,
-# matching CommonMark's block-separator convention. Each block's own
-# serialized text already carries its own trailing newline (BlockRange.end
-# is inclusive of it), so this is the *additional* blank-line character, not
-# two. Not required to match the source body's exact blank-line count — only
-# untouched regions carry a byte-stability guarantee (see module docstring /
-# design doc).
-_SYNTHESIZED_GAP = "\n"
-
 
 class TouchedTracker:
     """Tracks which blocks/rows of a session's live doc have been mutated
@@ -147,6 +137,14 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
 
     ``base_body`` is the body the live doc was seeded from (session start,
     or the body as of the last checkpoint after a ``tracker.reset()``).
+
+    No separator is ever synthesized between blocks here: each touched/new
+    block's own ``serialize_block`` output already supplies its own complete
+    boundary (a block with content ends in exactly one newline; an empty one
+    contributes nothing), so parts are concatenated directly. There is
+    deliberately no "canonical gap" concept anywhere in this module — every
+    single newline the user enters is its own block (``BlockKind.BLANK_LINE``
+    in ``markdown_blocks.py``), with nothing implicit synthesized on top.
     """
     orig_blocks = top_level_block_ranges(base_body)
     orig_by_id = {b.block_id: b for b in orig_blocks}
@@ -180,8 +178,7 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
             parts.append(base_body[leading_gap_start[block_id] : orig.end])
             continue
 
-        gap = _SYNTHESIZED_GAP if parts else ""
-        parts.append(gap + serialize_block(child))
+        parts.append(serialize_block(child))
 
     parts.append(base_body[tail_start:])
     return "".join(parts)

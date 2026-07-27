@@ -50,7 +50,6 @@ from app.wiki.markdown_blocks import BlockKind, BlockRange, gfm_parser, top_leve
 # `field` config exactly (see frontend/src/lib/tiptapEditor/extensions.ts).
 ROOT_XML_KEY = "prosemirror"
 
-_NL_ATTR = "_nl"  # "1" if this block's raw text ends with a trailing newline
 _RAW_ATTR = "_raw"  # "1" for an opaque verbatim-text block
 BLOCK_ID_ATTR = "_blockId"
 ROW_ID_ATTR = "_rowId"
@@ -214,11 +213,12 @@ def _serialize_paragraph_text(children: list[Any]) -> str:
     just Tiptap's default paragraph split) leaves the *old* softbreak's
     "\\n" as an ordinary leading/trailing character in whichever half didn't
     consume it, since that split has no markdown-syntax awareness at all.
-    Left in, it stacks with ``markdown_splice._SYNTHESIZED_GAP``'s own
-    separator newline to produce an extra, unwanted blank line around the
-    split point. A leading/trailing "\\n" is never meaningful paragraph
-    content either way (an *interior* one still is — a real softbreak —
-    and is untouched here, since ``str.strip`` only touches the ends)."""
+    Left in, it stacks with this block's own trailing newline (every block
+    contributes exactly one — see ``serialize_block``) to produce an extra,
+    unwanted blank line around the split point. A leading/trailing "\\n" is
+    never meaningful paragraph content either way (an *interior* one still
+    is — a real softbreak — and is untouched here, since ``str.strip`` only
+    touches the ends)."""
     return _escape_block_start_ambiguity(_serialize_inline_children(children).strip("\n"))
 
 
@@ -445,50 +445,52 @@ def _build_heading(raw: str, attrs: dict[str, str]) -> tuple[XmlElement, list[An
 def _build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list[Any]]:
     """Returns the (prelim) element plus a list of "finish" callbacks to run
     once the element is integrated into a doc (mark ``.format()`` calls need
-    an already-integrated ``XmlText``)."""
+    an already-integrated ``XmlText``).
+
+    No ``_nl`` attribute anywhere below, deliberately: every block's own
+    trailing newline is no longer conditional on anything stored — see
+    ``serialize_block``, which now always emits exactly one, unconditionally,
+    for every block kind. Trying to track "does this block's raw text end in
+    a newline" as stamped, frozen state was the root cause of a whole family
+    of bugs (a stored value going stale relative to a block's actual current
+    content); the fix is to never store the decision at all.
+    """
     raw = body[block.start : block.end]
-    trailing_nl = raw.endswith("\n")
-    nl_attr = "1" if trailing_nl else "0"
 
     if block.kind is BlockKind.BLANK_LINE:
-        # Always an empty paragraph with no trailing-newline attr, regardless
-        # of `raw`/`nl_attr` above (`raw` is just the one blank-line
-        # character this pseudo-block occupies, not real paragraph content)
-        # - matches exactly what a live Enter-press on an empty paragraph
-        # already produces, so it round-trips through the same, unmodified
-        # `serialize_block` paragraph branch with no special-casing there.
+        # Always an empty paragraph - matches exactly what a live Enter-press
+        # on an empty paragraph already produces, so it round-trips through
+        # the same, unmodified `serialize_block` paragraph branch with no
+        # special-casing there.
         return (
-            XmlElement(
-                "paragraph", {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: "0"}, contents=[XmlText("")]
-            ),
+            XmlElement("paragraph", {BLOCK_ID_ATTR: block.block_id}, contents=[XmlText("")]),
             [],
         )
 
     if block.kind is BlockKind.HEADING:
-        return _build_heading(raw, {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr})
+        return _build_heading(raw, {BLOCK_ID_ATTR: block.block_id})
 
     if block.kind is BlockKind.PARAGRAPH:
-        line = raw[:-1] if trailing_nl else raw
-        return _make_inline_element(
-            "paragraph", {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr}, line
-        )
+        line = raw[:-1] if raw.endswith("\n") else raw
+        line = _strip_indented_code_ambiguity_for_parse(line)
+        return _make_inline_element("paragraph", {BLOCK_ID_ATTR: block.block_id}, line)
 
     if block.kind is BlockKind.LIST:
         tokens = gfm_parser().parse(raw)
         el, finishers = _build_list(
-            tokens, 0, len(tokens), extra_attrs={BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr}
+            tokens, 0, len(tokens), extra_attrs={BLOCK_ID_ATTR: block.block_id}
         )
         return el, finishers
 
     if block.kind is BlockKind.BLOCKQUOTE:
         tokens = gfm_parser().parse(raw)
         el, finishers = _build_blockquote(
-            tokens, 0, len(tokens), extra_attrs={BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr}
+            tokens, 0, len(tokens), extra_attrs={BLOCK_ID_ATTR: block.block_id}
         )
         return el, finishers
 
     if block.kind is BlockKind.CODE_BLOCK:
-        el = _build_code_block(raw, {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr})
+        el = _build_code_block(raw, {BLOCK_ID_ATTR: block.block_id})
         return el, []
 
     if block.kind is BlockKind.TABLE:
@@ -699,6 +701,27 @@ _FENCE_OPENER_RE = re.compile(r"^(?:`{3,}|~{3,})")
 _INDENTED_CODE_FIRST_LINE_RE = re.compile(r"^(?: {4}| {0,3}\t)")
 
 
+def _strip_indented_code_ambiguity_for_parse(line: str) -> str:
+    """Parse-side mirror of ``_escape_block_start_ambiguity``'s first-line
+    handling, below.
+
+    ``top_level_block_ranges`` splits a multi-line paragraph into one
+    ``BlockRange`` per soft-break line (every newline is its own block
+    boundary now - see that function's docstring). A continuation line with
+    4+ leading columns of indentation was always safe as part of a bigger
+    paragraph (an indented code block can't interrupt one already started),
+    but once split out it becomes its own block and gets reparsed standalone
+    by ``_make_inline_element`` - exactly the indented-code-block trigger,
+    which has no ``inline`` token at all, so the paragraph's content would
+    silently come back empty instead of just losing its indentation. Strip
+    the same leading run stripped on the write side so the round-trip stays
+    symmetric: a promoted continuation line still parses as a paragraph."""
+    lines = line.split("\n")
+    if lines[0] and _INDENTED_CODE_FIRST_LINE_RE.match(lines[0]):
+        lines[0] = lines[0].lstrip(" \t")
+    return "\n".join(lines)
+
+
 def _escape_block_start_ambiguity(text: str) -> str:
     """A paragraph's serialized text starting with a character or pattern
     that's only special as a *block*-start marker (heading ``#``, bullet
@@ -787,25 +810,29 @@ def _escape_line_start(line: str) -> str:
 
 
 def serialize_block(node: XmlElement) -> str:
+    """No stored newline state anywhere in this function, deliberately: every
+    block - including an empty paragraph (a ``BlockKind.BLANK_LINE`` spacer,
+    or a fresh one from an Enter press with nothing typed) - contributes
+    exactly its own text plus one trailing newline, unconditionally, with no
+    exception for empty content. `checkpoint_body` concatenates every
+    block's own output directly with no separator of its own added on top
+    (see its module docstring) - it's the block's own newline that supplies
+    the entire boundary, so an empty block still needs to contribute one:
+    it represents exactly one blank line, not the absence of one."""
     attrs = dict(node.attributes)
-    trailing = attrs.get(_NL_ATTR) == "1"
 
     if node.tag == "heading":
         level = int(attrs["level"])
         text = _serialize_inline_children(list(node.children))
-        return "#" * level + " " + text + ("\n" if trailing else "")
+        return "#" * level + " " + text + "\n"
     if node.tag == "paragraph":
-        text = _serialize_paragraph_text(list(node.children))
-        return text + ("\n" if trailing else "")
+        return _serialize_paragraph_text(list(node.children)) + "\n"
     if node.tag in ("bulletList", "orderedList", "taskList"):
-        text = _serialize_list(node)
-        return text if trailing else text.rstrip("\n")
+        return _serialize_list(node)
     if node.tag == "blockquote":
-        text = _serialize_blockquote(node)
-        return text if trailing else text.rstrip("\n")
+        return _serialize_blockquote(node)
     if node.tag == "codeBlock":
-        text = _serialize_code_block(node)
-        return text if trailing else text.rstrip("\n")
+        return _serialize_code_block(node)
     if node.tag == "table":
         return "".join(serialize_row(row) for row in node.children)
     if attrs.get(_RAW_ATTR) == "1":
@@ -847,14 +874,14 @@ def reconstruct_body_with_block_map(doc: Doc) -> tuple[str, list[BlockSpan]]:
     """Like ``reconstruct_body``, but also returns each top-level block's
     character span within the returned text. See ``BlockSpan``.
 
-    Each block's own serialized text already carries its own trailing
-    newline (``BlockRange.end`` is inclusive of it, per
-    ``markdown_blocks.py``) — bare concatenation would silently merge
-    adjacent blocks (e.g. two paragraphs collapse into one) rather than just
-    losing exact spacing, so a blank-line separator is inserted between
-    blocks whose own text doesn't already end in one (a raw/opaque block's
-    captured span sometimes already includes its trailing blank line;
-    headings/paragraphs never do, per ``_build_block_element``). A table's
+    No separator is synthesized between blocks: each block's own
+    ``serialize_block`` output already supplies its complete boundary (one
+    trailing newline if it has content, nothing if it doesn't — see that
+    function), and any actual blank line the document contains is its own
+    separate, empty ``BlockKind.BLANK_LINE`` block, not something inferred
+    here. Bare concatenation is therefore already correct — two blocks with
+    truly nothing between them are supposed to read back as one soft-broken
+    paragraph, not silently gain a separator that was never there. A table's
     span covers its whole reserialized text (every row concatenated) — rows
     aren't tracked individually, matching this codec's row-level (not
     per-cell) granularity everywhere else.
@@ -864,9 +891,6 @@ def reconstruct_body_with_block_map(doc: Doc) -> tuple[str, list[BlockSpan]]:
     spans: list[BlockSpan] = []
     pos = 0
     for child in root.children:
-        if parts and not parts[-1].endswith("\n\n"):
-            parts.append("\n")
-            pos += 1
         text = serialize_block(child)  # type: ignore[arg-type]
         block_id = dict(child.attributes).get(BLOCK_ID_ATTR)  # type: ignore[union-attr]
         start = pos

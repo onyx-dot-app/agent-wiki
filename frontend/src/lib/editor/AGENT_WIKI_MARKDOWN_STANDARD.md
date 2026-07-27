@@ -64,11 +64,29 @@ referenced standards:
    (save, then reopen), even though CommonMark attaches no semantic meaning
    to it — 1 blank line and 5 blank lines between two paragraphs parse to
    the identical AST and render identically, so a strict CommonMark parser
-   has nowhere to record how many there were. Each _extra_ blank line beyond
-   the implicit single-line default becomes its own trackable pseudo-block
-   (`BlockKind.BLANK_LINE` in `markdown_blocks.py`), seeded as a real, empty,
-   directly-editable paragraph node — indistinguishable from one the user
-   typed by pressing Enter an extra time.
+   has nowhere to record how many there were. No newline is ever implicit or
+   "free": every single blank line, including the first one before/between
+   blocks, becomes its own trackable pseudo-block (`BlockKind.BLANK_LINE` in
+   `markdown_blocks.py`), seeded as a real, empty, directly-editable
+   paragraph node — indistinguishable from one the user typed by pressing
+   Enter. Nothing is ever synthesized on top of what the doc's blocks
+   actually contain; a checkpoint's separator between two blocks is always
+   exactly the newline each block's own serialization contributes, never an
+   inferred minimum.
+4. A CommonMark soft line break (a single newline joining two physical
+   lines into one paragraph) is NOT honored as a within-block join. Every
+   single newline the user enters (or that a paragraph happens to contain
+   when read from existing content) is its own top-level block boundary —
+   one paragraph node per line, full stop. This applies at the top level
+   only (not yet inside list items, blockquotes, or code blocks — those
+   still join a multi-line span into one block, unchanged). The only
+   construct that still keeps two physical lines inside one block is a hard
+   line break (§2 item 14) — trailing double-space or backslash — since
+   that's an explicit, unambiguous choice the user made, not an inferred
+   one. This does not change a document's rendered output or its
+   byte-for-byte serialized text (concatenating each one-line block's own
+   output reproduces the exact same lines); it only changes how finely the
+   live editor can address and independently edit each line.
 
 ## 5. Explicitly Excluded
 
@@ -94,21 +112,33 @@ stability only for blocks untouched since the last commit (see
 block type and content, but MAY normalize the following rather than
 preserve it byte-for-byte:
 
-1. Leading whitespace (1-3 columns) at the start of a paragraph line MAY be
-   trimmed when it precedes text that would otherwise reparse as a
+1. Leading whitespace (1-3 columns, or a 4+-column/tab run on what would
+   otherwise be a block's own first line) at the start of a paragraph line
+   MAY be trimmed when it precedes text that would otherwise reparse as a
    block-start marker (heading `#`, blockquote `>`, list bullet `-`/`+`, an
-   ordered marker, a thematic break, a setext underline, or a fence
-   opener). CommonMark's backslash escape applies only to punctuation, never
-   to whitespace, so trimming that whitespace is the only way to guarantee
-   the line's block type is unchanged by the next parse — escaping just the
-   marker and leaving the whitespace in front of it round-trips the marker
-   characters as literal text but not the indentation that preceded them.
+   ordered marker, a thematic break, a setext underline, a fence opener, or
+   an indented code block). CommonMark's backslash escape applies only to
+   punctuation, never to whitespace, so trimming that whitespace is the
+   only way to guarantee the line's block type is unchanged by the next
+   parse — escaping just the marker and leaving the whitespace in front of
+   it round-trips the marker characters as literal text but not the
+   indentation that preceded them. This applies symmetrically on both the
+   write path (`_escape_block_start_ambiguity`) and the read path
+   (`_strip_indented_code_ambiguity_for_parse`): a paragraph line that was
+   always safe as a _continuation_ line of a bigger paragraph (indented
+   code can't interrupt one already started) becomes its own top-level
+   block once §4 item 4's per-line splitting promotes it to a block's own
+   first line, so the same 4+-column-indent ambiguity that write-side
+   escaping already handled has to be handled again on reparse.
 
-2. A trailing newline at the very end of the file MAY be absent after a
-   checkpoint, if the last block is new/touched and was never stamped with
-   a trailing-newline marker (a brand-new node has none until something
-   sets it). Unlike item 1 above, this one isn't a reparse-safety
-   requirement — CommonMark attaches no meaning to whether a file ends in
-   `\n` (see §4 item 3 — a different, related case where the same "not
-   semantically meaningful" property is instead handled as full
-   preservation rather than an accepted loss).
+2. Every block, once touched or newly created, always ends in exactly one
+   trailing newline in the checkpointed output — including the very last
+   block in the file, even if the source file's own last line never had a
+   trailing newline to begin with. There is no stored, conditional state
+   anywhere that decides whether a block "needs" one (`serialize_block`
+   emits it unconditionally, for every block kind, always); trying to track
+   that as stamped state per block was the root cause of an entire class of
+   staleness bugs (a stored decision drifting out of sync with a block's
+   actual current content). CommonMark attaches no meaning to whether a
+   file ends in `\n` either way, so this is a normalization, not a
+   reparse-safety requirement — unlike item 1 above.

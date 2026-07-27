@@ -7,7 +7,7 @@ committed body identical to pre-session HEAD.
 
 from __future__ import annotations
 
-from pycrdt import XmlElement, XmlFragment
+from pycrdt import Doc, XmlElement, XmlFragment, XmlText
 
 from app.wiki.markdown_splice import TouchedTracker, checkpoint_body
 from app.wiki.markdown_yjs import ROOT_XML_KEY, seed_doc_from_markdown
@@ -38,12 +38,119 @@ def test_no_edits_round_trips_byte_identical() -> None:
     assert checkpoint_body(_SAMPLE, doc, tracker) == _SAMPLE
 
 
+def test_blank_line_count_round_trips_byte_identical() -> None:
+    """A run of blank lines between two blocks is invisible to markdown-it
+    (no token at all - see BlockKind.BLANK_LINE's docstring), so this is the
+    regression test for a real bug: reopening a page used to silently
+    collapse any blank-line count beyond the implicit single-line default.
+    Every one of these must round-trip an untouched session byte-for-byte,
+    same guarantee as every other block kind."""
+    bodies = [
+        "a\n\na\n",  # the canonical single-blank-line case - no BLANK_LINE blocks at all
+        "a\n\n\na\n",  # one extra blank line
+        "a\n\n\n\n\n\n\na\n",  # several extra blank lines
+        "a\n\n\na",  # no trailing newline on the file itself
+        "# Heading\n\n\n\nParagraph.\n",  # blank-line run after a non-paragraph block
+    ]
+    for body in bodies:
+        doc = seed_doc_from_markdown(body)
+        tracker = TouchedTracker(doc)
+        assert checkpoint_body(body, doc, tracker) == body, f"failed for {body!r}"
+
+
+def test_split_paragraph_with_cleared_block_id_does_not_duplicate() -> None:
+    """Regression test for the "a\\na\\na" -> 5 a's bug: ProseMirror's
+    default node-split copies a node's own attrs onto both halves, so
+    without the frontend's UniqueBlockIdentity safety net
+    (frontend/src/lib/editor/blocks.ts) both resulting top-level paragraphs
+    would claim the same _blockId, and this module's block_id -> BlockRange
+    lookup would resolve both to the same original range - duplicating
+    content. This asserts the *fixed* shape (the second half's _blockId
+    cleared to None, exactly what that safety net produces) round-trips
+    correctly rather than duplicating "a"."""
+    base_body = "a\na\na\n"  # one paragraph, three lines via soft breaks
+    doc = seed_doc_from_markdown(base_body)
+    tracker = TouchedTracker(doc)
+    root = _root(doc)
+
+    with doc.transaction():
+        para = root.children[0]
+        text_node = para.children[0]
+        full_text = text_node.to_py()  # "a\na\na"
+        before, after = full_text[:3], full_text[3:]  # "a\na", "\na"
+        del text_node[0 : len(full_text)]
+        text_node += before
+        # No _blockId/_nl attrs - matches what UniqueBlockIdentity produces
+        # for the newly-split-off second half.
+        new_para = XmlElement("paragraph", {}, contents=[XmlText(after)])
+        root.children.insert(1, new_para)
+
+    result = checkpoint_body(base_body, doc, tracker)
+    assert result.count("a") == 3, f"expected 3 a's, got {result.count('a')}: {result!r}"
+
+
+def test_brand_new_adjacent_paragraphs_get_no_synthesized_gap() -> None:
+    """No newline is ever synthesized between blocks, deliberately (the
+    "no magic" architecture - see markdown_blocks.BlockKind.BLANK_LINE and
+    this module's docstring): three brand-new top-level paragraphs typed via
+    "a, Enter, a, Enter, a" with no blank-line spacer between any of them
+    serialize with a bare newline between each, exactly what was typed, no
+    more. Confirmed against the first checkpoint of a brand-new page
+    (`base_body=""`, matching `change_kind=CREATE`)."""
+    doc = Doc()
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    with doc.transaction():
+        for _ in range(3):
+            root.children.append(XmlElement("paragraph", {}, contents=[XmlText("a")]))
+    tracker = TouchedTracker(doc)
+
+    result = checkpoint_body("", doc, tracker)
+
+    assert result == "a\na\na\n", f"got {result!r}"
+    # Reparsing must still keep them as three separate blocks: the three
+    # lines form one soft-broken paragraph_open token, but
+    # top_level_block_ranges splits every soft-break line into its own
+    # block, so this still converges back to the original structure.
+    reparsed = seed_doc_from_markdown(result)
+    reparsed_root = _root(reparsed)
+    assert len(reparsed_root.children) == 3
+    assert [c.children[0].to_py() for c in reparsed_root.children] == ["a", "a", "a"]
+
+
+def test_fresh_empty_spacer_paragraph_contributes_exactly_one_newline() -> None:
+    """A brand-new *empty* paragraph (a real blank-line spacer from pressing
+    Enter twice, not yet seeded from committed markdown) contributes exactly
+    one newline and nothing else - same as every other block, empty or not
+    (see serialize_block's docstring: there's no separate gap-synthesis
+    mechanism to lean on, so an empty block's own newline is the only thing
+    that can represent it as a real blank line)."""
+    doc = Doc()
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    with doc.transaction():
+        for text in ["a", "a", "a", "", "a"]:
+            root.children.append(XmlElement("paragraph", {}, contents=[XmlText(text)]))
+    tracker = TouchedTracker(doc)
+
+    result = checkpoint_body("", doc, tracker)
+
+    assert result == "a\na\na\n\na\n", f"got {result!r}"
+    reparsed = seed_doc_from_markdown(result)
+    reparsed_root = _root(reparsed)
+    assert [c.children[0].to_py() if c.children else None for c in reparsed_root.children] == [
+        "a",
+        "a",
+        "a",
+        "",
+        "a",
+    ]
+
+
 def test_editing_one_paragraph_leaves_every_other_byte_identical() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     tracker = TouchedTracker(doc)
     root = _root(doc)
 
-    para = root.children[1]  # "Paragraph one has some **bold** text."
+    para = root.children[2]  # "Paragraph one has some **bold** text." (children[1] is the blank-line block)
     with doc.transaction():
         para.children[0].insert(0, "EDITED: ")
 
@@ -106,7 +213,7 @@ def test_inserting_a_new_top_level_block_leaves_existing_blocks_untouched() -> N
     tracker = TouchedTracker(doc)
     root = _root(doc)
 
-    new_para = XmlElement("paragraph", {"_blockId": "new0", "_nl": "1"}, contents=[])
+    new_para = XmlElement("paragraph", {"_blockId": "new0"}, contents=[])
     with doc.transaction():
         root.children.append(new_para)
     from pycrdt import XmlText
@@ -143,7 +250,7 @@ def test_reset_clears_touched_state_for_next_checkpoint() -> None:
     tracker = TouchedTracker(doc)
     root = _root(doc)
 
-    para = root.children[1]
+    para = root.children[2]  # "Paragraph one has some **bold** text." (children[1] is the blank-line block)
     with doc.transaction():
         para.children[0].insert(0, "FIRST: ")
     first_checkpoint = checkpoint_body(_SAMPLE, doc, tracker)
@@ -168,7 +275,7 @@ def test_concurrent_editing_convergence_via_update_apply() -> None:
 
     tracker_b = TouchedTracker(doc_b)
     root_a = _root(doc_a)
-    para_a = root_a.children[1]
+    para_a = root_a.children[2]  # "Paragraph one has some **bold** text." (children[1] is the blank-line block)
     with doc_a.transaction():
         para_a.children[0].insert(0, "FROM PEER A: ")
 

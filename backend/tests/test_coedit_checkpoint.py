@@ -76,7 +76,7 @@ def _new_page(sess, uid: str, text_: str) -> coedit_room.Room:
     test_markdown_splice.py's new-top-level-block test."""
     room = _room(sess, "")
     root = _root(room.doc)
-    para = XmlElement("paragraph", {"_blockId": "new0", "_nl": "1"}, contents=[])
+    para = XmlElement("paragraph", {"_blockId": "new0"}, contents=[])
     with room.doc.transaction():
         root.children.append(para)
     with room.doc.transaction():

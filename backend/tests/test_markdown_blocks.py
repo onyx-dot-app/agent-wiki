@@ -35,11 +35,17 @@ def test_top_level_block_ranges_reconstructs_body_verbatim() -> None:
 def test_block_kinds_classified_correctly() -> None:
     blocks = top_level_block_ranges(_SAMPLE)
     kinds = [b.kind for b in blocks]
+    # Every blank line between blocks is its own BLANK_LINE block now - no
+    # newline is ever an implicit, "free" gap. See BlockKind.BLANK_LINE.
     assert kinds == [
         BlockKind.HEADING,
+        BlockKind.BLANK_LINE,
         BlockKind.PARAGRAPH,
+        BlockKind.BLANK_LINE,
         BlockKind.LIST,
+        BlockKind.BLANK_LINE,
         BlockKind.TABLE,
+        BlockKind.BLANK_LINE,
         BlockKind.PARAGRAPH,
     ]
 
@@ -48,14 +54,24 @@ def test_block_ids_are_positional_and_deterministic() -> None:
     blocks_a = top_level_block_ranges(_SAMPLE)
     blocks_b = top_level_block_ranges(_SAMPLE)
     assert [b.block_id for b in blocks_a] == [b.block_id for b in blocks_b]
-    assert [b.block_id for b in blocks_a] == ["b0", "b1", "b2", "b3", "b4"]
+    assert [b.block_id for b in blocks_a] == [
+        "b0",
+        "b1",
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7",
+        "b8",
+    ]
 
 
 def test_table_block_has_row_ranges() -> None:
     blocks = top_level_block_ranges(_SAMPLE)
     table = next(b for b in blocks if b.kind is BlockKind.TABLE)
     assert len(table.rows) == 3  # header + 2 body rows
-    assert [r.row_id for r in table.rows] == ["b3:r0", "b3:r1", "b3:r2"]
+    assert [r.row_id for r in table.rows] == ["b6:r0", "b6:r1", "b6:r2"]
     for row in table.rows:
         assert table.start <= row.start < row.end <= table.end
     # Each row's text is a distinct slice of the table's text.
@@ -88,14 +104,26 @@ def test_code_block_kind() -> None:
     body = "Intro.\n\n```python\nx = 1\n```\n\nOutro.\n"
     blocks = top_level_block_ranges(body)
     kinds = [b.kind for b in blocks]
-    assert kinds == [BlockKind.PARAGRAPH, BlockKind.CODE_BLOCK, BlockKind.PARAGRAPH]
+    assert kinds == [
+        BlockKind.PARAGRAPH,
+        BlockKind.BLANK_LINE,
+        BlockKind.CODE_BLOCK,
+        BlockKind.BLANK_LINE,
+        BlockKind.PARAGRAPH,
+    ]
 
 
 def test_thematic_break_and_blockquote_kinds() -> None:
     body = "Para.\n\n---\n\n> quoted line\n"
     blocks = top_level_block_ranges(body)
     kinds = [b.kind for b in blocks]
-    assert kinds == [BlockKind.PARAGRAPH, BlockKind.THEMATIC_BREAK, BlockKind.BLOCKQUOTE]
+    assert kinds == [
+        BlockKind.PARAGRAPH,
+        BlockKind.BLANK_LINE,
+        BlockKind.THEMATIC_BREAK,
+        BlockKind.BLANK_LINE,
+        BlockKind.BLOCKQUOTE,
+    ]
 
 
 def test_list_block_span_excludes_trailing_blank_line() -> None:
@@ -109,6 +137,8 @@ def test_list_block_span_excludes_trailing_blank_line() -> None:
     blocks = top_level_block_ranges(body)
     list_block = blocks[0]
     assert body[list_block.start : list_block.end] == "- item one\n- item two\n"
-    # The blank line belongs to nobody's span — it's the gap before the
-    # next block, same as a heading/paragraph pair.
-    assert body[list_block.end : blocks[1].start] == "\n"
+    # The blank line is its own BLANK_LINE block, not folded into either
+    # neighbor's span - same as a heading/paragraph pair.
+    assert blocks[1].kind is BlockKind.BLANK_LINE
+    assert body[list_block.end : blocks[1].start] == ""
+    assert body[blocks[1].end : blocks[2].start] == ""

@@ -31,15 +31,16 @@ class BlockKind(str, Enum):
     # <-> Yjs codec is the layer that must fail loud (NotImplementedError)
     # rather than silently mis-serialize one.
     OTHER = "other"
-    # A single *extra* blank line within a longer run between two blocks —
-    # see top_level_block_ranges. Blank lines produce no markdown-it token at
-    # all (confirmed: a run of them is invisible to the tokenizer), so
-    # without this they're silently dropped every time a doc is re-seeded
-    # from committed markdown, even though a live edit session preserves them
-    # fine (each is a real, separately-addressable empty paragraph node the
-    # whole time it's live). One blank line is already the implicit default
-    # gap every block gets via its own leading-gap slice — this kind only
-    # exists for anything beyond that.
+    # One single blank line between two blocks (or before the first one).
+    # Blank lines produce no markdown-it token at all (confirmed: a run of
+    # them is invisible to the tokenizer), so without this they're silently
+    # dropped every time a doc is re-seeded from committed markdown, even
+    # though a live edit session preserves them fine (each is a real,
+    # separately-addressable empty paragraph node the whole time it's live).
+    # No newline is ever implicit or "free" - see top_level_block_ranges and
+    # EDITOR_STYLING_TRIGGERS.md: every single newline the user enters is
+    # its own block boundary, full stop, so every blank line gets one of
+    # these, including the first.
     BLANK_LINE = "blank_line"
 
 
@@ -143,12 +144,22 @@ def top_level_block_ranges(body: str) -> list[BlockRange]:
     per-row ``RowRange``s (matching ``tr_open`` tokens carry ``.map`` too,
     confirmed against the installed markdown-it-py).
 
-    A run of 2+ blank lines before a block (including before the very first
-    one) also gets a ``BlockRange`` per *extra* blank line beyond the
-    implicit single-blank-line default — see ``BlockKind.BLANK_LINE``. Not
-    applied after the last block: trailing-at-EOF content already survives
-    checkpointing unconditionally (``markdown_splice.checkpoint_body``'s
-    verbatim tail slice), so there's nothing lossy to fix there.
+    Every blank line before a block (including before the very first one)
+    gets its own ``BlockRange`` — see ``BlockKind.BLANK_LINE``. No newline is
+    ever implicit: N raw newlines between two blocks always means N blank
+    lines, none of them "free." Not applied after the last block: trailing-
+    at-EOF content already survives checkpointing unconditionally
+    (``markdown_splice.checkpoint_body``'s verbatim tail slice), so there's
+    nothing lossy to fix there.
+
+    A ``paragraph_open`` token spanning multiple physical lines (CommonMark's
+    own soft-break rule, joining consecutive non-blank lines into one
+    paragraph) is split into one ``BlockRange`` *per line* instead of one
+    for the whole span — every single newline the user enters is its own
+    block boundary here, no exceptions, matching the live editor's own
+    one-node-per-line model exactly. This deliberately does not (yet) apply
+    inside list items, blockquotes, or code blocks — those keep today's
+    behavior until they get the same treatment separately.
     """
     if not body.strip():
         return []
@@ -164,7 +175,7 @@ def top_level_block_ranges(body: str) -> list[BlockRange]:
         end = _trim_trailing_blank_lines(body, start, end)
 
         gap_blank_lines = body[prev_end:start].count("\n")
-        for i in range(gap_blank_lines - 1):
+        for i in range(gap_blank_lines):
             blocks.append(
                 BlockRange(
                     block_id=f"b{len(blocks)}",
@@ -175,6 +186,35 @@ def top_level_block_ranges(body: str) -> list[BlockRange]:
             )
 
         kind = _KIND_BY_TOKEN_TYPE.get(token.type, BlockKind.OTHER)
+
+        if kind is BlockKind.PARAGRAPH:
+            # Split on every line ending EXCEPT a hard break (CommonMark:
+            # 2+ trailing spaces, or a trailing backslash, immediately
+            # before the line ending) - a hard break is never ambiguous the
+            # way a bare newline (soft break) is, so those lines stay
+            # joined in one block, exactly as already built (hardBreak
+            # sibling element) and tested.
+            seg_start_line = start_line
+            for line_no in range(start_line, end_line):
+                line_text = body[offsets[line_no] : offsets[line_no + 1]]
+                without_nl = line_text[:-1] if line_text.endswith("\n") else line_text
+                is_hard_break = line_no < end_line - 1 and (
+                    without_nl.endswith("\\") or without_nl.endswith("  ")
+                )
+                if is_hard_break:
+                    continue
+                blocks.append(
+                    BlockRange(
+                        block_id=f"b{len(blocks)}",
+                        kind=BlockKind.PARAGRAPH,
+                        start=offsets[seg_start_line],
+                        end=offsets[line_no + 1],
+                    )
+                )
+                seg_start_line = line_no + 1
+            prev_end = end
+            continue
+
         block_id = f"b{len(blocks)}"
 
         rows: tuple[RowRange, ...] = ()
