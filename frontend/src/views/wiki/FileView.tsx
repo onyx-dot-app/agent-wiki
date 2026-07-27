@@ -45,7 +45,7 @@ import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { EditorEdgeScrollbar } from "@/components/wiki/EditorEdgeScrollbar";
 import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
-import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
+import type { AnchoredHighlightTarget } from "@/lib/tiptapEditor/types";
 import { SWR_KEYS } from "@/lib/swr-keys";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
@@ -67,15 +67,12 @@ import { createComment, listComments } from "@/lib/comments";
 import type {
   CommentDraft,
   CommentHighlightTarget,
-} from "@/lib/editor/comments";
+} from "@/lib/tiptapEditor/types";
 import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
-import {
-  Coeditor,
-  CoeditPresenceBar,
-  type CoeditorHandle,
-} from "@/lib/editor/components";
-import { useCoeditSession } from "@/lib/editor/hooks";
+import { CoeditPresenceBar, TiptapEditor } from "@/lib/tiptapEditor/components";
+import { useCoeditSession } from "@/lib/tiptapEditor/hooks";
+import type { CoeditorHandle } from "@/lib/tiptapEditor/types";
 import {
   useAgentsBarHost,
   useHeaderActionsHost,
@@ -402,17 +399,17 @@ export function FileView({ path }: FileViewProps) {
 
   // The page's live session: everyone viewing the live editor joins it for
   // presence plus real-time updates, and editing is just a capability inside
-  // it (`canWrite`, ops write-gated server-side). Left whenever a version
-  // diff is showing (including the current version's). See
+  // it (`coedit.canWrite`, from the join's own ACL check — content/awareness
+  // writes from a viewer are dropped server-side regardless). Left whenever
+  // a version diff is showing (including the current version's). See
   // `useCoeditSession`'s `enabled` doc. No explicit Save. Teardown
   // (checkpoint + leave) fires from the hook itself on that
   // transition/unmount, not from a button here.
   const coedit = useCoeditSession({
     path,
     enabled: !viewingVersion,
-    committedBody: body,
     myUserId: user?.id ?? null,
-    canWrite,
+    myUserDisplay: user?.name ?? user?.email ?? null,
     onEnd: () => {
       void refreshComments();
       void refreshDraftState();
@@ -423,7 +420,7 @@ export function FileView({ path }: FileViewProps) {
   // closed and something to anchor. Drives both the overlay and the
   // .rail-reserved content reservation.
   const railActive =
-    !!coedit.session &&
+    coedit.active &&
     !viewingVersion &&
     panelTab === null &&
     !isMobile &&
@@ -433,7 +430,7 @@ export function FileView({ path }: FileViewProps) {
   // viewport edge (EditorEdgeScrollbar) and the native one hides, so tab
   // switches never toggle the native bar's width inside the scroller.
   const panelScrollDocked =
-    !!coedit.session && !viewingVersion && !isMobile && panelTab !== null;
+    coedit.active && !viewingVersion && !isMobile && panelTab !== null;
 
   // A caret inside a commented span focuses its thread in the panel (the
   // panel's activeId effect scrolls the card into view), without the doc
@@ -459,7 +456,9 @@ export function FileView({ path }: FileViewProps) {
         root.start_offset === null
       )
         return;
-      coeditorRef.current?.scrollToOffset(root.start_offset);
+      const handle = coeditorRef.current;
+      if (handle)
+        handle.scrollToOffset(handle.textOffsetToPos(root.start_offset));
     },
     [commentThreads, viewingVersion],
   );
@@ -467,10 +466,10 @@ export function FileView({ path }: FileViewProps) {
   // Deep-link: `?comment=<id>` opens the panel, selects that thread, and
   // scrolls to its anchored span — the shareable-link counterpart to
   // click-to-focus. Runs once per id (focusedCommentRef), and only once the
-  // thread is loaded and the editor has mounted (`coedit.session`).
+  // thread is loaded and the editor has mounted (`coedit.active`).
   useEffect(() => {
     const target = searchParams?.get("comment");
-    if (!target || loading || viewingVersion || !coedit.session) return;
+    if (!target || loading || viewingVersion || !coedit.active) return;
     if (focusedCommentRef.current === target) return;
     const root = commentThreads.find((t) => t.root.id === target)?.root;
     if (!root) return; // not loaded yet, or not a thread on this page
@@ -483,18 +482,20 @@ export function FileView({ path }: FileViewProps) {
       root.start_offset === null
     )
       return; // selected, but no live span to scroll to
-    coeditorRef.current?.scrollToOffset(root.start_offset);
+    const handle = coeditorRef.current;
+    if (handle)
+      handle.scrollToOffset(handle.textOffsetToPos(root.start_offset));
   }, [
     searchParams,
     commentThreads,
     loading,
     viewingVersion,
-    coedit.session,
+    coedit.active,
     openComments,
   ]);
 
   // Selecting text in the editor offers a floating "Comment" affordance
-  // anchored above the selection — fed by the Coeditor's selection reporting
+  // anchored above the selection — fed by TiptapEditor's onSelectionForComment
   // instead of a DOM `mouseup`/`selectionchange` handler.
   // The margin rail's mutation runner mirrors the panel's success gate;
   // failures surface as toasts since the rail has no error slot.
@@ -1261,7 +1262,7 @@ export function FileView({ path }: FileViewProps) {
                     // still verbatim equal to the template the user just
                     // applied (so they can keep swapping templates).
                     //
-                    // Gated on `coedit.session` too, not just the buffer
+                    // Gated on `coedit.active` too, not just the buffer
                     // text: `coedit.buffer` starts as `""` before the coedit
                     // session has actually resolved (a separate async
                     // handshake from the file fetch that drives `loading`
@@ -1269,12 +1270,12 @@ export function FileView({ path }: FileViewProps) {
                     // flash the template picker for the gap between the file
                     // fetch resolving and the session catching up — reusing
                     // the exact "has the session resolved" signal the editor
-                    // fallback below already keys off (`coedit.session` vs.
+                    // fallback below already keys off (`coedit.active` vs.
                     // `coedit.joinError` vs. "Connecting…").
                     const isBlank =
-                      coedit.session !== null && coedit.buffer.trim() === "";
+                      coedit.active && coedit.buffer.trim() === "";
                     const matchesApplied =
-                      coedit.session !== null &&
+                      coedit.active &&
                       appliedTemplateBody !== null &&
                       coedit.buffer === appliedTemplateBody;
                     const showGallery =
@@ -1294,22 +1295,17 @@ export function FileView({ path }: FileViewProps) {
                     );
                   })()}
                 </div>
-                {coedit.session ? (
+                {coedit.active ? (
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                    <Coeditor
-                      key={coedit.session.id}
+                    <TiptapEditor
+                      key={coedit.connectionId}
                       ref={coeditorRef}
-                      session={coedit.session}
-                      peers={coedit.peers}
-                      onSelectionChange={coedit.reportSelection}
-                      onCaretCleared={coedit.reportCaretCleared}
-                      getCaretSeq={coedit.getCaretSeq}
-                      onServerFrame={coedit.onServerFrame}
-                      reportDoc={coedit.reportDoc}
-                      registerFlush={coedit.registerFlush}
-                      registerSetDoc={coedit.registerSetDoc}
-                      registerCatchUp={coedit.registerCatchUp}
-                      readOnly={!canWrite}
+                      doc={coedit.doc}
+                      awareness={coedit.awareness}
+                      userId={user?.id}
+                      userDisplay={user?.name ?? user?.email}
+                      onEditorReady={coedit.onEditorReady}
+                      readOnly={!coedit.canWrite}
                       commentHighlights={commentHighlights}
                       activeCommentIds={activeCommentIds}
                       onCommentCaret={handleCommentCaret}

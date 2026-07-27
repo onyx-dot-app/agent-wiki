@@ -10,8 +10,10 @@ import {
 import { Button, Tag, Text } from "@onyx-ai/opal/components";
 import { SvgExternalLink } from "@onyx-ai/opal/icons";
 
-import type { CoeditorHandle } from "@/lib/editor/components";
-import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
+import type {
+  AnchoredHighlightTarget,
+  CoeditorHandle,
+} from "@/lib/tiptapEditor/types";
 import { relativeTime } from "@/lib/time";
 import type { SourceRef } from "@/types";
 

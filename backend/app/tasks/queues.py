@@ -35,16 +35,18 @@ Queues:
   Onyx Craft launches also ride this queue (each blocks ~10-60s on Onyx
   sandbox provisioning).
 
-* ``coedit_queue`` — **co-edit session checkpoints.** Commits a live session
-  buffer to git and, on a concurrent agent/ingest commit, runs an AI merge —
-  so like ``documents_queue`` it commits and may hit the LLM, and can't live on
-  ``lightweight_maintenance_queue``. It gets its *own* queue because a
-  checkpoint's freshness is user-visible (readers see git HEAD): parked behind
-  hours of connector ingest on ``documents_queue``, a session's committed page
-  goes stale and, in the limit, pins readers to a lagging buffer. Runs wider
-  than ``documents`` because per-session safety comes from
-  a Postgres advisory lock (``coedit.checkpoint_lock_key``), not single-threading
-  — different sessions checkpoint in parallel; the same session is serialized.
+* ``coedit_queue`` — **co-edit session leave fallback.** A session's live Yjs
+  document only exists as one *web* process's in-memory room
+  (``app/wiki/coedit_room.py`` — ``pycrdt.Doc`` is thread-affine, can't be
+  shared cross-process), so checkpointing it can only ever happen in-process,
+  never dispatched through a queue; the checkpoint engine
+  (``app/wiki/coedit_checkpoint.py``) and its triggers
+  (``app/tasks/coedit_checkpoint.py``) are plain in-process ``asyncio`` calls,
+  not tasks on this queue. This queue still exists for exactly one thing:
+  ``leave_coedit_session``, the durable fallback the WS route enqueues when
+  its own connection-teardown task is cancelled before it can record a leave
+  itself (server shutdown, a torn-down test connection) — a plain Redis send
+  nothing can cancel. See ``app/tasks/coedit_leave.py``.
 
 Wiki Auto Management splits by **latency tier** — whether anyone is waiting on
 the result (see the "Queues and Workers" design doc):

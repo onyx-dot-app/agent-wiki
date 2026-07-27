@@ -1,8 +1,10 @@
 """Co-editing session store (app/wiki/coedit.py) — get-or-create sessions,
-CAS on the buffer, participant presence, checkpoint + lifecycle helpers.
+the Yjs update log, participant presence, checkpoint + lifecycle helpers.
 
 DB-backed (uses the per-test schema from the ``tmp_db`` fixture), mirroring
-``test_comments_repo.py``.
+``test_comments_repo.py``. Pure DB bookkeeping only — this module never
+imports ``pycrdt`` (see its own docstring), so these tests don't need a real
+``Doc``/room; update payloads are opaque bytes as far as this layer cares.
 """
 from __future__ import annotations
 
@@ -20,13 +22,6 @@ from tests._seed import count_rows, seed_user
 _PATH = "guides/setup.md"
 
 
-def _ch(frm: int, to: int, insert: str = "") -> coedit.Change:
-    # Build via model_validate so the aliased "from" field is set by its wire
-    # name — Change(from_=...) isn't expressible (the constructor param is the
-    # alias "from", a keyword).
-    return coedit.Change.model_validate({"from": frm, "to": to, "insert": insert})
-
-
 @pytest.fixture
 def users(tmp_db):
     seed_user("usr_a", "a@x.com", name="Ada")
@@ -35,18 +30,16 @@ def users(tmp_db):
 
 
 def test_open_session_get_or_create(users):
-    first = coedit.open_session(_PATH, base_sha="sha1", initial_buffer="hello")
+    first = coedit.open_session(_PATH, base_sha="sha1")
     assert first.path == _PATH
-    assert first.buffer_text == "hello"
-    assert first.version == 0
+    assert first.ydoc_seq == 0
     assert first.base_sha == "sha1"
     assert first.status == "active"
 
     # Second open on the same path adopts the existing session — the live
-    # buffer wins, the new base_sha/initial_buffer are ignored.
-    again = coedit.open_session(_PATH, base_sha="sha2", initial_buffer="ignored")
+    # room wins, the new base_sha is ignored.
+    again = coedit.open_session(_PATH, base_sha="sha2")
     assert again.id == first.id
-    assert again.buffer_text == "hello"
     assert again.base_sha == "sha1"
     assert count_rows(CoeditSession) == 1
 
@@ -59,53 +52,88 @@ def test_get_active_session(users):
     assert fetched.id == opened.id
 
 
-def test_set_buffer_cas_success(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="v0")
-    updated = coedit.set_buffer(s.id, base_version=0, buffer_text="v1")
-    assert updated is not None
-    assert updated.version == 1
-    assert updated.buffer_text == "v1"
+def test_apply_update_logs_and_bumps_seq(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    seq = coedit.apply_update(s.id, update_bytes=b"\x00\x01update-1", author_user_id="usr_a")
+    assert seq == 1
+    fetched = coedit.get_active_session(_PATH)
+    assert fetched is not None
+    assert fetched.ydoc_seq == 1
 
-    again = coedit.set_buffer(s.id, base_version=1, buffer_text="v2")
-    assert again is not None
-    assert again.version == 2
-    assert again.buffer_text == "v2"
-
-
-def test_set_buffer_cas_stale_is_rejected(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="v0")
-    assert coedit.set_buffer(s.id, base_version=0, buffer_text="v1") is not None
-
-    # Caller still thinks it's on version 0 — reject, leave the buffer alone.
-    stale = coedit.set_buffer(s.id, base_version=0, buffer_text="clobber")
-    assert stale is None
-    current = coedit.get_active_session(_PATH)
-    assert current is not None
-    assert current.version == 1
-    assert current.buffer_text == "v1"
+    seq2 = coedit.apply_update(s.id, update_bytes=b"\x00\x01update-2", author_user_id="usr_b")
+    assert seq2 == 2
+    fetched = coedit.get_active_session(_PATH)
+    assert fetched is not None
+    assert fetched.ydoc_seq == 2
 
 
-def test_set_buffer_concurrent_writers_one_wins(users):
-    # Two writers both read version 0 and race to apply a patch. The atomic
-    # conditional UPDATE means exactly one swap lands; the loser is rejected
-    # (None) and must rebase. No lost update — the winner's text survives.
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="v0")
-    first = coedit.set_buffer(s.id, base_version=0, buffer_text="from-A")
-    second = coedit.set_buffer(s.id, base_version=0, buffer_text="from-B")
-
-    winners = [r for r in (first, second) if r is not None]
-    assert len(winners) == 1
-    assert winners[0].version == 1
-    current = coedit.get_active_session(_PATH)
-    assert current is not None
-    assert current.version == 1
-    assert current.buffer_text == winners[0].buffer_text
+def test_apply_update_both_concurrent_writers_land(users):
+    # Unlike the OT era's version-CAS, CRDT updates don't reject on a stale
+    # base — both apply, sequentially numbered. Conflict resolution already
+    # happened at the pycrdt.Doc level before this is ever called.
+    s = coedit.open_session(_PATH, base_sha=None)
+    a = coedit.apply_update(s.id, update_bytes=b"A", author_user_id="usr_a")
+    b = coedit.apply_update(s.id, update_bytes=b"B", author_user_id="usr_b")
+    assert {a, b} == {1, 2}
 
 
-def test_set_buffer_on_closed_session_returns_none(users):
+def test_apply_update_on_closed_session_returns_none(users):
     s = coedit.open_session(_PATH, base_sha=None)
     coedit.close_session(s.id)
-    assert coedit.set_buffer(s.id, base_version=0, buffer_text="x") is None
+    assert coedit.apply_update(s.id, update_bytes=b"x", author_user_id="usr_a") is None
+
+
+def test_updates_since_returns_updates_after_seq(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a", client_id="cli_1")
+    coedit.apply_update(s.id, update_bytes=b"b", author_user_id="usr_a")
+    assert [u.seq for u in coedit.updates_since(s.id, 0).updates] == [1, 2]
+    assert [u.seq for u in coedit.updates_since(s.id, 1).updates] == [2]
+    assert coedit.updates_since(s.id, 2).updates == []
+    # Head seq comes back alongside the updates, from one consistent read.
+    result = coedit.updates_since(s.id, 0)
+    assert result.head_seq == 2
+    assert result.updates[0].update_payload == b"a"
+    assert result.updates[0].client_id == "cli_1"
+    assert result.updates[0].author_user_id == "usr_a"
+
+
+def test_updates_since_gone_session_returns_none_head(users):
+    assert coedit.updates_since(999999, 0) == coedit.UpdatesSince(head_seq=None, updates=[])
+
+
+def test_last_update_author_returns_most_recent(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    assert coedit.last_update_author(s.id) is None
+    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
+    coedit.apply_update(s.id, update_bytes=b"b", author_user_id="usr_b")
+    assert coedit.last_update_author(s.id) == "usr_b"
+
+
+def test_rebase_onto_bumps_seq_and_clears_updates(users):
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
+    res = coedit.rebase_onto(s.id, new_base_sha="sha2", checkpointed=False)
+    assert res is not None
+    assert res.ydoc_seq == 2
+    assert res.base_sha == "sha2"
+    assert res.ydoc_checkpointed_seq == 0  # checkpointed=False leaves the watermark alone
+    assert coedit.updates_since(s.id, 0).updates == []
+
+
+def test_rebase_onto_checkpointed_advances_watermark(users):
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
+    res = coedit.rebase_onto(s.id, new_base_sha="sha2", checkpointed=True)
+    assert res is not None
+    assert res.ydoc_checkpointed_seq == res.ydoc_seq
+    assert res.last_checkpoint_at is not None
+
+
+def test_rebase_onto_closed_session_returns_none(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.close_session(s.id)
+    assert coedit.rebase_onto(s.id, new_base_sha="sha2", checkpointed=False) is None
 
 
 def test_participants_join_touch_leave(users):
@@ -132,22 +160,22 @@ def test_participants_join_touch_leave(users):
 
 def test_mark_checkpointed(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
-    coedit.mark_checkpointed(s.id, base_sha="sha2", version=3)
+    coedit.mark_checkpointed(s.id, base_sha="sha2", seq=3)
     fetched = coedit.get_active_session(_PATH)
     assert fetched is not None
     assert fetched.base_sha == "sha2"
-    assert fetched.checkpointed_version == 3
+    assert fetched.ydoc_checkpointed_seq == 3
     assert fetched.last_checkpoint_at is not None
 
 
 def test_mark_checkpointed_never_regresses(users):
     s = coedit.open_session(_PATH, base_sha=None)
-    coedit.mark_checkpointed(s.id, base_sha="sha6", version=6)
-    # A slower concurrent checkpoint at a lower version must not roll it back.
-    coedit.mark_checkpointed(s.id, base_sha="sha5", version=5)
+    coedit.mark_checkpointed(s.id, base_sha="sha6", seq=6)
+    # A slower concurrent checkpoint at a lower seq must not roll it back.
+    coedit.mark_checkpointed(s.id, base_sha="sha5", seq=5)
     fetched = coedit.get_active_session(_PATH)
     assert fetched is not None
-    assert fetched.checkpointed_version == 6
+    assert fetched.ydoc_checkpointed_seq == 6
     assert fetched.base_sha == "sha6"
 
 
@@ -156,16 +184,16 @@ def _due_ids(**kw) -> set[int]:
 
 
 def test_due_excludes_clean_session(users):
-    # Never edited (version == checkpointed_version) → never a checkpoint
+    # Never edited (ydoc_seq == ydoc_checkpointed_seq) → never a checkpoint
     # candidate, even with zero cutoffs.
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="x")
+    s = coedit.open_session(_PATH, base_sha=None)
     assert _due_ids(idle_seconds=0, max_interval_seconds=0) == set()
     assert s.id not in _due_ids(idle_seconds=0, max_interval_seconds=0)
 
 
 def test_due_includes_idle_dirty_session(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
-    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
     # idle_seconds=0 → any past edit counts as settled; max_interval large so
     # the idle branch alone is what selects it.
     assert s.id in _due_ids(idle_seconds=0, max_interval_seconds=3600)
@@ -174,16 +202,16 @@ def test_due_includes_idle_dirty_session(users):
 def test_due_excludes_recently_edited_session(users):
     # Dirty but just edited and never checkpointed: not idle, and not overdue
     # (measured from session start) → not grabbed mid-typing.
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
-    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
     assert s.id not in _due_ids(idle_seconds=3600, max_interval_seconds=3600)
 
 
 def test_due_includes_overdue_active_session(users):
     # Still actively edited (not idle) but past the max interval since session
     # start → forced so a never-idle session can't stay uncommitted forever.
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
-    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
     assert s.id in _due_ids(idle_seconds=3600, max_interval_seconds=0)
 
 
@@ -199,8 +227,8 @@ def test_legacy_space_separated_created_at_normalized_not_overdue(users, monkeyp
     monkeypatch.setattr(
         coedit, "_now", lambda: datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
     )
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
-    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
     with db_session() as sess:
         sess.execute(
             text(
@@ -226,26 +254,27 @@ def test_legacy_space_separated_created_at_normalized_not_overdue(users, monkeyp
 
 
 def test_due_excludes_session_clean_since_last_checkpoint(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
-    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
-    coedit.mark_checkpointed(s.id, base_sha="sha", version=1)
-    # version == checkpointed_version again → no longer dirty.
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
+    coedit.mark_checkpointed(s.id, base_sha="sha", seq=1)
+    # ydoc_seq == ydoc_checkpointed_seq again → no longer dirty.
     assert _due_ids(idle_seconds=0, max_interval_seconds=0) == set()
 
 
 def test_close_if_clean_closes_a_clean_session(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
-    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
-    coedit.mark_checkpointed(s.id, base_sha="sha", version=1)  # version == checkpointed
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
+    coedit.mark_checkpointed(s.id, base_sha="sha", seq=1)  # ydoc_seq == checkpointed
     assert coedit.close_if_clean(s.id) is True
     assert coedit.get_active_session(_PATH) is None
 
 
 def test_close_if_clean_skips_a_dirty_session(users):
-    # A late op after the checkpoint (version > checkpointed_version) must not be
-    # sealed in a closed session — close_if_clean leaves it active for the scan.
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
-    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+    # A late update after the checkpoint (ydoc_seq > ydoc_checkpointed_seq)
+    # must not be sealed in a closed session — close_if_clean leaves it
+    # active for the scan.
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.apply_update(s.id, update_bytes=b"yo", author_user_id="usr_a")
     assert coedit.close_if_clean(s.id) is False
     active = coedit.get_active_session(_PATH)
     assert active is not None and active.id == s.id
@@ -284,121 +313,22 @@ def test_rename_path(users):
     assert moved.id == s.id
 
 
-# --------------------------------------------------------------------------- #
-# apply_op — range-change application + version CAS + op log                   #
-# --------------------------------------------------------------------------- #
-
-
-def test_apply_op_applies_change_bumps_version_and_logs(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hello world")
-    out = coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id="usr_a")
-    assert out is not None
-    assert out.version == 1
-    assert out.buffer_text == "hi world"
-    logged = coedit.ops_since_with_head(s.id, 0).ops
-    assert [o.seq for o in logged] == [1]
-    assert logged[0].base_version == 0
-    assert logged[0].author_user_id == "usr_a"
-    assert logged[0].changes == [{"from": 0, "to": 5, "insert": "hi"}]
-
-
-def test_apply_op_multiple_changes_apply_right_to_left(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="abcdef")
-    out = coedit.apply_op(
-        s.id, base_version=0, changes=[_ch(0, 1, "X"), _ch(4, 6, "Y")], author_user_id="usr_a"
-    )
-    assert out is not None
-    assert out.buffer_text == "XbcdY"
-
-
-def test_apply_op_stale_base_version_rejected(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="v0")
-    assert coedit.apply_op(s.id, base_version=0, changes=[_ch(2, 2, "!")], author_user_id="usr_a") is not None
-    # Caller still on version 0 — rejected, buffer untouched.
-    stale = coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "X")], author_user_id="usr_a")
-    assert stale is None
-    current = coedit.get_active_session(_PATH)
-    assert current is not None
-    assert current.version == 1
-    assert current.buffer_text == "v0!"
-
-
-def test_apply_op_out_of_bounds_raises(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="short")
-    with pytest.raises(ValueError):
-        coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 999, "x")], author_user_id="usr_a")
-
-
-def test_apply_op_concurrent_one_wins(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="v0")
-    a = coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "A")], author_user_id="usr_a")
-    b = coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "B")], author_user_id="usr_b")
-    winners = [r for r in (a, b) if r is not None]
-    assert len(winners) == 1
-    assert winners[0].version == 1
-
-
-def test_apply_op_rejects_overlapping_changes(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="abcdef")
-    with pytest.raises(ValueError):
-        coedit.apply_op(
-            s.id, base_version=0, changes=[_ch(0, 3, "X"), _ch(2, 4, "Y")], author_user_id="usr_a"
-        )
-
-
-def test_change_rejects_malformed_input():
-    # Missing 'to' / negative offset are rejected at the type boundary
-    # (pydantic ValidationError is a ValueError subclass).
-    with pytest.raises(ValueError):
-        coedit.Change.model_validate({"from": 0, "insert": "x"})
-    with pytest.raises(ValueError):
-        coedit.Change.model_validate({"from": -1, "to": 0})
-
-
-def test_apply_op_uses_utf16_offsets_with_emoji(users):
-    # 'a'=unit 0, 😀=units 1-2 (astral → 2 UTF-16 units), 'b'=unit 3.
-    # Replacing [3,4) must hit 'b' → "a😀!". Code-point slicing (len 3) would
-    # instead append, giving "a😀b!", so this pins the UTF-16 contract.
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="a😀b")
-    out = coedit.apply_op(s.id, base_version=0, changes=[_ch(3, 4, "!")], author_user_id="usr_a")
-    assert out is not None
-    assert out.buffer_text == "a😀!"
-
-
-def test_apply_op_can_insert_astral_char(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="ab")
-    out = coedit.apply_op(s.id, base_version=0, changes=[_ch(1, 1, "🎉")], author_user_id="usr_a")
-    assert out is not None
-    assert out.buffer_text == "a🎉b"
-
-
-def test_ops_since_with_head_returns_ops_after_version(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="")
-    coedit.apply_op(s.id, base_version=0, changes=[_ch(0, 0, "a")], author_user_id="usr_a")
-    coedit.apply_op(s.id, base_version=1, changes=[_ch(1, 1, "b")], author_user_id="usr_a")
-    assert [o.seq for o in coedit.ops_since_with_head(s.id, 0).ops] == [1, 2]
-    assert [o.seq for o in coedit.ops_since_with_head(s.id, 1).ops] == [2]
-    assert coedit.ops_since_with_head(s.id, 2).ops == []
-    # Head version comes back alongside the ops, from one consistent read.
-    assert coedit.ops_since_with_head(s.id, 0).head_version == 2
-
-
 def test_purge_viewer_sessions_deletes_only_closed_never_edited(users):
-    # Viewer-only session: opened (buffer seeded), no ops, closed.
-    viewer_only = coedit.open_session("viewed.md", base_sha=None, initial_buffer="body")
+    # Viewer-only session: opened, no updates, closed.
+    viewer_only = coedit.open_session("viewed.md", base_sha=None)
     coedit.join(viewer_only.id, "usr_a")
     coedit.leave(viewer_only.id, "usr_a")
     coedit.close_session(viewer_only.id)
 
-    # Edited session: has an op, closed after checkpoint — must be retained
-    # (its coedit_ops history hangs off it).
-    edited = coedit.open_session("edited.md", base_sha=None, initial_buffer="hi")
-    coedit.apply_op(edited.id, base_version=0, changes=[_ch(0, 0, "x")], author_user_id="usr_a")
-    coedit.mark_checkpointed(edited.id, base_sha="sha", version=1)
+    # Edited session: has an update, closed after checkpoint — must be
+    # retained (its coedit_updates history hangs off it).
+    edited = coedit.open_session("edited.md", base_sha=None)
+    coedit.apply_update(edited.id, update_bytes=b"x", author_user_id="usr_a")
+    coedit.mark_checkpointed(edited.id, base_sha="sha", seq=1)
     coedit.close_session(edited.id)
 
     # Active viewer-only session: still occupied — must be retained.
-    active = coedit.open_session("open.md", base_sha=None, initial_buffer="live")
+    active = coedit.open_session("open.md", base_sha=None)
 
     assert coedit.purge_viewer_sessions() == 1
     assert coedit.get_session(viewer_only.id) is None

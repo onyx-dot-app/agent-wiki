@@ -2,26 +2,41 @@
 one ``WebSocket`` per session (``app/api/coedit.py``).
 
 Browser clients open one connection per co-edit session (cookie-authed) and
-the server pushes session frames (e.g. presence) to every connection in the
-session. Cross-process delivery rides the shared realtime bus
-(``app/realtime/bus.py``, Postgres LISTEN/NOTIFY) under a ``coedit`` payload
-kind, so participants connected to different app servers still see each other.
+the server relays two kinds of outbound traffic to every connection in the
+session: raw Yjs sync/awareness protocol bytes (the live document itself —
+``broadcast_yjs``), and small JSON control frames for everything that isn't
+document content (presence roster, checkpoint acknowledgement —
+``publish_control``). The WS route sends the former as binary frames, the
+latter as text/JSON frames — that split is how a client tells them apart on
+the wire.
+
+Cross-process delivery rides the shared realtime bus (``app/realtime/bus.py``,
+Postgres LISTEN/NOTIFY). Control frames go through unchanged (small, always
+fits). Yjs payloads are base64'd into the same JSON envelope and, on the rare
+oversized message (a large paste's CRDT update, or any payload that would
+exceed Postgres's 8000-byte NOTIFY cap), split into sequential chunks tagged
+with a shared group id and reassembled on the receiving end — chosen over a
+lossy "resync" fallback (what the old op-based ``broadcast_op`` did) because
+there's no cheap "refetch the live doc" endpoint to resync *from* here: the
+live document only exists as this process's in-memory ``pycrdt.Doc`` (see
+``coedit_room.py``), not as a row a resync request could just re-read.
 
 One thread-safe ``queue.Queue`` per connection, mirroring the MCP pubsub's
 sync ``_queues`` / ``drain_blocking`` path — this module has no opinion on
 how a connection drains its queue (``app/api/coedit.py``'s WS send loop
-calls ``drain`` in a thread). Frames are plain JSON-serializable dicts.
-Connection state is in-process and ephemeral — nothing here is persisted;
-durable session/participant state lives in ``app/wiki/coedit.py``.
-
-See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
+calls ``drain`` in a thread). Connection state is in-process and ephemeral —
+nothing here is persisted; durable session/participant state lives in
+``app/wiki/coedit.py``, and the live document itself lives in
+``app/wiki/coedit_room.py``.
 """
 
 from __future__ import annotations
 
+import base64
 import logging
 import queue
 import threading
+import time
 import uuid
 from typing import Any
 
@@ -29,23 +44,33 @@ from pydantic import BaseModel, ConfigDict
 
 from app.realtime import bus
 from app.wiki import coedit
-from app.wiki.coedit import Change
 
 log = logging.getLogger(__name__)
 
-Frame = dict[str, Any]
+ControlFrame = dict[str, Any]
 
 
 class _CloseSignal:
-    """Sentinel type for the one non-``Frame`` value a connection's queue can
+    """Sentinel type for the one non-content value a connection's queue can
     carry. Distinct from ``None`` (which ``drain`` already uses to mean "the
-    poll timed out, nothing arrived") and from any real ``Frame`` (a plain
-    ``dict``, so nothing dict-shaped could ever collide with an ``is``
-    check against the singleton instance below)."""
+    poll timed out, nothing arrived")."""
 
 
 CLOSE_SIGNAL = _CloseSignal()
-QueueItem = Frame | _CloseSignal
+
+
+class YjsBytes(BaseModel):
+    """Wrapper marking a queued item as a raw Yjs protocol frame (sent as a
+    WS binary frame) rather than a JSON control frame (sent as WS
+    text/JSON) — the two are otherwise both just "something in the queue",
+    and the send loop needs to know which wire method to use."""
+
+    model_config = ConfigDict(frozen=True)
+
+    payload: bytes
+
+
+QueueItem = YjsBytes | ControlFrame | _CloseSignal
 
 
 class Connection(BaseModel):
@@ -56,6 +81,7 @@ class Connection(BaseModel):
 
     id: str
     queue: queue.Queue[QueueItem]
+
 
 # Per-connection registry, keyed by an opaque connection id (one per open
 # WebSocket). Parallel dicts rather than a class, mirroring ``pubsub``'s sync
@@ -107,9 +133,9 @@ def user_still_connected(coedit_session_id: int, user_id: str) -> bool:
 
 
 def drain(q: queue.Queue[QueueItem], timeout: float) -> QueueItem | None:
-    """Block up to ``timeout`` seconds for the next frame; ``None`` on timeout so
-    the caller can emit a heartbeat. Can also return ``CLOSE_SIGNAL`` — see
-    ``wake``."""
+    """Block up to ``timeout`` seconds for the next item; ``None`` on timeout
+    so the caller can emit a heartbeat. Can also return ``CLOSE_SIGNAL`` —
+    see ``wake``."""
     try:
         return q.get(timeout=timeout)
     except queue.Empty:
@@ -124,134 +150,19 @@ def wake(conn_id: str) -> None:
     awaiting it via ``asyncio.to_thread`` can be cancelled at the asyncio
     level, but the underlying OS thread has no way to know that and keeps
     blocking regardless, for up to the full timeout, occupying a thread-pool
-    slot the whole time (confirmed directly: cancelling the wrapping Future
-    doesn't stop the executor's function, it only makes the *awaiter* stop
-    watching it — see ``loop.run_in_executor``'s documented behavior). This
-    reaches the blocked call the only way that's actually possible: pushing
-    something into the same queue it's already waiting on, so ``get()``
-    returns immediately the normal way, on its own thread, same as a real
-    frame arriving. The caller (``app/api/coedit.py``'s teardown path) must
-    call this whenever it's about to cancel a connection's send loop."""
+    slot the whole time. This reaches the blocked call the only way that's
+    actually possible: pushing something into the same queue it's already
+    waiting on, so ``get()`` returns immediately the normal way, on its own
+    thread, same as a real item arriving. The caller (``app/api/coedit.py``'s
+    teardown path) must call this whenever it's about to cancel a
+    connection's send loop."""
     with _lock:
         q = _queues.get(conn_id)
     if q is not None:
         q.put_nowait(CLOSE_SIGNAL)
 
 
-def _bus_payload(coedit_session_id: int, frame: Frame) -> dict[str, Any]:
-    return {"kind": "coedit", "coedit_session_id": coedit_session_id, "frame": frame}
-
-
-def publish(coedit_session_id: int, frame: Frame) -> None:
-    """Deliver ``frame`` to every connection in the session, on this process and
-    (via NOTIFY) on every other."""
-    _deliver_local(coedit_session_id, frame)
-    bus.emit(_bus_payload(coedit_session_id, frame))
-
-
-def handle_remote(payload: dict[str, Any]) -> None:
-    """Bus handler for a ``coedit`` NOTIFY from another process — local delivery
-    only (no re-emit)."""
-    _deliver_local(int(payload["coedit_session_id"]), payload["frame"])
-
-
-bus.register("coedit", handle_remote)
-
-
-def broadcast_presence(coedit_session_id: int) -> None:
-    """Push the current participant roster to the session."""
-    participants = coedit.list_participants(coedit_session_id)
-    publish(
-        coedit_session_id,
-        {
-            "type": "presence",
-            "session_id": coedit_session_id,
-            "participants": [p.model_dump() for p in participants],
-        },
-    )
-
-
-def broadcast_cursor(
-    coedit_session_id: int,
-    *,
-    user_id: str,
-    user_display: str,
-    anchor: int | None,
-    head: int | None,
-    typing: bool,
-    seq: int | None,
-) -> None:
-    """Broadcast a participant's live cursor/selection — an ephemeral frame,
-    never persisted. A collapsed selection (anchor == head) is a caret; a range
-    is a selection highlight; null anchor/head means the sender cleared their
-    caret (peers drop it). ``seq`` is the sender's caret epoch — peers drop
-    frames older than the latest epoch they've seen, so concurrently delivered
-    place/clear frames can't apply out of order. Peers shift held offsets
-    client-side as ops land."""
-    publish(
-        coedit_session_id,
-        {
-            "type": "cursor",
-            "session_id": coedit_session_id,
-            "user_id": user_id,
-            "user_display": user_display,
-            "anchor": anchor,
-            "head": head,
-            "typing": typing,
-            "seq": seq,
-        },
-    )
-
-
-def broadcast_resync(coedit_session_id: int, version: int) -> None:
-    """Tell the session its buffer was replaced out from under the op stream —
-    peers re-fetch via ``GET /coedit/session``.
-
-    Used when an inbound agent/ingest commit is reconciled into the buffer
-    (live-rebase) or a checkpoint syncs its merged result back. The change is a
-    git commit, not a co-edit op, so it doesn't carry a per-keystroke delta —
-    participants reload the buffer at the new ``version``."""
-    publish(coedit_session_id, {"type": "resync", "session_id": coedit_session_id, "version": version})
-
-
-def broadcast_op(
-    coedit_session_id: int,
-    version: int,
-    changes: list[Change],
-    author_user_id: str,
-    client_id: str | None = None,
-    caret_seq: int | None = None,
-) -> None:
-    """Broadcast an applied edit op to the session's other connections.
-
-    Normally the op frame carries the changes so peers apply them directly. If
-    the serialized payload would exceed the bus's NOTIFY cap (a large paste),
-    fall back to a ``resync`` signal — peers re-fetch the buffer via
-    ``GET /coedit/session`` instead of us dropping the update.
-
-    ``client_id`` (the originating connection) rides along so a collaborative
-    client can tell its own echoed op from a peer's. ``caret_seq`` is the
-    author's caret epoch when placed (an edit asserts caret placement); None
-    means the op carries no caret assertion.
-    """
-    frame: Frame = {
-        "type": "op",
-        "session_id": coedit_session_id,
-        "version": version,
-        "changes": [c.model_dump(by_alias=True) for c in changes],
-        "author": author_user_id,
-        "client_id": client_id,
-        "caret_seq": caret_seq,
-    }
-    if not bus.payload_fits(_bus_payload(coedit_session_id, frame)):
-        frame = {"type": "resync", "session_id": coedit_session_id, "version": version}
-    publish(coedit_session_id, frame)
-
-
-def _deliver_local(coedit_session_id: int, frame: Frame) -> None:
-    # ``queue.Queue`` is thread-safe, so a plain ``put_nowait`` works from any
-    # thread (the LISTEN listener, a request handler) — no event loop, no
-    # cross-thread scheduling dance.
+def _deliver_local(coedit_session_id: int, frame: ControlFrame) -> None:
     with _lock:
         targets = [
             _queues.get(cid) for cid in _conns_by_session.get(coedit_session_id, ())
@@ -261,9 +172,149 @@ def _deliver_local(coedit_session_id: int, frame: Frame) -> None:
             q.put_nowait(frame)
 
 
+def _deliver_local_bytes(coedit_session_id: int, payload: bytes) -> None:
+    with _lock:
+        targets = [
+            _queues.get(cid) for cid in _conns_by_session.get(coedit_session_id, ())
+        ]
+    item = YjsBytes(payload=payload)
+    for q in targets:
+        if q is not None:
+            q.put_nowait(item)
+
+
+# --------------------------------------------------------------------------- #
+# Control frames (presence, checkpoint ack) — small JSON, one bus "kind"      #
+# --------------------------------------------------------------------------- #
+
+_CONTROL_BUS_KIND = "coedit"
+
+
+def publish_control(coedit_session_id: int, frame: ControlFrame) -> None:
+    """Deliver a JSON control frame to every connection in the session, on
+    this process and (via NOTIFY) on every other."""
+    _deliver_local(coedit_session_id, frame)
+    bus.emit({"kind": _CONTROL_BUS_KIND, "session_id": coedit_session_id, "frame": frame})
+
+
+def _handle_remote_control(payload: dict[str, Any]) -> None:
+    _deliver_local(int(payload["session_id"]), payload["frame"])
+
+
+bus.register(_CONTROL_BUS_KIND, _handle_remote_control)
+
+
+def broadcast_presence(coedit_session_id: int) -> None:
+    """Push the current participant roster to the session. Participants
+    (join/leave/viewer tracking) stay DB-backed and separate from Yjs
+    Awareness — Awareness only reflects clients that have actually set
+    local state, and this roster is also what the last-participant-leave
+    checkpoint trigger keys off (see ``app/wiki/coedit.py``)."""
+    participants = coedit.list_participants(coedit_session_id)
+    publish_control(
+        coedit_session_id,
+        {
+            "type": "presence",
+            "session_id": coedit_session_id,
+            "participants": [p.model_dump() for p in participants],
+        },
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Yjs binary relay — chunked over the bus when a payload would exceed        #
+# Postgres's NOTIFY size cap                                                  #
+# --------------------------------------------------------------------------- #
+
+_YJS_BUS_KIND = "coedit_yjs"
+# Leaves room for the JSON envelope (session_id, i, n, group keys + quoting)
+# around each base64 chunk, comfortably inside bus.MAX_PAYLOAD_BYTES.
+_CHUNK_ENVELOPE_BUDGET = 200
+_MAX_CHUNK_B64_LEN = bus.MAX_PAYLOAD_BYTES - _CHUNK_ENVELOPE_BUDGET
+
+# Reassembly buffer for a chunked cross-process update, keyed by the sending
+# process's group id. Bounded lifetime (``_PARTIAL_TTL_SECONDS``) so a lost
+# chunk (a process restarting mid-send) can't leak a slot forever.
+_partial_chunks: dict[str, list[str | None]] = {}
+_partial_started_at: dict[str, float] = {}
+_partial_lock = threading.Lock()
+_PARTIAL_TTL_SECONDS = 30.0
+
+
+def broadcast_yjs(coedit_session_id: int, payload: bytes) -> None:
+    """Relay a raw Yjs sync/awareness protocol message to every connection in
+    the session, this process and every other.
+
+    No origin-exclusion: CRDT updates are idempotent, so even the sender
+    re-receiving and re-applying its own message is a harmless no-op — the
+    old op-based ``broadcast_op`` echoed to the sender too, for the same
+    reason (relying on client-side ``client_id`` matching to skip re-
+    applying, not on the server withholding the echo).
+    """
+    _deliver_local_bytes(coedit_session_id, payload)
+    b64 = base64.b64encode(payload).decode("ascii")
+    if len(b64) <= _MAX_CHUNK_B64_LEN:
+        bus.emit(
+            {"kind": _YJS_BUS_KIND, "session_id": coedit_session_id, "i": 0, "n": 1, "group": None, "chunk": b64}
+        )
+        return
+    group = uuid.uuid4().hex
+    chunks = [b64[i : i + _MAX_CHUNK_B64_LEN] for i in range(0, len(b64), _MAX_CHUNK_B64_LEN)]
+    for i, chunk in enumerate(chunks):
+        bus.emit(
+            {
+                "kind": _YJS_BUS_KIND,
+                "session_id": coedit_session_id,
+                "i": i,
+                "n": len(chunks),
+                "group": group,
+                "chunk": chunk,
+            }
+        )
+
+
+def _cleanup_stale_partials_locked() -> None:
+    now = time.monotonic()
+    stale = [g for g, started in _partial_started_at.items() if now - started > _PARTIAL_TTL_SECONDS]
+    for g in stale:
+        _partial_chunks.pop(g, None)
+        _partial_started_at.pop(g, None)
+        log.warning("coedit_channel: dropped incomplete Yjs update chunk group %s (timed out)", g)
+
+
+def _handle_remote_yjs(payload: dict[str, Any]) -> None:
+    session_id = int(payload["session_id"])
+    n = int(payload["n"])
+    if n == 1:
+        _deliver_local_bytes(session_id, base64.b64decode(payload["chunk"]))
+        return
+    group = payload["group"]
+    full_b64: str | None = None
+    with _partial_lock:
+        _cleanup_stale_partials_locked()
+        parts = _partial_chunks.setdefault(group, [None] * n)
+        parts[int(payload["i"])] = payload["chunk"]
+        _partial_started_at.setdefault(group, time.monotonic())
+        if all(p is not None for p in parts):
+            # The filtered generator (not a plain `"".join(parts)`) is what
+            # lets basedpyright narrow each element to `str` here — `all()`
+            # above doesn't propagate that narrowing back to `parts` itself.
+            full_b64 = "".join(p for p in parts if p is not None)
+            del _partial_chunks[group]
+            del _partial_started_at[group]
+    if full_b64 is not None:
+        _deliver_local_bytes(session_id, base64.b64decode(full_b64))
+
+
+bus.register(_YJS_BUS_KIND, _handle_remote_yjs)
+
+
 def reset_for_tests() -> None:
     with _lock:
         _queues.clear()
         _session_of.clear()
         _user_of.clear()
         _conns_by_session.clear()
+    with _partial_lock:
+        _partial_chunks.clear()
+        _partial_started_at.clear()

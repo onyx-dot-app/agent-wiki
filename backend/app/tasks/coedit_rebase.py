@@ -1,39 +1,68 @@
-"""Trigger + task for live-rebase (fold an inbound commit into an open session).
+"""Trigger + cross-process fan-out for live-rebase.
 
-``on_wiki_commit`` is called from ``app.wiki.notify.after_doc_write`` on every
-wiki commit; if an active session exists for the page and the commit is external
-to it, it enqueues ``rebase_coedit_session``. The task runs on
-``lightweight_maintenance_queue`` — a rebase only *reads* git refs and updates
-the Postgres buffer (no commit, no LLM), so it fits that queue's sub-second
-contract and stays off the slower ``documents`` queue for a live feel.
+``on_wiki_commit`` is called from ``app.wiki.notify.after_doc_write`` on
+every wiki commit, from whatever process/thread did the writing — a web
+request, a worker task, anything. If an active session exists for the page
+and the commit is external to it, the rebase needs to run wherever that
+session's room actually lives (``app/wiki/coedit_room.py`` — a ``pycrdt.Doc``
+is thread-affine, so it's never shared cross-process), which this process
+generally doesn't know. Resolved the same way the co-edit channel resolves
+"which process has this session's connections": fan out over the realtime
+bus (``app/realtime/bus.py``) so every process checks its own room registry,
+plus a direct local check here (the bus doesn't echo to the sender).
 
-The engine (``app.wiki.coedit_rebase``) does the merge + buffer fold.
+Not a queue task, unlike the OT era's ``lightweight_maintenance_queue``-
+dispatched version — a queue worker never holds a room either, so
+dispatching there would just relocate the same problem, not solve it.
+
+The engine (``app.wiki.coedit_rebase``) does the merge + doc re-seed.
 """
 
 from __future__ import annotations
 
 import logging
 
-from app.tasks.queues import coedit_queue, lightweight_maintenance_queue
-from app.wiki import coedit
+from app.realtime import bus
+from app.wiki import coedit, coedit_room
+from app.wiki.coedit_checkpoint import checkpoint_session
 from app.wiki.coedit_rebase import RebaseOutcome, rebase_session
 
 log = logging.getLogger(__name__)
 
+_BUS_KIND = "coedit_rebase"
 
-@lightweight_maintenance_queue.task()
-def rebase_coedit_session(session_id: int, head_sha: str) -> None:
-    if rebase_session(session_id, head_sha) == RebaseOutcome.CONFLICT:
-        # Overlap → hand to the checkpoint engine's AI-merge (coedit_queue).
-        # Enqueue by name rather than importing checkpoint_coedit_session: the
-        # import would be circular (checkpoint → wiki.utils → notify → here).
-        coedit_queue.enqueue("checkpoint_coedit_session", (session_id,), {})
+
+async def _rebase_and_maybe_checkpoint(session_id: int, head_sha: str) -> None:
+    outcome = await rebase_session(session_id, head_sha)
+    if outcome == RebaseOutcome.CONFLICT:
+        # Overlap the plain 3-way merge couldn't resolve — hand it to the
+        # checkpoint engine's AI merge, which resolves, commits, and
+        # re-seeds the room from the result.
+        await checkpoint_session(session_id)
+
+
+def _try_local(session_id: int, head_sha: str) -> None:
+    """Fire the rebase if — and only if — this process holds the session's
+    room; a no-op dict lookup otherwise (cheap enough to call unconditionally
+    from every process a commit's fan-out reaches)."""
+    if coedit_room.get_room(session_id) is None:
+        return
+    coedit_room.run_on_main_loop(_rebase_and_maybe_checkpoint(session_id, head_sha))
+
+
+def _handle_remote(payload: dict[str, object]) -> None:
+    _try_local(int(payload["session_id"]), str(payload["head_sha"]))  # type: ignore[arg-type]
+
+
+bus.register(_BUS_KIND, _handle_remote)
 
 
 def on_wiki_commit(rel_path: str, sha: str) -> None:
-    """Enqueue a live-rebase if an active session exists for ``rel_path`` and the
-    commit is external to it (its ``base_sha`` hasn't already advanced to ``sha``,
-    which is the case for the session's own checkpoint commit)."""
+    """Fan out a live-rebase if an active session exists for ``rel_path`` and
+    the commit is external to it (its ``base_sha`` hasn't already advanced to
+    ``sha``, which is the case for the session's own checkpoint commit)."""
     sess = coedit.get_active_session(rel_path)
-    if sess is not None and sess.base_sha != sha:
-        rebase_coedit_session(sess.id, sha)
+    if sess is None or sess.base_sha == sha:
+        return
+    _try_local(sess.id, sha)
+    bus.emit({"kind": _BUS_KIND, "session_id": sess.id, "head_sha": sha})

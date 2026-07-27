@@ -38,7 +38,8 @@ import { relativeTime } from "@/lib/users";
 import { fetchFileHistory } from "@/lib/wiki/svc";
 import type { CommitInfo } from "@/lib/wiki/types";
 import { parseCommitAuthor } from "@/lib/wiki/utils";
-import type { CoeditParticipant, CoeditPeer } from "@/lib/editor/types";
+import type { CoeditPeer } from "@/lib/tiptapEditor/hooks";
+import type { CoeditParticipant } from "@/lib/tiptapEditor/svc";
 import type { DocumentActivity } from "@/types";
 
 // Identity hues cycled per user. Semantic hues stay reserved: red/green/

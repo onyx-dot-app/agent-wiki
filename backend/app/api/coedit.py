@@ -1,24 +1,34 @@
 """The page live-session channel — one WebSocket per session (cookie-authed
-humans), driving the same domain logic (``app/wiki/coedit.py``) and
-broadcast layer (``app/wiki/coedit_channel.py``) every message type in this
-module shares. See ``plans/coedit-websocket-transport.md`` (if present) or
-the originating conversation for the design rationale.
+humans), speaking raw Yjs sync/awareness protocol bytes over binary frames,
+plus a small set of JSON control messages over text frames. Driven by
+session/participant bookkeeping in ``app/wiki/coedit.py``, the in-process
+live document in ``app/wiki/coedit_room.py``, and the broadcast layer in
+``app/wiki/coedit_channel.py``. See ``plans/valiant-tickling-reddy.md`` (if
+still present) or the originating conversation for the design rationale.
 
-The first ``asyncio`` in this backend, scoped deliberately: ``async`` here
-covers connection lifecycle only (accept, the recv/send loops, task
-orchestration) — every ``_connect_sync``/``record_leave``/``_handle_*``
-helper below is a plain sync function, run via ``asyncio.to_thread`` from
-the loops, with no idea it's being called from an async context at all. See
+``async`` here covers connection lifecycle (accept, the recv/send loops,
+task orchestration) plus — deliberately, unlike every other WebSocket route
+in this backend — the Yjs sync/awareness message handling itself. See
 CLAUDE.md's "WebSocket routes" rule before adding another route like this
-one.
+one; this one departs from it on purpose for pycrdt calls specifically:
+``Doc``/``Awareness`` are PyO3 "unsendable" Rust types (thread-affine), so
+unlike a normal blocking call, they must run inline on this task's own
+thread (the event loop), never via ``asyncio.to_thread``'s shared worker
+pool — see ``app/wiki/coedit_room.py``. It's also a good fit regardless:
+in-memory CRDT math is fast, not the kind of blocking call that rule exists
+to keep off the loop. Every DB/git call (participant tracking, permission
+checks, the checkpoint's git commit) still goes through
+``asyncio.to_thread`` as usual.
 
 A "co-edit session" is the page's *live session*: everyone viewing the page
-joins it (read-gated — presence + real-time updates), and editing is a
-capability inside it (``op``/``cursor``/``checkpoint`` messages are
-write-gated, re-checked on *every* message, not just at connect, so a
-mid-session ACL change takes effect immediately). Presence labels editors
-vs viewers client-side from the live caret frames — a rendered caret IS the
-"editing" state; the server stores nothing for it.
+joins it (read-gated — presence + the live document), and writing (applying
+sync/awareness updates that change content, checkpointing) is a capability
+inside it, gated once at connect time via ``can_write`` and closed over for
+the connection's lifetime — a known, carried-forward limitation (a
+mid-session ACL change doesn't take effect until reconnect), not solved
+here. Presence labels editors vs viewers client-side from Awareness state —
+a rendered caret IS the "editing" state; the server stores nothing for it
+beyond relaying it.
 
 No client-sent "leave" message: the server's disconnect handler (``finally``
 below) is the sole leave signal, firing on any connection loss — explicit
@@ -29,30 +39,27 @@ on the client successfully transmitting anything during teardown.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import queue
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from pycrdt import (
+    YMessageType,
+    YSyncMessageType,
+    create_sync_message,
+    handle_sync_message,
+    read_message,
+)
 from pydantic import ValidationError
 
-from app.auth import PermissionDenied, User, require_can
+from app.auth import User, require_can
 from app.auth.deps import require_user_ws
-from app.models.coedit import (
-    CheckpointMessage,
-    CheckpointResultFrame,
-    CursorMessage,
-    GetOpsMessage,
-    JoinedFrame,
-    OpMessage,
-    Operation,
-    OpResultFrame,
-    OpsResultFrame,
-    ParticipantOut,
-)
+from app.models.coedit import CheckpointMessage, CheckpointResultFrame, JoinedFrame, ParticipantOut
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session
 from app.tasks.coedit_leave import leave_coedit_session, record_leave
-from app.wiki import coedit, coedit_channel, git
+from app.wiki import acl, coedit, coedit_channel, coedit_room, git
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -75,171 +82,140 @@ def _participants_out(session_id: int) -> list[ParticipantOut]:
     ]
 
 
-class _WsActionError(Exception):
-    """Internal — a write/read re-check failed for one inbound message.
-    Caught per-handler and turned into a correlated error reply so the
-    *connection* stays open — a rejected message is a per-message failure,
-    not a reason to tear down the whole session."""
+def _connect_sync(path: str, user: User) -> tuple[coedit.SessionRow, bool]:
+    """The DB/permission/git work of the pre-accept handshake — blocking,
+    but no ``Doc`` access, so safe on any thread. ``require_can`` must run
+    (and be free to raise ``PermissionDenied``) before ``websocket.accept()``
+    — verified directly that an exception raised here still reaches the
+    app's registered exception handler and produces a clean denial response
+    pre-upgrade, the same as it does from a plain ``async def`` route body;
+    offloading to a thread via ``asyncio.to_thread`` doesn't change that
+    propagation.
 
-    def __init__(self, error: str) -> None:
-        self.error = error
-
-
-def _require_active(session_id: int, user: User, action: str) -> coedit.SessionRow:
-    sess = coedit.get_session(session_id)
-    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
-        raise _WsActionError("no_active_session")
-    try:
-        require_can(action, sess.path, user)
-    except PermissionDenied:
-        raise _WsActionError("forbidden") from None
-    return sess
-
-
-def _handle_op(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
-    """All handlers below enqueue onto ``outbox`` (the connection's own
-    ``coedit_channel`` queue) rather than calling ``websocket.send_json``
-    directly. Found the hard way (a real test failure, not a hypothetical):
-    ``_send_loop`` is *already* draining this queue and writing to the same
-    socket concurrently with the recv loop — two tasks both calling
-    ``send_json`` on one ``WebSocket`` races (and can interleave/corrupt)
-    the frame writes, and there's no ordering guarantee between a direct
-    reply and a same-op broadcast echo landing first. Routing everything
-    through the one queue makes ``_send_loop`` the sole writer, and
-    enqueueing the reply *before* triggering the broadcast (see the ``op``
-    case) makes the ordering deterministic: a sender always sees their own
-    ``op_result`` before its broadcast echo, not racing it.
+    Room creation, if needed, happens separately back on the event loop —
+    see ``ws()`` — since constructing a ``Doc`` must happen on the thread
+    that will go on to use it.
     """
-    msg = OpMessage.model_validate(raw)
-    try:
-        _require_active(session_id, user, "write")
-        out = coedit.apply_op(
-            session_id,
-            base_version=msg.base_version,
-            changes=msg.changes,
-            author_user_id=user.id,
-            client_id=msg.client_id,
-        )
-    except _WsActionError as e:
-        outbox.put_nowait(OpResultFrame(request_id=msg.request_id, ok=False, error=e.error).model_dump(by_alias=True))
-        return
-    except ValueError:
-        outbox.put_nowait(
-            OpResultFrame(request_id=msg.request_id, ok=False, error="invalid_op").model_dump(by_alias=True)
-        )
-        return
-    if out is None:
-        outbox.put_nowait(
-            OpResultFrame(request_id=msg.request_id, ok=False, error="stale_version").model_dump(by_alias=True)
-        )
-        return
-    coedit.touch(session_id, user.id, edited=True)
-    outbox.put_nowait(
-        OpResultFrame(request_id=msg.request_id, ok=True, version=out.version).model_dump(by_alias=True)
-    )
-    # caret_seq rides the frame so peers render the author's caret at the
-    # edit; None (cleared caret / legacy client) = no caret assertion.
-    coedit_channel.broadcast_op(
-        session_id,
-        out.version,
-        msg.changes,
-        user.id,
-        client_id=msg.client_id,
-        caret_seq=msg.caret_seq,
-    )
+    require_can("read", path, user)
+    can_write = "write" in acl.effective(user.id, user.is_admin, path)
+    head = git.head_sha_for_path(path)
+    sess = coedit.open_session(path, base_sha=head)
+    coedit.join(sess.id, user.id)
+    # Announce the new participant to existing connections *before*
+    # registering this one — otherwise the broadcast lands in our own queue
+    # and the send loop would emit it on top of the inline `joined` frame
+    # sent right after (a duplicate).
+    coedit_channel.broadcast_presence(sess.id)
+    return sess, can_write
 
 
-def _handle_cursor(session_id: int, user: User, raw: dict[str, Any]) -> None:
-    """Fire-and-forget: a rejected/failed cursor ping is silently dropped,
-    never surfaced to the client, since the next throttled ping self-heals
-    it (matches ``svc.ts``'s ``sendCursor``, which doesn't await a reply)."""
-    msg = CursorMessage.model_validate(raw)
-    try:
-        _require_active(session_id, user, "write")
-    except _WsActionError:
-        return
-    cleared = msg.anchor is None or msg.head is None
-    coedit_channel.broadcast_cursor(
-        session_id,
-        user_id=user.id,
-        # Match list_participants' SQL COALESCE(name, email) exactly — substitute
-        # only on NULL, not on "" — so a peer's caret label and roster name agree.
-        user_display=user.name if user.name is not None else user.email,
-        anchor=None if cleared else msg.anchor,
-        head=None if cleared else msg.head,
-        typing=msg.typing and not cleared,
-        seq=msg.seq,
-    )
+def _apply_yjs_frame(
+    outbox: queue.Queue[coedit_channel.QueueItem],
+    session_id: int,
+    room: coedit_room.Room,
+    can_write: bool,
+    raw: bytes,
+) -> bytes | None:
+    """``Doc``/``Awareness``-touching only — runs inline on the event loop
+    (see module docstring), never offloaded via ``asyncio.to_thread``.
+
+    Returns the raw update bytes to durably log via ``coedit.apply_update``,
+    or ``None`` if nothing content-changing happened (a reply-only
+    SYNC_STEP1, an awareness frame, an empty/no-op update, or a write
+    attempt from a read-only viewer, silently dropped).
+    """
+    if not raw:
+        return None
+    msg_type = raw[0]
+    if msg_type == YMessageType.SYNC:
+        inner = raw[1:]
+        if not inner:
+            return None
+        sync_type = inner[0]
+        is_content = sync_type in (YSyncMessageType.SYNC_STEP2, YSyncMessageType.SYNC_UPDATE)
+        if is_content and not can_write:
+            return None
+        # handle_sync_message expects the message *without* the leading
+        # YMessageType.SYNC byte (still carrying its own YSyncMessageType
+        # byte) — confirmed against the installed pycrdt, not assumed. Its
+        # reply (SYNC_STEP2, only for a SYNC_STEP1 input) is *already* a
+        # complete, ready-to-send message with its own YMessageType.SYNC
+        # prefix (create_sync_step2_message adds it internally) — sent
+        # as-is, never re-wrapped.
+        reply = handle_sync_message(inner, room.doc)
+        if reply is not None:
+            outbox.put_nowait(coedit_channel.YjsBytes(payload=reply))
+        if not is_content:
+            return None
+        update = read_message(inner[1:])
+        if update == b"\x00\x00":
+            return None  # empty update (pycrdt's own "nothing to apply" marker)
+        coedit_channel.broadcast_yjs(session_id, raw)
+        return update
+    if msg_type == YMessageType.AWARENESS:
+        if not can_write:
+            return None  # a read-only viewer has no caret to show
+        payload = read_message(raw[1:])
+        room.awareness.apply_awareness_update(payload, "remote")
+        coedit_channel.broadcast_yjs(session_id, raw)
+        return None
+    return None
 
 
-def _handle_checkpoint(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
-    msg = CheckpointMessage.model_validate(raw)
-    try:
-        _require_active(session_id, user, "write")
-    except _WsActionError:
-        outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=False).model_dump(by_alias=True))
-        return
-    checkpoint_coedit_session(session_id)
-    outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=True).model_dump(by_alias=True))
-
-
-def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
-    msg = GetOpsMessage.model_validate(raw)
-    try:
-        sess = _require_active(session_id, user, "read")
-    except _WsActionError as e:
-        outbox.put_nowait(
-            OpsResultFrame(
-                request_id=msg.request_id, ok=False, error=e.error, current_head_version=0, ops=[]
-            ).model_dump(by_alias=True)
-        )
-        return
-    # Head version + ops read as one consistent snapshot (see
-    # ops_since_with_head), so a concurrent op can't desync them.
-    result = coedit.ops_since_with_head(session_id, msg.since_version)
-    outbox.put_nowait(
-        OpsResultFrame(
-            request_id=msg.request_id,
-            ok=True,
-            current_head_version=(
-                result.head_version if result.head_version is not None else sess.version
-            ),
-            ops=[
-                Operation(
-                    version=r.seq,
-                    author=r.author_user_id,
-                    client_id=r.client_id,
-                    changes=[coedit.Change.model_validate(c) for c in r.changes],
-                )
-                for r in result.ops
-            ],
-        ).model_dump(by_alias=True)
-    )
-
-
-async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User) -> None:
+async def _recv_loop(
+    websocket: WebSocket,
+    outbox: queue.Queue[coedit_channel.QueueItem],
+    session_id: int,
+    user: User,
+    room: coedit_room.Room,
+    can_write: bool,
+) -> None:
     while True:
-        raw = await websocket.receive_json()
-        msg_type = raw.get("type")
+        # Low-level receive() (not receive_bytes()/receive_json()) so one
+        # loop can discriminate binary Yjs frames from text control frames —
+        # it doesn't raise on disconnect the way the typed helpers do, so
+        # that's checked and raised explicitly below.
+        msg = await websocket.receive()
+        if msg["type"] == "websocket.disconnect":
+            raise WebSocketDisconnect(msg["code"], msg.get("reason"))
+
+        data = msg.get("bytes")
+        if data is not None:
+            update_bytes = _apply_yjs_frame(outbox, session_id, room, can_write, data)
+            if update_bytes is not None:
+                await asyncio.to_thread(
+                    coedit.apply_update,
+                    session_id,
+                    update_bytes=update_bytes,
+                    author_user_id=user.id,
+                )
+                await asyncio.to_thread(coedit.touch, session_id, user.id, edited=True)
+            continue
+
+        text = msg.get("text")
+        if text is None:
+            continue
         try:
-            # Every handler below makes blocking DB calls (require_can,
-            # coedit.apply_op, ...) — offloaded to a thread so one session's
-            # DB round-trip doesn't stall every other WS connection sharing
-            # this event loop. FastAPI only threadpools a plain `def` route
-            # automatically; a sync call made *from inside* an `async def`
-            # route (this one, since it's a WebSocket route) does not.
-            if msg_type == "op":
-                await asyncio.to_thread(_handle_op, outbox, session_id, user, raw)
-            elif msg_type == "cursor":
-                await asyncio.to_thread(_handle_cursor, session_id, user, raw)
-            elif msg_type == "checkpoint":
-                await asyncio.to_thread(_handle_checkpoint, outbox, session_id, user, raw)
-            elif msg_type == "get_ops":
-                await asyncio.to_thread(_handle_get_ops, outbox, session_id, user, raw)
-            else:
-                log.warning("coedit ws: unknown message type %r", msg_type)
+            parsed: Any = json.loads(text)
+        except ValueError:
+            log.warning("coedit ws: malformed text frame")
+            continue
+        if not isinstance(parsed, dict) or parsed.get("type") != "checkpoint":
+            log.warning("coedit ws: unknown text message %r", parsed)
+            continue
+        try:
+            checkpoint_msg = CheckpointMessage.model_validate(parsed)
         except ValidationError:
-            log.warning("coedit ws: malformed %r message", msg_type)
+            continue
+        if not can_write:
+            outbox.put_nowait(
+                CheckpointResultFrame(request_id=checkpoint_msg.request_id, ok=False).model_dump()
+            )
+            continue
+        await checkpoint_coedit_session(session_id)
+        outbox.put_nowait(
+            CheckpointResultFrame(request_id=checkpoint_msg.request_id, ok=True).model_dump()
+        )
 
 
 # How often _send_loop's blocking drain call returns to check for
@@ -252,12 +228,12 @@ async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[coedit_channel.Qu
 # thread pool every asyncio.to_thread call in the process draws from. Under
 # frequent reconnects, orphaned threads accumulate faster than they drain,
 # eventually exhausting the pool — at which point *every* asyncio.to_thread
-# call across the whole backend (new connects, every op/cursor/checkpoint
-# message, for every session) queues for a free worker. That reads as "the
-# whole app froze," and can plausibly cause more disconnects itself (a
-# starved event loop can miss uvicorn's own ping/pong window and get
-# closed as unresponsive) — a self-reinforcing spiral. Bounding the poll to
-# ~1s bounds any orphaned thread's worst case to ~1s instead of 15.
+# call across the whole backend (new connects, every message, every
+# checkpoint) queues for a free worker. That reads as "the whole app
+# froze," and can plausibly cause more disconnects itself (a starved event
+# loop can miss uvicorn's own ping/pong window and get closed as
+# unresponsive) — a self-reinforcing spiral. Bounding the poll to ~1s
+# bounds any orphaned thread's worst case to ~1s instead of 15.
 _SEND_LOOP_POLL_SECONDS = 1.0
 
 
@@ -266,8 +242,8 @@ async def _send_loop(
 ) -> None:
     idle_elapsed = 0.0
     while True:
-        frame = await asyncio.to_thread(coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS)
-        if frame is coedit_channel.CLOSE_SIGNAL:
+        item = await asyncio.to_thread(coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS)
+        if item is coedit_channel.CLOSE_SIGNAL:
             # ws()'s teardown path pushed this via coedit_channel.wake() right
             # before cancelling this task — reachable here (not just via
             # cancellation) because there's a real race between the two: this
@@ -277,7 +253,7 @@ async def _send_loop(
             # waiting on a CancelledError that might arrive after the value
             # already did.
             return
-        if frame is None:
+        if item is None:
             idle_elapsed += _SEND_LOOP_POLL_SECONDS
             if idle_elapsed >= _HEARTBEAT_SECONDS:
                 idle_elapsed = 0.0
@@ -285,28 +261,10 @@ async def _send_loop(
                 await websocket.send_json({"type": "ping"})
             continue
         idle_elapsed = 0.0
-        await websocket.send_json(frame)
-
-
-def _connect_sync(path: str, user: User) -> coedit.SessionRow:
-    """The whole pre-accept handshake's DB/git work, bundled into one
-    thread hop. ``require_can`` must run (and be free to raise
-    ``PermissionDenied``) before ``websocket.accept()`` — verified directly
-    that an exception raised here still reaches the app's registered
-    exception handler and produces a clean denial response pre-upgrade, the
-    same as it does from a plain ``async def`` route body; offloading to a
-    thread via ``asyncio.to_thread`` doesn't change that propagation."""
-    require_can("read", path, user)
-    head = git.head_sha_for_path(path)
-    initial = git.read_file_opt(path) or ""
-    sess = coedit.open_session(path, base_sha=head, initial_buffer=initial)
-    coedit.join(sess.id, user.id)
-    # Announce the new participant to existing connections *before*
-    # registering this one — otherwise the broadcast lands in our own queue
-    # and the send loop would emit it on top of the inline `joined` frame
-    # sent right after (a duplicate).
-    coedit_channel.broadcast_presence(sess.id)
-    return sess
+        if isinstance(item, coedit_channel.YjsBytes):
+            await websocket.send_bytes(item.payload)
+        else:
+            await websocket.send_json(item)
 
 
 @router.websocket("/ws")
@@ -315,21 +273,25 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     app owns both ends of the connection URL, so there's no need for
     ``y-websocket``'s ``serverUrl/roomname`` convention.
 
-    Joining is opening the page — presence + the live op stream — so
-    connecting requires only read; *writing* (``op``/``cursor``/
-    ``checkpoint``) is gated per-message inside the recv loop. A fresh
-    session is seeded from the page's current HEAD; an already-open session
-    is adopted as-is (its live buffer wins) — see ``coedit.open_session``.
+    Joining is opening the page — presence + the live document — so
+    connecting requires only read; see the module docstring for the write
+    gate. A fresh session is seeded from the page's current HEAD; an
+    already-open session's room (this process's, if it holds one, else a
+    fresh read seeded at the session's own ``base_sha``) is adopted as-is.
     """
-    sess = await asyncio.to_thread(_connect_sync, path, user)
+    sess, can_write = await asyncio.to_thread(_connect_sync, path, user)
+    room = coedit_room.get_room(sess.id)
+    if room is None:
+        body = await asyncio.to_thread(git.read_file_opt, sess.path, sess.base_sha or "HEAD")
+        room = coedit_room.create_room(sess.id, sess.path, body or "", sess.base_sha)
 
     # `_connect_sync` already registered the participant (`coedit.join`)
     # before returning, so from here on a disconnect — including one during
     # `accept()` itself, which the client can trigger mid-handshake since
     # `_connect_sync`'s git/DB work takes measurable time — must still reach
-    # `record_leave` to undo it. Otherwise the user is stuck as a
-    # phantom participant forever, which also blocks
-    # `_checkpoint_if_last_left` from ever firing for this session.
+    # `record_leave` to undo it. Otherwise the user is stuck as a phantom
+    # participant forever, which also blocks the last-leave checkpoint
+    # trigger from ever firing for this session.
     conn: coedit_channel.Connection | None = None
     try:
         await websocket.accept()
@@ -338,14 +300,20 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         await websocket.send_json(
             JoinedFrame(
                 session_id=sess.id,
-                buffer=sess.buffer_text,
-                version=sess.version,
-                base_sha=sess.base_sha,
+                base_sha=room.base_sha,
+                can_write=can_write,
                 participants=participants,
-            ).model_dump(by_alias=True)
+            ).model_dump()
         )
+        # Offer our state so the new client's Yjs provider can request
+        # exactly what it's missing — the standard two-way sync handshake.
+        # A personal query sent directly to this connection only, never
+        # broadcast.
+        await websocket.send_bytes(create_sync_message(room.doc))
 
-        recv_task = asyncio.create_task(_recv_loop(websocket, conn.queue, sess.id, user))
+        recv_task = asyncio.create_task(
+            _recv_loop(websocket, conn.queue, sess.id, user, room, can_write)
+        )
         send_task = asyncio.create_task(_send_loop(websocket, conn, sess.id, user.id))
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED
@@ -372,15 +340,16 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
             coedit_channel.disconnect(conn.id)
         # The leave must survive this task being cancelled (server shutdown;
         # the test portal tearing down the connection). A cancelled `await`
-        # is not enough: the executor item it submitted can be *discarded*
-        # before any pool worker picks it up — cancelling a not-yet-started
-        # future removes it from the queue — and the cancellation can land at
-        # any moment, so no up-front check closes the window. On that path,
-        # hand the leave to the coedit queue instead: a synchronous enqueue
-        # nothing can cancel, durable across the shutdown that caused it.
-        # `record_leave` is idempotent, so the rare both-ran overlap is safe.
+        # is not enough: cancellation can land inside record_leave's own
+        # first asyncio.to_thread call before that executor item is even
+        # picked up — cancelling a not-yet-started future removes it from
+        # the queue — and the cancellation can land at any moment, so no
+        # up-front check closes the window. On that path, hand the leave to
+        # the coedit queue instead: a synchronous enqueue nothing can
+        # cancel, durable across the shutdown that caused it. `record_leave`
+        # is idempotent, so the rare both-ran overlap is safe.
         try:
-            await asyncio.to_thread(record_leave, sess.id, user.id)
+            await record_leave(sess.id, user.id)
         except asyncio.CancelledError:
             try:
                 leave_coedit_session(sess.id, user.id)  # enqueue, no await

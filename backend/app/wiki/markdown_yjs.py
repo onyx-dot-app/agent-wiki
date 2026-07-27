@@ -46,8 +46,8 @@ from pydantic import BaseModel, ConfigDict
 
 from app.wiki.markdown_blocks import BlockKind, BlockRange, gfm_parser, top_level_block_ranges
 
-# Root-fragment key. Must match the frontend PM schema's y-prosemirror
-# `field` config exactly (see frontend/src/lib/editor/schema.ts).
+# Root-fragment key. Must match the frontend's Collaboration extension
+# `field` config exactly (see frontend/src/lib/tiptapEditor/extensions.ts).
 ROOT_XML_KEY = "prosemirror"
 
 _NL_ATTR = "_nl"  # "1" if this block's raw text ends with a trailing newline

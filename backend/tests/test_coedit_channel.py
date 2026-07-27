@@ -1,12 +1,19 @@
 """Co-edit live channel (app/wiki/coedit_channel.py) — the in-memory
-connection registry, fan-out, and the cross-process ``handle_remote`` path.
+connection registry, fan-out, and the cross-process ``_handle_remote_*``
+paths.
 
 Synchronous (thread-per-connection + ``queue.Queue``), so the tests are plain
-puts and gets — no event loop.
+puts and gets — no event loop, no DB fixtures. ``broadcast_yjs``/
+``publish_control`` also call ``bus.emit`` for cross-process delivery; with
+no DB configured here that NOTIFY best-effort-fails and is swallowed (see
+``bus.emit``'s own docstring), so it doesn't interfere with asserting on the
+local delivery path these tests care about.
 """
 from __future__ import annotations
 
-from app.wiki import coedit, coedit_channel
+import base64
+
+from app.wiki import coedit_channel
 
 
 def test_connect_publish_delivers_to_connection():
@@ -52,87 +59,72 @@ def test_user_still_connected_tracks_multiple_tabs():
     assert coedit_channel.user_still_connected(5, "usr_a") is False
 
 
-def _change(frm: int, to: int, insert: str) -> coedit.Change:
-    return coedit.Change.model_validate({"from": frm, "to": to, "insert": insert})
-
-
-def test_broadcast_op_delivers_op_frame():
+def test_publish_control_delivers_to_all_connections_in_session():
     coedit_channel.reset_for_tests()
-    conn = coedit_channel.connect(4, "usr_a")
-    coedit_channel.broadcast_op(4, 3, [_change(0, 1, "x")], "usr_a", client_id="cli_1")
-    frame = coedit_channel.drain(conn.queue, 0.5)
-    assert frame == {
-        "type": "op",
-        "session_id": 4,
-        "version": 3,
-        "changes": [{"from": 0, "to": 1, "insert": "x"}],
-        "author": "usr_a",
-        "client_id": "cli_1",
-        "caret_seq": None,
-    }
+    a = coedit_channel.connect(4, "usr_a")
+    b = coedit_channel.connect(4, "usr_b")
+    coedit_channel.publish_control(4, {"type": "resync", "session_id": 4})
+    assert coedit_channel.drain(a.queue, 0.5) == {"type": "resync", "session_id": 4}
+    assert coedit_channel.drain(b.queue, 0.5) == {"type": "resync", "session_id": 4}
 
 
-def test_broadcast_op_oversized_falls_back_to_resync():
-    coedit_channel.reset_for_tests()
-    conn = coedit_channel.connect(4, "usr_a")
-    big = "z" * 8000  # payload exceeds the NOTIFY cap → resync signal instead
-    coedit_channel.broadcast_op(4, 5, [_change(0, 0, big)], "usr_a")
-    frame = coedit_channel.drain(conn.queue, 0.5)
-    assert frame == {"type": "resync", "session_id": 4, "version": 5}
-
-
-def test_broadcast_cursor_delivers_selection_frame_to_peers():
+def test_broadcast_yjs_delivers_bytes_frame_to_peers():
     coedit_channel.reset_for_tests()
     a = coedit_channel.connect(6, "usr_a")
-    b = coedit_channel.connect(6, "usr_b")  # a peer in the same session
-    coedit_channel.broadcast_cursor(
-        6, user_id="usr_a", user_display="Ada", anchor=3, head=10, typing=True, seq=7
-    )
-    expected = {
-        "type": "cursor",
-        "session_id": 6,
-        "user_id": "usr_a",
-        "user_display": "Ada",
-        "anchor": 3,
-        "head": 10,
-        "typing": True,
-        "seq": 7,
-    }
-    # The peer receives it — not just the sender's own connection.
-    assert coedit_channel.drain(b.queue, 0.5) == expected
-    assert coedit_channel.drain(a.queue, 0.5) == expected
+    b = coedit_channel.connect(6, "usr_b")
+    payload = b"\x00\x01hello"
+    coedit_channel.broadcast_yjs(6, payload)
+    # No origin-exclusion — the sender's own connection receives the echo
+    # too (CRDT updates are idempotent; see broadcast_yjs's docstring).
+    assert coedit_channel.drain(a.queue, 0.5) == coedit_channel.YjsBytes(payload=payload)
+    assert coedit_channel.drain(b.queue, 0.5) == coedit_channel.YjsBytes(payload=payload)
 
 
-def test_broadcast_cursor_cleared_delivers_null_positions():
-    # A cleared caret (editor blur / tab hidden) rides the same frame with
-    # null anchor/head — peers drop the caret on it.
+def test_broadcast_yjs_other_session_does_not_receive():
     coedit_channel.reset_for_tests()
-    conn = coedit_channel.connect(6, "usr_b")
-    coedit_channel.broadcast_cursor(
-        6,
-        user_id="usr_a",
-        user_display="Ada",
-        anchor=None,
-        head=None,
-        typing=False,
-        seq=8,
-    )
-    assert coedit_channel.drain(conn.queue, 0.5) == {
-        "type": "cursor",
-        "session_id": 6,
-        "user_id": "usr_a",
-        "user_display": "Ada",
-        "anchor": None,
-        "head": None,
-        "typing": False,
-        "seq": 8,
-    }
+    a = coedit_channel.connect(1, "usr_a")
+    coedit_channel.broadcast_yjs(2, b"\x00\x01other")
+    assert coedit_channel.drain(a.queue, 0.1) is None
 
 
-def test_handle_remote_delivers_locally():
+def test_handle_remote_control_delivers_locally():
     coedit_channel.reset_for_tests()
     conn = coedit_channel.connect(9, "usr_a")
-    coedit_channel.handle_remote(
-        {"coedit_session_id": 9, "frame": {"type": "presence", "via": "notify"}}
+    coedit_channel._handle_remote_control(
+        {"session_id": 9, "frame": {"type": "presence", "via": "notify"}}
     )
     assert coedit_channel.drain(conn.queue, 0.5) == {"type": "presence", "via": "notify"}
+
+
+def test_handle_remote_yjs_single_chunk_delivers_locally():
+    coedit_channel.reset_for_tests()
+    conn = coedit_channel.connect(9, "usr_a")
+    payload = b"\x00\x01remote-update"
+    coedit_channel._handle_remote_yjs(
+        {
+            "session_id": 9,
+            "i": 0,
+            "n": 1,
+            "group": None,
+            "chunk": base64.b64encode(payload).decode("ascii"),
+        }
+    )
+    assert coedit_channel.drain(conn.queue, 0.5) == coedit_channel.YjsBytes(payload=payload)
+
+
+def test_handle_remote_yjs_reassembles_chunks_in_any_order():
+    coedit_channel.reset_for_tests()
+    conn = coedit_channel.connect(9, "usr_a")
+    payload = b"x" * 100
+    b64 = base64.b64encode(payload).decode("ascii")
+    third = len(b64) // 3
+    chunks = [b64[:third], b64[third : 2 * third], b64[2 * third :]]
+    group = "group-1"
+    # Deliver out of order — reassembly is keyed by index, not arrival order.
+    for i in (2, 0, 1):
+        coedit_channel._handle_remote_yjs(
+            {"session_id": 9, "i": i, "n": 3, "group": group, "chunk": chunks[i]}
+        )
+    assert coedit_channel.drain(conn.queue, 0.5) == coedit_channel.YjsBytes(payload=payload)
+    # Reassembly buffer is cleared once complete.
+    assert group not in coedit_channel._partial_chunks

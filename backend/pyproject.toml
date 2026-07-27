@@ -153,6 +153,58 @@ reportAssignmentType = "none"
 reportUnnecessaryComparison = "none"
 reportUnnecessaryContains = "none"
 
+# Same pycrdt stub relaxation as markdown_splice.py above — this module
+# constructs/holds `Doc`/`Awareness` instances directly.
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/coedit_room.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeArgument = "none"
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportAttributeAccessIssue = "none"
+
+# Same pycrdt stub relaxation as coedit_room.py above — the WS route calls
+# handle_sync_message/create_sync_message and reads room.doc directly.
+[[tool.basedpyright.executionEnvironments]]
+root = "app/api/coedit.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeArgument = "none"
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportAttributeAccessIssue = "none"
+
+# Same pycrdt stub relaxation — reads room.doc to reconstruct the checkpoint
+# body.
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/coedit_checkpoint.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeArgument = "none"
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportAttributeAccessIssue = "none"
+
+# Same pycrdt stub relaxation — reads room.doc to reconstruct the live body
+# for a 3-way merge.
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/coedit_rebase.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeArgument = "none"
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportAttributeAccessIssue = "none"
+
 [tool.uv]
 # Some transitive deps (e.g. greenlet) publish releases missing Linux wheels;
 # require Linux x86_64 so the lock can only resolve to versions installable in

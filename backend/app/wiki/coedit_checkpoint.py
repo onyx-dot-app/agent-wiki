@@ -1,31 +1,40 @@
-"""Checkpoint a co-edit session's live buffer back into git.
+"""Checkpoint a co-edit session's live Yjs doc back into git.
 
-The live buffer lives in Postgres (``coedit_sessions.buffer_text``); a checkpoint
-is the Layer-2 boundary that commits it to git through the *existing* write
-gateway, reconciling any agent/ingest commit that landed meanwhile via the same
-3-way + AI merge. Durability is Postgres, so a checkpoint is about visibility
-(making the committed page fresh for readers/search/agents) and bounding merge
-size — not data safety.
+The live doc lives in this process's in-memory ``coedit_room.Room`` (there
+is no cross-process room registry — see that module); a checkpoint is the
+Layer-2 boundary that reconstructs markdown from it and commits through the
+*existing* write gateway, reconciling any agent/ingest commit that landed
+meanwhile via the same 3-way + AI merge. Durability is the update log in
+Postgres (``coedit_updates``), so a checkpoint is about visibility (making
+the committed page fresh for readers/search/agents) and bounding merge size
+— not data safety.
 
-Attribution: the commit author is the last editor (so git blame credits whoever
-last touched the buffer); the other session participants are added as
+Because the room only exists in this one process, ``checkpoint_session`` can
+only ever be called here, in-process — never dispatched to a worker queue
+(unlike the OT era's ``@coedit_queue.task()``). See ``app/tasks/
+coedit_checkpoint.py`` for what triggers it (periodic scan, last-participant-
+leave, explicit save), all now plain in-process calls.
+
+Attribution: the commit author is the last editor (so git blame credits
+whoever last touched the doc); the other session participants are added as
 ``Co-authored-by:`` trailers. See
 ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
-
-This module is the engine (``checkpoint_session``). What *triggers* it — a
-periodic scan, last-participant-leave, an explicit save — is wired separately.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from app.auth import User, set_current_user
 from app.auth import users as users_repo
-from app.models.wiki import ChangeKind
-from app.wiki import coedit, coedit_channel, filesystem
+from app.models.coedit import ResyncFrame
+from app.models.wiki import ChangeKind, CommitResult
+from app.wiki import coedit, coedit_channel, coedit_room, filesystem
 from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
+from app.wiki import markdown_splice
+from app.wiki.coedit_room import Room
 from app.wiki.utils import commit_and_fan_out
 
 log = logging.getLogger(__name__)
@@ -57,156 +66,154 @@ def _commit_message(session_id: int, *, primary_author_id: str | None) -> str:
     return "\n".join(lines)
 
 
-def checkpoint_session(session_id: int) -> str | None:
-    """Commit a dirty session's buffer to git; return the new sha (or None).
+async def checkpoint_session(session_id: int) -> str | None:
+    """Commit a dirty session's doc to git; return the new sha (or None).
 
-    No-op (returns None) when the session is gone, clean
-    (``version == checkpointed_version``), or the merge collapses to the current
-    HEAD. Reconciles concurrent agent/ingest commits via the gateway's 3-way +
-    AI merge. Idempotent: after a successful commit the session is marked clean.
-
-    Serialized per session by an advisory lock, so two workers that both dequeued
-    a checkpoint for the same session can't both commit the buffer — the loser
-    blocks, then re-reads a clean/closed session and no-ops (see
-    ``coedit.checkpoint_lock``). Distinct sessions still checkpoint in parallel.
+    No-op when the session is gone, clean (``ydoc_seq ==
+    ydoc_checkpointed_seq``), this process doesn't hold the session's room,
+    or the merge collapses to the current HEAD. Reconciles concurrent
+    agent/ingest commits via the gateway's 3-way + AI merge; when that
+    reconciliation changes the content the room's doc was holding, the room
+    is re-seeded from the merged result and connected clients are told to
+    resync (see ``coedit_room.reseed``).
     """
-    with coedit.checkpoint_lock(session_id) as acquired:
-        if not acquired:
-            # Another worker is checkpointing this session and held the lock past
-            # the wait cap. Skip — the periodic scan re-enqueues if still dirty.
-            log.info("coedit checkpoint: session %s busy; skipping (scan retries)", session_id)
+    async with coedit_room.get_checkpoint_lock(session_id):
+        prep = await asyncio.to_thread(_prepare_and_commit, session_id)
+        if prep is None:
             return None
-        return _checkpoint_locked(session_id)
-
-
-def _checkpoint_locked(session_id: int) -> str | None:
-    """Body of ``checkpoint_session``, run while holding the session's checkpoint
-    advisory lock so the read-guard-commit sequence is atomic across workers."""
-    sess = coedit.get_session(session_id)
-    if sess is None:
-        return None  # gone
-    if sess.status != coedit.SessionStatus.ACTIVE.value:
-        # A closed session is finalized — never re-commit it. This dedupes
-        # queued duplicates: once the first checkpoint commits and closes the
-        # session, every other queued copy no-ops here. A closed session should
-        # already be clean (close follows a clean checkpoint); if it's somehow
-        # dirty, log and skip rather than clobber HEAD with its stale buffer —
-        # the edits stay in the buffer for manual recovery.
-        if sess.version != sess.checkpointed_version:
-            log.warning(
-                "coedit checkpoint: session %s is %s but dirty (v%d != "
-                "checkpointed v%d); skipping — buffer left uncommitted, needs "
-                "manual reconciliation",
-                session_id,
-                sess.status,
-                sess.version,
-                sess.checkpointed_version,
+        room, path, body, result = prep
+        if result.new_body != body:
+            coedit_room.reseed(room, result.new_body, result.sha)
+            coedit_channel.publish_control(
+                session_id, ResyncFrame(session_id=session_id).model_dump()
             )
-        return None
-    if sess.version == sess.checkpointed_version:
-        return None  # nothing new to commit
-
-    path = sess.path
-    # The page existed when the session was seeded (base_sha set) but the
-    # working-tree file is gone — it was moved or deleted underneath the
-    # session. A move should have re-keyed the session
-    # (``coedit.on_path_moved``); committing here would resurrect the dead
-    # path from the buffer. Working-tree ``is_file`` (not a git read) so a
-    # transient git failure can't masquerade as a missing page; an OSError
-    # propagates and the task retries. Participant-less sessions close (the
-    # zombie case; buffer stays in the row for recovery). Sessions with live
-    # participants just skip: if a move re-key is landing concurrently, the
-    # scan retries after it points the session at the new path.
-    if sess.base_sha is not None and not filesystem.absolute(path).is_file():
-        if coedit.list_participants(session_id):
-            log.warning(
-                "coedit checkpoint: session %s targets missing path %r but has "
-                "participants; skipping (scan retries after any move re-key)",
-                session_id,
-                path,
-            )
-            return None
-        log.warning(
-            "coedit checkpoint: session %s targets missing path %r (moved or "
-            "deleted); closing — buffer left uncommitted",
-            session_id,
-            path,
-        )
-        coedit.close_session(session_id)
-        return None
-    # Merge base = the page content at the last checkpoint. None when the
-    # session was opened on a not-yet-existing page (→ create).
-    base_body = wiki_git.read_file_opt(path, ref=sess.base_sha) if sess.base_sha else None
-    change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
-
-    primary_id = coedit.last_op_author(session_id)
-    author = _user(primary_id) if primary_id else None
-    message = _commit_message(session_id, primary_author_id=primary_id)
-
-    # System-initiated write: the editors' write permission was already enforced
-    # when they joined/POSTed ops, so skip the ACL gate; not "agent activity".
-    with set_current_user(author):
-        result = commit_and_fan_out(
-            path,
-            sess.buffer_text,
-            message,
-            change_kind=change_kind,
-            base_body=base_body,
-            ai_merge=True,
-            skip_acl=True,
-            record_activity=False,
-            # This is the session's own commit — don't fold it back into the
-            # session as an inbound rebase (we sync the merged result below).
-            trigger_coedit_rebase=False,
-        )
-
-    if result is not None:
-        # Sync the committed content back into the buffer. When the commit-time
-        # 3-way merge folded in a concurrent agent/ingest commit, result.new_body
-        # differs from the buffer we committed; writing it back (and broadcasting
-        # the delta) keeps the live buffer == git and stops a later checkpoint
-        # from re-committing the pre-merge buffer and dropping the agent's edit.
-        res = coedit.rebase_onto(
-            session_id,
-            base_version=sess.version,
-            merged_text=result.new_body,
-            new_base_sha=result.sha,
-            checkpointed=True,
-        )
-        if res is None:
-            # A human op raced in during the commit, so the buffer moved past
-            # what we committed. Leave base_sha / checkpointed_version untouched:
-            # the session stays dirty and the next checkpoint does a proper 3-way
-            # merge (base=old, current=HEAD, incoming=newer buffer) that preserves
-            # the folded-in agent edit. Advancing base_sha to result.sha here
-            # would make that next merge base==current and drop the agent's edit.
-            log.info(
-                "coedit checkpoint: concurrent op during commit of %s; reconciling next checkpoint",
-                path,
-            )
-        elif res.changed:
-            # The commit-time merge folded in a concurrent agent commit; tell
-            # participants to reload the merged buffer.
-            coedit_channel.broadcast_resync(session_id, res.session.version)
-        # Clear the template-drafting row once the committed body diverges from
-        # the snapshot — the page is now the user's own, so the chat banner and
-        # the template's system-prompt override should no longer apply.
-        wiki_drafts.clear_if_diverged(path, result.new_body)
+        else:
+            room.base_body = result.new_body
+            room.base_sha = result.sha
+            room.tracker.reset()
+        await asyncio.to_thread(_finish_bookkeeping, session_id, path, result)
         return result.sha
 
-    # None = the merge produced exactly the current HEAD (buffer already matches
-    # committed content). Still mark clean against current HEAD so we don't
-    # re-attempt this version forever.
-    head = wiki_git.head_sha_for_path(path)
-    if head is not None:
-        coedit.mark_checkpointed(session_id, base_sha=head, version=sess.version)
-    else:
-        # Shouldn't happen — a no-op merge implies HEAD exists. Surface it rather
-        # than silently leaving the session dirty and re-entering this path on
-        # every future trigger.
-        log.warning(
-            "coedit checkpoint: no-op merge but no HEAD for %s (session %s); left dirty",
-            path,
-            session_id,
-        )
-    return None
+
+def _prepare_and_commit(session_id: int) -> tuple[Room, str, str, CommitResult] | None:
+    """Everything up to (and including) the git commit — blocking DB/git
+    work, no ``Doc`` access, safe to run on any thread. Holds the session's
+    checkpoint advisory lock (serializing across processes, in case that
+    ever again becomes possible — see ``coedit.checkpoint_lock``) for the
+    whole read-guard-commit sequence, same discipline as the OT-era engine
+    this replaces."""
+    with coedit.checkpoint_lock(session_id) as acquired:
+        if not acquired:
+            log.info("coedit checkpoint: session %s busy; skipping (scan retries)", session_id)
+            return None
+        sess = coedit.get_session(session_id)
+        if sess is None:
+            return None  # gone
+        if sess.status != coedit.SessionStatus.ACTIVE.value:
+            # A closed session is finalized — never re-commit it. This dedupes
+            # duplicate triggers: once the first checkpoint commits and closes
+            # the session, every other pending trigger no-ops here. A closed
+            # session should already be clean (close follows a clean
+            # checkpoint); if it's somehow dirty, log and skip rather than
+            # clobber HEAD with a stale doc — the edits stay in the update log
+            # for manual recovery.
+            if sess.ydoc_seq != sess.ydoc_checkpointed_seq:
+                log.warning(
+                    "coedit checkpoint: session %s is %s but dirty (seq %d != "
+                    "checkpointed seq %d); skipping — needs manual reconciliation",
+                    session_id,
+                    sess.status,
+                    sess.ydoc_seq,
+                    sess.ydoc_checkpointed_seq,
+                )
+            return None
+        if sess.ydoc_seq == sess.ydoc_checkpointed_seq:
+            return None  # nothing new to commit
+
+        room = coedit_room.get_room(session_id)
+        if room is None:
+            # This process doesn't hold the session's room — a different
+            # process's connection does, or everyone connected here has since
+            # left. Nothing this process can checkpoint from; the trigger that
+            # fired in the room's own process (or the periodic scan there)
+            # handles it.
+            return None
+
+        path = sess.path
+        # The page existed when the session was seeded (base_sha set) but the
+        # working-tree file is gone — moved or deleted underneath the session.
+        # A move should have re-keyed the session (``coedit.on_path_moved``);
+        # committing here would resurrect the dead path from the doc.
+        # Working-tree ``is_file`` (not a git read) so a transient git failure
+        # can't masquerade as a missing page; an OSError propagates and the
+        # trigger retries. Participant-less sessions close (the zombie case;
+        # the update log stays for recovery). Sessions with live participants
+        # just skip: if a move re-key is landing concurrently, the scan
+        # retries after it points the session at the new path.
+        if sess.base_sha is not None and not filesystem.absolute(path).is_file():
+            if coedit.list_participants(session_id):
+                log.warning(
+                    "coedit checkpoint: session %s targets missing path %r but "
+                    "has participants; skipping (scan retries after any move re-key)",
+                    session_id,
+                    path,
+                )
+                return None
+            log.warning(
+                "coedit checkpoint: session %s targets missing path %r (moved or "
+                "deleted); closing — doc left uncommitted",
+                session_id,
+                path,
+            )
+            coedit.close_session(session_id)
+            return None
+
+        body = markdown_splice.checkpoint_body(room.base_body, room.doc, room.tracker)
+        change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
+
+        primary_id = coedit.last_update_author(session_id)
+        author = _user(primary_id) if primary_id else None
+        message = _commit_message(session_id, primary_author_id=primary_id)
+
+        # System-initiated write: editors' write permission was already
+        # enforced when they joined/applied updates, so skip the ACL gate;
+        # not "agent activity".
+        with set_current_user(author):
+            result = commit_and_fan_out(
+                path,
+                body,
+                message,
+                change_kind=change_kind,
+                base_body=room.base_body if sess.base_sha else None,
+                ai_merge=True,
+                skip_acl=True,
+                record_activity=False,
+                # This is the session's own commit — don't fold it back into
+                # the session as an inbound rebase (the reseed above already
+                # syncs the merged result).
+                trigger_coedit_rebase=False,
+            )
+
+        if result is None:
+            # The merge produced exactly the current HEAD (doc already
+            # matches committed content). Still mark clean against current
+            # HEAD so we don't re-attempt this seq forever.
+            head = wiki_git.head_sha_for_path(path)
+            if head is not None:
+                coedit.mark_checkpointed(session_id, base_sha=head, seq=sess.ydoc_seq)
+            else:
+                # Shouldn't happen — a no-op merge implies HEAD exists. Surface
+                # it rather than silently leaving the session dirty forever.
+                log.warning(
+                    "coedit checkpoint: no-op merge but no HEAD for %s (session %s); "
+                    "left dirty",
+                    path,
+                    session_id,
+                )
+            return None
+        return room, path, body, result
+
+
+def _finish_bookkeeping(session_id: int, path: str, result: CommitResult) -> None:
+    coedit.rebase_onto(session_id, new_base_sha=result.sha, checkpointed=True)
+    wiki_drafts.clear_if_diverged(path, result.new_body)

@@ -8,8 +8,7 @@ import {
   type RefObject,
 } from "react";
 
-import type { CoeditorHandle } from "@/lib/editor/components";
-import type { CommentDraft } from "@/lib/editor/comments";
+import type { CoeditorHandle, CommentDraft } from "@/lib/tiptapEditor/types";
 import type { CommentThreadView } from "@/types";
 
 import { NewCommentComposer, ThreadCard } from "./commentCards";
@@ -88,7 +87,9 @@ export function CommentMarginRail({
     const wanted: Array<{ key: string; want: number }> = [];
     for (const t of threads) {
       if (t.root.status !== "open" || t.root.start_offset === null) continue;
-      const line = editor.anchorLine(t.root.start_offset);
+      const line = editor.anchorLine(
+        editor.textOffsetToPos(t.root.start_offset),
+      );
       if (line)
         wanted.push({
           key: t.root.id,
@@ -96,7 +97,7 @@ export function CommentMarginRail({
         });
     }
     if (draft) {
-      const line = editor.anchorLine(draft.startOffset);
+      const line = editor.anchorLine(editor.textOffsetToPos(draft.startOffset));
       if (line)
         wanted.push({
           key: DRAFT_KEY,
