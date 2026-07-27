@@ -38,6 +38,8 @@
  * follows from there being no cell structure to hang it off.
  */
 import { Extension, Node, mergeAttributes } from "@tiptap/core";
+import { Fragment } from "@tiptap/pm/model";
+import { TextSelection } from "@tiptap/pm/state";
 
 /** Internal bookkeeping attrs never rendered into the DOM (`rendered:
  * false`) — they exist purely for the Yjs XML round trip, not for display
@@ -106,12 +108,114 @@ function createOpaqueBlock(name: string) {
   });
 }
 
+/** A line consisting of nothing but 3+ of the same `-`/`_`/`*` character
+ * (each optionally followed by spaces/tabs), 0-3 leading spaces — the
+ * actual CommonMark thematic-break grammar (spec section 4.1), not a
+ * simplified stand-in. Deliberately per-character-type (`-*` mixed with
+ * `_` doesn't count) and deliberately permissive about interior spacing
+ * (`- - -` is as valid as `---`) and trailing spaces, matching the spec
+ * exactly rather than the common "just `---`" shorthand. */
+const THEMATIC_BREAK_LINE_RE =
+  /^ {0,3}(?:-[ \t]*){3,}$|^ {0,3}(?:_[ \t]*){3,}$|^ {0,3}(?:\*[ \t]*){3,}$/;
+
 /** Matches the backend's literal XML tag for a `---`/`***`/`___` divider —
  * see gap 2 above. Replaces StarterKit's `horizontalRule` (disabled in
  * `extensions.ts`), not layered alongside it: only one node type can ever
  * own this content, and it has to be the one whose name the backend's Yjs
- * doc actually uses. */
-export const ThematicBreak = createOpaqueBlock("thematic_break");
+ * doc actually uses.
+ *
+ * Converts on Enter, once the *whole current line* is checked against
+ * `THEMATIC_BREAK_LINE_RE` — not a character-triggered `InputRule` (the
+ * `@tiptap/extension-horizontal-rule` precedent, and this node's own
+ * earlier version). A thematic break is a line-level CommonMark construct:
+ * unlike an ATX heading (`#` + space is unambiguous the instant it's
+ * typed — nothing that could follow invalidates it), a line starting with
+ * `---` is only decidable once the line is known to be *complete*, since
+ * CommonMark still accepts interior/trailing spaces and more dashes
+ * (`- - -`, `----------`) as the same construct, while any other trailing
+ * content (`--- notes`) makes it plain text instead — there's no
+ * character short of end-of-line that settles it either way. Verified
+ * directly against a battery of these cases (bare `---`, `***`, `___`,
+ * `- - -`, trailing-space, 10-dash, `--- x`, under-count `-- `/`- -`) via
+ * the real regex + transaction logic, not assumed. */
+export const ThematicBreak = createOpaqueBlock("thematic_break").extend({
+  // Explicit, not relying on extension array order: Tiptap gives each
+  // extension its own keymap plugin and checks them in priority order
+  // (higher first, confirmed against the installed core's own doc comment
+  // on ExtensionConfig.priority), so this must outrank StarterKit's default
+  // paragraph Enter/Backspace handling (priority 100) or this node's own
+  // Enter/Backspace bindings below would never be reached.
+  priority: 200,
+  // Lets arrow-key navigation and click-to-select treat the divider as one
+  // unit rather than (invisible) text to move/click into — see renderHTML
+  // below. Doesn't by itself fix Backspace-after (see addKeyboardShortcuts):
+  // `content: "text*"` still makes ProseMirror's default joinBackward treat
+  // this node as a textblock to merge into, `atom` or not — confirmed by
+  // driving prosemirror-commands' joinBackward directly against a doc built
+  // from this exact schema shape, not assumed from the docs.
+  atom: true,
+  // Unlike createOpaqueBlock's default renderHTML, a divider's text content
+  // ("---\n", stored only so it round-trips through a checkpoint — see
+  // addKeyboardShortcuts below) must never actually be visible: the base
+  // renderHTML puts the content hole (the `0`) directly inside the visible
+  // div, which rendered the literal "---" text *and* the styled rule on top
+  // of it. The content hole moves into a zero-size wrapper here instead —
+  // present in the DOM for ProseMirror's sake, invisible to the reader.
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "div",
+      mergeAttributes(HTMLAttributes, { "data-type": "thematic-break" }),
+      ["span", { style: "display: none" }, 0],
+    ];
+  },
+  addKeyboardShortcuts() {
+    return {
+      Enter: ({ editor }) => {
+        const { state } = editor;
+        const { $from, empty } = state.selection;
+        if (!empty || $from.parent.type.name !== "paragraph") return false;
+        if (!THEMATIC_BREAK_LINE_RE.test($from.parent.textContent))
+          return false;
+        const blockStart = $from.before($from.depth);
+        const blockEnd = $from.after($from.depth);
+        const divider = state.schema.nodes.thematic_break!.create(
+          null,
+          state.schema.text("---\n"),
+        );
+        const freshParagraph = state.schema.nodes.paragraph!.create();
+        const tr = state.tr.replaceWith(
+          blockStart,
+          blockEnd,
+          Fragment.from([divider, freshParagraph]),
+        );
+        tr.setSelection(
+          TextSelection.create(tr.doc, blockStart + divider.nodeSize + 1),
+        );
+        editor.view.dispatch(tr);
+        return true;
+      },
+      // Backspace at the very start of a block immediately preceded by a
+      // divider deletes the *whole* divider in one step, cursor landing
+      // exactly where it was — not ProseMirror's default joinBackward,
+      // which (verified directly) merges into the divider's hidden text
+      // content instead of removing the node, since content: "text*"
+      // makes it a "textblock" for merge purposes same as any paragraph.
+      Backspace: ({ editor }) => {
+        const { $from, empty } = editor.state.selection;
+        if (!empty || $from.parentOffset !== 0) return false;
+        const posBefore = $from.before($from.depth);
+        if (posBefore === 0) return false;
+        const nodeBefore = editor.state.doc.resolve(posBefore).nodeBefore;
+        if (!nodeBefore || nodeBefore.type.name !== "thematic_break")
+          return false;
+        return editor
+          .chain()
+          .deleteRange({ from: posBefore - nodeBefore.nodeSize, to: posBefore })
+          .run();
+      },
+    };
+  },
+});
 
 /** A raw HTML block (e.g. an embedded `<iframe>` or comment) — opaque
  * verbatim, same as a thematic break. */

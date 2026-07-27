@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from "react";
 
-import type { CoeditorHandle, CommentDraft } from "@/lib/tiptapEditor/types";
+import type { CoeditorHandle, CommentDraft } from "@/lib/editor/types";
 import type { CommentThreadView } from "@/types";
 
 import { NewCommentComposer, ThreadCard } from "./commentCards";

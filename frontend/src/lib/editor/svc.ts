@@ -19,7 +19,7 @@ import {
   encodeSyncStep1,
   encodeUpdateMessage,
   handleMessage,
-} from "@/lib/tiptapEditor/yProtocol";
+} from "@/lib/editor/yProtocol";
 
 export interface CoeditParticipant {
   user_id: string;

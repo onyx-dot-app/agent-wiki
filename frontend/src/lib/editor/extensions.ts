@@ -14,9 +14,10 @@ import {
   TableRow,
   TableSeparator,
   ThematicBreak,
-} from "@/lib/tiptapEditor/blocks";
-import { AnchoredHighlights } from "@/lib/tiptapEditor/highlights";
-import { presenceExtension } from "@/lib/tiptapEditor/presence";
+} from "@/lib/editor/blocks";
+import { CommandMenu } from "@/lib/editor/commandMenu";
+import { AnchoredHighlights } from "@/lib/editor/highlights";
+import { presenceExtension } from "@/lib/editor/presence";
 
 /**
  * The Tiptap extension set for the live wiki editor. Images stay deferred
@@ -63,5 +64,6 @@ export function tiptapExtensions(
     Placeholder.configure({ placeholder: placeholder ?? "" }),
     AnchoredHighlights,
     presenceExtension(awareness),
+    CommandMenu,
   ];
 }

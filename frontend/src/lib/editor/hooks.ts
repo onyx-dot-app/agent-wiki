@@ -40,7 +40,7 @@ import {
   connectSession,
   disconnectForResync,
   type CoeditParticipant,
-} from "@/lib/tiptapEditor/svc";
+} from "@/lib/editor/svc";
 
 /** Ms of doc-change silence before an autosave checkpoint fires. The
  * server's own periodic scan (`app/tasks/coedit_checkpoint.py`) is a much

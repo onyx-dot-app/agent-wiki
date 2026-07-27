@@ -10,7 +10,7 @@
 import { Extension, type Editor } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
-import type { AnchoredHighlightTarget } from "@/lib/tiptapEditor/types";
+import type { AnchoredHighlightTarget } from "@/lib/editor/types";
 
 interface HighlightClasses {
   idle: string;

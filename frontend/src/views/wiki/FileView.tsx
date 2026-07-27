@@ -45,7 +45,7 @@ import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { EditorEdgeScrollbar } from "@/components/wiki/EditorEdgeScrollbar";
 import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
-import type { AnchoredHighlightTarget } from "@/lib/tiptapEditor/types";
+import type { AnchoredHighlightTarget } from "@/lib/editor/types";
 import { SWR_KEYS } from "@/lib/swr-keys";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
@@ -64,15 +64,12 @@ import { apiFetch } from "@/lib/api";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
 import { createComment, listComments } from "@/lib/comments";
-import type {
-  CommentDraft,
-  CommentHighlightTarget,
-} from "@/lib/tiptapEditor/types";
+import type { CommentDraft, CommentHighlightTarget } from "@/lib/editor/types";
 import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
-import { CoeditPresenceBar, TiptapEditor } from "@/lib/tiptapEditor/components";
-import { useCoeditSession } from "@/lib/tiptapEditor/hooks";
-import type { CoeditorHandle } from "@/lib/tiptapEditor/types";
+import { CoeditPresenceBar, TiptapEditor } from "@/lib/editor/components";
+import { useCoeditSession } from "@/lib/editor/hooks";
+import type { CoeditorHandle } from "@/lib/editor/types";
 import {
   useAgentsBarHost,
   useHeaderActionsHost,
@@ -130,12 +127,13 @@ interface DocTitleProps {
 }
 
 /** Renders the page title (inline-editable when `onRename` is given) and a
- * divider below it. Capped at the same `max-w-[768px]` and centered the same
- * way as the editor column below it, so the title and the doc text share one
- * left margin instead of drifting apart. */
+ * divider below it. Capped at the same `--app-container-sm-md` (Opal's
+ * `sizes.css`) and centered the same way as the editor column below it, so
+ * the title and the doc text share one left margin instead of drifting
+ * apart. */
 export function DocTitle({ path, onRename }: DocTitleProps) {
   return (
-    <div className="rail-inset mx-auto flex w-full max-w-[768px] flex-col gap-6 pb-6">
+    <div className="rail-inset mx-auto flex w-full max-w-(--app-container-sm-md) flex-col gap-6 pb-6">
       <Content
         icon={SvgDocFile}
         sizePreset="headline"
@@ -1220,7 +1218,7 @@ export function FileView({ path }: FileViewProps) {
               at the far-right edge; the text is capped + centered. */}
             {viewingVersion && diffData ? (
               <div className="flex min-h-0 flex-1 justify-center">
-                <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
+                <div className="flex min-h-0 w-full max-w-(--app-container-sm-md) min-w-0 flex-1 overflow-hidden">
                   <DiffView data={diffData!} />
                 </div>
               </div>
@@ -1241,7 +1239,7 @@ export function FileView({ path }: FileViewProps) {
                 }`}
               >
                 <div
-                  className={`rail-inset mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
+                  className={`rail-inset mx-auto flex w-full max-w-(--app-container-sm-md) min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
                     isMobile ? "px-3" : ""
                   }`}
                 >

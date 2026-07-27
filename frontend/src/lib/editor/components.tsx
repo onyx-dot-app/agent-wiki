@@ -14,24 +14,21 @@ import {
 } from "react";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
-import { tiptapExtensions } from "@/lib/tiptapEditor/extensions";
+import { tiptapExtensions } from "@/lib/editor/extensions";
 import {
   commentHighlights as commentHighlightPlugin,
   sourceHighlights as sourceHighlightPlugin,
-} from "@/lib/tiptapEditor/highlights";
-import type { CoeditPeer } from "@/lib/tiptapEditor/hooks";
-import { colorFor } from "@/lib/tiptapEditor/presence";
-import type { CoeditParticipant } from "@/lib/tiptapEditor/svc";
-import {
-  pmPosToTextOffset,
-  textOffsetToPmPos,
-} from "@/lib/tiptapEditor/textOffsets";
+} from "@/lib/editor/highlights";
+import type { CoeditPeer } from "@/lib/editor/hooks";
+import { colorFor } from "@/lib/editor/presence";
+import type { CoeditParticipant } from "@/lib/editor/svc";
+import { pmPosToTextOffset, textOffsetToPmPos } from "@/lib/editor/textOffsets";
 import type {
   AnchoredHighlightTarget,
   CoeditorHandle,
   CommentDraft,
   TiptapEditorProps,
-} from "@/lib/tiptapEditor/types";
+} from "@/lib/editor/types";
 
 /** Highlight ids whose spans contain a collapsed caret or intersect a
  * selection, half-open at span ends so a caret just past a span misses —
@@ -51,96 +48,6 @@ function caretHitIds(
   }
   return ids;
 }
-
-// Every selector below targets ProseMirror's own rendered tags directly
-// (Tiptap doesn't let us hand a className to each node without a custom
-// NodeView per construct) — Tailwind's arbitrary descendant-selector form
-// on the wrapping container, same "inline utilities, Opal tokens via
-// var(--...)" convention as the rest of the app, just applied one level
-// up since these nodes render outside our own JSX.
-const PROSE_CLASSES = [
-  // The scroll wrapper — ProseMirror has no built-in "scroller" the way CM6's
-  // view.scrollDOM is; editor.view.dom is just the contenteditable itself.
-  // This element is what CoeditorHandle's scroll/geometry methods read and
-  // write against. Top padding reserves room for a peer's caret name-label,
-  // which renders 1.15em *above* its cursor line — with none, a caret on
-  // the doc's very first line gets its label clipped by overflow-y-auto
-  // (confirmed directly: computed styles were all correct, opacity 1, right
-  // colors — it was purely clipped out of the scrollable box).
-  "h-full overflow-y-auto pt-[1.2em]",
-  // Base prose font, matching DocTitle/the rest of the app's content type ramp.
-  "text-(--text-04) font-(family-name:--font-hanken-grotesk,ui-sans-serif)",
-  "text-[1rem] leading-[1.5rem] font-[450]",
-  "[&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[200px]",
-  // Headings — same size scale as the old CM6 WYSIWYG decorations.
-  "[&_h1]:text-[2em] [&_h1]:font-bold [&_h1]:mt-[0.5em] [&_h1]:text-(--text-05)",
-  "[&_h2]:text-[1.6em] [&_h2]:font-bold [&_h2]:mt-[0.5em] [&_h2]:text-(--text-05)",
-  "[&_h3]:text-[1.375em] [&_h3]:font-bold [&_h3]:mt-[0.4em] [&_h3]:text-(--text-05)",
-  "[&_h4]:text-[1.25em] [&_h4]:font-bold [&_h4]:mt-[0.4em] [&_h4]:text-(--text-05)",
-  "[&_h5]:text-[1.125em] [&_h5]:font-bold [&_h5]:mt-[0.3em] [&_h5]:text-(--text-05)",
-  "[&_h6]:text-[1.125em] [&_h6]:font-bold [&_h6]:mt-[0.3em] [&_h6]:opacity-85 [&_h6]:text-(--text-05)",
-  // Marks.
-  "[&_strong]:font-bold [&_em]:italic",
-  "[&_code]:font-(family-name:--font-dm-mono,ui-monospace) [&_code]:bg-(--background-tint-01) [&_code]:rounded-(--border-radius-04) [&_code]:px-[0.3em] [&_code]:py-[0.1em]",
-  "[&_pre]:font-(family-name:--font-dm-mono,ui-monospace) [&_pre]:bg-(--background-tint-01) [&_pre]:rounded-(--border-radius-08) [&_pre]:p-3 [&_pre]:overflow-x-auto",
-  "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
-  // Blockquote.
-  "[&_blockquote]:border-l-[3px] [&_blockquote]:border-(--border-02) [&_blockquote]:pl-3 [&_blockquote]:text-(--text-03)",
-  // Lists.
-  "[&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6",
-  "[&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:pl-0",
-  "[&_ul[data-type=taskList]_li]:flex [&_ul[data-type=taskList]_li]:items-start [&_ul[data-type=taskList]_li]:gap-2",
-  "[&_ul[data-type=taskList]_input]:mt-[0.3em] [&_ul[data-type=taskList]_input]:accent-(--background-tint-inverted-00)",
-  // Links — accent is near-black warm grey, not a hue, per the design system.
-  "[&_a]:text-(--background-tint-inverted-00) [&_a]:underline",
-  // Horizontal rule.
-  "[&_hr]:border-t [&_hr]:border-(--border-02) [&_hr]:my-4",
-  // thematic_break renders as its own div (see blocks.ts — it replaces the
-  // default `hr` node so its Yjs tag name matches the backend), styled like
-  // one. Rendered data-type is dash-separated (see blocks.ts's
-  // createOpaqueBlock) — Tailwind's arbitrary-value brackets treat `_` as
-  // an escaped space, which broke the build when this used the raw
-  // underscore node name directly.
-  "[&_[data-type=thematic-break]]:border-t [&_[data-type=thematic-break]]:border-(--border-02) [&_[data-type=thematic-break]]:my-4",
-  // Opaque verbatim blocks (raw HTML / unclassified) and table rows — all
-  // render their source text as-is, monospace, matching codeBlock's
-  // treatment; a table row's `data-type` is "tableRow"/"tableSeparator",
-  // set directly from the node name (see blocks.ts) — no underscore, so no
-  // dash-conversion needed there.
-  "[&_[data-type=html-block]]:font-(family-name:--font-dm-mono,ui-monospace) [&_[data-type=html-block]]:whitespace-pre-wrap [&_[data-type=html-block]]:text-(--text-03)",
-  "[&_[data-type=other]]:font-(family-name:--font-dm-mono,ui-monospace) [&_[data-type=other]]:whitespace-pre-wrap [&_[data-type=other]]:text-(--text-03)",
-  "[&_[data-type=table]]:my-2 [&_[data-type=table]]:rounded-(--border-radius-08) [&_[data-type=table]]:border [&_[data-type=table]]:border-(--border-02) [&_[data-type=table]]:overflow-hidden",
-  "[&_[data-type=tableRow]]:font-(family-name:--font-dm-mono,ui-monospace) [&_[data-type=tableRow]]:whitespace-pre-wrap [&_[data-type=tableRow]]:px-2 [&_[data-type=tableRow]]:py-1",
-  "[&_[data-type=tableSeparator]]:font-(family-name:--font-dm-mono,ui-monospace) [&_[data-type=tableSeparator]]:whitespace-pre-wrap [&_[data-type=tableSeparator]]:px-2 [&_[data-type=tableSeparator]]:py-1 [&_[data-type=tableSeparator]]:text-(--text-02) [&_[data-type=tableSeparator]]:bg-(--background-tint-01)",
-  "[&_[data-type=tableRow]+[data-type=tableRow]]:border-t [&_[data-type=tableRow]+[data-type=tableRow]]:border-(--border-02)",
-  // Placeholder (Placeholder extension's own data attribute).
-  "[&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
-  "[&_.is-editor-empty:first-child::before]:text-(--text-02)",
-  "[&_.is-editor-empty:first-child::before]:float-left",
-  "[&_.is-editor-empty:first-child::before]:pointer-events-none [&_.is-editor-empty:first-child::before]:h-0",
-  // Comment/source highlights — same idle/active two-tier treatment as the
-  // CM6 version: idle threads at 30% amber (20% reads as unhighlighted on
-  // real content), hovered/selected at Highlight/Active (60%). Sources sit
-  // on most lines of an ingested page, so idle spans get the subtler
-  // background-tint-02, only the hovered/caret-focused source jumps to
-  // Highlight/Active.
-  "[&_.tt-comment-highlight]:bg-(--neon-amber-a30)",
-  "[&_.tt-comment-highlight-active]:bg-(--highlight-active)",
-  "[&_.tt-source-highlight]:bg-(--background-tint-02)",
-  "[&_.tt-source-highlight-active]:bg-(--highlight-active)",
-  // Peer caret — `@tiptap/y-tiptap`'s yCursorPlugin renders
-  // `.ProseMirror-yjs-cursor` (a <span>, per-user border-color set inline)
-  // wrapping a name-label <div> (per-user background-color set inline).
-  // Base geometry/typography here, same visual shape as the old CM6
-  // `.cm-coedit-caret`/`.cm-coedit-caret-label`: a thin colored bar with a
-  // small name tag above it.
-  "[&_.ProseMirror-yjs-cursor]:relative [&_.ProseMirror-yjs-cursor]:mx-[-1px]",
-  "[&_.ProseMirror-yjs-cursor]:border-l-2 [&_.ProseMirror-yjs-cursor]:border-solid",
-  "[&_.ProseMirror-yjs-cursor_div]:absolute [&_.ProseMirror-yjs-cursor_div]:-top-[1.15em] [&_.ProseMirror-yjs-cursor_div]:left-[-1px]",
-  "[&_.ProseMirror-yjs-cursor_div]:whitespace-nowrap [&_.ProseMirror-yjs-cursor_div]:rounded-[3px] [&_.ProseMirror-yjs-cursor_div]:px-[3px]",
-  "[&_.ProseMirror-yjs-cursor_div]:text-[10px] [&_.ProseMirror-yjs-cursor_div]:leading-tight [&_.ProseMirror-yjs-cursor_div]:text-(--text-inverted-05)",
-  "[&_.ProseMirror-yjs-selection]:opacity-30",
-].join(" ");
 
 export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
   function TiptapEditor(
@@ -437,7 +344,7 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
     );
 
     return (
-      <div ref={scrollRef} className={PROSE_CLASSES}>
+      <div ref={scrollRef} className="editor-prose">
         <EditorContent editor={editor} />
       </div>
     );

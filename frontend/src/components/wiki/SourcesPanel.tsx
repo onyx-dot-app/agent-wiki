@@ -14,7 +14,7 @@ import { SvgExternalLink } from "@onyx-ai/opal/icons";
 import type {
   AnchoredHighlightTarget,
   CoeditorHandle,
-} from "@/lib/tiptapEditor/types";
+} from "@/lib/editor/types";
 import { relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import type { SourceRef } from "@/types";

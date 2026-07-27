@@ -1,5 +1,6 @@
 @import "@onyx-ai/opal/root.css";
 @import "./css/z-index.css";
+@import "./css/editor.css";
 @config "../../tailwind.config.cjs";
 
 /* The app shell is height-capped and scrolls inside its own columns, so
