@@ -53,6 +53,7 @@ import { WatchingPanel } from "@/components/wiki/WatchingPanel";
 import {
   AnchoredPanel,
   AutoGlyph,
+  PanelSurface,
   PolicyPopover,
 } from "@/components/wiki/policyPanels";
 import { useProposalsByPath } from "@/lib/autoOrganize";
@@ -421,8 +422,7 @@ function Explorer({ dir }: ExplorerProps) {
     setPopupHidden(false);
     setHoverOpen(false);
   }, [dir]);
-  const showPopup =
-    !hoverOpen && !popupHidden && !panelVisible && proposals.length > 0;
+  const showPopup = !popupHidden && !panelVisible && proposals.length > 0;
   const openSidePanel = useCallback(() => {
     setHoverOpen(false);
     if (isMobile) setPolicyOpen(true);
@@ -740,33 +740,39 @@ function Explorer({ dir }: ExplorerProps) {
           />
         )}
 
-        {hoverOpen && clusterRef.current && (
-          // Hover previews the policy popover only. Suggestions self-show
-          // as the dismissible popup and live in the side panel.
+        {(hoverOpen || showPopup) && clusterRef.current && (
+          // Mock 2283:84706: hovering Auto stacks the policy panel ABOVE
+          // the persistent suggestions popup; the popup itself self-shows
+          // and only the X (or the side panel) removes it.
           <AnchoredPanel
             anchor={clusterRef.current}
-            onDismiss={() => setHoverOpen(false)}
-            hover={{ onEnter: holdOpen, onLeave: closeSoon }}
-          >
-            <PolicyPopover
-              path={dir}
-              canWrite
-              onOpenUpdatesPanel={openSidePanel}
-            />
-          </AnchoredPanel>
-        )}
-        {showPopup && clusterRef.current && (
-          <AnchoredPanel
-            anchor={clusterRef.current}
-            onDismiss={() => setPopupHidden(true)}
+            onDismiss={() =>
+              hoverOpen ? setHoverOpen(false) : setPopupHidden(true)
+            }
+            hover={
+              hoverOpen ? { onEnter: holdOpen, onLeave: closeSoon } : undefined
+            }
             chrome={false}
           >
-            <SuggestionsCard
-              path={dir}
-              onClose={() => setPopupHidden(true)}
-              onOpenPanel={openSidePanel}
-              onHighlight={highlightPath}
-            />
+            <Section gap={0.25} height="fit" alignItems="stretch">
+              {hoverOpen && (
+                <PanelSurface>
+                  <PolicyPopover
+                    path={dir}
+                    canWrite
+                    onOpenUpdatesPanel={openSidePanel}
+                  />
+                </PanelSurface>
+              )}
+              {showPopup && (
+                <SuggestionsCard
+                  path={dir}
+                  onClose={() => setPopupHidden(true)}
+                  onOpenPanel={openSidePanel}
+                  onHighlight={highlightPath}
+                />
+              )}
+            </Section>
           </AnchoredPanel>
         )}
       </div>
