@@ -8,7 +8,7 @@ import {
   Text,
   Tooltip,
 } from "@onyx-ai/opal/components";
-import { InputHorizontal, Section } from "@onyx-ai/opal/layouts";
+import { ContentAction, InputHorizontal, Section } from "@onyx-ai/opal/layouts";
 import {
   SvgAddLines,
   SvgAlertTriangle,
@@ -338,9 +338,11 @@ export function UpdatePolicyPanel({
 
               <div className="flex flex-col gap-1 p-2">
                 {/* Collapsed, the row's description is the instruction when
-                    one exists (mock 1855:273683). While the editor is open
-                    the row shows the generic hint (mock 1855:273690). */}
-                <InputHorizontal
+                    one exists (mock 1855:273683), clamped to 5 lines. While
+                    the editor is open the row shows the generic hint (mock
+                    1855:273690). ContentAction over InputHorizontal: only
+                    the former forwards descriptionMaxLines. */}
+                <ContentAction
                   icon={SvgAddLines}
                   title="Page Instructions"
                   description={
@@ -350,22 +352,28 @@ export function UpdatePolicyPanel({
                         effInstruction ||
                         `Instruct the wiki on how to update this ${kind}.`
                   }
-                >
-                  <Button
-                    icon={editing ? SvgFold : SvgExpand}
-                    prominence="tertiary"
-                    size="md"
-                    tooltip={editing ? "Collapse" : "Edit instructions"}
-                    onClick={() => {
-                      if (editing) {
-                        setEditing(false);
-                        return;
-                      }
-                      setDraft(ownInstruction);
-                      setEditing(true);
-                    }}
-                  />
-                </InputHorizontal>
+                  descriptionMaxLines={5}
+                  sizePreset="main-ui"
+                  variant="section"
+                  width="full"
+                  padding="fit"
+                  rightChildren={
+                    <Button
+                      icon={editing ? SvgFold : SvgExpand}
+                      prominence="tertiary"
+                      size="md"
+                      tooltip={editing ? "Collapse" : "Edit instructions"}
+                      onClick={() => {
+                        if (editing) {
+                          setEditing(false);
+                          return;
+                        }
+                        setDraft(ownInstruction);
+                        setEditing(true);
+                      }}
+                    />
+                  }
+                />
 
                 {!editing && !ownInstruction && effInstruction && (
                   <Text font="secondary-body" color="text-03">
@@ -377,9 +385,14 @@ export function UpdatePolicyPanel({
                   // Implicit save per the mock: blur persists, collapse only
                   // hides. A failed save reopens with the draft intact.
                   <div className="instructions-editor">
+                    {/* rows = maxRows pins the editor at 8 lines (Opal's
+                        autoResize clamps between the two); longer content
+                        scrolls in place instead of resizing the panel. */}
                     <InputTextArea
-                      rows={5}
-                      resizable
+                      rows={8}
+                      autoResize
+                      maxRows={8}
+                      resizable={false}
                       value={draft}
                       autoFocus
                       placeholder={`How should this ${kind} be updated?`}

@@ -18,7 +18,7 @@ import {
   Tag,
   Text,
 } from "@onyx-ai/opal/components";
-import { InputHorizontal, Section } from "@onyx-ai/opal/layouts";
+import { ContentAction, InputHorizontal, Section } from "@onyx-ai/opal/layouts";
 import {
   SvgAddLines,
   SvgArrowUpRight,
@@ -453,13 +453,17 @@ function PolicyPopover({
     }
   };
 
+  // Mock 2079:379824 annotation: clicking the popover body (any field)
+  // opens the full side panel; the switches keep their inline toggles by
+  // stopping the bubble.
   return (
     <Section
       justifyContent="start"
       alignItems="stretch"
       height="fit"
       gap={0.25}
-      className="w-full"
+      className="w-full cursor-pointer"
+      onClick={onOpenUpdatesPanel}
     >
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
         <InputHorizontal
@@ -467,16 +471,18 @@ function PolicyPopover({
           title="AI Auto-Edits"
           description="Let AI update/organize this page on its own."
         >
-          <Switch
-            checked={allowed}
-            // Held until this path's policy loads (toggling against the
-            // null default would persist a wrong override) and while a
-            // save is in flight (a second click would race the PATCH).
-            disabled={!canWrite || !loaded || saving}
-            onCheckedChange={() =>
-              void patchField({ ai_management_allowed: !allowed })
-            }
-          />
+          <span onClick={(e) => e.stopPropagation()}>
+            <Switch
+              checked={allowed}
+              // Held until this path's policy loads (toggling against the
+              // null default would persist a wrong override) and while a
+              // save is in flight (a second click would race the PATCH).
+              disabled={!canWrite || !loaded || saving}
+              onCheckedChange={() =>
+                void patchField({ ai_management_allowed: !allowed })
+              }
+            />
+          </span>
         </InputHorizontal>
         {allowed && (
           <Section
@@ -490,15 +496,17 @@ function PolicyPopover({
               title="Update"
               description="Periodically scan ingested data sources to add relevant new information."
             >
-              <Switch
-                checked={!autoUpdateDisabled}
-                disabled={!canWrite || !loaded || saving}
-                onCheckedChange={() =>
-                  void patchField({
-                    ingestion_auto_update_disabled: !autoUpdateDisabled,
-                  })
-                }
-              />
+              <span onClick={(e) => e.stopPropagation()}>
+                <Switch
+                  checked={!autoUpdateDisabled}
+                  disabled={!canWrite || !loaded || saving}
+                  onCheckedChange={() =>
+                    void patchField({
+                      ingestion_auto_update_disabled: !autoUpdateDisabled,
+                    })
+                  }
+                />
+              </span>
             </InputHorizontal>
             <OrganizeComingSoonRow kind="page" />
           </Section>
@@ -506,21 +514,34 @@ function PolicyPopover({
       </Section>
       <Divider />
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
-        <InputHorizontal
+        {/* ContentAction over InputHorizontal: only the former forwards
+            descriptionMaxLines (mock annotation: real value, 3 lines). */}
+        <ContentAction
           icon={SvgAddLines}
           title="Page Instructions"
           description={
             loaded?.update_instruction || "How should this page be updated?"
           }
-        >
-          <Button
-            icon={SvgExpand}
-            size="md"
-            prominence="tertiary"
-            tooltip="Open in panel"
-            onClick={onOpenUpdatesPanel}
-          />
-        </InputHorizontal>
+          descriptionMaxLines={3}
+          sizePreset="main-ui"
+          variant="section"
+          width="full"
+          padding="fit"
+          rightChildren={
+            <Button
+              icon={SvgExpand}
+              size="md"
+              prominence="tertiary"
+              tooltip="Open in panel"
+              // stopPropagation: the popover body opens the panel too, and
+              // the bubble would double-fire the handler.
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenUpdatesPanel?.();
+              }}
+            />
+          }
+        />
       </Section>
     </Section>
   );
@@ -760,11 +781,14 @@ export function PresenceAvatars({
       <button
         type="button"
         aria-label="AI auto-edits"
-        aria-expanded={openPanel?.kind === "auto"}
         className="flex cursor-pointer items-center justify-center px-[2px]"
-        onClick={() =>
-          setOpenPanel((p) => (p?.kind === "auto" ? null : { kind: "auto" }))
-        }
+        // Hover previews the popover; click commits to the side panel
+        // (mock annotation: "Clicking on the auto icon or panel will open
+        // in the side panel").
+        onClick={() => {
+          setOpenPanel(null);
+          onOpenUpdatesPanel?.();
+        }}
         onPointerEnter={() => {
           holdOpen();
           setOpenPanel({ kind: "auto" });
@@ -832,7 +856,12 @@ export function PresenceAvatars({
           <PolicyPopover
             path={path}
             canWrite={canWrite}
-            onOpenUpdatesPanel={onOpenUpdatesPanel}
+            // The popover hands off to the side panel in place: same UI,
+            // so it dismisses as the panel opens.
+            onOpenUpdatesPanel={() => {
+              setOpenPanel(null);
+              onOpenUpdatesPanel?.();
+            }}
           />
         </AnchoredPanel>
       )}
