@@ -72,4 +72,4 @@ class ProposalActionResponse(BaseModel):
     the detection queue, so ``status`` reflects the decision, not the
     applied state."""
 
-    status: Literal["approved", "rejected", "dismissed"]
+    status: Literal["approved", "rejected"]
