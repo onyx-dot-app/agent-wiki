@@ -1275,15 +1275,17 @@ class UpdatePolicy(Base):
 
 class PageView(Base):
     """Last time a wiki page was *read* — by a human opening it or an agent
-    (chat/MCP) reading it. **Postgres-only** metadata keyed by live path (like
-    ``update_policies``); moves re-key it, deletes drop it. One row per page,
-    updated with a coarse throttle (a page read many times an hour writes
-    once) — this feeds staleness detection, which thinks in months, so
-    second-precision freshness is deliberately not a goal."""
+    (chat/MCP) reading it. **Postgres-only**, keyed by the page's stable doc
+    id (``wiki_doc_ids``), not its path: renames/moves need no re-keying, a
+    restore from Trash keeps its history, and a page recreated at an old path
+    is a new id that inherits nothing. One row per page, updated with a
+    coarse throttle (a page read many times an hour writes once) — this feeds
+    staleness detection, which thinks in months, so second-precision
+    freshness is deliberately not a goal."""
 
     __tablename__ = "page_views"
 
-    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    doc_id: Mapped[str] = mapped_column(Text, primary_key=True)
     last_viewed_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )

@@ -4,9 +4,10 @@ Revision ID: c2e7a4d9f1b8
 Revises: b8d3f6a1c9e7
 
 Feeds staleness detection: a page is only *considered* stale when both its
-last edit (git) and last view (this table) are old. Path-keyed Postgres-only
-metadata like update_policies; rows are re-keyed on moves and dropped on
-deletes by the lifecycle seams.
+last edit (git) and last view (this table) are old. Keyed by the page's
+stable doc id (wiki_doc_ids) so no lifecycle re-keying is needed: ids
+survive moves, keep history across trash/restore, and a recreated page is
+a fresh id.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ def upgrade() -> None:
         return
     op.create_table(
         "page_views",
-        sa.Column("path", sa.Text(), primary_key=True),
+        sa.Column("doc_id", sa.Text(), primary_key=True),
         sa.Column(
             "last_viewed_at",
             sa.Text(),
