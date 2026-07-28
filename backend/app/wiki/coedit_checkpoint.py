@@ -101,13 +101,23 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     doc = Doc()
     assert sess.ydoc_snapshot is not None  # caller guarantees this (see checkpoint_session)
     doc.apply_update(sess.ydoc_snapshot)
-    base_body = wiki_git.read_file_opt(sess.path, sess.base_sha) if sess.base_sha else ""
+    if sess.base_sha is None:
+        base_body = ""
+    else:
+        # sess.path is the session's *current* path — a move re-keys the
+        # session row (coedit.on_path_moved) without touching base_sha, so a
+        # session that's moved since its last checkpoint has a base_sha that
+        # predates the rename. path_at_ref follows the rename backwards to
+        # what the path was at base_sha (same idiom as app/wiki/diff.py and
+        # app/api/wiki.py's own historical reads).
+        base_path = wiki_git.path_at_ref(sess.path, sess.base_sha) or sess.path
+        base_body = wiki_git.read_file_opt(base_path, sess.base_sha) or ""
     tracker = TouchedTracker(doc)
     since = coedit.updates_since(sess.id, sess.ydoc_snapshot_seq)
     for u in since.updates:
         doc.apply_update(u.update_payload)
     replayed_seq = since.head_seq if since.head_seq is not None else sess.ydoc_snapshot_seq
-    return doc, base_body or "", tracker, replayed_seq
+    return doc, base_body, tracker, replayed_seq
 
 
 class CheckpointOutcome(BaseModel):

@@ -38,6 +38,7 @@ from app.db.models import DocumentTemplate
 from app.db.session import session as db_session
 from app.db.session import try_advisory_xact_lock
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
+from app.tasks.queues import coedit_queue
 from app.wiki import coedit, coedit_checkpoint, coedit_room, drafts
 from app.wiki import git as wiki_git
 from app.wiki.markdown_yjs import ROOT_XML_KEY
@@ -116,7 +117,10 @@ def test_checkpoint_commits_and_attributes_last_editor(repo):
     outcome = coedit_checkpoint.checkpoint_session(sess.id)
 
     assert outcome is not None
-    assert wiki_git.read_file(_PATH) == "EDITED hello world"
+    # Trailing newline: the touched (only) block is fully re-serialized via
+    # markdown_yjs.serialize_block, which always terminates a block with
+    # exactly one newline — see that function's own docstring.
+    assert wiki_git.read_file(_PATH) == "EDITED hello world\n"
     st = coedit.get_active_session(_PATH)
     assert st is not None
     assert st.ydoc_checkpointed_seq == 1
@@ -187,7 +191,7 @@ def test_checkpoint_survives_a_racing_close(repo, monkeypatch):
     outcome = coedit_checkpoint.checkpoint_session(sess.id)
 
     assert outcome is not None
-    assert wiki_git.read_file(_PATH) == "EDITED hello world"
+    assert wiki_git.read_file(_PATH) == "EDITED hello world\n"
 
 
 def test_checkpoint_is_noop_when_clean(repo):
@@ -234,9 +238,14 @@ def test_task_checkpoints_then_closes_when_empty(repo):
     _edit(sess, room, uid, "EDITED ")
     coedit.leave(sess.id, uid)  # last participant gone
 
-    coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)
+    # checkpoint_coedit_session_task is @coedit_queue.task()-decorated —
+    # calling it directly enqueues rather than running (see Task.__call__);
+    # immediate_mode runs the handler synchronously so the assertions below
+    # see its effects.
+    with coedit_queue.immediate_mode():
+        coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)
 
-    assert wiki_git.read_file(_PATH) == "EDITED hello world"
+    assert wiki_git.read_file(_PATH) == "EDITED hello world\n"
     # No participants remained → the task closed the session.
     assert coedit.get_active_session(_PATH) is None
 
@@ -249,9 +258,10 @@ def test_task_keeps_session_open_when_participants_remain(repo):
     room = _room(sess, "hello world")
     _edit(sess, room, uid, "EDITED ")
 
-    coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)
+    with coedit_queue.immediate_mode():
+        coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)
 
-    assert wiki_git.read_file(_PATH) == "EDITED hello world"
+    assert wiki_git.read_file(_PATH) == "EDITED hello world\n"
     # A participant is still editing → session stays active.
     st = coedit.get_active_session(_PATH)
     assert st is not None
@@ -269,9 +279,10 @@ def test_scan_checkpoints_due_sessions(repo, monkeypatch):
     _edit(sess, room, uid, "EDITED ")
     coedit.leave(sess.id, uid)
 
-    coedit_checkpoint_task.scan_coedit_checkpoints()
+    with coedit_queue.immediate_mode():
+        coedit_checkpoint_task.scan_coedit_checkpoints()
 
-    assert wiki_git.read_file(_PATH) == "EDITED hello world"
+    assert wiki_git.read_file(_PATH) == "EDITED hello world\n"
     assert coedit.get_active_session(_PATH) is None
 
 
@@ -296,9 +307,10 @@ def test_scan_checkpoints_sessions_without_a_local_room(repo, monkeypatch):
     coedit.apply_update(sess.id, update_bytes=room.doc.get_update(), author_user_id=uid)
     coedit_room.close_room(sess.id)  # this process no longer holds a room for it either
 
-    coedit_checkpoint_task.scan_coedit_checkpoints()
+    with coedit_queue.immediate_mode():
+        coedit_checkpoint_task.scan_coedit_checkpoints()
 
-    assert wiki_git.read_file(_PATH) == "EDITED hello world"
+    assert wiki_git.read_file(_PATH) == "EDITED hello world\n"
     st = coedit.get_active_session(_PATH)
     assert st is not None
     assert st.ydoc_seq == st.ydoc_checkpointed_seq  # clean — checkpointed with no local room
@@ -353,13 +365,14 @@ def test_duplicate_checkpoints_commit_once(repo):
 
     before = len(wiki_git.history(_PATH))
 
-    coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)  # commits + closes
-    coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)  # duplicate → no-op
-    coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)  # duplicate → no-op
+    with coedit_queue.immediate_mode():
+        coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)  # commits + closes
+        coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)  # duplicate → no-op
+        coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)  # duplicate → no-op
 
     after = len(wiki_git.history(_PATH))
     assert after - before == 1  # exactly one "Co-editing checkpoint" commit
-    assert wiki_git.read_file(_PATH) == "EDITED hello world"
+    assert wiki_git.read_file(_PATH) == "EDITED hello world\n"
 
 
 def test_checkpoint_lock_serializes_same_session_only(repo):
@@ -447,7 +460,7 @@ def test_checkpoint_commits_to_new_path_after_move(repo):
     outcome = coedit_checkpoint.checkpoint_session(sess.id)
     assert outcome is not None
     # The doc landed on the page's new home; the old path stays gone.
-    assert wiki_git.read_file_opt(new_path) == "HOWDY hello world"
+    assert wiki_git.read_file_opt(new_path) == "HOWDY hello world\n"
     assert wiki_git.read_file_opt(_PATH) is None
 
 
@@ -486,7 +499,9 @@ def test_checkpoint_still_creates_brand_new_page(repo):
     _new_page(sess, uid, "first words")
 
     assert coedit_checkpoint.checkpoint_session(sess.id) is not None
-    assert wiki_git.read_file_opt("guides/fresh.md") == "first words"
+    # Trailing newline: a brand-new block is fully serialized via
+    # markdown_yjs.serialize_block, which always terminates with one.
+    assert wiki_git.read_file_opt("guides/fresh.md") == "first words\n"
 
 
 def test_checkpoint_skips_but_keeps_session_with_participants(repo):
