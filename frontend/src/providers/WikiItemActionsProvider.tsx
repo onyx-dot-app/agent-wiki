@@ -29,8 +29,9 @@ interface RowActions {
   move: (path: string) => void;
   copyLink: (path: string) => void;
   launchAgent: (path: string) => void;
-  /** Download a folder's readable pages as a markdown zip ("" = whole wiki). */
-  exportZip: (path: string) => void;
+  /** Download a page as markdown, or a folder's readable pages as a zip
+   * ("" = whole wiki). */
+  exportMarkdown: (path: string) => void;
   remove: (path: string, isFolder: boolean) => void;
   /** Route to the new-page flow scoped to a folder ("" = wiki root). */
   newPage: (dir: string) => void;
@@ -163,8 +164,8 @@ export function WikiItemActionsProvider({
         .then(() => setToast("Link copied"))
         .catch(() => setToast("Couldn't copy link"));
     },
-    exportZip: async (path) => {
-      // The zip is built server-side and only holds pages the caller can
+    exportMarkdown: async (path) => {
+      // A folder zip is built server-side and only holds pages the caller can
       // read, so an "empty" folder legitimately 404s — surface the backend's
       // message rather than a silent no-op download.
       try {
