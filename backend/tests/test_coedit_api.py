@@ -234,11 +234,14 @@ def test_read_only_user_joins_as_viewer_but_cannot_edit(client):
         # A content update from a read-only viewer is silently dropped —
         # _apply_yjs_frame returns None before ever calling
         # coedit.apply_update/touch, so there's no ack to assert on; proof
-        # is that last_edited_at never advances.
+        # is that last_edited_at never advances. Checked *inside* this
+        # block, before disconnect — closing the connection removes the
+        # participant row entirely, so checking after would just find an
+        # empty list, not a preserved None.
         _send_content(ws, _edit_bytes(doc, "x"))
-
-    after = [p for p in coedit.list_participants(joined["session_id"]) if p.user_id == reader]
-    assert after and after[0].last_edited_at is None
+        time.sleep(0.2)
+        after = [p for p in coedit.list_participants(joined["session_id"]) if p.user_id == reader]
+        assert after and after[0].last_edited_at is None
 
     # The read tells the frontend not to offer editing at all.
     doc_resp = client.get(f"/api/wiki/file?path={_PATH}")
@@ -513,13 +516,14 @@ def test_op_requires_write(client):
             assert after and after[0].last_edited_at is None
 
 
-def test_write_permission_revoked_mid_session_is_enforced_on_next_message(client):
-    # The one behavior this migration was explicit about preserving: write
-    # permission is re-checked on every message, not just at connect — a
-    # mid-session ACL change takes effect immediately, not just on the next
-    # reconnect (app/api/coedit.py's module docstring flags the *connect-
-    # time* gate as a known, separate limitation — this is about the
-    # per-message content gate, which isn't that).
+def test_write_permission_revoked_mid_session_does_not_gate_open_connection_but_blocks_reconnect(client):
+    # can_write is resolved once at connect time (_connect_sync) and closed
+    # over for the connection's whole lifetime (app/api/coedit.py's own
+    # module docstring calls this out as a known, accepted limitation — a
+    # mid-session ACL change takes effect on the *next reconnect*, not the
+    # next message). So a revoke doesn't retroactively gate an update sent
+    # later on the same, already-open connection — but connecting fresh
+    # afterward re-resolves can_write and does see it.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     editor = users_repo.create(email="editor@x.com", password="hunter2-x", name="Editor")
     _seed_page("hello world")
@@ -536,23 +540,22 @@ def test_write_permission_revoked_mid_session_is_enforced_on_next_message(client
     login_fastapi(client, editor)
     with _ws(client) as (ws, joined, doc):
         _send_content(ws, _edit_bytes(doc, "EDITED "))
-        _wait_for(
-            lambda: any(
-                p.last_edited_at is not None
-                for p in coedit.list_participants(joined["session_id"])
-                if p.user_id == editor
-            )
-        )
+        _wait_for(lambda: _ydoc_seq_at_least(joined["session_id"], 1))
         acl.revoke(entry_id)
-        before = coedit.get_session(joined["session_id"])
         _send_content(ws, _edit_bytes(doc, "MORE "))
-        # Give the (silently-dropped) update a moment it would need if it
-        # had actually been applied, then confirm ydoc_seq never advanced
-        # past the pre-revoke edit.
-        time.sleep(0.2)
+        _wait_for(lambda: _ydoc_seq_at_least(joined["session_id"], 2))
         after = coedit.get_session(joined["session_id"])
-        assert after is not None and before is not None
-        assert after.ydoc_seq == before.ydoc_seq
+        assert after is not None and after.ydoc_seq == 2  # still applied — same open connection
+
+    # A fresh connection re-resolves can_write against the now-revoked ACL.
+    with _ws(client) as (ws2, joined2, doc2):
+        assert joined2["can_write"] is False
+        before = coedit.get_session(joined2["session_id"])
+        _send_content(ws2, _edit_bytes(doc2, "BLOCKED "))
+        time.sleep(0.2)
+        after2 = coedit.get_session(joined2["session_id"])
+        assert before is not None and after2 is not None
+        assert after2.ydoc_seq == before.ydoc_seq  # dropped, unlike on the stale connection
 
 
 def test_file_read_serves_live_buffer_during_session(client):
