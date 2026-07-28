@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import useSWR from "swr";
 
 import { apiFetch } from "@/lib/api";
+import { downloadMarkdownExport } from "@/lib/wiki/svc";
 import { revalidateWiki, shareableWikiUrl } from "@/lib/wikiHref";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
@@ -28,6 +29,9 @@ interface RowActions {
   move: (path: string) => void;
   copyLink: (path: string) => void;
   launchAgent: (path: string) => void;
+  /** Download a page as markdown, or a folder's readable pages as a zip
+   * ("" = whole wiki). */
+  exportMarkdown: (path: string) => void;
   remove: (path: string, isFolder: boolean) => void;
   /** Route to the new-page flow scoped to a folder ("" = wiki root). */
   newPage: (dir: string) => void;
@@ -159,6 +163,16 @@ export function WikiItemActionsProvider({
         .writeText(url)
         .then(() => setToast("Link copied"))
         .catch(() => setToast("Couldn't copy link"));
+    },
+    exportMarkdown: async (path) => {
+      // A folder zip is built server-side and only holds pages the caller can
+      // read, so an "empty" folder legitimately 404s — surface the backend's
+      // message rather than a silent no-op download.
+      try {
+        await downloadMarkdownExport(path);
+      } catch (e) {
+        setToast(e instanceof Error ? e.message : "Export failed");
+      }
     },
     remove: async (path, isFolder) => {
       const label = path.replace(/\.md$/, "").split("/").pop() ?? path;

@@ -30,6 +30,7 @@ import {
   SvgCheck,
   SvgChevronLeft,
   SvgDocFile,
+  SvgDownload,
   SvgFolder,
   SvgFolderPlus,
   SvgMoreHorizontal,
@@ -542,6 +543,18 @@ function Explorer({ dir }: ExplorerProps) {
               onClick={() => {
                 setMoreOpen(false);
                 rowActions.launchAgent(dir);
+              }}
+            />
+            {/* `dir` is "" at the wiki root, where this exports the whole
+                readable corpus rather than one folder. */}
+            <LineItemButton
+              title="Export as Zip"
+              icon={SvgDownload}
+              sizePreset="main-ui"
+              variant="section"
+              onClick={() => {
+                setMoreOpen(false);
+                rowActions.exportMarkdown(dir);
               }}
             />
           </PopoverMenu>
