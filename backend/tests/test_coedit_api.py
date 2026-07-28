@@ -18,6 +18,7 @@ separate `get_ops` message.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from contextlib import contextmanager
@@ -40,7 +41,7 @@ from starlette.testclient import WebSocketDenialResponse
 from app.auth import users as users_repo
 from app.main import create_app
 from app.tasks.queues import coedit_queue
-from app.wiki import acl, coedit, git
+from app.wiki import acl, coedit, coedit_room, git
 from app.wiki.markdown_yjs import ROOT_XML_KEY, reconstruct_body
 
 from tests._auth import login_fastapi
@@ -93,8 +94,21 @@ def _ws(client, path: str = _PATH):
     Sequencing is safe without a skip-loop here: ``ws()`` sends `joined`
     then its own SYNC_STEP1 query synchronously, before the recv/send task
     loops (and so any broadcast this connection could see) ever start.
+
+    Also (re)binds ``coedit_room``'s main loop to this connection's own
+    portal: unlike the real app (whose lifespan binds it once, see
+    app/main.py), ``TestClient`` spins up a fresh, independent event loop
+    for *every* ``websocket_connect``/HTTP call (confirmed directly in
+    starlette's own testclient.py — neither the WS portal nor a plain
+    ``client.get`` call ever share one), so nothing ever binds it here on
+    its own. Without this, any live-buffer read (``GET /wiki/file`` ->
+    ``coedit_room.read_body_sync``) while this connection is open raises
+    "main loop not bound yet". Rebinding to the still-open WS connection's
+    own loop lets a subsequent ``client.get`` (on its own, different loop)
+    schedule the read onto it via the normal cross-thread path.
     """
     with client.websocket_connect(f"/api/coedit/ws?path={path}") as ws:
+        coedit_room.bind_main_loop(ws.portal.call(asyncio.get_running_loop))
         joined = ws.receive_json()
         assert joined["type"] == "joined"
         ws.receive_bytes()  # the server's own SYNC_STEP1 query — nothing to reply with
@@ -528,6 +542,19 @@ def test_write_permission_revoked_mid_session_does_not_gate_open_connection_but_
     editor = users_repo.create(email="editor@x.com", password="hunter2-x", name="Editor")
     _seed_page("hello world")
     acl.set_owner(_PATH, owner)
+    # A separate, never-revoked read grant: "write" implies "read" (see
+    # acl.effective) only while the write grant is active — revoking it
+    # alone would otherwise leave editor with zero permissions at all,
+    # failing the reconnect's own require_can("read", ...) gate (403)
+    # before ever reaching the can_write resolution this test is about.
+    acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=editor,
+        permission="read",
+        granted_by_user_id=owner,
+    )
     entry_id = acl.grant(
         resource_kind="page",
         resource_path=_PATH,
