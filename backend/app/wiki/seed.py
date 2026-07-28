@@ -16,9 +16,9 @@ and reboots gets an empty wiki, not a re-seed. The marker lives in
 Postgres on purpose, so wiping the wiki working tree alone doesn't
 re-arm seeding.
 
-Seeding is also the only startup path that indexes the wiki — a first
-boot over pre-existing content leaves those pages unsearchable
-(see ``reindex_all_inline``).
+Seeding indexes the pages it writes; a first boot over pre-existing
+content skips seeding, and the lifespan's ``backfill_index_if_empty``
+indexes that content instead.
 
 The CLI in ``app/scripts/seed_onboarding.py`` shares the helper below
 to write pages onto an already-populated wiki without nuking it. The
@@ -143,12 +143,9 @@ def seed_if_empty(target_dir: str) -> bool:
     if any(p.endswith(".md") for p in list_paths()):
         # Pre-existing content (admin seeded another way, migrating from
         # an older install). Stamp the marker so a future delete-all
-        # doesn't trigger re-seeding. Also skips the index backfill —
-        # these pages boot unsearchable (see reindex_all_inline).
-        log.info(
-            "wiki already has tracked pages, stamping marker without seeding "
-            "(search index not backfilled)"
-        )
+        # doesn't trigger re-seeding. Indexing this content is the
+        # lifespan's job (backfill_index_if_empty).
+        log.info("wiki already has tracked pages, stamping marker without seeding")
         _stamp_seed_marker()
         return False
     log.info("seeding empty wiki at %s from %s", target_dir, SEED_SOURCE_DIR)

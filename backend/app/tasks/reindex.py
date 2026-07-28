@@ -113,9 +113,9 @@ def index_path_inline(path: str) -> None:
 def reindex_all_inline() -> None:
     """Index every .md page currently in the wiki. Idempotent.
 
-    Runs only from the seed path, not every boot (O(pages) inline work) —
-    so a wiki booted over pre-existing content stays unindexed until pages
-    are edited or this is run manually.
+    Runs from the seed path (fresh wiki) and from ``backfill_index_if_empty``
+    (pre-existing wiki, empty index) — never on a steady-state boot, where
+    the O(pages) inline walk would be wasted work.
     """
     paths = [p for p in wiki_git.list_paths() if p.endswith(".md")]
     if not paths:
@@ -123,6 +123,20 @@ def reindex_all_inline() -> None:
     log.info("reindex: indexing %d wiki page(s) at startup", len(paths))
     for path in paths:
         index_path_inline(path)
+
+
+def backfill_index_if_empty() -> None:
+    """Startup backfill: index the whole wiki when the doc index is empty.
+
+    Covers a first boot over pre-existing content (restored volume,
+    migration, an already-populated ``WIKI_DIR``) — that path skips seeding,
+    which is the only other boot path that indexes, so without this every
+    page would be invisible to search until it happened to be edited.
+    ``count_documents()`` returns None when OpenSearch is unreachable —
+    skip then too, since indexing would fail just the same.
+    """
+    if fts.count_documents() == 0:
+        reindex_all_inline()
 
 
 @lightweight_maintenance_queue.periodic_task(crontab(minute="0"))
