@@ -59,6 +59,11 @@ async def upload_image(
         anchor_doc_id=anchor_doc_id,
         uploaded_by=user.id,
     )
+    # Brackets the mint+put against a concurrent page move/trash/delete: if
+    # the page vanished in the window, drop the blob instead of orphaning it.
+    if await run_in_threadpool(wiki_git.head_sha_for_path, rel) is None:
+        await run_in_threadpool(image_store.delete, image_id)
+        raise HTTPException(status_code=404, detail="anchor page not found")
 
     url = f"/api/wiki/images/{image_id}"
     alt = (filename or "").replace("\n", " ").replace("\r", " ").replace("]", "")
