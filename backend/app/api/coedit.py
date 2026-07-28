@@ -46,6 +46,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pycrdt import (
+    Doc,
     YMessageType,
     YSyncMessageType,
     create_sync_message,
@@ -56,10 +57,17 @@ from pydantic import ValidationError
 
 from app.auth import User, require_can
 from app.auth.deps import require_user_ws
-from app.models.coedit import CheckpointMessage, CheckpointResultFrame, JoinedFrame, ParticipantOut
+from app.models.coedit import (
+    CheckpointMessage,
+    CheckpointResultFrame,
+    JoinedFrame,
+    JoinErrorFrame,
+    ParticipantOut,
+)
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
 from app.tasks.coedit_leave import leave_coedit_session, record_leave
 from app.wiki import acl, coedit, coedit_channel, coedit_room, git
+from app.wiki.markdown_yjs import seed_doc_from_markdown
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -280,25 +288,86 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
 
     Joining is opening the page — presence + the live document — so
     connecting requires only read; see the module docstring for the write
-    gate. A fresh session is seeded from the page's current HEAD; an
-    already-open session's room (this process's, if it holds one, else a
-    fresh read seeded at the session's own ``base_sha``) is adopted as-is.
+    gate. This process's existing room (if it holds one) is adopted as-is.
+    Otherwise — a second worker process, a restart, a rolling deploy, or
+    truly the session's first-ever connection anywhere — the room is
+    rebuilt from durable state: rehydrated from
+    ``(ydoc_snapshot, coedit_updates)`` (the same replay
+    ``coedit_checkpoint.py``'s engine does) if the session already has a
+    snapshot, or seeded fresh from the page's git HEAD only for a session
+    that has never had one. Seeding from git unconditionally here used to
+    silently diverge two processes' rooms onto incompatible CRDT lineages
+    the moment more than one worker (the deployed default) or a restart was
+    involved — confirmed in review: an update logged against one lineage
+    is integrated by neither the other worker's room nor a later
+    checkpoint replaying onto the persisted snapshot.
     """
     sess, can_write = await asyncio.to_thread(_connect_sync, path, user)
     room = coedit_room.get_room(sess.id)
     if room is None:
-        body = await asyncio.to_thread(git.read_file_opt, sess.path, sess.base_sha or "HEAD")
-        room = coedit_room.create_room(sess.id, sess.path, body or "", sess.base_sha)
-        # A Doc read (get_update) — must run inline on this task's own
-        # thread (the event loop, which just constructed the Doc), not via
-        # to_thread; see coedit_room.py. The DB write itself is plain bytes,
-        # offloaded normally. Conditional on ydoc_snapshot IS NULL
-        # (coedit.set_initial_snapshot), so this is safe to call every time
-        # a process creates a room for a session it didn't already know
-        # about — only the very first room, ever, for a brand-new session
-        # actually persists here.
-        snapshot = room.doc.get_update()
-        await asyncio.to_thread(coedit.set_initial_snapshot, sess.id, snapshot)
+        sess_ck = await asyncio.to_thread(coedit.get_session_for_checkpoint, sess.id)
+        if sess_ck is not None and sess_ck.ydoc_snapshot is not None:
+            since = await asyncio.to_thread(
+                coedit.updates_since, sess.id, sess_ck.ydoc_snapshot_seq
+            )
+            # Doc construction + apply_update — must run inline on this
+            # task's own thread (the event loop), not via to_thread; see
+            # coedit_room.py.
+            doc = Doc()
+            doc.apply_update(sess_ck.ydoc_snapshot)
+            for u in since.updates:
+                doc.apply_update(u.update_payload)
+            base_body = sess_ck.ydoc_snapshot_body
+            room = coedit_room.create_room(sess.id, sess.path, doc, base_body, sess.base_sha)
+        else:
+            body = await asyncio.to_thread(git.read_file_opt, sess.path, sess.base_sha or "HEAD")
+            base_body = body or ""
+            try:
+                doc = seed_doc_from_markdown(base_body)  # Doc construction — inline, see above
+            except NotImplementedError:
+                # A construct the codec can't encode (an image, a code
+                # block inside a list item, etc. — see markdown_yjs.py's
+                # module docstring) makes this page permanently unable to
+                # open in the live editor; retrying changes nothing, since
+                # the input is deterministic. _connect_sync already
+                # registered this user as a participant and broadcast
+                # their join — undo both, or they're stuck as a phantom
+                # participant forever, blocking the session's last-leave
+                # checkpoint trigger from ever firing (caught in review).
+                #
+                # Accept then close, rather than denying pre-upgrade
+                # (raising here, as a PermissionDenied-style exception
+                # would): a real browser's WebSocket API can't see a
+                # pre-accept HTTP rejection's status/body at all (only the
+                # test client's WebSocketDenialResponse can), so the only
+                # way to hand the frontend a distinguishable, non-retryable
+                # reason is a real frame sent after a real accept().
+                log.warning(
+                    "coedit ws: %s has a construct the codec can't encode; denying join",
+                    sess.path,
+                    exc_info=True,
+                )
+                await asyncio.to_thread(coedit.leave, sess.id, user.id)
+                await asyncio.to_thread(coedit_channel.broadcast_presence, sess.id)
+                await websocket.accept()
+                await websocket.send_json(
+                    JoinErrorFrame(
+                        detail="This page uses formatting the live editor doesn't support yet."
+                    ).model_dump()
+                )
+                await websocket.close()
+                return
+            room = coedit_room.create_room(sess.id, sess.path, doc, base_body, sess.base_sha)
+            # A Doc read (get_update) — must run inline on this task's own
+            # thread (the event loop, which just constructed the Doc), not
+            # via to_thread; see coedit_room.py. The DB write itself is
+            # plain bytes, offloaded normally. Conditional on ydoc_snapshot
+            # IS NULL (coedit.set_initial_snapshot), so this is safe to call
+            # every time a process creates a room for a session it didn't
+            # already know about — only the very first room, ever, for a
+            # brand-new session actually persists here.
+            snapshot = room.doc.get_update()
+            await asyncio.to_thread(coedit.set_initial_snapshot, sess.id, snapshot, base_body)
 
     # `_connect_sync` already registered the participant (`coedit.join`)
     # before returning, so from here on a disconnect — including one during

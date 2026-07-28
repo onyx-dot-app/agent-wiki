@@ -75,15 +75,15 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     update logged since — never touches any process's live room.
 
     ``base_body`` — the pre-replay text ``markdown_splice.checkpoint_body``
-    diffs against — is read from git at ``sess.base_sha``, *not* reconstructed
-    from the doc: ``advance_checkpoint`` always advances ``ydoc_snapshot`` and
-    ``base_sha`` together, so the git blob at ``base_sha`` is always exactly
-    the raw markdown ``ydoc_snapshot`` was seeded from (same invariant
-    ``coedit_room.Room.__init__`` relies on, which stores the raw string it
-    was seeded from directly rather than round-tripping through
-    ``reconstruct_body``). Round-tripping through the doc instead would drift
-    from the original formatting on every untouched block, defeating
-    ``checkpoint_body``'s verbatim-slice diffing.
+    diffs against — comes from ``sess.ydoc_snapshot_body``, kept in lockstep
+    with ``ydoc_snapshot`` by every writer (``set_initial_snapshot``,
+    ``advance_checkpoint``, ``rebase_onto`` — see ``app/wiki/coedit.py``),
+    *not* re-derived from a git read at ``base_sha``: a live-rebase fold-in
+    has no corresponding git commit at all (the merge lands only in
+    memory), so ``base_sha`` can't always resolve to the content the
+    snapshot actually represents the way a real commit ref can (confirmed
+    in review — a git-read approach silently corrupted the diff base after
+    a mid-session rebase).
 
     The ``TouchedTracker`` is created right after the doc is seeded, before
     replay, so every replayed update is observed by the tracker exactly as
@@ -101,17 +101,7 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     doc = Doc()
     assert sess.ydoc_snapshot is not None  # caller guarantees this (see checkpoint_session)
     doc.apply_update(sess.ydoc_snapshot)
-    if sess.base_sha is None:
-        base_body = ""
-    else:
-        # sess.path is the session's *current* path — a move re-keys the
-        # session row (coedit.on_path_moved) without touching base_sha, so a
-        # session that's moved since its last checkpoint has a base_sha that
-        # predates the rename. path_at_ref follows the rename backwards to
-        # what the path was at base_sha (same idiom as app/wiki/diff.py and
-        # app/api/wiki.py's own historical reads).
-        base_path = wiki_git.path_at_ref(sess.path, sess.base_sha) or sess.path
-        base_body = wiki_git.read_file_opt(base_path, sess.base_sha) or ""
+    base_body = sess.ydoc_snapshot_body
     tracker = TouchedTracker(doc)
     since = coedit.updates_since(sess.id, sess.ydoc_snapshot_seq)
     for u in since.updates:
@@ -127,13 +117,27 @@ class CheckpointOutcome(BaseModel):
     realtime bus (same domain/fan-out split as ``coedit_rebase.py`` vs.
     ``app/tasks/coedit_rebase.py``). ``sha`` is the checkpoint's own commit —
     also the session's new ``base_sha`` from here on, same value serving
-    both purposes."""
+    both purposes. Deliberately carries no ``snapshot`` bytes: a room being
+    reconciled must reseed from the exact bytes just persisted as
+    ``ydoc_snapshot``, never from an independent ``seed_doc_from_markdown(body)``
+    call of its own, since two separate seedings of "the same" text produce
+    incompatible CRDT lineages (see ``coedit_room.reseed``) — so the
+    reconciling room re-reads ``ydoc_snapshot`` fresh from the DB instead
+    (already durably there by the time this notify fires; also sidesteps
+    carrying a whole page's snapshot bytes through the cross-process
+    notify's payload, which Postgres NOTIFY caps at 8000 bytes — see
+    ``app/realtime/bus.py``). ``diverged`` is True when the committed
+    result differs from what this session's own doc held (an out-of-band
+    merge folded in content this room's doc never had) — the one case a
+    room actually needs reseeding; otherwise its own doc already reflects
+    exactly what got committed, since checkpointing never touches it."""
 
     model_config = ConfigDict(frozen=True)
 
     session_id: int
     sha: str
     body: str
+    diverged: bool
 
 
 def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
@@ -265,15 +269,19 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             # restamp_block_ids's own docstring.
             markdown_splice.restamp_block_ids(doc)
             coedit.advance_checkpoint(
-                session_id, seq=replayed_seq, snapshot=doc.get_update(), base_sha=head
+                session_id, seq=replayed_seq, snapshot=doc.get_update(), body=body, base_sha=head
             )
             return None
 
         # If the AI/3-way merge changed the content beyond what this doc
         # held (a concurrent external commit folded in), the *committed*
         # result — not this doc's own state — is the correct new snapshot,
-        # so any future replay starts from what's actually on disk.
-        if result.new_body != body:
+        # so any future replay starts from what's actually on disk. A room
+        # being reconciled must reseed from *this* snapshot, not its own
+        # independent seed_doc_from_markdown call — see CheckpointOutcome's
+        # own docstring.
+        diverged = result.new_body != body
+        if diverged:
             snap_doc = markdown_yjs.seed_doc_from_markdown(result.new_body)
             snapshot = snap_doc.get_update()
         else:
@@ -281,7 +289,12 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             snapshot = doc.get_update()
 
         coedit.advance_checkpoint(
-            session_id, seq=replayed_seq, snapshot=snapshot, base_sha=result.sha
+            session_id, seq=replayed_seq, snapshot=snapshot, body=result.new_body, base_sha=result.sha
         )
         wiki_drafts.clear_if_diverged(path, result.new_body)
-        return CheckpointOutcome(session_id=session_id, sha=result.sha, body=result.new_body)
+        return CheckpointOutcome(
+            session_id=session_id,
+            sha=result.sha,
+            body=result.new_body,
+            diverged=diverged,
+        )

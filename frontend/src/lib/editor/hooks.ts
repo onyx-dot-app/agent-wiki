@@ -34,6 +34,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
+import { ApiError } from "@/lib/api";
 import {
   checkpointSession,
   closeSession,
@@ -108,6 +109,13 @@ export interface UseCoeditSession {
    * this and offers `retryJoin`. A drop *after* a successful join doesn't
    * set this (the session is already usable; the reconnect loop heals it). */
   joinError: string | null;
+  /** False when `joinError` is a real, distinguishable reason retrying
+   * won't fix (today: a page the live-editor codec can't encode) — the
+   * caller should hide/disable `retryJoin` and say so instead of offering
+   * a Retry that can never succeed. True (the default) for every other
+   * failure: a network error, expired auth, a plain dropped connection —
+   * all worth retrying. */
+  joinErrorRetryable: boolean;
   /** Clears `joinError` and re-runs the join handshake. */
   retryJoin: () => void;
   /** Autosave state, for a "Saving…/Saved/Couldn't save" indicator. */
@@ -208,9 +216,11 @@ export function useCoeditSession(opts: {
   const [peers, setPeers] = useState<CoeditPeer[]>([]);
   const [active, setActive] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinErrorRetryable, setJoinErrorRetryable] = useState(true);
   const [retryToken, setRetryToken] = useState(0);
   const retryJoin = useCallback(() => {
     setJoinError(null);
+    setJoinErrorRetryable(true);
     setRetryToken((t) => t + 1);
   }, []);
   const [saveStatus, setSaveStatus] =
@@ -349,6 +359,12 @@ export function useCoeditSession(opts: {
           );
         } catch (e) {
           if (!cancelled) {
+            // A 422 is svc.ts's join_error frame — a real, distinguishable
+            // reason retrying won't fix (e.g. a codec-unsupported page),
+            // unlike every other failure here (network error, expired
+            // auth, a plain dropped connection), which really is worth
+            // retrying.
+            setJoinErrorRetryable(!(e instanceof ApiError && e.status === 422));
             setJoinError(
               e instanceof Error
                 ? e.message
@@ -431,6 +447,7 @@ export function useCoeditSession(opts: {
     typing,
     peers,
     joinError,
+    joinErrorRetryable,
     retryJoin,
     saveStatus,
     onEditorReady,

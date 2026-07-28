@@ -968,6 +968,15 @@ class CoeditSession(Base):
     ydoc_snapshot_seq: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
+    # The exact raw markdown ``ydoc_snapshot`` was seeded from — the
+    # checkpoint diff base (``markdown_splice.checkpoint_body``'s
+    # ``base_body``), kept in lockstep with the snapshot everywhere it
+    # advances. Deliberately *not* re-derived from a git read at
+    # ``base_sha``: a live-rebase fold-in has no corresponding git commit
+    # at all (the merge lands only in memory), so ``base_sha`` can't always
+    # resolve to the content the snapshot actually represents the way a
+    # real commit ref can.
+    ydoc_snapshot_body: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     # Monotonic sequence, bumped on every applied Yjs update. Clients/late
     # joiners use it to ask "updates since N" for catch-up.
     ydoc_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))

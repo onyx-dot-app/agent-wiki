@@ -1311,14 +1311,22 @@ export function FileView({ path }: FileViewProps) {
                 ) : coedit.joinError ? (
                   // The join handshake itself failed and there is no read-only
                   // fallback to fall back to, so this has to be an actionable
-                  // dead end, not a permanent "Connecting…".
+                  // dead end, not a permanent "Connecting…" — except when
+                  // joinErrorRetryable is false (a page the live-editor codec
+                  // can't encode): retrying can never succeed there (the input
+                  // is deterministic), so a Retry button would just be a dead
+                  // end of its own.
                   <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
                     <span>
-                      Couldn't connect to the live session: {coedit.joinError}
+                      {coedit.joinErrorRetryable
+                        ? `Couldn't connect to the live session: ${coedit.joinError}`
+                        : coedit.joinError}
                     </span>
-                    <Button size="sm" onClick={coedit.retryJoin}>
-                      Retry
-                    </Button>
+                    {coedit.joinErrorRetryable && (
+                      <Button size="sm" onClick={coedit.retryJoin}>
+                        Retry
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   // Joining the session. The editor mounts once we have its

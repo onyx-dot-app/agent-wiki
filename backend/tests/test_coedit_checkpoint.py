@@ -39,7 +39,7 @@ from app.db.session import session as db_session
 from app.db.session import try_advisory_xact_lock
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
 from app.tasks.queues import coedit_queue
-from app.wiki import coedit, coedit_checkpoint, coedit_room, drafts
+from app.wiki import coedit, coedit_checkpoint, coedit_room, drafts, markdown_yjs
 from app.wiki import git as wiki_git
 from app.wiki.markdown_yjs import ROOT_XML_KEY
 from app.models.wiki import PathMove
@@ -71,8 +71,9 @@ def _room(sess, body: str) -> coedit_room.Room:
     (``coedit.set_initial_snapshot``), which the checkpoint engine now
     requires (a session with no snapshot yet has nothing to rebuild a doc
     from — see ``coedit_checkpoint.checkpoint_session``'s guard)."""
-    room = coedit_room.create_room(sess.id, sess.path, body, sess.base_sha)
-    coedit.set_initial_snapshot(sess.id, room.doc.get_update())
+    doc = markdown_yjs.seed_doc_from_markdown(body)
+    room = coedit_room.create_room(sess.id, sess.path, doc, body, sess.base_sha)
+    coedit.set_initial_snapshot(sess.id, room.doc.get_update(), body)
     return room
 
 
@@ -299,8 +300,9 @@ def test_scan_checkpoints_sessions_without_a_local_room(repo, monkeypatch):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = coedit_room.create_room(sess.id, sess.path, "hello world", sha)
-    coedit.set_initial_snapshot(sess.id, room.doc.get_update())
+    doc = markdown_yjs.seed_doc_from_markdown("hello world")
+    room = coedit_room.create_room(sess.id, sess.path, doc, "hello world", sha)
+    coedit.set_initial_snapshot(sess.id, room.doc.get_update(), "hello world")
     root = _root(room.doc)
     with room.doc.transaction():
         root.children[0].children[0].insert(0, "EDITED ")

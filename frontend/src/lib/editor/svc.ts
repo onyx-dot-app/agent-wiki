@@ -84,6 +84,9 @@ export function connectSession(
     ws.binaryType = "arraybuffer";
     const pendingCheckpoints = new Map<string, PendingCheckpoint>();
     let joined = false;
+    // Set by a `join_error` frame — onclose (right behind it) must not
+    // overwrite that specific rejection with its own generic message.
+    let failedWithDetail = false;
     let expectedClose = false;
     let sessionId: number | null = null;
     let resolveClosed:
@@ -136,6 +139,17 @@ export function connectSession(
         return;
       }
       switch (msg.type) {
+        case "join_error": {
+          // Unlike a generic pre-accept denial (which a real browser can
+          // only ever see as a bare close, code 1006 — see onclose below),
+          // this is a real post-accept frame: the server sends it, then
+          // closes right after. Reject with the server's actual detail so
+          // the caller can tell "retrying is pointless" (a codec-
+          // unsupported page) apart from "transient, worth retrying."
+          failedWithDetail = true;
+          reject(new ApiError(422, msg.detail as string));
+          return;
+        }
         case "joined": {
           joined = true;
           sessionId = msg.session_id as number;
@@ -184,6 +198,11 @@ export function connectSession(
       }
       pendingCheckpoints.clear();
       if (!joined) {
+        // A `join_error` frame already rejected with the server's actual,
+        // distinguishable reason — don't clobber it with the generic
+        // message below (this close is expected to follow right behind
+        // it).
+        if (failedWithDetail) return;
         // The join handshake itself failed — surface it rather than retry
         // silently (there's no read-only fallback to fall back to). No
         // permission-specific message here: a pre-accept HTTP-level denial

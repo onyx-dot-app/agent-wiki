@@ -189,6 +189,7 @@ class CheckpointSessionRow(BaseModel):
     ydoc_checkpointed_seq: int
     ydoc_snapshot: bytes | None
     ydoc_snapshot_seq: int
+    ydoc_snapshot_body: str
 
 
 def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
@@ -209,6 +210,7 @@ def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
             ydoc_checkpointed_seq=row.ydoc_checkpointed_seq,
             ydoc_snapshot=row.ydoc_snapshot,
             ydoc_snapshot_seq=row.ydoc_snapshot_seq,
+            ydoc_snapshot_body=row.ydoc_snapshot_body,
         )
 
 
@@ -261,12 +263,16 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
         return _session_row(fresh)
 
 
-def set_initial_snapshot(session_id: int, snapshot: bytes) -> None:
-    """Persist the very first ``ydoc_snapshot`` for a session — call once,
-    right after a process constructs the session's room for the first time
-    anywhere (``coedit_room.create_room`` in ``app/api/coedit.py:ws``), with
-    ``room.doc.get_update()`` taken on the same thread that just built the
-    ``Doc`` (required — see ``coedit_room.py``).
+def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> None:
+    """Persist the very first ``ydoc_snapshot``/``ydoc_snapshot_body`` for a
+    session — call once, right after a process constructs the session's
+    room for the first time anywhere (``coedit_room.create_room`` in
+    ``app/api/coedit.py:ws``), with ``room.doc.get_update()`` taken on the
+    same thread that just built the ``Doc`` (required — see
+    ``coedit_room.py``). ``body`` is the exact raw text the room was seeded
+    from (the same string passed to ``create_room``) — must be exactly what
+    the snapshot bytes decode to, since this is the checkpoint engine's diff
+    base with no git read to fall back on.
 
     Conditional on ``ydoc_snapshot IS NULL`` so this is safe to call every
     time a process creates a room for a session it didn't already know
@@ -279,7 +285,7 @@ def set_initial_snapshot(session_id: int, snapshot: bytes) -> None:
         s.execute(
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.ydoc_snapshot.is_(None))
-            .values(ydoc_snapshot=snapshot, ydoc_snapshot_seq=0)
+            .values(ydoc_snapshot=snapshot, ydoc_snapshot_seq=0, ydoc_snapshot_body=body)
         )
 
 
@@ -374,7 +380,7 @@ def updates_since(session_id: int, after_seq: int) -> UpdatesSince:
 
 
 def rebase_onto(
-    session_id: int, *, new_base_sha: str, snapshot: bytes, checkpointed: bool
+    session_id: int, *, new_base_sha: str, snapshot: bytes, body: str, checkpointed: bool
 ) -> SessionRow | None:
     """Record that the session's document was rebased onto ``new_base_sha``
     — either a live-rebase re-seed (an out-of-band agent/ingest commit
@@ -390,16 +396,23 @@ def rebase_onto(
     so catch-up must start clean from the new seq rather than attempt to
     replay through the discontinuity.
 
-    ``snapshot`` — a throwaway ``Doc`` seeded from the rebased text, its
-    ``get_update()`` bytes — must move in lockstep with that clear:
-    ``ydoc_snapshot``/``ydoc_snapshot_seq`` advance to the new ``ydoc_seq``
-    in the same update. Skipping this was a real bug (caught in review): the
-    checkpoint engine never touches this room's live ``Doc``, only
-    ``(ydoc_snapshot, coedit_updates)`` (see ``coedit_checkpoint.py``) — with
-    the log cleared but the snapshot left pointing at its pre-rebase seq, a
-    later checkpoint would rebuild from that stale snapshot plus an empty
-    log, silently dropping every edit made since the snapshot was last
-    advanced.
+    ``snapshot``/``body`` — a throwaway ``Doc`` seeded from the rebased
+    text, its ``get_update()`` bytes and the text itself — must move in
+    lockstep with that clear: ``ydoc_snapshot``/``ydoc_snapshot_seq``/
+    ``ydoc_snapshot_body`` advance to the new ``ydoc_seq`` in the same
+    update. Skipping the snapshot advance was a real bug (caught in
+    review): the checkpoint engine never touches this room's live ``Doc``,
+    only ``(ydoc_snapshot, coedit_updates)`` (see ``coedit_checkpoint.py``)
+    — with the log cleared but the snapshot left pointing at its
+    pre-rebase seq, a later checkpoint would rebuild from that stale
+    snapshot plus an empty log, silently dropping every edit made since
+    the snapshot was last advanced. ``body`` specifically (not a git read
+    at ``new_base_sha``) matters here because a live-rebase's merged text
+    has no corresponding git commit at all — the merge only ever happens
+    in memory, so ``new_base_sha`` (the out-of-band commit that triggered
+    the rebase) does *not* decode to ``body`` on its own; a caller that
+    passes the wrong ``body`` here corrupts every future checkpoint's diff
+    base for this session (also caught in review).
     """
     now = _iso(_now())
     with session() as s:
@@ -419,6 +432,7 @@ def rebase_onto(
             return None
         row.ydoc_snapshot = snapshot
         row.ydoc_snapshot_seq = row.ydoc_seq
+        row.ydoc_snapshot_body = body
         if checkpointed:
             row.ydoc_checkpointed_seq = row.ydoc_seq
             row.last_checkpoint_at = now
@@ -426,13 +440,18 @@ def rebase_onto(
         return _session_row(row)
 
 
-def advance_checkpoint(session_id: int, *, seq: int, snapshot: bytes, base_sha: str) -> None:
+def advance_checkpoint(
+    session_id: int, *, seq: int, snapshot: bytes, body: str, base_sha: str
+) -> None:
     """Record a checkpoint's result — a real commit, or a no-op where the
     doc's content already matched HEAD — moving the snapshot, the
     checkpoint watermark, and the update-log pruning boundary together, in
-    one transaction: ``ydoc_snapshot``/``ydoc_snapshot_seq`` and
-    ``ydoc_checkpointed_seq`` all advance to ``seq``, and every
-    ``coedit_updates`` row with ``seq`` less-or-equal is pruned.
+    one transaction: ``ydoc_snapshot``/``ydoc_snapshot_seq``/
+    ``ydoc_snapshot_body`` and ``ydoc_checkpointed_seq`` all advance to
+    ``seq``, and every ``coedit_updates`` row with ``seq`` less-or-equal is
+    pruned. ``body`` must be exactly what ``snapshot`` decodes to — the
+    next checkpoint's diff base comes from here, not a git read at
+    ``base_sha`` (see ``ydoc_snapshot_body`` on the model).
 
     The three have to move in lockstep — unlike ``rebase_onto``'s
     unconditional clear (correct only for a rebase, which replaces the doc
@@ -465,6 +484,7 @@ def advance_checkpoint(session_id: int, *, seq: int, snapshot: bytes, base_sha: 
             .values(
                 ydoc_snapshot=snapshot,
                 ydoc_snapshot_seq=seq,
+                ydoc_snapshot_body=body,
                 ydoc_checkpointed_seq=seq,
                 base_sha=base_sha,
                 last_checkpoint_at=now,

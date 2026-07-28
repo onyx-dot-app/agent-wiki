@@ -108,6 +108,7 @@ async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         session_id,
         new_base_sha=head_sha,
         snapshot=snapshot,
+        body=mr.merged,
         checkpointed=False,
     )
     if res is None:
@@ -115,6 +116,12 @@ async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
     if mr.merged == room_body:
         return RebaseOutcome.NOOP
 
-    coedit_room.reseed(room, mr.merged, head_sha)
+    # Reseed from this same snapshot, not an independent
+    # seed_doc_from_markdown(mr.merged) call inside reseed() — two separate
+    # seedings of "the same" text produce incompatible CRDT lineages (see
+    # coedit_room.reseed), which would silently break a later checkpoint's
+    # replay against the ydoc_snapshot just persisted above (caught in
+    # review).
+    coedit_room.reseed(room, snapshot, mr.merged, head_sha)
     coedit_channel.publish_control(session_id, ResyncFrame(session_id=session_id).model_dump())
     return RebaseOutcome.APPLIED

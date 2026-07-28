@@ -26,7 +26,7 @@ from typing import Any
 from pycrdt import Awareness, Doc
 
 from app.wiki.markdown_splice import TouchedTracker
-from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
+from app.wiki.markdown_yjs import reconstruct_body
 
 log = logging.getLogger(__name__)
 
@@ -53,12 +53,14 @@ class Room:
     base_body: str
     base_sha: str | None
 
-    def __init__(self, session_id: int, path: str, base_body: str, base_sha: str | None) -> None:
+    def __init__(
+        self, session_id: int, path: str, doc: Doc, base_body: str, base_sha: str | None
+    ) -> None:
         self.session_id = session_id
         self.path = path
         self.base_body = base_body
         self.base_sha = base_sha
-        self.doc = seed_doc_from_markdown(base_body)
+        self.doc = doc
         self.awareness = Awareness(self.doc)
         self.tracker = TouchedTracker(self.doc)
 
@@ -74,20 +76,24 @@ def get_room(session_id: int) -> Room | None:
         return _rooms.get(session_id)
 
 
-def create_room(session_id: int, path: str, body: str, base_sha: str | None) -> Room:
-    """Construct and register a session's room, seeded from ``body`` (the
-    caller has already fetched it — a git read, done separately so it can
-    run off the event loop; see ``app/api/coedit.py:_connect_sync``).
+def create_room(session_id: int, path: str, doc: Doc, base_body: str, base_sha: str | None) -> Room:
+    """Construct and register a session's room around ``doc`` — already
+    built by the caller (either fresh via ``seed_doc_from_markdown`` for a
+    session with no durable Yjs state yet, or rehydrated from
+    ``(ydoc_snapshot, coedit_updates)`` for one that already has some —
+    see ``app/api/coedit.py:ws``, which picks between the two. ``base_body``
+    must be exactly what ``doc`` decodes to, either way.
 
     Must be called from the same thread that will go on to touch the room's
     ``Doc``/``Awareness`` afterwards — normally the event loop thread, since
-    that's what the WS route's recv/send loops run on. Constructing a
-    ``pycrdt.Doc`` binds it to the calling thread (PyO3 "unsendable"), so
-    unlike a plain dict insert this cannot be dispatched through
-    ``asyncio.to_thread``'s shared worker pool: the pool gives no guarantee
-    later calls land back on the same worker thread that ran this one.
+    that's what the WS route's recv/send loops run on. Constructing (or
+    calling ``apply_update`` on) a ``pycrdt.Doc`` binds it to the calling
+    thread (PyO3 "unsendable"), so unlike a plain dict insert this cannot be
+    dispatched through ``asyncio.to_thread``'s shared worker pool: the pool
+    gives no guarantee later calls land back on the same worker thread that
+    ran this one.
     """
-    room = Room(session_id, path, body, base_sha)
+    room = Room(session_id, path, doc, base_body, base_sha)
     with _lock:
         # Lost a race with another connection that reached this point first
         # for the same session — adopt their room, discard ours (never
@@ -99,11 +105,23 @@ def create_room(session_id: int, path: str, body: str, base_sha: str | None) -> 
         return room
 
 
-def reseed(room: Room, body: str, base_sha: str | None) -> None:
+def reseed(room: Room, snapshot: bytes, body: str, base_sha: str | None) -> None:
     """Replace a room's live ``Doc`` wholesale with fresh content — a
     live-rebase fold-in (``coedit_rebase.py``) or a checkpoint's committed
     result landing content this room's ``Doc`` doesn't have
     (``app/tasks/coedit_checkpoint.py``'s cross-process reconcile step).
+
+    Reconstructs the new ``Doc`` by applying ``snapshot`` (the caller's own
+    already-built ``Doc.get_update()`` bytes for ``body``), never by an
+    independent ``seed_doc_from_markdown(body)`` call here — two separate
+    calls seeding "the same" text produce *incompatible* CRDT lineages
+    (pycrdt assigns a fresh random client id per ``Doc()``), so a caller
+    that persists a snapshot from one call and reseeds the live room from
+    another silently breaks: an update logged against this room's post-
+    reseed lineage can fail to integrate when a future checkpoint replays
+    it onto the *persisted* (differently-seeded) snapshot (caught in
+    review). Applying an update instead of seeding fresh reproduces the
+    exact same lineage the snapshot itself belongs to.
 
     Must run on the room's own thread (the event loop — same constraint as
     ``create_room``, since this constructs a brand-new ``Doc``). Existing
@@ -114,7 +132,8 @@ def reseed(room: Room, body: str, base_sha: str | None) -> None:
     handshake fresh.
     """
     room.tracker.stop()
-    room.doc = seed_doc_from_markdown(body)
+    room.doc = Doc()
+    room.doc.apply_update(snapshot)
     room.awareness = Awareness(room.doc)
     room.tracker = TouchedTracker(room.doc)
     room.base_body = body

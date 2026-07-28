@@ -27,13 +27,14 @@ the bus doesn't echo to the sender).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from app.models.coedit import CheckpointResultFrame, ResyncFrame
 from app.realtime import bus
 from app.tasks.queue import crontab
 from app.tasks.queues import coedit_queue
-from app.wiki import coedit, coedit_channel, coedit_room, markdown_splice, markdown_yjs
+from app.wiki import coedit, coedit_channel, coedit_room, markdown_splice
 from app.wiki.coedit_checkpoint import CheckpointOutcome, checkpoint_session
 
 log = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ def _notify_checkpoint_landed(outcome: CheckpointOutcome) -> None:
             "session_id": outcome.session_id,
             "base_sha": outcome.sha,
             "body": outcome.body,
+            "diverged": outcome.diverged,
         }
     )
 
@@ -142,40 +144,42 @@ def _try_local_reconcile(outcome: CheckpointOutcome) -> None:
 
 
 async def _reconcile_room(outcome: CheckpointOutcome) -> None:
-    # A Doc read — must run inline on this task's own thread (the event
-    # loop), not via to_thread; see coedit_room.py.
     room = coedit_room.get_room(outcome.session_id)
     if room is None:
         return  # left/evicted between the schedule and this running
-    live_body = markdown_yjs.reconstruct_body(room.doc)  # type: ignore[reportUnknownMemberType]
-    # reconstruct_body is a full reserialize — every block always
-    # contributes exactly one trailing newline (see
-    # markdown_yjs.serialize_block), unlike checkpoint_body's own tail
-    # slice, which preserves a page's real lack of a final newline. For a
-    # page with no trailing newline, live_body is legitimately always
-    # exactly one "\n" ahead of what actually got committed — tolerate
-    # that specific, known gap rather than reseed+resync on every single
-    # checkpoint for such pages; any *other* discrepancy still reseeds.
-    if live_body == outcome.body or live_body == outcome.body + "\n":
-        # This room's content is exactly what got committed — nothing to
-        # reconcile beyond bookkeeping. Still restamp block/row ids to
-        # match outcome.body's own (freshly re-derived every parse)
-        # positional numbering: this doc is kept as-is rather than
-        # reseeded, so its ids would otherwise silently drift out of sync
-        # the moment a future checkpoint's base_body has a different block
-        # count/order — see restamp_block_ids's own docstring.
+    if not outcome.diverged:
+        # This room's own doc already reflects exactly what got committed
+        # — checkpointing never touches it, so there's nothing to reseed
+        # here regardless of what a full reconstruct_body reserialize of
+        # it would look like (deliberately not compared: reconstruct_body
+        # and checkpoint_body's own verbatim-slice output diverge for tight
+        # lists, task lists, ordered lists, and emphasis runs even when the
+        # *content* is identical, which used to force a needless reseed —
+        # see review). Still restamp block/row ids to match outcome.body's
+        # own (freshly re-derived every parse) positional numbering: this
+        # doc is kept as-is rather than reseeded, so its ids would
+        # otherwise silently drift out of sync the moment a future
+        # checkpoint's base_body has a different block count/order — see
+        # restamp_block_ids's own docstring.
         markdown_splice.restamp_block_ids(room.doc)  # type: ignore[reportUnknownMemberType]
         room.base_body = outcome.body
         room.base_sha = outcome.sha
         return
-    # This room has content the checkpoint didn't see (an edit landed here
-    # after the worker read the update log, or the committed result folded
-    # in an out-of-band merge this room never had) — reseed from what's
-    # actually committed and have connected clients resync. Never loses the
-    # divergent edits themselves: anything applied here already bumped
-    # ydoc_seq and is durably logged, so it's simply still-dirty relative to
-    # the new base and picked up by the next checkpoint.
-    coedit_room.reseed(room, outcome.body, outcome.sha)
+    # An out-of-band merge folded in content this room's doc never had —
+    # reseed from the just-persisted snapshot and have connected clients
+    # resync. Re-read ydoc_snapshot fresh from the DB (already durably
+    # there — advance_checkpoint ran before this notify fired) rather than
+    # reseeding from an independent seed_doc_from_markdown(outcome.body)
+    # call here: two separate seedings of "the same" text produce
+    # incompatible CRDT lineages (see coedit_room.reseed), which used to
+    # silently break a later checkpoint's replay (see review). Never loses
+    # this room's own divergent edits: anything applied here already
+    # bumped ydoc_seq and is durably logged, so it's simply still-dirty
+    # relative to the new base and picked up by the next checkpoint.
+    sess = await asyncio.to_thread(coedit.get_session_for_checkpoint, outcome.session_id)
+    if sess is None or sess.ydoc_snapshot is None:
+        return  # gone, or racing a close — nothing to reconcile
+    coedit_room.reseed(room, sess.ydoc_snapshot, outcome.body, outcome.sha)
     coedit_channel.publish_control(
         outcome.session_id, ResyncFrame(session_id=outcome.session_id).model_dump()
     )
@@ -186,6 +190,7 @@ def _handle_remote_checkpoint_landed(payload: dict[str, object]) -> None:
         session_id=int(payload["session_id"]),  # type: ignore[arg-type]
         sha=str(payload["base_sha"]),
         body=str(payload["body"]),
+        diverged=bool(payload["diverged"]),
     )
     _try_local_reconcile(outcome)
 

@@ -38,6 +38,22 @@ class ParticipantOut(BaseModel):
     last_edited_at: str | None = None
 
 
+class JoinErrorFrame(BaseModel):
+    """Server -> client, sent (once ``accept()``ed) *instead of*
+    ``JoinedFrame`` when the join can't complete for a reason retrying
+    won't fix — today, a page containing a construct the live-editor codec
+    can't encode (see ``markdown_yjs.py``'s module docstring). Sent after
+    ``accept()``, not before, specifically so the browser's ``WebSocket``
+    API can actually see it: a pre-upgrade HTTP-level rejection carries no
+    status/body a real browser's ``onclose``/``onerror`` can read (unlike
+    the test client's ``WebSocketDenialResponse``), so a page-content
+    failure has to ride a real frame instead. The connection closes right
+    after this frame."""
+
+    type: str = "join_error"
+    detail: str
+
+
 class JoinedFrame(BaseModel):
     """Server -> client, sent once right after ``accept()`` — the WS
     connection's own handshake response. Carries no document content (that

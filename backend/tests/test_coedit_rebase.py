@@ -50,8 +50,9 @@ def _room(sess, body: str) -> coedit_room.Room:
     # (test_checkpoint_commit_does_not_self_trigger_rebase), which needs
     # it; harmless overhead for the rebase-only tests. See
     # test_coedit_checkpoint.py's _room for the same pattern.
-    room = coedit_room.create_room(sess.id, sess.path, body, sess.base_sha)
-    coedit.set_initial_snapshot(sess.id, room.doc.get_update())
+    doc = seed_doc_from_markdown(body)
+    room = coedit_room.create_room(sess.id, sess.path, doc, body, sess.base_sha)
+    coedit.set_initial_snapshot(sess.id, room.doc.get_update(), body)
     return room
 
 
@@ -126,11 +127,13 @@ def test_rebase_skips_stale_ancestor_head(repo):
     room = _room(sess, "one\ntwo\n")
     # base_sha advances to a descendant (e.g. a checkpoint committed ONE).
     new_sha = wiki_git.commit_file(_PATH, "ONE\ntwo\n", "checkpoint", author="A <a@x.com>")
-    coedit_room.reseed(room, "ONE\ntwo\n", new_sha)
+    snapshot = seed_doc_from_markdown("ONE\ntwo\n").get_update()
+    coedit_room.reseed(room, snapshot, "ONE\ntwo\n", new_sha)
     coedit.rebase_onto(
         sess.id,
         new_base_sha=new_sha,
-        snapshot=seed_doc_from_markdown("ONE\ntwo\n").get_update(),
+        snapshot=snapshot,
+        body="ONE\ntwo\n",
         checkpointed=True,
     )
 

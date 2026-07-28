@@ -10,7 +10,14 @@ any process's live in-memory room directly), renames
 ``version``/``checkpointed_version`` to ``ydoc_seq``/``ydoc_checkpointed_seq``
 (same monotonic-watermark semantics, renamed for clarity), and replaces
 ``coedit_ops`` (JSONB range-op log) with ``coedit_updates`` (bytea Yjs-update
-log). No coexistence period — this app is pre-production, one clean cut, per
+log). Also adds ``ydoc_snapshot_body`` (text) — the exact raw markdown
+``ydoc_snapshot`` was seeded from, kept in lockstep with it everywhere it
+advances (``set_initial_snapshot``/``advance_checkpoint``/``rebase_onto`` in
+``app/wiki/coedit.py``). A checkpoint's diff base has to come from *here*,
+not a git read at ``base_sha``: a live-rebase fold-in has no corresponding
+git commit at all (the merge happens only in memory), so ``base_sha`` can't
+always resolve to the right content the way a real commit ref can. No
+coexistence period — this app is pre-production, one clean cut, per
 ``app/db/models.py``'s ``CoeditSession``/``CoeditUpdate``. Guarded with the
 inspector because ``0001_initial`` builds fresh databases from the current
 models.
@@ -70,6 +77,13 @@ def upgrade() -> None:
             "coedit_sessions",
             sa.Column(
                 "ydoc_snapshot_seq", sa.BigInteger(), server_default=sa.text("0"), nullable=False
+            ),
+        )
+    if "ydoc_snapshot_body" not in cols:
+        op.add_column(
+            "coedit_sessions",
+            sa.Column(
+                "ydoc_snapshot_body", sa.Text(), server_default=sa.text("''"), nullable=False
             ),
         )
     _rename_or_drop("coedit_sessions", "version", "ydoc_seq")
@@ -151,6 +165,8 @@ def downgrade() -> None:
         )
     if "ydoc_seq" in cols:
         op.alter_column("coedit_sessions", "ydoc_seq", new_column_name="version")
+    if "ydoc_snapshot_body" in cols:
+        op.drop_column("coedit_sessions", "ydoc_snapshot_body")
     if "ydoc_snapshot_seq" in cols:
         op.drop_column("coedit_sessions", "ydoc_snapshot_seq")
     if "ydoc_snapshot" in cols:
