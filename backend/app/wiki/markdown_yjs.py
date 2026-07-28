@@ -230,6 +230,10 @@ def _escape_title(title: str) -> str:
 
 
 def _serialize_image(node: XmlElement) -> str:
+    # Src is emitted verbatim, the same discipline link hrefs use. markdown-it
+    # normalizes destination spellings (angle-bracket form, encoded spaces) at
+    # parse time, so the normalized destination is this codec's canonical form
+    # and re-parsing the output is a no-op. See the link branch of _wrap_run.
     attrs = dict(node.attributes)
     src = attrs.get("src", "")
     alt = _escape_inline_text(attrs.get("alt", ""))
