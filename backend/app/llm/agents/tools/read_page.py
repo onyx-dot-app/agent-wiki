@@ -30,8 +30,6 @@ def handle(args: dict[str, Any]) -> Any:
     except PermissionDenied as exc:
         return {"error": str(exc)}
 
-    page_views.note_view(path)
-
     try:
         body = wiki_git.read_file(path)
     except Exception as exc:
