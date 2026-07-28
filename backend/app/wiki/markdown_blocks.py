@@ -11,10 +11,19 @@ code-points) — nothing here should leak UTF-16 units.
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, ConfigDict
+
+# A footnote-definition line (`[^label]: body`) — not a construct our
+# gfm_parser() config recognizes (no footnote plugin enabled), so
+# markdown-it-py tokenizes it as an ordinary paragraph. Detected here by
+# pattern alone, before any tokenizing/escaping decision downstream, so it
+# can be routed to an opaque passthrough block instead — see its call site
+# in top_level_block_ranges.
+_FOOTNOTE_DEF_RE = re.compile(r"^\[\^[^\]\s]+\]:")
 
 
 class BlockKind(str, Enum):
@@ -177,18 +186,62 @@ def top_level_block_ranges(body: str) -> list[BlockRange]:
         start, end = offsets[start_line], offsets[end_line]
         end = _trim_trailing_blank_lines(body, start, end)
 
-        gap_blank_lines = body[prev_end:start].count("\n")
-        for i in range(gap_blank_lines):
+        gap_cursor = prev_end
+        for line in body[prev_end:start].splitlines(keepends=True):
+            if line == "\n":
+                blocks.append(
+                    BlockRange(
+                        block_id=f"b{len(blocks)}",
+                        kind=BlockKind.BLANK_LINE,
+                        start=gap_cursor,
+                        end=gap_cursor + 1,
+                    )
+                )
+                gap_cursor += 1
+                continue
+            # A non-blank line inside what would otherwise be a run of
+            # blank-line gaps: something markdown-it-py consumed without
+            # emitting any token at all — a link reference definition is
+            # the common case (it's metadata, not rendered content, so it
+            # produces no block-level token; confirmed against the
+            # installed markdown-it-py). Treating the whole gap as "just
+            # blank lines" left this text uncovered by any block, which
+            # checkpoint_body then silently dropped the moment a
+            # neighboring block was touched (confirmed in review — a real
+            # data-loss bug, not cosmetic). Capture it as its own opaque
+            # block instead: build_block_element's fallback branch already
+            # round-trips an OTHER-kind block byte-for-byte verbatim.
             blocks.append(
                 BlockRange(
                     block_id=f"b{len(blocks)}",
-                    kind=BlockKind.BLANK_LINE,
-                    start=prev_end + i,
-                    end=prev_end + i + 1,
+                    kind=BlockKind.OTHER,
+                    start=gap_cursor,
+                    end=gap_cursor + len(line),
                 )
             )
+            gap_cursor += len(line)
 
         kind = _KIND_BY_TOKEN_TYPE.get(token.type, BlockKind.OTHER)
+
+        if kind is BlockKind.PARAGRAPH and end_line == start_line + 1:
+            raw = body[start:end]
+            if _FOOTNOTE_DEF_RE.match(raw):
+                # A footnote definition (`[^label]: body`) — our
+                # gfm_parser() has no footnote plugin, so this tokenizes as
+                # a plain paragraph, and the normal paragraph path would
+                # feed its text through inline-mark escaping, corrupting
+                # `[^label]:` into `\[^label\]:` the moment anything in
+                # this block is touched (confirmed in review). Route it
+                # through the same opaque, byte-verbatim passthrough as a
+                # link reference definition instead — not real footnote
+                # *support* (no inline `[^label]` reference handling, no
+                # multi-line body), just no longer silently damaging one
+                # single-line definition's own text.
+                blocks.append(
+                    BlockRange(block_id=f"b{len(blocks)}", kind=BlockKind.OTHER, start=start, end=end)
+                )
+                prev_end = end
+                continue
 
         if kind is BlockKind.PARAGRAPH:
             # Split on every line ending EXCEPT a hard break (CommonMark:

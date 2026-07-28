@@ -263,7 +263,7 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
         return _session_row(fresh)
 
 
-def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> None:
+def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> bool:
     """Persist the very first ``ydoc_snapshot``/``ydoc_snapshot_body`` for a
     session — call once, right after a process constructs the session's
     room for the first time anywhere (``coedit_room.create_room`` in
@@ -280,13 +280,31 @@ def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> None:
     or another process's connection already stamped one) leaves it alone —
     only the very first room, for a brand-new session, ever actually
     writes here.
+
+    Returns whether *this* call's snapshot actually won (persisted). Two
+    processes can both observe ``ydoc_snapshot IS NULL`` and each seed
+    their own room independently — each ``seed_doc_from_markdown`` call
+    invents its own CRDT lineage (see that function's own docstring), so
+    the loser's freshly-built room is now on a lineage nothing durable
+    corresponds to: no future checkpoint replay could ever integrate an
+    update logged against it (confirmed in review). The caller must check
+    this and, on ``False``, discard its own room in favor of rehydrating
+    from whichever snapshot *did* win — see ``app/api/coedit.py:ws``.
     """
     with session() as s:
-        s.execute(
+        # .returning(...).one_or_none() (not .rowcount) to detect whether
+        # the conditional UPDATE matched — matches this module's other
+        # conditional-UPDATE call sites (e.g. close_if_clean, advance_
+        # checkpoint), and sidesteps a basedpyright strict-mode gap:
+        # SQLAlchemy's plain Result.rowcount isn't typed on the generic
+        # Result[Any] this execute() returns.
+        row = s.scalars(
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.ydoc_snapshot.is_(None))
             .values(ydoc_snapshot=snapshot, ydoc_snapshot_seq=0, ydoc_snapshot_body=body)
-        )
+            .returning(CoeditSession.id)
+        ).one_or_none()
+        return row is not None
 
 
 class UpdateRow(BaseModel):
@@ -380,7 +398,13 @@ def updates_since(session_id: int, after_seq: int) -> UpdatesSince:
 
 
 def rebase_onto(
-    session_id: int, *, new_base_sha: str, snapshot: bytes, body: str, checkpointed: bool
+    session_id: int,
+    *,
+    new_base_sha: str,
+    snapshot: bytes,
+    body: str,
+    expected_seq: int,
+    checkpointed: bool,
 ) -> SessionRow | None:
     """Record that the session's document was rebased onto ``new_base_sha``
     — either a live-rebase re-seed (an out-of-band agent/ingest commit
@@ -395,6 +419,22 @@ def rebase_onto(
     reconnecting client could meaningfully replay onto the post-rebase doc,
     so catch-up must start clean from the new seq rather than attempt to
     replay through the discontinuity.
+
+    ``expected_seq`` is a CAS: the ``ydoc_seq`` the caller observed when it
+    read the doc it built ``snapshot``/``body`` from (``room_body`` in
+    ``coedit_rebase.py``). The merge/snapshot-build happens across several
+    ``await``s, during which the event loop is free to run ``_recv_loop``
+    for a genuine local edit — that edit lands in ``coedit_updates`` *and*
+    bumps ``ydoc_seq`` before this call ever runs. Rebasing unconditionally
+    in that window would delete that edit's log row and reseed the room to
+    a snapshot that never saw it either — silently erased, no fallback (a
+    real bug, caught in review; the OT-era ``rebase``'s own
+    ``base_version`` CAS existed for exactly this). Conditioning the update
+    on ``ydoc_seq == expected_seq`` makes the whole operation a no-op
+    (returns ``None``, same as a closed session) when a concurrent edit
+    landed — the caller skips this rebase and leaves the room's own edit
+    intact; the fold-in the skipped rebase would have applied still
+    reaches the page via the checkpoint engine's own merge.
 
     ``snapshot``/``body`` — a throwaway ``Doc`` seeded from the rebased
     text, its ``get_update()`` bytes and the text itself — must move in
@@ -423,7 +463,11 @@ def rebase_onto(
         }
         row = s.scalars(
             update(CoeditSession)
-            .where(CoeditSession.id == session_id, CoeditSession.status == SessionStatus.ACTIVE.value)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.status == SessionStatus.ACTIVE.value,
+                CoeditSession.ydoc_seq == expected_seq,
+            )
             .values(**values)
             .returning(CoeditSession)
             .execution_options(synchronize_session=False)
@@ -566,7 +610,7 @@ def close_session(session_id: int) -> None:
             sess.updated_at = _iso(_now())
 
 
-def on_path_moved(moves: list[PathMove]) -> None:
+def on_path_moved(moves: list[PathMove]) -> list[int]:
     """Re-key co-edit sessions so a session (and its queued checkpoints, which
     resolve the path through the session row) follows a page move/rename.
 
@@ -584,15 +628,31 @@ def on_path_moved(moves: list[PathMove]) -> None:
     session still here was opened inside the seconds-wide window since that
     check — typically someone opening the just-moved page before this re-key
     ran. It is superseded (closed); if it managed to collect edits, they stay
-    in the closed row's (and this process's in-memory room's, if any)
-    history. Each pair runs in a savepoint so a racing insert that still
-    trips the active-unique index degrades to a logged skip instead of
-    aborting the whole move fan-out.
+    in the closed row's history.
+
+    Returns the ids of any superseded (closed) sessions — this module is
+    deliberately pure DB bookkeeping with no ``pycrdt`` import (see
+    ``app/wiki/coedit_room.py``'s own module docstring), so it can't evict
+    a superseded session's in-memory room itself; the caller
+    (``app/wiki/notify.py``) does that via ``coedit_room.evict_if_local``
+    for each returned id. Left un-evicted, a superseded room would pin its
+    ``Doc``/``Awareness``/``TouchedTracker`` in its owning process's memory
+    forever — nothing else would ever call ``coedit_room.close_room`` for
+    it once its session row is already closed here (confirmed in review).
+    Each pair runs in a savepoint so a racing insert that still trips the
+    active-unique index degrades to a logged skip instead of aborting the
+    whole move fan-out.
     """
     if not moves:
-        return
+        return []
+    superseded_ids: list[int] = []
     with session() as s:
         for mv in moves:
+            # Not appended to superseded_ids until after the try/except
+            # below succeeds — the nested transaction can still roll back
+            # on IntegrityError, and this plain Python list wouldn't roll
+            # back along with it.
+            dest_id: int | None = None
             try:
                 with s.begin_nested():
                     dest = s.scalar(
@@ -612,6 +672,7 @@ def on_path_moved(moves: list[PathMove]) -> None:
                             )
                         dest.status = SessionStatus.CLOSED.value
                         dest.updated_at = _iso(_now())
+                        dest_id = dest.id
                         s.flush()
                     s.execute(
                         update(CoeditSession)
@@ -627,6 +688,10 @@ def on_path_moved(moves: list[PathMove]) -> None:
                     mv.old,
                     mv.new,
                 )
+                continue
+            if dest_id is not None:
+                superseded_ids.append(dest_id)
+    return superseded_ids
 
 
 def close_if_clean(session_id: int) -> bool:

@@ -109,6 +109,12 @@ async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         new_base_sha=head_sha,
         snapshot=snapshot,
         body=mr.merged,
+        # sess.ydoc_seq was read in the same synchronous stretch as
+        # room_body above (no await between them) — the CAS baseline a
+        # concurrent local edit (landing during the merge's several
+        # `await`s since) would move past, so rebase_onto can detect it
+        # and no-op instead of erasing it. See rebase_onto's own docstring.
+        expected_seq=sess.ydoc_seq,
         checkpointed=False,
     )
     if res is None:

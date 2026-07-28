@@ -134,6 +134,7 @@ def test_rebase_skips_stale_ancestor_head(repo):
         new_base_sha=new_sha,
         snapshot=snapshot,
         body="ONE\ntwo\n",
+        expected_seq=0,
         checkpointed=True,
     )
 
@@ -181,6 +182,34 @@ def test_rebase_raced_session_is_skipped(repo, monkeypatch):
     new_sha = wiki_git.commit_file(_PATH, "a\nB\n", "agent edit", author="Agent <a@x.com>")
     outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
     assert outcome == coedit_rebase.RebaseOutcome.RACED
+
+
+def test_rebase_passes_expected_seq_from_observed_ydoc_seq(repo, monkeypatch):
+    # rebase_onto's CAS is only as good as what rebase_session passes it —
+    # this pins that expected_seq is the ydoc_seq observed in the same
+    # synchronous stretch as room_body (before any `await`), not some other
+    # value, since a mismatch here would silently defeat the CAS guard added
+    # for the concurrent-edit-during-merge race (see coedit.rebase_onto's own
+    # docstring and test_coedit_repo.py's test_rebase_onto_seq_mismatch_returns_none
+    # for the DB-level half of this fix).
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed("one\ntwo\n")
+    sess = coedit.open_session(_PATH, base_sha=sha)
+    coedit.join(sess.id, uid)
+    room = _room(sess, "one\ntwo\n")
+    _edit(sess, room, uid, "EDIT-")  # bumps ydoc_seq to 1
+    new_sha = wiki_git.commit_file(_PATH, "ONE\ntwo\n", "agent edit", author="Agent <a@x.com>")
+
+    captured: dict[str, object] = {}
+
+    def fake_rebase_onto(session_id, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    monkeypatch.setattr(coedit, "rebase_onto", fake_rebase_onto)
+    outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
+    assert outcome == coedit_rebase.RebaseOutcome.RACED
+    assert captured["expected_seq"] == 1
 
 
 def test_rebase_noop_when_merge_matches_live_doc(repo):

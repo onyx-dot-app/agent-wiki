@@ -105,7 +105,23 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     tracker = TouchedTracker(doc)
     since = coedit.updates_since(sess.id, sess.ydoc_snapshot_seq)
     for u in since.updates:
-        doc.apply_update(u.update_payload)
+        try:
+            doc.apply_update(u.update_payload)
+        except Exception:
+            # An undecodable payload (corrupt row, or bytes from an
+            # incompatible lineage that somehow made it into the log)
+            # used to propagate straight out of checkpoint_session,
+            # raising -> retrying -> exceeding retries -> the task getting
+            # dropped, leaving the session ACTIVE and dirty indefinitely
+            # while the room kept right on accepting edits nobody could
+            # ever checkpoint (confirmed in review). Skip-and-log instead:
+            # one bad row can't strand the rest of the session's history,
+            # which is far more valuable than one row's own content.
+            log.exception(
+                "coedit checkpoint: session %s seq %d update failed to apply; skipping",
+                sess.id,
+                u.seq,
+            )
     replayed_seq = since.head_seq if since.head_seq is not None else sess.ydoc_snapshot_seq
     return doc, base_body, tracker, replayed_seq
 
@@ -267,7 +283,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             # the moment a future checkpoint re-parses a base_body whose
             # block count/order has since changed — see
             # restamp_block_ids's own docstring.
-            markdown_splice.restamp_block_ids(doc)
+            markdown_splice.restamp_block_ids(doc, body)
             coedit.advance_checkpoint(
                 session_id, seq=replayed_seq, snapshot=doc.get_update(), body=body, base_sha=head
             )
@@ -275,18 +291,32 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
 
         # If the AI/3-way merge changed the content beyond what this doc
         # held (a concurrent external commit folded in), the *committed*
-        # result — not this doc's own state — is the correct new snapshot,
-        # so any future replay starts from what's actually on disk. A room
-        # being reconciled must reseed from *this* snapshot, not its own
-        # independent seed_doc_from_markdown call — see CheckpointOutcome's
-        # own docstring.
+        # result must become the new snapshot's content. Splice it onto
+        # this doc's own lineage (apply_markdown_diff) rather than
+        # discarding that lineage for a fresh seed_doc_from_markdown parse
+        # — a concurrent edit logged during the git-commit-plus-merge
+        # window above (still live, still landing on the *room's* doc the
+        # whole time — checkpointing never touches it) is durably in
+        # coedit_updates beyond replayed_seq, generated against *this*
+        # doc's lineage; a fresh, unrelated lineage can't integrate it
+        # (confirmed in review — silent, total loss, not an error). See
+        # apply_markdown_diff's own docstring.
         diverged = result.new_body != body
         if diverged:
-            snap_doc = markdown_yjs.seed_doc_from_markdown(result.new_body)
-            snapshot = snap_doc.get_update()
+            if not markdown_splice.apply_markdown_diff(doc, body, result.new_body):
+                # doc's children don't correspond 1:1 to a fresh parse of
+                # their own body — the same positional drift
+                # restamp_block_ids guards against, just discovered here
+                # first. No safe way to splice without risking a wrong
+                # pairing; fall back to the old, lineage-discarding
+                # behavior rather than risk misapplying the diff (no worse
+                # than before this fix for this rarer, compounding case).
+                doc = markdown_yjs.seed_doc_from_markdown(result.new_body)
+            else:
+                markdown_splice.restamp_block_ids(doc, result.new_body)
         else:
-            markdown_splice.restamp_block_ids(doc)
-            snapshot = doc.get_update()
+            markdown_splice.restamp_block_ids(doc, body)
+        snapshot = doc.get_update()
 
         coedit.advance_checkpoint(
             session_id, seq=replayed_seq, snapshot=snapshot, body=result.new_body, base_sha=result.sha

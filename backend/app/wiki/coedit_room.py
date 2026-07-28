@@ -7,12 +7,19 @@ are PyO3 "unsendable" Rust types (confirmed — `markdown_splice.py`'s own
 docstring), so a session's live document can only ever be touched from the
 process (and, in practice, the single-threaded-per-room discipline the WS
 route observes) that created it. Unlike `coedit_channel`'s connection
-registry, a room is **not** shared cross-process via the realtime bus — it
-cannot be, since the `Doc` itself is the thing being shared, not a
-JSON-serializable frame. A checkpoint trigger (idle scan, last-leave,
-explicit save) or a live-rebase (an out-of-band commit landing mid-session)
-can only ever act on rooms live in its own process; see
-`app/wiki/coedit_checkpoint.py` and `app/wiki/coedit_rebase.py`.
+registry, a room's `Doc` object itself is **not** shared cross-process via
+the realtime bus — it cannot be, it's not a JSON-serializable frame. Its
+*content* does converge across processes, though: every raw Yjs frame
+`coedit_channel.broadcast_yjs` relays cross-process is also applied to
+this process's own local room, if it holds one, via
+`apply_remote_frame_if_local` — two rooms in different processes stay in
+sync on an ongoing basis, not just at the moment each was created
+(rehydrating from `(ydoc_snapshot, coedit_updates)` only fixes CRDT
+lineage *once*, at that moment). A checkpoint trigger (idle scan,
+last-leave, explicit save) or a live-rebase (an out-of-band commit
+landing mid-session) still can only ever act on rooms live in its own
+process, though; see `app/wiki/coedit_checkpoint.py` and
+`app/wiki/coedit_rebase.py`.
 """
 
 from __future__ import annotations
@@ -23,7 +30,7 @@ import threading
 from collections.abc import Coroutine
 from typing import Any
 
-from pycrdt import Awareness, Doc
+from pycrdt import Awareness, Doc, YMessageType, handle_sync_message, read_message
 
 from app.wiki.markdown_splice import TouchedTracker
 from app.wiki.markdown_yjs import reconstruct_body
@@ -175,6 +182,63 @@ def evict_if_local(session_id: int) -> None:
     run_on_main_loop(_evict(session_id))
 
 
+async def _apply_remote_frame(session_id: int, raw: bytes) -> None:
+    room = get_room(session_id)
+    if room is None:
+        return  # evicted between the schedule and this running
+    if not raw:
+        return
+    msg_type = raw[0]
+    if msg_type == YMessageType.SYNC:
+        inner = raw[1:]
+        if not inner:
+            return
+        # handle_sync_message applies SYNC_STEP2/SYNC_UPDATE content to
+        # room.doc as a side effect and returns a reply only for a
+        # SYNC_STEP1 query — never the case here, see apply_remote_frame_
+        # if_local's own docstring — so the return value has nowhere to go
+        # and is discarded.
+        handle_sync_message(inner, room.doc)  # type: ignore[reportUnknownMemberType]
+    elif msg_type == YMessageType.AWARENESS:
+        payload = read_message(raw[1:])
+        room.awareness.apply_awareness_update(payload, "remote")  # type: ignore[reportUnknownMemberType]
+
+
+def apply_remote_frame_if_local(session_id: int, raw: bytes) -> None:
+    """Apply a raw Yjs sync/awareness frame that arrived from *another*
+    process's connection (via ``coedit_channel``'s realtime-bus relay) to
+    this process's own local room, if it holds one for the session — a
+    no-op dict lookup otherwise (the common case).
+
+    Without this, rehydrating a room from ``(ydoc_snapshot, coedit_updates)``
+    only fixes CRDT lineage *at creation time*: two rooms in different
+    processes, once both exist, never see each other's edits again — this
+    process's ``room.doc`` just freezes at whatever it was seeded with,
+    forever, with respect to the other process's connections (confirmed in
+    review: with ``--workers 2``, the deployed default, ``read_body_sync``
+    serves stale content and a client joining via this process misses the
+    other side's blocks entirely, until a checkpoint-driven resync). This
+    closes that gap: every raw frame ``coedit_channel.broadcast_yjs``
+    fans out cross-process also gets applied here, so both processes'
+    ``Doc``s converge continuously, not just once at room creation.
+
+    Never re-broadcasts or re-logs the update — the originating process's
+    own ``_apply_yjs_frame`` (``app/api/coedit.py``) already did both;
+    this only keeps *this* process's in-memory ``Doc``/``Awareness``
+    converged with it. The frame is always content (``SYNC_STEP2``/
+    ``SYNC_UPDATE``) or ``AWARENESS`` — ``broadcast_yjs`` is never called
+    for a bare ``SYNC_STEP1`` query (see ``_apply_yjs_frame``), so there's
+    never a reply to send anywhere from here.
+
+    Scheduled onto the room's own thread (the event loop) the same way
+    every other cross-process room-touching notify in this codebase is —
+    see ``run_on_main_loop``.
+    """
+    if get_room(session_id) is None:
+        return
+    run_on_main_loop(_apply_remote_frame(session_id, raw))
+
+
 def reset_for_tests() -> None:
     """Clear the in-process room registry. Each test gets a fresh Postgres
     database whose ``coedit_sessions`` id sequence restarts at 1 (see
@@ -226,6 +290,11 @@ def run_on_main_loop(coro: Coroutine[Any, Any, None]) -> None:
         # The bound loop is closed (e.g. process shutdown mid-request) —
         # best-effort, same as bus.emit's own swallow-and-log: whatever
         # triggered this has bigger problems than a missed live-rebase.
+        # run_coroutine_threadsafe raises before it ever schedules `coro`
+        # in this case, so it's otherwise never awaited — same leak
+        # (RuntimeWarning: coroutine never awaited) the `_main_loop is
+        # None` branch above already guards against; close it here too.
+        coro.close()
         log.warning("coedit_room: run_on_main_loop couldn't schedule (loop closed?)")
 
 
@@ -252,8 +321,14 @@ def read_body_sync(room: Room, *, timeout: float = 2.0) -> str:
     """
     if _main_loop is None:
         raise RuntimeError("coedit_room: main loop not bound yet")
+    coro = _read_body(room)
     try:
-        future = asyncio.run_coroutine_threadsafe(_read_body(room), _main_loop)
+        future = asyncio.run_coroutine_threadsafe(coro, _main_loop)
     except RuntimeError as e:
+        # run_coroutine_threadsafe raises before it ever schedules `coro`
+        # in this case, so it's otherwise never awaited (a real
+        # RuntimeWarning, confirmed visible in the test suite — see
+        # run_on_main_loop's identical fix for the same underlying leak).
+        coro.close()
         raise TimeoutError("coedit_room: main loop closed") from e
     return future.result(timeout=timeout)

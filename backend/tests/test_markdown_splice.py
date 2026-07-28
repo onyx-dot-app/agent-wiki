@@ -9,8 +9,13 @@ from __future__ import annotations
 
 from pycrdt import Doc, XmlElement, XmlFragment, XmlText
 
-from app.wiki.markdown_splice import TouchedTracker, checkpoint_body
-from app.wiki.markdown_yjs import ROOT_XML_KEY, seed_doc_from_markdown
+from app.wiki.markdown_splice import (
+    TouchedTracker,
+    apply_markdown_diff,
+    checkpoint_body,
+    restamp_block_ids,
+)
+from app.wiki.markdown_yjs import BLOCK_ID_ATTR, ROOT_XML_KEY, seed_doc_from_markdown
 
 _SAMPLE = """# Heading
 
@@ -353,3 +358,132 @@ def test_editing_inside_code_block_leaves_everything_before_it_untouched() -> No
     new_body = checkpoint_body(_NESTED_SAMPLE, doc, tracker)
     assert "y = 2\nx = 1" in new_body
     assert new_body.startswith(_NESTED_SAMPLE[: _NESTED_SAMPLE.index("```python")])
+
+
+# --- restamp_block_ids / apply_markdown_diff --------------------------------- #
+
+
+def test_restamp_assigns_shared_id_when_reparse_merges_adjacent_lists() -> None:
+    """Regression test (review): two doc children that reparse into *one*
+    CommonMark block (adjacent same-kind containers with no blank line
+    between them — plain markdown text can't distinguish "two lists" from
+    "one list with more items") must both land on that one block's id, not
+    drift onto distinct positional ids (b0, b1) that no longer correspond
+    to anything in the next base_body's own reparse — the exact drift that
+    caused checkpoint_body to duplicate content (see the module docstring
+    on restamp_block_ids)."""
+    from app.wiki.markdown_blocks import top_level_block_ranges
+    from app.wiki.markdown_yjs import build_block_element
+
+    doc = Doc()
+    root = _root(doc)
+    new_list_body, old_list_body = "- new\n", "- old\n"
+    with doc.transaction():
+        for body, blocks in (
+            (new_list_body, top_level_block_ranges(new_list_body)),
+            (old_list_body, top_level_block_ranges(old_list_body)),
+        ):
+            el, finishers = build_block_element(body, blocks[0])
+            root.children.append(el)
+            for f in finishers:
+                f()
+
+    cp1_body = "- new\n- old\n"
+    # Sanity: this is the drift condition itself — one reparsed block, two
+    # doc children.
+    assert len(top_level_block_ranges(cp1_body)) == 1
+    assert len(root.children) == 2
+
+    restamp_block_ids(doc, cp1_body)
+    ids = [dict(c.attributes).get(BLOCK_ID_ATTR) for c in root.children]
+    assert ids == ["b0", "b0"], ids
+
+    # Editing only the second child must not duplicate the first — both
+    # children sharing "b0" means touching either marks the shared id
+    # touched, so checkpoint_body re-serializes both (harmless for the
+    # unedited one) instead of slicing child 0 verbatim from a stale range
+    # that (pre-fix) covered the *whole* former text.
+    tracker = TouchedTracker(doc)
+    old_item_text = root.children[1].children[0].children[0].children[0]
+    with doc.transaction():
+        del old_item_text[0:3]
+        old_item_text += "EDITED"
+
+    cp2_body = checkpoint_body(cp1_body, doc, tracker)
+    assert cp2_body == "- new\n- EDITED\n", cp2_body
+
+
+def test_apply_markdown_diff_preserves_lineage_of_untouched_blocks() -> None:
+    """The whole point of apply_markdown_diff over a fresh
+    seed_doc_from_markdown reseed: a block the diff doesn't touch keeps its
+    *original* XmlElement (and so its CRDT item ids), so a Yjs update
+    logged against the pre-diff doc still integrates after the diff runs."""
+    old_body = "one\n\ntwo\n\nthree\n"
+    doc = seed_doc_from_markdown(old_body)
+    root = _root(doc)
+    untouched_child = root.children[0]  # "one" — the diff below doesn't touch this block
+
+    new_body = "one\n\nTWO\n\nthree\n"
+    assert apply_markdown_diff(doc, old_body, new_body) is True
+    assert root.children[0] is untouched_child, "untouched block's element was replaced"
+    assert checkpoint_body(new_body, doc, TouchedTracker(doc)) == new_body
+
+    # A late Yjs update generated against the pre-diff doc's lineage — e.g.
+    # a concurrent edit to the untouched "one" paragraph landing in the
+    # window between reading `old_body` and this diff running (the review
+    # repro) — must still integrate correctly afterward, since the
+    # untouched paragraph's own item ids never changed.
+    other_doc = Doc()
+    other_doc.apply_update(seed_doc_from_markdown(old_body).get_update())
+    other_root = _root(other_doc)
+    with other_doc.transaction():
+        other_root.children[0].children[0].insert(0, "EDITED-")
+    late_update = other_doc.get_update()
+
+    doc.apply_update(late_update)
+    assert checkpoint_body(new_body, doc, TouchedTracker(doc)) == "EDITED-one\n\nTWO\n\nthree\n"
+
+
+def test_apply_markdown_diff_returns_false_on_child_count_drift() -> None:
+    """When doc's children don't correspond 1:1 to a fresh parse of their
+    own old_body (the restamp drift condition), there's no safe pairing —
+    the caller must fall back to a fresh reseed rather than risk splicing
+    the wrong replacement onto the wrong child."""
+    from app.wiki.markdown_blocks import top_level_block_ranges
+    from app.wiki.markdown_yjs import build_block_element
+
+    doc = Doc()
+    root = _root(doc)
+    with doc.transaction():
+        for body in ("- new\n", "- old\n"):
+            el, finishers = build_block_element(body, top_level_block_ranges(body)[0])
+            root.children.append(el)
+            for f in finishers:
+                f()
+    old_body = "- new\n- old\n"  # 2 doc children, but this reparses to 1 block
+    assert apply_markdown_diff(doc, old_body, "- new\n- old\n- more\n") is False
+    assert len(root.children) == 2  # untouched — no partial mutation on the bail-out path
+
+
+def test_editing_paragraph_after_link_reference_definition_preserves_it() -> None:
+    """Regression test (review): touching the paragraph *after* a link
+    reference definition used to delete the definition and leave a
+    corrupted fragment behind (the definition produces no markdown-it
+    token, so it was previously miscounted as blank-line filler — see
+    test_markdown_blocks.py). Editing the trailing paragraph must leave the
+    definition's own text completely untouched."""
+    base_body = "See [spec][ref] here.\n\n[ref]: https://example.com/spec\n\nTrailing paragraph.\n"
+    doc = seed_doc_from_markdown(base_body)
+    tracker = TouchedTracker(doc)
+    root = _root(doc)
+    trailing_para = root.children[-1]
+    assert trailing_para.tag == "paragraph"
+    with doc.transaction():
+        trailing_para.children[0].insert(0, "EDITED ")
+
+    new_body = checkpoint_body(base_body, doc, tracker)
+    assert "[ref]: https://example.com/spec\n" in new_body
+    assert "EDITED Trailing paragraph.\n" in new_body
+    assert new_body == (
+        "See [spec][ref] here.\n\n[ref]: https://example.com/spec\n\nEDITED Trailing paragraph.\n"
+    )

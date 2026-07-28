@@ -121,33 +121,56 @@ def scan_coedit_checkpoints() -> None:
 
 
 def _notify_checkpoint_landed(outcome: CheckpointOutcome) -> None:
-    _try_local_reconcile(outcome)
+    """Fan out that a checkpoint landed for ``outcome.session_id`` — the bus
+    payload deliberately carries only ``session_id``/``diverged``, not the
+    committed body: an earlier version shipped the whole page body through
+    ``bus.emit``, which is a Postgres NOTIFY capped at
+    ``bus.MAX_PAYLOAD_BYTES`` (8000) — measured against Postgres directly,
+    a ~7.7KB body already exceeds it (``InvalidParameterValue: payload
+    string too long``), silently swallowed by ``bus.emit``'s own
+    generic-exception log, so most real pages never actually reconciled
+    another process's room at all (confirmed in review). ``_reconcile_room``
+    re-reads the committed body fresh from the DB instead — already
+    durably there by the time this notify fires (``advance_checkpoint``
+    ran inside ``checkpoint_session``, before it returned this outcome) —
+    which has no size concern and, as a bonus, always reconciles against
+    whatever the *latest* known-good state is even if another checkpoint
+    landed in the gap between this one committing and this notify actually
+    running.
+    """
+    _try_local_reconcile(outcome.session_id, outcome.diverged)
     bus.emit(
         {
             "kind": _CHECKPOINT_LANDED_BUS_KIND,
             "session_id": outcome.session_id,
-            "base_sha": outcome.sha,
-            "body": outcome.body,
             "diverged": outcome.diverged,
         }
     )
 
 
-def _try_local_reconcile(outcome: CheckpointOutcome) -> None:
+def _try_local_reconcile(session_id: int, diverged: bool) -> None:
     """Reconcile this process's own room, if it holds one for the session —
     a no-op dict lookup otherwise (cheap enough to call unconditionally
     from every process a checkpoint's fan-out reaches, including the
     checkpointing worker itself, which typically holds no rooms at all)."""
-    if coedit_room.get_room(outcome.session_id) is None:
+    if coedit_room.get_room(session_id) is None:
         return
-    coedit_room.run_on_main_loop(_reconcile_room(outcome))
+    coedit_room.run_on_main_loop(_reconcile_room(session_id, diverged))
 
 
-async def _reconcile_room(outcome: CheckpointOutcome) -> None:
-    room = coedit_room.get_room(outcome.session_id)
+async def _reconcile_room(session_id: int, diverged: bool) -> None:
+    room = coedit_room.get_room(session_id)
     if room is None:
         return  # left/evicted between the schedule and this running
-    if not outcome.diverged:
+    # Always re-read fresh from the DB rather than trusting values carried
+    # on the caller's own outcome — see _notify_checkpoint_landed's
+    # docstring for why (no cross-process payload-size concern, and always
+    # reflects the latest committed state even if a newer checkpoint has
+    # already landed in the meantime).
+    sess = await asyncio.to_thread(coedit.get_session_for_checkpoint, session_id)
+    if sess is None:
+        return  # gone
+    if not diverged:
         # This room's own doc already reflects exactly what got committed
         # — checkpointing never touches it, so there's nothing to reseed
         # here regardless of what a full reconstruct_body reserialize of
@@ -155,44 +178,55 @@ async def _reconcile_room(outcome: CheckpointOutcome) -> None:
         # and checkpoint_body's own verbatim-slice output diverge for tight
         # lists, task lists, ordered lists, and emphasis runs even when the
         # *content* is identical, which used to force a needless reseed —
-        # see review). Still restamp block/row ids to match outcome.body's
-        # own (freshly re-derived every parse) positional numbering: this
-        # doc is kept as-is rather than reseeded, so its ids would
-        # otherwise silently drift out of sync the moment a future
-        # checkpoint's base_body has a different block count/order — see
-        # restamp_block_ids's own docstring.
-        markdown_splice.restamp_block_ids(room.doc)  # type: ignore[reportUnknownMemberType]
-        room.base_body = outcome.body
-        room.base_sha = outcome.sha
+        # see review). Still restamp block/row ids to match the committed
+        # body's own (freshly re-derived every parse) positional
+        # numbering: this doc is kept as-is rather than reseeded, so its
+        # ids would otherwise silently drift out of sync the moment a
+        # future checkpoint's base_body has a different block count/order
+        # — see restamp_block_ids's own docstring.
+        markdown_splice.restamp_block_ids(room.doc, sess.ydoc_snapshot_body)  # type: ignore[reportUnknownMemberType]
+        room.base_body = sess.ydoc_snapshot_body
+        room.base_sha = sess.base_sha
         return
     # An out-of-band merge folded in content this room's doc never had —
     # reseed from the just-persisted snapshot and have connected clients
-    # resync. Re-read ydoc_snapshot fresh from the DB (already durably
-    # there — advance_checkpoint ran before this notify fired) rather than
-    # reseeding from an independent seed_doc_from_markdown(outcome.body)
-    # call here: two separate seedings of "the same" text produce
-    # incompatible CRDT lineages (see coedit_room.reseed), which used to
-    # silently break a later checkpoint's replay (see review). Never loses
-    # this room's own divergent edits: anything applied here already
-    # bumped ydoc_seq and is durably logged, so it's simply still-dirty
-    # relative to the new base and picked up by the next checkpoint.
-    sess = await asyncio.to_thread(coedit.get_session_for_checkpoint, outcome.session_id)
-    if sess is None or sess.ydoc_snapshot is None:
-        return  # gone, or racing a close — nothing to reconcile
-    coedit_room.reseed(room, sess.ydoc_snapshot, outcome.body, outcome.sha)
-    coedit_channel.publish_control(
-        outcome.session_id, ResyncFrame(session_id=outcome.session_id).model_dump()
-    )
+    # resync. Reseeding from an independent seed_doc_from_markdown(body)
+    # call here instead of the persisted ydoc_snapshot bytes would be
+    # wrong: two separate seedings of "the same" text produce incompatible
+    # CRDT lineages (see coedit_room.reseed). The persisted snapshot's own
+    # lineage is now spliced from this session's existing doc rather than
+    # freshly seeded (coedit_checkpoint.checkpoint_session's
+    # apply_markdown_diff call, see its docstring) specifically so this
+    # reseed doesn't erase a concurrent edit — but the snapshot only
+    # reflects state as of ydoc_snapshot_seq; an edit logged *after* the
+    # checkpoint captured that seq (this room's own doc, still live and
+    # accepting edits the whole time — checkpointing never touches it) is
+    # durably logged but not yet folded into the snapshot bytes themselves.
+    # Replay it now, the same way a fresh checkpoint's _rebuild_doc would —
+    # this was the actual gap a prior version of this comment claimed
+    # didn't exist ("never loses the divergent edits ... picked up by the
+    # next checkpoint" — false: the reseed below replaced this room's doc
+    # outright, and nothing replayed what the new one was missing, so nothing
+    # ever *did* pick it up; confirmed via review repro).
+    if sess.ydoc_snapshot is None:
+        return  # racing a close — nothing to reconcile
+    coedit_room.reseed(room, sess.ydoc_snapshot, sess.ydoc_snapshot_body, sess.base_sha)
+    late = await asyncio.to_thread(coedit.updates_since, session_id, sess.ydoc_snapshot_seq)
+    for u in late.updates:
+        try:
+            room.doc.apply_update(u.update_payload)  # type: ignore[reportUnknownMemberType]
+        except Exception:
+            log.exception(
+                "coedit checkpoint: session %s seq %d update failed to apply during"
+                " reconcile replay; skipping",
+                session_id,
+                u.seq,
+            )
+    coedit_channel.publish_control(session_id, ResyncFrame(session_id=session_id).model_dump())
 
 
 def _handle_remote_checkpoint_landed(payload: dict[str, object]) -> None:
-    outcome = CheckpointOutcome(
-        session_id=int(payload["session_id"]),  # type: ignore[arg-type]
-        sha=str(payload["base_sha"]),
-        body=str(payload["body"]),
-        diverged=bool(payload["diverged"]),
-    )
-    _try_local_reconcile(outcome)
+    _try_local_reconcile(int(payload["session_id"]), bool(payload["diverged"]))  # type: ignore[arg-type]
 
 
 bus.register(_CHECKPOINT_LANDED_BUS_KIND, _handle_remote_checkpoint_landed)
