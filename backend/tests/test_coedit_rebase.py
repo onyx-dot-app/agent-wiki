@@ -184,10 +184,23 @@ def test_rebase_noop_when_merge_matches_live_doc(repo):
     # The external commit, once merged, produces exactly what the doc
     # already had (e.g. it's a no-op relative to the live edit) — base_sha
     # still advances, but nothing is reseeded/resynced.
+    #
+    # The agent's commit must be a genuinely different commit from the
+    # session's own base_sha — committing byte-identical content is a
+    # no-op to git.commit_file (nothing staged to commit), so it returns
+    # the *existing* HEAD sha instead of a new one, collapsing new_sha to
+    # base_sha and tripping the "already based on this head" skip path
+    # before ever reaching the merge/NOOP logic this test is about. Here
+    # the human and the agent make the *same* edit independently — the
+    # agent's commit is new, but the merge result equals what the live
+    # doc already converged to on its own.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed("same\n")
     sess = coedit.open_session(_PATH, base_sha=sha)
-    _room(sess, "same\n")
-    new_sha = wiki_git.commit_file(_PATH, "same\n", "no-op agent commit", author="A <a@x.com>")
+    coedit.join(sess.id, uid)
+    room = _room(sess, "same\n")
+    _edit(sess, room, uid, "AGENT-")
+    new_sha = wiki_git.commit_file(_PATH, "AGENT-same\n", "no-op agent commit", author="A <a@x.com>")
     outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
     assert outcome == coedit_rebase.RebaseOutcome.NOOP
     st = coedit.get_session(sess.id)
@@ -223,13 +236,20 @@ def test_applied_rebase_does_not_fall_back_to_checkpoint(repo, monkeypatch):
         coedit_rebase_task, "checkpoint_coedit_session_task", lambda sid: calls.append(sid)
     )
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    doc = "one\ntwo\n"
+    # Same non-overlapping-edit shape already proven clean in
+    # test_rebase_folds_clean_agent_commit (human edits the first line,
+    # agent edits a distant, unrelated line) — just driven through the
+    # task layer's _rebase_and_maybe_checkpoint instead of the engine
+    # directly, to check the fallback wiring specifically.
+    doc = "one\ntwo\nthree\nfour\nfive\n"
     sha = _seed(doc)
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
     room = _room(sess, doc)
     _edit(sess, room, uid, "EDIT-")
-    new_sha = wiki_git.commit_file(_PATH, "one\nTWO\n", "agent edit", author="Agent <a@x.com>")
+    new_sha = wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
 
     _run(coedit_rebase_task._rebase_and_maybe_checkpoint(sess.id, new_sha))
 
