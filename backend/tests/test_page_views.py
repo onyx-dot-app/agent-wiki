@@ -138,3 +138,14 @@ def test_historical_http_read_is_not_a_view(tmp_repo):
     )
     assert res.status_code == 200
     assert page_views.last_viewed(["team/page.md"]) == {}
+
+
+def test_failed_read_is_not_a_view(tmp_repo):
+    """A 404 must not stamp a view (nor mint an id for a missing path)."""
+    client = TestClient(create_app())
+    uid = seed_user(uid="u1", email="u@x.com")
+    login_fastapi(client, uid)
+    res = client.get("/api/wiki/file", params={"path": "missing/page.md"})
+    assert res.status_code == 404
+    assert page_views.last_viewed(["missing/page.md"]) == {}
+    assert doc_ids.id_for_path("missing/page.md") is None

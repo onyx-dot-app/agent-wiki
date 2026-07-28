@@ -307,10 +307,6 @@ def get_document_by_path(
     if "read" not in perms:
         raise PermissionDenied(f"forbidden: read on {rel}")
     can_write = "write" in perms
-    # A HEAD read is a "view" — feeds staleness detection. Throttled and
-    # failure-proof; historical (?ref=) reads are not using the page.
-    if ref is None:
-        page_views.note_view(rel)
     head_sha = wiki_git.head_sha_for_path(rel)
     # Stable id: reading a live page lazily backfills its row (pre-id pages);
     # historical/deleted reads only report an id if a live row exists.
@@ -380,6 +376,11 @@ def get_document_by_path(
             if fallback is None:
                 raise HTTPException(status_code=404, detail="not found")
             body = fallback
+    # A successful HEAD read is a "view" — feeds staleness detection.
+    # Stamped only now, after the body was actually produced: a 404 or git
+    # failure must not mark the page as used (nor mint an id for a missing
+    # path). Throttled and failure-proof inside note_view.
+    page_views.note_view(rel)
     # Page-level (current HEAD), so both live reads share them.
     return GetDocumentResponse(
         path=rel,

@@ -34,10 +34,6 @@ def handle(args: dict[str, Any]) -> Any:
     except PermissionDenied as exc:
         return {"error": str(exc)}
 
-    if sha is None:
-        # Agent reads count as views on purpose: a page agents keep
-        # consulting is useful even if no human opens it.
-        page_views.note_view(path)
     ref = sha or "HEAD"
     try:
         body = wiki_git.read_file(path, ref=ref)
@@ -53,6 +49,12 @@ def handle(args: dict[str, Any]) -> Any:
         return {"error": f"could not read {path}@{ref}: {exc}"}
 
     is_head = sha is None or sha == head_sha
+    if sha is None:
+        # A successful HEAD read is a "view" (stamped only after the body was
+        # produced — a failed read must not mark the page as used). Agent
+        # reads count on purpose: a page agents keep consulting is useful
+        # even if no human opens it.
+        page_views.note_view(path)
     agents: list[dict[str, Any]] = []
     if is_head:
         wiki_utils.mark_doc_read(path)
