@@ -29,6 +29,7 @@ from app.llm import client as llm_client
 from app.llm.errors import LLMError
 from app.llm.prompts import load_prompt
 from app.wiki import git, page_views
+from app.wiki.automanage import fingerprint
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import ProposalOp
 
@@ -103,7 +104,14 @@ def _tools() -> list[dict[str, Any]]:
 
 class _StalePageDetector:
     name = "stale_page"
-    pairs_paths = False  # single-path proposals; no cross-page pairing
+    # Audience isolation, not pairing: the runner feeds one same-audience
+    # bucket at a time, so the file tree shown to the model, the search
+    # results, and any evidence text can never name a page across a
+    # visibility boundary (a proposal's reviewers are cleared for the
+    # candidate page, not necessarily for others). Accepted blind spot,
+    # same as the pairing detectors': a lone page in its own audience
+    # bucket is never scanned.
+    pairs_paths = True
 
     def __init__(self, floor_days: int = FLOOR_DAYS):
         self._floor_days = floor_days
@@ -163,6 +171,10 @@ class _StalePageDetector:
             },
         ]
         candidate_set = set(candidates)
+        # The scope is one same-audience bucket (pairs_paths), so any
+        # member's fingerprint is the bucket's: every search result must
+        # share it before the model may see the path/title.
+        audience_fp = fingerprint.combined_fingerprint([candidates[0]])
         for _ in range(MAX_STEPS):
             result = llm_client.complete(messages, tools=_tools())
             if not result.tool_calls:
@@ -202,7 +214,9 @@ class _StalePageDetector:
                             {"path": path, "evidence": str(item.get("evidence", ""))}
                         )
                     return picked
-                out = self._tool(call.name, call.arguments, candidate_set)
+                out = self._tool(
+                    call.name, call.arguments, candidate_set, audience_fp
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -214,7 +228,8 @@ class _StalePageDetector:
         return []
 
     def _tool(
-        self, name: str, args: dict[str, Any], candidates: set[str]
+        self, name: str, args: dict[str, Any], candidates: set[str],
+        audience_fp: str,
     ) -> Any:
         if name == "read_page":
             path = str(args.get("path", ""))
@@ -226,10 +241,20 @@ class _StalePageDetector:
             }
         if name == "search_wiki":
             hits = fts.search(
-                str(args.get("query", "")), limit=8, is_admin=True,
+                str(args.get("query", "")), limit=16, is_admin=True,
                 apply_visibility=False,
             )
-            return [{"path": h.path, "title": h.title} for h in hits]
+            # Same-audience rule (as pairing detectors): never surface a
+            # page across a visibility boundary — restricted paths/titles
+            # must not enter the transcript or a proposal's evidence text,
+            # which the candidate page's reviewers may not be cleared for.
+            paths = [h.path for h in hits]
+            fps = fingerprint.fingerprints_for_paths(paths) if paths else {}
+            return [
+                {"path": h.path, "title": h.title}
+                for h in hits
+                if fps.get(h.path) == audience_fp
+            ][:8]
         return {"error": f"unknown tool {name!r}"}
 
     # ---- detector protocol ----------------------------------------------

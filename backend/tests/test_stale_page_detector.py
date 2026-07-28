@@ -26,6 +26,7 @@ from app.wiki import page_views
 from app.wiki.automanage.detectors.base import Scope, TriggerKind
 from app.wiki.automanage.detectors.stale_page import _StalePageDetector
 from app.wiki.change_proposals import ProposalOp
+from tests._seed import seed_user
 
 _OLD_BODY = "# 2025 Offsite Agenda\n\nSessions for the June 2025 offsite.\n"
 _LIVE_BODY = "# Runbook\n\nSteps that stay current.\n"
@@ -243,3 +244,30 @@ def test_validate_stales_on_missing_page(tmp_repo):
     p = _proposal_for("notes/old.md")
     wiki_git.delete_path("notes/old.md", "rm", author=None)
     assert "no longer exists" in (_StalePageDetector().validate(p) or "")
+
+
+def test_search_never_surfaces_cross_audience_pages(monkeypatch, tmp_repo):
+    """The coverage search must not leak a restricted page's path/title into
+    the transcript: hits outside the bucket's audience are dropped."""
+    from types import SimpleNamespace
+
+    from app.wiki import acl
+    from app.wiki.automanage import fingerprint
+    from app.wiki.automanage.detectors import stale_page as sp
+
+    wiki_git.commit_file("public/page.md", _OLD_BODY, "seed", author=None)
+    wiki_git.commit_file("secret/page.md", _OLD_BODY + "s", "seed", author=None)
+    owner = seed_user(uid="owner", email="o@x.com")
+    acl.set_owner("secret/page.md", owner)  # restricted: different audience
+
+    hits = [
+        SimpleNamespace(path="public/page.md", title="Public"),
+        SimpleNamespace(path="secret/page.md", title="Secret"),
+    ]
+    monkeypatch.setattr(sp.fts, "search", lambda *a, **k: hits)
+
+    det = _StalePageDetector()
+    fp = fingerprint.combined_fingerprint(["public/page.md"])
+    out = det._tool("search_wiki", {"query": "q"}, {"public/page.md"}, fp)
+
+    assert out == [{"path": "public/page.md", "title": "Public"}]
