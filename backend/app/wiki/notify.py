@@ -33,6 +33,7 @@ import logging
 
 from app.db import fts, page_dirs, provenance as db_provenance
 from app.mcp_server import pubsub as mcp_pubsub
+from app.tasks import coedit_checkpoint as coedit_checkpoint_task
 from app.tasks import coedit_rebase as coedit_rebase_trigger
 # Module import, not name import: automanage tasks -> runner -> executor ->
 # notify is a cycle, and a name import here breaks whichever side loads
@@ -47,7 +48,6 @@ from app.wiki import (
     acl,
     agent_activity,
     coedit,
-    coedit_room,
     comments,
     constants as wiki_constants,
     doc_ids,
@@ -242,14 +242,17 @@ def after_doc_trashed(
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
     # coedit.py is pure DB bookkeeping (no pycrdt import) and so can't evict
-    # a superseded session's in-memory room itself — evict here, in whatever
-    # process(es) hold one, for each session it closed (a destination
-    # collision, e.g. someone opened the just-moved-to path in the seconds-
-    # wide window before this move landed). Left un-evicted, that room pins
-    # its Doc/Awareness/TouchedTracker in memory forever (confirmed in
-    # review).
+    # a superseded session's in-memory room itself — evict here, for each
+    # session it closed (a destination collision, e.g. someone opened the
+    # just-moved-to path in the seconds-wide window before this move
+    # landed). notify_session_closed (not a bare coedit_room.evict_if_local
+    # call) fans the eviction out over the bus too, not just this process —
+    # local-only eviction left a room's Doc/Awareness/TouchedTracker pinned
+    # forever in whichever *other* process actually held it under more than
+    # one worker (still the deployed default), since nothing guarantees the
+    # move's own fan-out runs in that same process (confirmed in review).
     for superseded_id in coedit.on_path_moved(moves):
-        coedit_room.evict_if_local(superseded_id)
+        coedit_checkpoint_task.notify_session_closed(superseded_id)
     # Tombstone the id(s) at the *original* root rather than following the move
     # into `.trash/` — the id keeps resolving (to a deleted state), and restore
     # re-binds it. ACL/policy above deliberately follow into `.trash/` (so the
@@ -320,10 +323,10 @@ def after_path_move(
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
     doc_ids.on_path_moved(moves, root_move=root_move)
-    # See after_doc_trashed's identical call for why this evicts rather
-    # than just re-keying.
+    # See after_doc_trashed's identical call for why this evicts (with bus
+    # fan-out, via notify_session_closed) rather than just re-keying.
     for superseded_id in coedit.on_path_moved(moves):
-        coedit_room.evict_if_local(superseded_id)
+        coedit_checkpoint_task.notify_session_closed(superseded_id)
     list_changed = False
     for mv in moves:
         old_p, new_p = mv.old, mv.new

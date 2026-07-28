@@ -175,6 +175,48 @@ def test_checkpoint_reseeds_room_and_syncs_merged_result(repo):
     assert wiki_git.read_file(_PATH) == merged
 
 
+def test_reconcile_room_skips_reseed_when_late_update_exists(repo):
+    # Regression test (review): a keystroke logged during the checkpoint's
+    # git-commit-plus-merge window (after checkpoint_session captured its
+    # replay point, before _reconcile_room runs) used to be silently lost
+    # on a diverged checkpoint — apply_markdown_diff's lineage preservation
+    # only covers blocks it *doesn't* touch; the block the merge actually
+    # rewrote gets a brand-new element, so reseeding the live room onto
+    # the persisted (post-merge) snapshot replaces that room's own element
+    # for the same block, and the late update's reference to the old one
+    # becomes a silent structural no-op. Reconciling must skip the reseed
+    # entirely whenever any such late update exists — the room's own doc
+    # already has it correctly (checkpointing never touches a live room).
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    doc = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed_page(doc)
+    sess = coedit.open_session(_PATH, base_sha=sha)
+    coedit.join(sess.id, uid)
+    room = _room(sess, doc)
+    _edit(sess, room, uid, "EDIT-")
+    wiki_git.commit_file(_PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>")
+
+    outcome = coedit_checkpoint.checkpoint_session(sess.id)
+    assert outcome is not None
+    assert outcome.diverged is True
+
+    # The race: a keystroke lands on the room's own doc *after* the
+    # checkpoint captured its replay point, logged as a real update (same
+    # as the WS route: apply to the Doc, then log it).
+    _edit(sess, room, uid, "LATE-")
+    before_reconcile = markdown_yjs.reconstruct_body(room.doc)
+    assert before_reconcile.startswith("LATE-EDIT-")
+
+    asyncio.run(coedit_checkpoint_task._reconcile_room(outcome.session_id, outcome.diverged))
+
+    # Not reseeded: the room's own doc, including the late edit, survives
+    # byte-for-byte untouched (a reseed would have replaced it with the
+    # merged git result instead, silently discarding "LATE-").
+    live_room = coedit_room.get_room(sess.id)
+    assert live_room is room
+    assert markdown_yjs.reconstruct_body(room.doc) == before_reconcile
+
+
 def test_checkpoint_survives_a_racing_close(repo, monkeypatch):
     # If the session's final bookkeeping write races a concurrent close
     # (advance_checkpoint's conditional UPDATE matches zero rows), the

@@ -99,7 +99,7 @@ def checkpoint_coedit_session_task(session_id: int, *, request_id: str | None = 
     # duplicate/retried task on a session closed by an earlier attempt.
     sess = coedit.get_session(session_id)
     if sess is not None and sess.status == coedit.SessionStatus.CLOSED.value:
-        _notify_session_closed(session_id)
+        notify_session_closed(session_id)
 
 
 @coedit_queue.periodic_task(crontab())
@@ -158,18 +158,59 @@ def _try_local_reconcile(session_id: int, diverged: bool) -> None:
     coedit_room.run_on_main_loop(_reconcile_room(session_id, diverged))
 
 
+def _read_sess_and_late_for_reconcile(
+    session_id: int, diverged: bool
+) -> tuple[coedit.CheckpointSessionRow, coedit.UpdatesSince | None] | None:
+    """Read the session row and (for the diverged/reseed path only) its
+    updates logged since the persisted snapshot, as one consistent unit
+    under ``checkpoint_lock``.
+
+    Without the lock, this read (previously two separate ``to_thread``
+    calls, ``get_session_for_checkpoint`` then ``updates_since``) and a
+    concurrent ``rebase_onto``'s delete-all-then-advance could interleave
+    — landing a pre-rebase snapshot alongside a post-rebase (already-
+    pruned) update log, stale *and* on the wrong lineage (confirmed in
+    review, with a repro; see ``coedit.rebase_onto``'s own docstring,
+    which now also takes this same lock for exactly this reason).
+
+    Returns ``None`` if the session is gone or the lock couldn't be
+    acquired within its own timeout (rare — a concurrent checkpoint or
+    rebase has held it for the full window); the caller treats either the
+    same as "nothing to reconcile this round," which is safe either way —
+    a later checkpoint/notify retries.
+    """
+    with coedit.checkpoint_lock(session_id) as acquired:
+        if not acquired:
+            return None
+        sess = coedit.get_session_for_checkpoint(session_id)
+        if sess is None:
+            return None
+        if not diverged or sess.ydoc_snapshot is None:
+            return sess, None
+        late = coedit.updates_since(session_id, sess.ydoc_snapshot_seq)
+        return sess, late
+
+
 async def _reconcile_room(session_id: int, diverged: bool) -> None:
     room = coedit_room.get_room(session_id)
     if room is None:
         return  # left/evicted between the schedule and this running
+    # Captured before any `await` below — the real gate for the reseed
+    # near the end of this function (checked again there, with no `await`
+    # in between at that point). See Room.generation's own docstring: a
+    # local edit landing anywhere in this function's several awaited DB
+    # reads bumps this synchronously with the room.doc mutation itself,
+    # unlike ydoc_seq, which can lag the Doc by a real window.
+    expected_generation = room.generation
     # Always re-read fresh from the DB rather than trusting values carried
     # on the caller's own outcome — see _notify_checkpoint_landed's
     # docstring for why (no cross-process payload-size concern, and always
     # reflects the latest committed state even if a newer checkpoint has
     # already landed in the meantime).
-    sess = await asyncio.to_thread(coedit.get_session_for_checkpoint, session_id)
-    if sess is None:
-        return  # gone
+    result = await asyncio.to_thread(_read_sess_and_late_for_reconcile, session_id, diverged)
+    if result is None:
+        return  # gone, or the lock was busy — a later notify retries
+    sess, late = result
     if not diverged:
         # This room's own doc already reflects exactly what got committed
         # — checkpointing never touches it, so there's nothing to reseed
@@ -193,35 +234,39 @@ async def _reconcile_room(session_id: int, diverged: bool) -> None:
     # resync. Reseeding from an independent seed_doc_from_markdown(body)
     # call here instead of the persisted ydoc_snapshot bytes would be
     # wrong: two separate seedings of "the same" text produce incompatible
-    # CRDT lineages (see coedit_room.reseed). The persisted snapshot's own
-    # lineage is now spliced from this session's existing doc rather than
-    # freshly seeded (coedit_checkpoint.checkpoint_session's
-    # apply_markdown_diff call, see its docstring) specifically so this
-    # reseed doesn't erase a concurrent edit — but the snapshot only
-    # reflects state as of ydoc_snapshot_seq; an edit logged *after* the
-    # checkpoint captured that seq (this room's own doc, still live and
-    # accepting edits the whole time — checkpointing never touches it) is
-    # durably logged but not yet folded into the snapshot bytes themselves.
-    # Replay it now, the same way a fresh checkpoint's _rebuild_doc would —
-    # this was the actual gap a prior version of this comment claimed
-    # didn't exist ("never loses the divergent edits ... picked up by the
-    # next checkpoint" — false: the reseed below replaced this room's doc
-    # outright, and nothing replayed what the new one was missing, so nothing
-    # ever *did* pick it up; confirmed via review repro).
+    # CRDT lineages (see coedit_room.reseed).
     if sess.ydoc_snapshot is None:
         return  # racing a close — nothing to reconcile
+    # Check for updates logged after this checkpoint's snapshot *before*
+    # reseeding, not replay them onto the room after — a prior version of
+    # this fix reseeded unconditionally and replayed any late updates
+    # afterward, which is only safe when the checkpoint's
+    # apply_markdown_diff left the *specific* block a late update touches
+    # alone (see markdown_splice.apply_markdown_diff's own docstring): for
+    # a block apply_markdown_diff replaced outright (the AI merge actually
+    # rewrote it — the likelier case in practice, since that's what
+    # triggers `diverged` at all), the replayed update targets the old,
+    # now-tombstoned element and is a silent structural no-op (confirmed
+    # in review, with a repro). This room's own doc already has any late
+    # edit correctly — checkpointing never touches it — so there's nothing
+    # to gain from reseeding here and a same-block loss to risk. Skip the
+    # reseed/resync entirely instead; base_sha/base_body bookkeeping is
+    # left stale (this room hasn't caught up to the external fold), but
+    # the next checkpoint's own merge is a clean no-op fold this round
+    # (HEAD hasn't moved further since), so it commits the pending edit —
+    # and finally shows the fold-in — normally, no special handling
+    # needed.
+    assert late is not None  # _read_sess_and_late_for_reconcile guarantees this when diverged
+    if late.updates:
+        return
+    # Re-check right before the reseed, no `await` since — closes the
+    # window between the locked read above and actually touching
+    # room.doc: an edit landing in that specific gap wouldn't show up in
+    # `late` (its DB write may not have landed yet either) but must still
+    # block the reseed.
+    if room.generation != expected_generation:
+        return
     coedit_room.reseed(room, sess.ydoc_snapshot, sess.ydoc_snapshot_body, sess.base_sha)
-    late = await asyncio.to_thread(coedit.updates_since, session_id, sess.ydoc_snapshot_seq)
-    for u in late.updates:
-        try:
-            room.doc.apply_update(u.update_payload)  # type: ignore[reportUnknownMemberType]
-        except Exception:
-            log.exception(
-                "coedit checkpoint: session %s seq %d update failed to apply during"
-                " reconcile replay; skipping",
-                session_id,
-                u.seq,
-            )
     coedit_channel.publish_control(session_id, ResyncFrame(session_id=session_id).model_dump())
 
 
@@ -234,12 +279,24 @@ bus.register(_CHECKPOINT_LANDED_BUS_KIND, _handle_remote_checkpoint_landed)
 _SESSION_CLOSED_BUS_KIND = "coedit_session_closed"
 
 
-def _notify_session_closed(session_id: int) -> None:
-    """A session just closed (this task, on last-participant-out) — evict
-    its in-memory Room in whichever process (if any) holds it. Without
-    this, a closed session's Room (Doc + Awareness + tracker) pins memory
-    in its owning web app process forever: nothing else ever calls
-    ``coedit_room.close_room``."""
+def notify_session_closed(session_id: int) -> None:
+    """A session just closed — evict its in-memory Room in whichever
+    process (if any) holds it, this one included. Without this, a closed
+    session's Room (Doc + Awareness + tracker) pins memory in its owning
+    web app process forever: nothing else ever calls
+    ``coedit_room.close_room``.
+
+    Public (no leading underscore): also called directly from
+    ``app/wiki/notify.py`` for a session ``coedit.on_path_moved``
+    superseded (a destination-path collision during a move/trash) — that
+    path used to call ``coedit_room.evict_if_local`` itself, local-only
+    with no bus fan-out, so under more than one worker process (still the
+    deployed default) the room only actually got evicted if the move's
+    own fan-out happened to run in the process holding it (confirmed in
+    review). Reusing this function instead of duplicating the fan-out
+    keeps "a session just closed, evict its room everywhere" as one
+    single mechanism regardless of which caller triggered the close.
+    """
     coedit_room.evict_if_local(session_id)
     bus.emit({"kind": _SESSION_CLOSED_BUS_KIND, "session_id": session_id})
 

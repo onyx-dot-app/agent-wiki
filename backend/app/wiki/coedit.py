@@ -453,8 +453,47 @@ def rebase_onto(
     the rebase) does *not* decode to ``body`` on its own; a caller that
     passes the wrong ``body`` here corrupts every future checkpoint's diff
     base for this session (also caught in review).
+
+    Takes ``checkpoint_lock`` for the same reason ``checkpoint_session``
+    and the WS route's rehydrate path do: every other reader/writer of
+    ``(ydoc_snapshot, ydoc_snapshot_seq, coedit_updates)`` takes it so
+    those three fields are always read/written as one consistent unit —
+    without this function also taking it, a rehydrating reader's own two
+    separate reads (``get_session_for_checkpoint`` then ``updates_since``)
+    could still land with this call's delete-all-then-advance in between
+    them, reading a pre-rebase snapshot alongside a post-rebase (already-
+    pruned) update log — stale *and* on the wrong lineage (confirmed in
+    review, with a repro). Returns ``None`` (same as a CAS miss) if the
+    lock can't be acquired within its own timeout, rather than blocking a
+    live-rebase indefinitely on it — the caller
+    (``coedit_rebase.rebase_session``) already treats a ``None`` return as
+    ``RACED`` and (as of this fix) retries.
     """
     now = _iso(_now())
+    with checkpoint_lock(session_id) as acquired:
+        if not acquired:
+            return None
+        return _rebase_onto_locked(
+            session_id,
+            new_base_sha=new_base_sha,
+            snapshot=snapshot,
+            body=body,
+            expected_seq=expected_seq,
+            checkpointed=checkpointed,
+            now=now,
+        )
+
+
+def _rebase_onto_locked(
+    session_id: int,
+    *,
+    new_base_sha: str,
+    snapshot: bytes,
+    body: str,
+    expected_seq: int,
+    checkpointed: bool,
+    now: str,
+) -> SessionRow | None:
     with session() as s:
         values: dict[str, Any] = {
             "base_sha": new_base_sha,
@@ -799,18 +838,6 @@ def rename_path(old_path: str, new_path: str) -> None:
             select(CoeditSession).where(CoeditSession.path == old_path)
         ).all():
             sess.path = new_path
-
-
-def delete_for_path(path: str) -> None:
-    """Drop all sessions for a page (called when the page is deleted).
-
-    Participants cascade via the FK.
-    """
-    with session() as s:
-        for sess in s.scalars(
-            select(CoeditSession).where(CoeditSession.path == path)
-        ).all():
-            s.delete(sess)
 
 
 # --------------------------------------------------------------------------- #

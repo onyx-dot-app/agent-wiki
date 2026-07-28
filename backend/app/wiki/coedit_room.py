@@ -47,7 +47,16 @@ class Room:
     because a `queue.Queue` genuinely is an arbitrary-but-safe-to-share
     type)."""
 
-    __slots__ = ("session_id", "path", "doc", "awareness", "tracker", "base_body", "base_sha")
+    __slots__ = (
+        "session_id",
+        "path",
+        "doc",
+        "awareness",
+        "tracker",
+        "base_body",
+        "base_sha",
+        "generation",
+    )
 
     session_id: int
     path: str
@@ -59,6 +68,21 @@ class Room:
     # the checkpoint engine after each successful commit.
     base_body: str
     base_sha: str | None
+    # Bumped synchronously on every content mutation to this room's `doc`
+    # — a local edit (`app/api/coedit.py:_apply_yjs_frame`), a cross-
+    # process relay (`apply_remote_frame_if_local`), or a reseed. Purely
+    # in-memory, deliberately independent of `ydoc_seq` (the DB's own
+    # watermark): a local edit mutates `doc` synchronously but its DB log
+    # write (`coedit.apply_update`) is a separate, awaited step — a caller
+    # that wants to know "has this room's *Doc* changed since I looked"
+    # can't use `ydoc_seq` for that without a real window where `doc` has
+    # already moved but the DB hasn't caught up yet (confirmed in review
+    # — `coedit_rebase.rebase_session` had exactly this gap). Comparing
+    # `generation` before/after an `await` gap, with no `await` between
+    # the final check and whatever it gates, closes that window: nothing
+    # can mutate `doc` without going through this same increment, on this
+    # same single-threaded event loop.
+    generation: int
 
     def __init__(
         self, session_id: int, path: str, doc: Doc, base_body: str, base_sha: str | None
@@ -70,6 +94,7 @@ class Room:
         self.doc = doc
         self.awareness = Awareness(self.doc)
         self.tracker = TouchedTracker(self.doc)
+        self.generation = 0
 
 
 _rooms: dict[int, Room] = {}
@@ -136,7 +161,9 @@ def reseed(room: Room, snapshot: bytes, body: str, base_sha: str | None) -> None
     cannot keep applying incremental updates against it; the caller must
     broadcast a resync (``app.models.coedit.ResyncFrame`` via
     ``coedit_channel.publish_control``) so they reconnect and redo the sync
-    handshake fresh.
+    handshake fresh. Also bumps ``generation`` — any caller mid-flight with
+    a stale ``expected_generation`` captured before this reseed must treat
+    it as changed too, same as any other content mutation.
     """
     room.tracker.stop()
     room.doc = Doc()
@@ -145,6 +172,7 @@ def reseed(room: Room, snapshot: bytes, body: str, base_sha: str | None) -> None
     room.tracker = TouchedTracker(room.doc)
     room.base_body = body
     room.base_sha = base_sha
+    room.generation += 1
 
 
 def close_room(session_id: int) -> None:
@@ -199,6 +227,7 @@ async def _apply_remote_frame(session_id: int, raw: bytes) -> None:
         # if_local's own docstring — so the return value has nowhere to go
         # and is discarded.
         handle_sync_message(inner, room.doc)  # type: ignore[reportUnknownMemberType]
+        room.generation += 1
     elif msg_type == YMessageType.AWARENESS:
         payload = read_message(raw[1:])
         room.awareness.apply_awareness_update(payload, "remote")  # type: ignore[reportUnknownMemberType]

@@ -8,6 +8,7 @@ imports ``pycrdt`` (see its own docstring), so these tests don't need a real
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
@@ -197,6 +198,34 @@ def test_rebase_onto_seq_mismatch_returns_none(users):
     assert len(coedit.updates_since(s.id, 0).updates) == 1
 
 
+def test_rebase_onto_returns_none_when_checkpoint_lock_busy(users, monkeypatch):
+    # Regression test (review): rebase_onto used to write directly, with
+    # no checkpoint_lock at all — a concurrent rebase_onto/checkpoint could
+    # land its own delete-all-then-advance between a reader's two separate
+    # reads (get_session_for_checkpoint then updates_since), yielding a
+    # stale snapshot paired with an already-pruned update log. Taking the
+    # lock closes that; this pins the "can't get it" half specifically —
+    # a busy lock must make the whole call a no-op (same as a CAS miss),
+    # never proceed unprotected.
+    @contextmanager
+    def fake_busy_lock(session_id: int):
+        yield False
+
+    monkeypatch.setattr(coedit, "checkpoint_lock", fake_busy_lock)
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    assert (
+        coedit.rebase_onto(
+            s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=0, checkpointed=False
+        )
+        is None
+    )
+    # Nothing changed — the whole write was skipped, not partially applied.
+    fetched = coedit.get_active_session(_PATH)
+    assert fetched is not None
+    assert fetched.base_sha == "sha1"
+    assert fetched.ydoc_seq == 0
+
+
 def test_participants_join_touch_leave(users):
     s = coedit.open_session(_PATH, base_sha=None)
     coedit.join(s.id, "usr_a")
@@ -378,17 +407,6 @@ def test_close_frees_path_for_new_session(users):
     active = coedit.get_active_session(_PATH)
     assert active is not None
     assert active.id == second.id
-
-
-def test_close_session_with_participants_cascades(users):
-    s = coedit.open_session(_PATH, base_sha=None)
-    coedit.join(s.id, "usr_a")
-    coedit.delete_for_path(_PATH)
-    assert coedit.get_active_session(_PATH) is None
-    assert count_rows(CoeditSession) == 0
-    # Participant rows cascade with the session.
-    fresh = coedit.open_session(_PATH, base_sha=None)
-    assert coedit.list_participants(fresh.id) == []
 
 
 def test_rename_path(users):

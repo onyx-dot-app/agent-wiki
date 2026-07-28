@@ -186,12 +186,16 @@ def test_rebase_raced_session_is_skipped(repo, monkeypatch):
 
 def test_rebase_passes_expected_seq_from_observed_ydoc_seq(repo, monkeypatch):
     # rebase_onto's CAS is only as good as what rebase_session passes it —
-    # this pins that expected_seq is the ydoc_seq observed in the same
-    # synchronous stretch as room_body (before any `await`), not some other
-    # value, since a mismatch here would silently defeat the CAS guard added
-    # for the concurrent-edit-during-merge race (see coedit.rebase_onto's own
-    # docstring and test_coedit_repo.py's test_rebase_onto_seq_mismatch_returns_none
-    # for the DB-level half of this fix).
+    # this pins that expected_seq is sess.ydoc_seq, as observed by
+    # _load_sess. NOT actually read "in the same synchronous stretch as
+    # room_body" (an earlier version of this comment claimed that — wrong,
+    # caught in review: _load_sess's own `await asyncio.to_thread(...)`
+    # means it's read strictly *before* room_body, a real gap a concurrent
+    # edit can land in). That makes expected_seq a coarse, best-effort
+    # DB-level check, not the actual safety guarantee — see
+    # test_rebase_skips_reseed_when_generation_changes_mid_flight below
+    # for the real gate (room.generation) and why expected_seq alone isn't
+    # enough on its own.
     # Non-overlapping edits (matching test_rebase_folds_clean_agent_commit)
     # so the 3-way merge is clean and actually reaches rebase_onto — an
     # overlapping edit hits the CONFLICT branch first, before rebase_onto
@@ -218,6 +222,48 @@ def test_rebase_passes_expected_seq_from_observed_ydoc_seq(repo, monkeypatch):
     outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
     assert outcome == coedit_rebase.RebaseOutcome.RACED
     assert captured["expected_seq"] == 1
+
+
+def test_rebase_skips_reseed_when_generation_changes_mid_flight(repo, monkeypatch):
+    # Regression test (review): the actual unsafe direction of the CAS gap
+    # — _apply_yjs_frame mutates room.doc synchronously but logs to the DB
+    # as a separate, later-awaited step, so an edit can land on room.doc
+    # without ydoc_seq having moved yet by the time rebase_onto's own
+    # DB-level CAS runs. That CAS alone would pass in this exact scenario
+    # (nothing bumped ydoc_seq), and reseeding would silently wipe the
+    # edit — confirmed in review, with a repro. room.generation (bumped
+    # synchronously with every room.doc content mutation, independent of
+    # the DB) is the real gate; this simulates the edit landing during the
+    # merge's own await window, without touching room.doc directly (would
+    # violate its thread-affinity — this callback runs via
+    # asyncio.to_thread, not the event loop) — just the plain-int counter
+    # that tracks it, same effect for this test's purposes.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    doc_body = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed(doc_body)
+    sess = coedit.open_session(_PATH, base_sha=sha)
+    coedit.join(sess.id, uid)
+    room = _room(sess, doc_body)
+    new_sha = wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
+
+    real_merge_content = wiki_git.merge_content
+
+    def racing_merge_content(*args, **kwargs):
+        room.generation += 1
+        return real_merge_content(*args, **kwargs)
+
+    monkeypatch.setattr(wiki_git, "merge_content", racing_merge_content)
+
+    outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
+    assert outcome == coedit_rebase.RebaseOutcome.RACED
+
+    # room.doc was never reseeded — still exactly what it was before the
+    # rebase attempt (the merge result never got applied to it).
+    live_room = coedit_room.get_room(sess.id)
+    assert live_room is room
+    assert reconstruct_body(room.doc) == doc_body
 
 
 def test_rebase_noop_when_merge_matches_live_doc(repo):

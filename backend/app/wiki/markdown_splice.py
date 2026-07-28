@@ -143,6 +143,24 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
 
     root = doc.get(ROOT_XML_KEY, type=XmlFragment)
     parts: list[str] = []
+    # Ids restamp_block_ids has already emitted an untouched, verbatim
+    # range for — restamp_block_ids can assign the *same* id to more than
+    # one doc child (when a fresh reparse of base_body merges what the doc
+    # still models as separate elements — e.g. two adjacent bullet lists;
+    # see its own docstring), and orig_by_id/leading_gap_start are keyed by
+    # id, not by child, so every child sharing an id resolves to the exact
+    # same base_body range. Emitting that range on more than one child
+    # duplicates it outright — and since the duplicated output becomes the
+    # *next* checkpoint's own base_body, still carrying the same shared
+    # id, it compounds on every subsequent untouched checkpoint rather
+    # than staying merely wrong once (confirmed in review — a real
+    # regression from restamp_block_ids' own id-sharing fix, not present
+    # before it). Only the *touched* path needs no such guard: touching
+    # any child sharing an id marks the whole shared id touched (the
+    # membership check below is by id, not by child), so every sharing
+    # child there independently re-serializes its own actual content —
+    # concatenation, not duplication.
+    emitted_untouched_ids: set[str] = set()
     for child in root.children:
         if not isinstance(child, XmlElement):
             raise NotImplementedError(f"unexpected top-level child: {type(child)!r}")
@@ -150,6 +168,9 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
         orig = orig_by_id.get(block_id) if block_id else None
 
         if orig is not None and child.tag == "table" and block_id not in tracker.touched_block_ids:
+            if block_id in emitted_untouched_ids:
+                continue
+            emitted_untouched_ids.add(block_id)
             gap = base_body[leading_gap_start[block_id] : orig.start]
             parts.append(gap + _splice_table(base_body, orig, child, tracker.touched_row_ids.get(block_id, set())))
             continue
@@ -161,6 +182,9 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
         )
         if not touched:
             assert orig is not None and block_id is not None
+            if block_id in emitted_untouched_ids:
+                continue
+            emitted_untouched_ids.add(block_id)
             parts.append(base_body[leading_gap_start[block_id] : orig.end])
             continue
 
