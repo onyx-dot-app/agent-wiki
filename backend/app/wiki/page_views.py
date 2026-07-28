@@ -14,6 +14,7 @@ no *recorded* view — callers treat the tracking-enable date as the floor
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Iterable
@@ -34,14 +35,16 @@ _last_enqueued: dict[str, float] = {}
 _lock = threading.Lock()
 _MAX_LOCAL = 4096
 
+log = logging.getLogger(__name__)
+
 
 def _now_text() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def should_enqueue(path: str) -> bool:
-    """Cheap in-process gate for read paths: at most one queued touch per
-    page per throttle window per process."""
+def _should_record(path: str) -> bool:
+    """Cheap in-process gate: at most one write per page per throttle window
+    per process."""
     now = time.monotonic()
     window = THROTTLE.total_seconds()
     with _lock:
@@ -55,6 +58,19 @@ def should_enqueue(path: str) -> bool:
                 if t < cutoff:
                     del _last_enqueued[p]
     return True
+
+
+def note_view(path: str) -> None:
+    """Record a view from a read path: throttled, and failure-proof — view
+    bookkeeping must never surface near a page read. Inline on purpose (no
+    queue): the write is one guarded UPDATE at most once per page per hour,
+    and the read path already writes to this table (id minting)."""
+    if not _should_record(path):
+        return
+    try:
+        touch(path)
+    except Exception:
+        log.warning("page view stamp failed for %s", path, exc_info=True)
 
 
 def touch(path: str) -> None:

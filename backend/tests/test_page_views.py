@@ -1,7 +1,8 @@
 """Last-viewed tracking — the read-side signal for staleness detection.
 
 A view = a human page open (HTTP HEAD read) or an agent read over chat/MCP
-(``read_doc``/``read_page``, HEAD only). The value is a column on the page's
+(``read_doc``/``read_page``, HEAD only). Recording is an inline, throttled,
+failure-proof write — no queue. The value is a column on the page's
 stable-id row (wiki_doc_ids), so it survives moves and trash/restore with no
 re-keying, and a recreated page (new id row) starts at NULL. Writes are
 coarse on purpose.
@@ -19,7 +20,6 @@ from app.db.session import session
 from app.llm.agents.tools import dispatch as registry_dispatch
 from app.main import create_app
 from app.models.wiki import PathMove
-from app.tasks.queues import lightweight_maintenance_queue
 from app.wiki import doc_ids
 from app.wiki import git as wiki_git
 from app.wiki import page_views
@@ -71,10 +71,10 @@ def test_last_viewed_missing_paths_are_absent(tmp_repo):
     assert "x.md" in out and "never-seen.md" not in out
 
 
-def test_should_enqueue_gates_per_window(tmp_repo):
-    assert page_views.should_enqueue("p.md") is True
-    assert page_views.should_enqueue("p.md") is False  # same window
-    assert page_views.should_enqueue("q.md") is True  # other page unaffected
+def test_record_gate_per_window(tmp_repo):
+    assert page_views._should_record("p.md") is True
+    assert page_views._should_record("p.md") is False  # same window
+    assert page_views._should_record("q.md") is True  # other page unaffected
 
 
 def test_history_follows_a_move_with_no_rekeying(tmp_repo):
@@ -106,16 +106,14 @@ def test_recreated_page_inherits_no_history(tmp_repo):
 
 def test_agent_read_records_a_view(tmp_repo):
     _seed_page("team/page.md")
-    with lightweight_maintenance_queue.immediate_mode():
-        out = registry_dispatch("read_doc", {"path": "team/page.md"})
+    out = registry_dispatch("read_doc", {"path": "team/page.md"})
     assert "error" not in out
     assert "team/page.md" in page_views.last_viewed(["team/page.md"])
 
 
 def test_historical_agent_read_is_not_a_view(tmp_repo):
     sha = wiki_git.commit_file("team/page.md", "# P\n\nbody\n", "seed", author=None)
-    with lightweight_maintenance_queue.immediate_mode():
-        out = registry_dispatch("read_doc", {"path": "team/page.md", "sha": sha})
+    out = registry_dispatch("read_doc", {"path": "team/page.md", "sha": sha})
     assert "error" not in out
     assert page_views.last_viewed(["team/page.md"]) == {}
 
@@ -125,8 +123,7 @@ def test_http_page_open_records_a_view(tmp_repo):
     client = TestClient(create_app())
     uid = seed_user(uid="u1", email="u@x.com")
     login_fastapi(client, uid)
-    with lightweight_maintenance_queue.immediate_mode():
-        res = client.get("/api/wiki/file", params={"path": "team/page.md"})
+    res = client.get("/api/wiki/file", params={"path": "team/page.md"})
     assert res.status_code == 200
     assert "team/page.md" in page_views.last_viewed(["team/page.md"])
 
@@ -136,9 +133,8 @@ def test_historical_http_read_is_not_a_view(tmp_repo):
     client = TestClient(create_app())
     uid = seed_user(uid="u1", email="u@x.com")
     login_fastapi(client, uid)
-    with lightweight_maintenance_queue.immediate_mode():
-        res = client.get(
-            "/api/wiki/file", params={"path": "team/page.md", "ref": sha}
-        )
+    res = client.get(
+        "/api/wiki/file", params={"path": "team/page.md", "ref": sha}
+    )
     assert res.status_code == 200
     assert page_views.last_viewed(["team/page.md"]) == {}

@@ -59,7 +59,6 @@ from app.models.file_system import (
     TrashListResponse,
 )
 from app.llm.agents import draft_generator, draft_reviser
-from app.tasks.page_views import record_page_view
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
@@ -308,10 +307,10 @@ def get_document_by_path(
     if "read" not in perms:
         raise PermissionDenied(f"forbidden: read on {rel}")
     can_write = "write" in perms
-    # A HEAD read is a "view" — feeds staleness detection. Throttled +
-    # queued; historical (?ref=) reads are not using the page.
-    if ref is None and page_views.should_enqueue(rel):
-        record_page_view(rel)
+    # A HEAD read is a "view" — feeds staleness detection. Throttled and
+    # failure-proof; historical (?ref=) reads are not using the page.
+    if ref is None:
+        page_views.note_view(rel)
     head_sha = wiki_git.head_sha_for_path(rel)
     # Stable id: reading a live page lazily backfills its row (pre-id pages);
     # historical/deleted reads only report an id if a live row exists.
