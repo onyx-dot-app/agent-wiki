@@ -129,7 +129,12 @@ class _StalePageDetector:
             return []
         floor_dt = _now() - timedelta(days=self._floor_days)
         floor = _iso(floor_dt)
-        recently_edited = git.paths_touched_since(floor)
+        # Explicit UTC offset: git --since parses a bare timestamp in the
+        # process's LOCAL timezone, which silently shifts the window on any
+        # non-UTC host (and made this prefilter a no-op in local dev).
+        recently_edited = git.paths_touched_since(
+            floor_dt.strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        )
         aged = [p for p in pages if p not in recently_edited]
         if not aged:
             return []

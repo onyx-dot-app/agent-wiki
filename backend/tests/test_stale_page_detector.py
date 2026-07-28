@@ -32,6 +32,32 @@ _OLD_BODY = "# 2025 Offsite Agenda\n\nSessions for the June 2025 offsite.\n"
 _LIVE_BODY = "# Runbook\n\nSteps that stay current.\n"
 
 
+def _backdated_commit(path: str, body: str, days: int = 60) -> None:
+    """Commit ``path`` with author+committer dates ``days`` ago — the only
+    way to seed genuinely old pages (the prefilter reads real git dates).
+    Test seeding only, same precedent as ``plumb_commit``."""
+    import os
+    import subprocess
+
+    import app.config
+
+    cwd = app.config.CONFIG.wiki_dir
+    when = (datetime.now(UTC) - timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M:%S+00:00"
+    )
+    absd = os.path.join(cwd, os.path.dirname(path))
+    os.makedirs(absd, exist_ok=True)
+    with open(os.path.join(cwd, path), "w") as f:
+        f.write(body)
+    env = {**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when}
+    subprocess.run(["git", "add", path], cwd=cwd, check=True, env=env)
+    subprocess.run(
+        ["git", "-c", "user.name=seed", "-c", "user.email=seed@local",
+         "commit", "-m", f"seed {path}"],
+        cwd=cwd, check=True, env=env, capture_output=True,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _fresh(tmp_repo):
     page_views.reset_for_tests()
@@ -93,10 +119,10 @@ def test_recently_edited_pages_never_reach_the_llm(monkeypatch, tmp_repo):
 
 def test_recently_viewed_pages_never_reach_the_llm(monkeypatch, tmp_repo):
     _age_tracking()
-    wiki_git.commit_file("notes/old.md", _OLD_BODY, "seed", author=None)
+    _backdated_commit("notes/old.md", _OLD_BODY)
     page_views.touch("notes/old.md")  # a fresh view
     calls = _script(monkeypatch)
-    det = _StalePageDetector(floor_days=0)
+    det = _StalePageDetector()
     assert det.detect(_scope("notes/old.md")) == []
     assert calls == []
 
@@ -104,9 +130,9 @@ def test_recently_viewed_pages_never_reach_the_llm(monkeypatch, tmp_repo):
 def test_young_tracking_gates_unviewed_pages(monkeypatch, tmp_repo):
     """With no recorded views at all, 'no view row' proves nothing — the
     detector must stay silent rather than call everything unviewed."""
-    wiki_git.commit_file("notes/old.md", _OLD_BODY, "seed", author=None)
+    _backdated_commit("notes/old.md", _OLD_BODY)
     calls = _script(monkeypatch)
-    det = _StalePageDetector(floor_days=0)
+    det = _StalePageDetector()
     assert det.detect(_scope("notes/old.md")) == []
     assert calls == []
 
@@ -116,13 +142,13 @@ def test_young_tracking_gates_unviewed_pages(monkeypatch, tmp_repo):
 
 def test_confirmed_stale_page_emits_a_deletion_draft(monkeypatch, tmp_repo):
     _age_tracking()
-    wiki_git.commit_file("notes/old.md", _OLD_BODY, "seed", author=None)
+    _backdated_commit("notes/old.md", _OLD_BODY)
     _script(
         monkeypatch,
         _finish({"path": "notes/old.md", "evidence": "agenda for a past event"}),
     )
 
-    (draft,) = _StalePageDetector(floor_days=0).detect(
+    (draft,) = _StalePageDetector().detect(
         _scope("notes/old.md", "anchor/tracked.md")
     )
 
@@ -136,12 +162,12 @@ def test_confirmed_stale_page_emits_a_deletion_draft(monkeypatch, tmp_repo):
 
 def test_non_candidate_proposals_are_dropped(monkeypatch, tmp_repo):
     _age_tracking()
-    wiki_git.commit_file("notes/old.md", _OLD_BODY, "seed", author=None)
+    _backdated_commit("notes/old.md", _OLD_BODY)
     _script(
         monkeypatch,
         _finish({"path": "made/up.md", "evidence": "not a candidate"}),
     )
-    det = _StalePageDetector(floor_days=0)
+    det = _StalePageDetector()
     drafts = det.detect(_scope("notes/old.md"))
     assert drafts == []
 
@@ -151,29 +177,29 @@ def test_cap_bounds_proposals_per_sweep(monkeypatch, tmp_repo):
     items = []
     paths = [f"notes/old-{i}.md" for i in range(5)]
     for p in paths:
-        wiki_git.commit_file(p, _OLD_BODY + p, "seed", author=None)
+        _backdated_commit(p, _OLD_BODY + p)
         items.append({"path": p, "evidence": "past event"})
     _script(monkeypatch, _finish(*items))
-    drafts = _StalePageDetector(floor_days=0).detect(_scope(*paths, "anchor/tracked.md"))
+    drafts = _StalePageDetector().detect(_scope(*paths, "anchor/tracked.md"))
     assert len(drafts) == 3  # MAX_PROPOSALS
 
 
 def test_llm_failure_degrades_to_empty(monkeypatch, tmp_repo):
     _age_tracking()
-    wiki_git.commit_file("notes/old.md", _OLD_BODY, "seed", author=None)
+    _backdated_commit("notes/old.md", _OLD_BODY)
 
     def boom(messages, **kwargs):
         raise LLMError("not_configured", "LLM is not configured")
 
     monkeypatch.setattr(llm_client, "complete", boom)
-    assert _StalePageDetector(floor_days=0).detect(_scope("notes/old.md")) == []
+    assert _StalePageDetector().detect(_scope("notes/old.md")) == []
 
 
 def test_agent_can_read_candidates_and_search(monkeypatch, tmp_repo):
     """One investigate turn (read + search) before finish — the tool results
     ride back into the transcript."""
     _age_tracking()
-    wiki_git.commit_file("notes/old.md", _OLD_BODY, "seed", author=None)
+    _backdated_commit("notes/old.md", _OLD_BODY)
     investigate = CompletionResult(
         text="",
         tool_calls=[
@@ -192,7 +218,7 @@ def test_agent_can_read_candidates_and_search(monkeypatch, tmp_repo):
         "app.wiki.automanage.detectors.stale_page.fts.search", lambda *a, **k: []
     )
 
-    (draft,) = _StalePageDetector(floor_days=0).detect(_scope("notes/old.md"))
+    (draft,) = _StalePageDetector().detect(_scope("notes/old.md"))
 
     assert draft.source_paths == ["notes/old.md"]
     # Second LLM call saw the tool results.
