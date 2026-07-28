@@ -30,6 +30,21 @@ def client(tmp_repo):
     return TestClient(create_app())
 
 
+def test_upload_400_for_folder_and_non_page_anchors(client: TestClient) -> None:
+    # A directory or a tracked non-page file is a git object but not a page.
+    uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
+    login_fastapi(client, uid)
+    wiki_git.commit_file("guides/.gitkeep", "", "seed")
+    for bad in ("guides", "guides/.gitkeep"):
+        resp = client.post(
+            f"/api/wiki/images?path={bad}",
+            content=PNG_BYTES,
+            headers={"content-type": "image/png"},
+        )
+        assert resp.status_code == 400
+    assert count_rows(Image) == 0
+
+
 def test_upload_404_for_formerly_existing_deleted_page(client: TestClient) -> None:
     # A deleted page still has commits touching its path, so the guard must
     # test HEAD presence, not history.

@@ -279,13 +279,15 @@ def read_file(rel_path: str, ref: str = "HEAD") -> str:
 
 
 def exists_at_head(rel_path: str) -> bool:
-    """True when ``rel_path`` is present in HEAD's tree.
+    """True when ``rel_path`` is a file (blob) in HEAD's tree.
 
     Presence, not history: ``head_sha_for_path`` answers "which commit last
     touched this path" and stays truthy forever after a delete or trash move,
-    so it must never gate on whether a page currently exists.
+    so it must never gate on whether a page currently exists. Blob-typed so a
+    directory at the path does not count as an existing file.
     """
-    return _run(["cat-file", "-e", f"HEAD:{rel_path}"], check=False).returncode == 0
+    res = _run(["cat-file", "-t", f"HEAD:{rel_path}"], check=False)
+    return res.returncode == 0 and res.stdout.strip() == "blob"
 
 
 def read_file_opt(rel_path: str, ref: str = "HEAD") -> str | None:
