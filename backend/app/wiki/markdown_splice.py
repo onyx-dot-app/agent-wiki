@@ -184,6 +184,56 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
     return "".join(parts)
 
 
+def restamp_block_ids(doc: Doc) -> None:
+    """Re-number every top-level block's ``_blockId`` (and, for tables, each
+    row's ``_rowId``) to match ``top_level_block_ranges``'s own purely
+    positional scheme (``b0``, ``b1``, ... in document order, rows
+    ``<block_id>:r<index>``/``<block_id>:sep``) — call once right after a
+    checkpoint advances ``base_body`` to the doc's own current content
+    (i.e. whenever the doc itself is kept rather than reseeded from the
+    committed markdown text — see ``app/tasks/coedit_checkpoint.py``'s
+    ``_reconcile_room`` fast path and ``app/wiki/coedit_checkpoint.py``'s
+    ``checkpoint_session`` same-content snapshot branch, the only two call
+    sites).
+
+    Ids are stamped once when a block is created and never otherwise
+    touched, so they silently drift out of sync with ``base_body``'s own
+    (freshly re-derived, every parse) numbering the moment a top-level
+    block is inserted or removed anywhere before another block in document
+    order. Left unfixed, the next checkpoint's ``checkpoint_body`` matches
+    an untouched live block against the *wrong* ``base_body`` range —
+    confirmed in review to silently drop or duplicate content (insert a
+    block, checkpoint, edit a different block, checkpoint again). A
+    reseed (``coedit_room.reseed``, or ``seed_doc_from_markdown`` for a
+    diverged snapshot) doesn't need this call — building fresh from
+    markdown text via ``top_level_block_ranges`` already assigns ids this
+    same way, by construction.
+    """
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    for index, child in enumerate(root.children):
+        if not isinstance(child, XmlElement):
+            continue
+        block_id = f"b{index}"
+        if dict(child.attributes).get(BLOCK_ID_ATTR) != block_id:
+            child.attributes[BLOCK_ID_ATTR] = block_id
+        if child.tag == "table":
+            _restamp_rows(child, block_id)
+
+
+def _restamp_rows(table_el: XmlElement, block_id: str) -> None:
+    row_index = 0
+    for row_child in table_el.children:
+        if not isinstance(row_child, XmlElement):
+            continue
+        if row_child.tag == "tableSeparator":
+            row_id = f"{block_id}:sep"
+        else:
+            row_id = f"{block_id}:r{row_index}"
+            row_index += 1
+        if dict(row_child.attributes).get(ROW_ID_ATTR) != row_id:
+            row_child.attributes[ROW_ID_ATTR] = row_id
+
+
 def _splice_table(
     base_body: str, orig: BlockRange, table_el: XmlElement, touched_row_ids: set[str]
 ) -> str:

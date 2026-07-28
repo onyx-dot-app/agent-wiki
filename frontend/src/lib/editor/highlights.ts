@@ -180,6 +180,13 @@ export const CurrentBlockHighlight = Extension.create({
               node = selection.node;
             } else {
               const { $from } = selection;
+              // $from.before(0) throws RangeError("There is no position
+              // before the top-level node") — depth 0 means $from resolves
+              // to the doc itself, not a block inside it (an AllSelection
+              // from select-all, or a top-level gap cursor before a leading
+              // table/divider — StarterKit ships gapcursor). Nothing
+              // meaningful to highlight as "the current block" there.
+              if ($from.depth === 0) return DecorationSet.empty;
               pos = $from.before($from.depth);
               node = $from.parent;
             }

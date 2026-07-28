@@ -33,7 +33,7 @@ from app.models.coedit import CheckpointResultFrame, ResyncFrame
 from app.realtime import bus
 from app.tasks.queue import crontab
 from app.tasks.queues import coedit_queue
-from app.wiki import coedit, coedit_channel, coedit_room, markdown_yjs
+from app.wiki import coedit, coedit_channel, coedit_room, markdown_splice, markdown_yjs
 from app.wiki.coedit_checkpoint import CheckpointOutcome, checkpoint_session
 
 log = logging.getLogger(__name__)
@@ -147,9 +147,24 @@ async def _reconcile_room(outcome: CheckpointOutcome) -> None:
     room = coedit_room.get_room(outcome.session_id)
     if room is None:
         return  # left/evicted between the schedule and this running
-    if markdown_yjs.reconstruct_body(room.doc) == outcome.body:  # type: ignore[reportUnknownMemberType]
+    live_body = markdown_yjs.reconstruct_body(room.doc)  # type: ignore[reportUnknownMemberType]
+    # reconstruct_body is a full reserialize — every block always
+    # contributes exactly one trailing newline (see
+    # markdown_yjs.serialize_block), unlike checkpoint_body's own tail
+    # slice, which preserves a page's real lack of a final newline. For a
+    # page with no trailing newline, live_body is legitimately always
+    # exactly one "\n" ahead of what actually got committed — tolerate
+    # that specific, known gap rather than reseed+resync on every single
+    # checkpoint for such pages; any *other* discrepancy still reseeds.
+    if live_body == outcome.body or live_body == outcome.body + "\n":
         # This room's content is exactly what got committed — nothing to
-        # reconcile, just advance the bookkeeping in place.
+        # reconcile beyond bookkeeping. Still restamp block/row ids to
+        # match outcome.body's own (freshly re-derived every parse)
+        # positional numbering: this doc is kept as-is rather than
+        # reseeded, so its ids would otherwise silently drift out of sync
+        # the moment a future checkpoint's base_body has a different block
+        # count/order — see restamp_block_ids's own docstring.
+        markdown_splice.restamp_block_ids(room.doc)  # type: ignore[reportUnknownMemberType]
         room.base_body = outcome.body
         room.base_sha = outcome.sha
         return

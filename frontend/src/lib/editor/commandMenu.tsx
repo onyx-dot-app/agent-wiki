@@ -115,7 +115,12 @@ const COMMANDS: CommandItem[] = [
     icon: SvgMinus,
     run: (editor, range) => {
       const node = editor.schema.nodes.thematic_break!.create(
-        null,
+        // _raw: "1" matches what the backend stamps on every opaque block
+        // (see blocks.ts's own Enter-conversion path) — serialize_block's
+        // opaque-block fallback requires this exact attr, so a divider
+        // created without it fails every checkpoint from here on with
+        // NotImplementedError, permanently stranding edits in the update log.
+        { _raw: "1" },
         editor.schema.text("---\n"),
       );
       editor

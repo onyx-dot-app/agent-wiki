@@ -4,8 +4,8 @@ Every top-level block (``markdown_blocks.top_level_block_ranges``) becomes an
 ``XmlElement`` in a ``pycrdt`` doc's root ``XmlFragment``, tagged with a
 stable, positional ``_blockId`` attribute. Structural treatment (real
 ProseMirror-shaped nodes, editable node-by-node, not opaque text) covers:
-``heading``, ``paragraph`` (inline content — text runs + bold/italic/code/
-link marks, represented via a ``pycrdt.XmlText``'s ``.format()`` runs, plus
+``heading``, ``paragraph`` (inline content — text runs + bold/italic/strike/
+code/link marks, represented via a ``pycrdt.XmlText``'s ``.format()`` runs, plus
 an explicit ``hardBreak`` leaf element interspersed as a sibling wherever a
 hard line break occurs — y-prosemirror maps a PM leaf/atom node to an empty
 sibling ``XmlElement``, not to a text mark, since a break is a node boundary,
@@ -27,9 +27,9 @@ padding, and still achieves the byte-stability goal for every row that isn't
 touched — cells aren't decomposed or individually editable. Thematic break
 and html block stay opaque verbatim, tagged ``_raw="1"``.
 
-Unrecognized inline constructs (an image, GFM strikethrough — anything this
-module doesn't have an explicit encoder for) raise ``NotImplementedError``
-rather than silently drop or mis-serialize content — the byte-stability
+Unrecognized inline constructs (an image — anything this module doesn't
+have an explicit encoder for) raise ``NotImplementedError`` rather than
+silently drop or mis-serialize content — the byte-stability
 requirement this whole engine exists for is only meaningful if failures are
 loud, never silent. Same for a list item that isn't a clean sequence of
 paragraph/list/blockquote children (e.g. a list item containing a table) —
@@ -65,13 +65,15 @@ _KNOWN_INLINE_TYPES = {
     "code_inline",
     "link_open",
     "link_close",
+    "s_open",
+    "s_close",
 }
 
 # Applied innermost-first when wrapping a diff run back into markdown syntax
 # (i.e. iterated in reverse of this tuple) — outer to inner: link, bold,
-# italic, code. Handles arbitrary combinations deterministically; not every
-# combination is meaningfully round-trippable in CommonMark (e.g. code spans
-# can't semantically nest other marks), but this never raises — an
+# strike, italic, code. Handles arbitrary combinations deterministically; not
+# every combination is meaningfully round-trippable in CommonMark (e.g. code
+# spans can't semantically nest other marks), but this never raises — an
 # unsupported *combination* degrades to best-effort markup, only a fully
 # unrecognized inline *construct* (see _KNOWN_INLINE_TYPES) raises. "code" is
 # still listed here for that documentation value (and skipped defensively if
@@ -79,7 +81,7 @@ _KNOWN_INLINE_TYPES = {
 # entirely by `_wrap_code_run` before this loop runs — see `_wrap_run` — not
 # by a plain wrap-with-backticks step the way the other three are, since its
 # delimiter is stored as literal text already, not synthesized here.
-_MARK_WRAP_ORDER = ("link", "bold", "italic", "code")
+_MARK_WRAP_ORDER = ("link", "bold", "strike", "italic", "code")
 
 # A text segment ("text", plain_text, mark_runs) or a hard-break leaf
 # ("hardbreak", None, None) — see module docstring for why a hard break is a
@@ -129,6 +131,10 @@ def _inline_runs(inline_token: Any) -> list[_Segment]:
             active = {**active, "italic": True}
         elif child.type == "em_close":
             active = {k: v for k, v in active.items() if k != "italic"}
+        elif child.type == "s_open":
+            active = {**active, "strike": True}
+        elif child.type == "s_close":
+            active = {k: v for k, v in active.items() if k != "strike"}
         elif child.type == "code_inline":
             # The flanking backtick fence is stored as literal text inside
             # the mark, not stripped - matching the frontend's own
@@ -248,6 +254,8 @@ def _wrap_run(text: str, attrs: dict[str, Any] | None) -> str:
             result = f"*{result}*"
         elif mark == "bold":
             result = f"**{result}**"
+        elif mark == "strike":
+            result = f"~~{result}~~"
         elif mark == "link":
             # attrs["link"] is {"href": ...} (matching y-prosemirror's
             # mark-attrs convention) — but also accept a bare string

@@ -257,6 +257,13 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                     session_id,
                 )
                 return None
+            # Restamp before snapshotting: this doc is kept as-is (not
+            # reseeded from markdown text), so its block/row ids would
+            # otherwise drift out of sync with base_body's own numbering
+            # the moment a future checkpoint re-parses a base_body whose
+            # block count/order has since changed — see
+            # restamp_block_ids's own docstring.
+            markdown_splice.restamp_block_ids(doc)
             coedit.advance_checkpoint(
                 session_id, seq=replayed_seq, snapshot=doc.get_update(), base_sha=head
             )
@@ -270,6 +277,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             snap_doc = markdown_yjs.seed_doc_from_markdown(result.new_body)
             snapshot = snap_doc.get_update()
         else:
+            markdown_splice.restamp_block_ids(doc)
             snapshot = doc.get_update()
 
         coedit.advance_checkpoint(

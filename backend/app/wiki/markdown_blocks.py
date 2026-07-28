@@ -64,8 +64,11 @@ def gfm_parser() -> MarkdownIt:
     ``frontend/src/lib/editor/AGENT_WIKI_MARKDOWN_STANDARD.md`` §5 — raw HTML tags are never
     parsed as tags, so ``html_block``/``html_inline`` tokens never appear;
     ``BlockKind.HTML_BLOCK`` above is unreachable in practice, kept only
-    because ``markdown-it-py`` still exposes the token type name."""
-    return MarkdownIt("commonmark", {"html": False}).enable("table")
+    because ``markdown-it-py`` still exposes the token type name.
+    ``strikethrough`` matches the frontend's Strike mark (StarterKit
+    default, see ``EDITOR_STYLING_TRIGGERS.md`` §3) — enabled so ``~~text~~``
+    round-trips as a real mark instead of literal tildes."""
+    return MarkdownIt("commonmark", {"html": False}).enable("table").enable("strikethrough")
 
 
 class RowRange(BaseModel):
