@@ -30,6 +30,22 @@ def client(tmp_repo):
     return TestClient(create_app())
 
 
+def test_upload_404_for_formerly_existing_deleted_page(client: TestClient) -> None:
+    # A deleted page still has commits touching its path, so the guard must
+    # test HEAD presence, not history.
+    uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
+    login_fastapi(client, uid)
+    wiki_git.commit_file("guides/gone.md", "# Gone\n", "seed")
+    wiki_git.delete_path("guides/gone.md", "remove")
+    resp = client.post(
+        "/api/wiki/images?path=guides/gone.md",
+        content=PNG_BYTES,
+        headers={"content-type": "image/png"},
+    )
+    assert resp.status_code == 404
+    assert count_rows(Image) == 0
+
+
 def test_upload_cleans_up_when_page_vanishes_mid_upload(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -37,14 +53,14 @@ def test_upload_cleans_up_when_page_vanishes_mid_upload(
     # and the post-put re-check: first probe sees the page, second does not.
     uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
     login_fastapi(client, uid)
-    real = wiki_git.head_sha_for_path
+    real = wiki_git.exists_at_head
     calls = {"n": 0}
 
-    def racing(rel_path: str) -> str | None:
+    def racing(rel_path: str) -> bool:
         calls["n"] += 1
-        return None if calls["n"] > 1 else real(rel_path)
+        return False if calls["n"] > 1 else real(rel_path)
 
-    monkeypatch.setattr("app.api.images.wiki_git.head_sha_for_path", racing)
+    monkeypatch.setattr("app.api.images.wiki_git.exists_at_head", racing)
     resp = client.post(
         "/api/wiki/images?path=guides/setup.md",
         content=PNG_BYTES,
