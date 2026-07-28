@@ -416,16 +416,18 @@ def test_restamp_assigns_shared_id_when_reparse_merges_adjacent_lists() -> None:
 def test_apply_markdown_diff_preserves_lineage_of_untouched_blocks() -> None:
     """The whole point of apply_markdown_diff over a fresh
     seed_doc_from_markdown reseed: a block the diff doesn't touch keeps its
-    *original* XmlElement (and so its CRDT item ids), so a Yjs update
-    logged against the pre-diff doc still integrates after the diff runs."""
+    *original* CRDT item ids, so a Yjs update logged against the pre-diff
+    doc still integrates after the diff runs. (Not asserted via Python
+    object identity on ``root.children[0]`` — pycrdt's XmlChildrenView
+    hands back a fresh wrapper object on every access regardless of
+    mutation, confirmed directly, so "is" across two separate accesses
+    proves nothing either way; the late-update-integrates check below is
+    the real, meaningful assertion.)"""
     old_body = "one\n\ntwo\n\nthree\n"
     doc = seed_doc_from_markdown(old_body)
-    root = _root(doc)
-    untouched_child = root.children[0]  # "one" — the diff below doesn't touch this block
 
     new_body = "one\n\nTWO\n\nthree\n"
     assert apply_markdown_diff(doc, old_body, new_body) is True
-    assert root.children[0] is untouched_child, "untouched block's element was replaced"
     assert checkpoint_body(new_body, doc, TouchedTracker(doc)) == new_body
 
     # A late Yjs update generated against the pre-diff doc's lineage — e.g.
@@ -476,7 +478,12 @@ def test_editing_paragraph_after_link_reference_definition_preserves_it() -> Non
     doc = seed_doc_from_markdown(base_body)
     tracker = TouchedTracker(doc)
     root = _root(doc)
-    trailing_para = root.children[-1]
+    # Not root.children[-1]: pycrdt's XmlChildrenView.__getitem__ passes a
+    # negative index straight through to the Rust binding without
+    # translating it to a positive one first, raising OverflowError
+    # (confirmed directly against the installed pycrdt) rather than
+    # indexing from the end the way a plain Python list would.
+    trailing_para = root.children[len(root.children) - 1]
     assert trailing_para.tag == "paragraph"
     with doc.transaction():
         trailing_para.children[0].insert(0, "EDITED ")

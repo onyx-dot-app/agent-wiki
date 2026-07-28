@@ -192,13 +192,21 @@ def test_rebase_passes_expected_seq_from_observed_ydoc_seq(repo, monkeypatch):
     # for the concurrent-edit-during-merge race (see coedit.rebase_onto's own
     # docstring and test_coedit_repo.py's test_rebase_onto_seq_mismatch_returns_none
     # for the DB-level half of this fix).
+    # Non-overlapping edits (matching test_rebase_folds_clean_agent_commit)
+    # so the 3-way merge is clean and actually reaches rebase_onto — an
+    # overlapping edit hits the CONFLICT branch first, before rebase_onto
+    # is ever called, and this test is specifically about what
+    # rebase_session passes rebase_onto.
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    sha = _seed("one\ntwo\n")
+    doc_body = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed(doc_body)
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "one\ntwo\n")
+    room = _room(sess, doc_body)
     _edit(sess, room, uid, "EDIT-")  # bumps ydoc_seq to 1
-    new_sha = wiki_git.commit_file(_PATH, "ONE\ntwo\n", "agent edit", author="Agent <a@x.com>")
+    new_sha = wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
 
     captured: dict[str, object] = {}
 
