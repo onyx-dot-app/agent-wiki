@@ -9,15 +9,22 @@ re-considers it). When in doubt, do not propose.
 
 Only two categories may ever be proposed:
 
-1. Time-bound artifacts whose moment has passed — meeting notes, agendas,
-   sprint plans, event pages, drafts for work that shipped or was cancelled.
+1. Time-bound coordination shells with no record value — pages that only
+   ever coordinated a future moment and say nothing now that it has passed:
+   a bare agenda that was never filled in with notes, a logistics page for
+   a past event (room, link, signup), an unfilled meeting skeleton, a draft
+   for cancelled work that contains no decisions.
 2. Test/scratch debris — throwaway pages ("test-...", "tmp", "playground",
    someone's name plus "test"), typically stub or filler content, never
    linked, never viewed.
 
-Evergreen-looking content — runbooks, reference, design docs, onboarding —
-must NEVER be proposed no matter how old. Age is why a candidate is on your
-list; it is never, by itself, a reason to delete.
+Anything that RECORDS what happened or why is never proposed, no matter how
+old: meeting notes with content, decisions and their rationale, retros,
+outcome-bearing sprint/event pages. Those are archives — institutional
+memory that people search years later — not clutter. Evergreen-looking
+content (runbooks, reference, design docs, onboarding) must likewise NEVER
+be proposed on age. Age is why a candidate is on your list; it is never, by
+itself, a reason to delete.
 
 Before proposing a page you MUST:
 - read_page it and find uselessness evidence IN THE BODY: a past date, work

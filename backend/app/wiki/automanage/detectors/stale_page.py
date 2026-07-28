@@ -6,9 +6,11 @@ admits pages with neither an edit (git) nor a recorded view (``page_views``)
 inside the floor window, and the LLM agent may only propose a page after
 reading it and finding uselessness evidence in the content (plus optional
 wiki searches for coverage elsewhere). Two categories only — time-bound
-artifacts whose moment has passed, and test/scratch debris; evergreen-looking
-content is never proposed on age alone. Design: the "Stale-page detector"
-section of the Detection wiki page.
+coordination shells with no record value (bare agendas, event logistics,
+unfilled skeletons; anything that RECORDS what happened is an archive and
+never proposed), and test/scratch debris; evergreen-looking content is never
+proposed on age alone. Design: the "Stale-page detector" section of the
+Detection wiki page.
 
 Conservative rails, all constants below: 30-day floor, at most 3 proposals
 per sweep, bounded reads/searches/LLM calls, never auto-approvable. A page
