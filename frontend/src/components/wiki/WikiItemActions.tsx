@@ -3,6 +3,7 @@
 import { type ReactNode } from "react";
 import { Divider, LineItemButton, Popover } from "@onyx-ai/opal/components";
 import {
+  SvgDownload,
   SvgEdit,
   SvgFolderIn,
   SvgFolderPlus,
@@ -28,8 +29,9 @@ export interface WikiItemMenuProps {
 
 /**
  * Per-item "⋯" actions menu. Spec: 160px wide, compact line items, dividers,
- * Delete in danger red. Folders lead with New Page / New Folder and omit
- * "Launch Agent". The caller supplies the trigger as `children`.
+ * Delete in danger red. Folders lead with New Page / New Folder and swap
+ * "Launch Agent" for "Export as Zip". The caller supplies the trigger as
+ * `children`.
  */
 export default function WikiItemMenu({
   path,
@@ -98,7 +100,15 @@ export default function WikiItemMenu({
             title="Copy Link"
             onClick={run(actions.copyLink)}
           />
-          {!isFolder && (
+          {isFolder ? (
+            <LineItemButton
+              variant="body"
+              sizePreset="main-ui"
+              icon={SvgDownload}
+              title="Export as Zip"
+              onClick={run(actions.exportZip)}
+            />
+          ) : (
             <LineItemButton
               variant="body"
               sizePreset="main-ui"
