@@ -30,15 +30,13 @@ def run(query: str, *, model: str | None = None) -> dict[str, Any]:
     called ``read_page`` on — built from the loop's mutated message log,
     not parsed from the LLM's prose.
     """
-    # Lazy on purpose — the tool registry imports ask_nl_question, which
-    # imports this module: a top-level import is a cycle.
-    from app.llm.agents import chat as chat_agent  # noqa: PLC0415
-    from app.llm.agents import skills as skill_registry  # noqa: PLC0415
-    from app.llm.agents import tools as tool_registry  # noqa: PLC0415
     # Lazy imports avoid a cycle: chat.py imports the tool registry at
     # module load, which loads ask_nl_question.py, which imports this
     # module. Deferring the chat / registry imports until call time keeps
     # the import graph acyclic.
+    from app.llm.agents import chat as chat_agent  # noqa: PLC0415
+    from app.llm.agents import skills as skill_registry  # noqa: PLC0415
+    from app.llm.agents import tools as tool_registry  # noqa: PLC0415
 
     system_prompt = load_prompt("wiki_qa.system")
     # Read-only sub-agent: base toolset only, no `load_skill` (cannot escalate
