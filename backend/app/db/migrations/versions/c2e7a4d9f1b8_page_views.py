@@ -1,13 +1,13 @@
-"""page_views — durable last-viewed timestamp per wiki page.
+"""wiki_doc_ids.last_viewed_at — durable last-viewed timestamp per page.
 
 Revision ID: c2e7a4d9f1b8
 Revises: b8d3f6a1c9e7
 
 Feeds staleness detection: a page is only *considered* stale when both its
-last edit (git) and last view (this table) are old. Keyed by the page's
-stable doc id (wiki_doc_ids) so no lifecycle re-keying is needed: ids
-survive moves, keep history across trash/restore, and a recreated page is
-a fresh id.
+last edit (git) and last view (this column) are old. Lives on the stable-id
+row (not a separate table): it's a single attribute of the page — an
+event-log of views would earn its own table — and the id survives moves
+and trash/restore, so no lifecycle re-keying is needed.
 """
 
 from __future__ import annotations
@@ -23,21 +23,11 @@ depends_on = None
 
 def upgrade() -> None:
     inspector = sa.inspect(op.get_bind())
-    if inspector.has_table("page_views"):
+    cols = {c["name"] for c in inspector.get_columns("wiki_doc_ids")}
+    if "last_viewed_at" in cols:
         return
-    op.create_table(
-        "page_views",
-        sa.Column("doc_id", sa.Text(), primary_key=True),
-        sa.Column(
-            "last_viewed_at",
-            sa.Text(),
-            nullable=False,
-            server_default=sa.text(
-                "to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')"
-            ),
-        ),
-    )
+    op.add_column("wiki_doc_ids", sa.Column("last_viewed_at", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_table("page_views")
+    op.drop_column("wiki_doc_ids", "last_viewed_at")

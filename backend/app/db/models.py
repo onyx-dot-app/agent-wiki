@@ -1273,24 +1273,6 @@ class UpdatePolicy(Base):
     )
 
 
-class PageView(Base):
-    """Last time a wiki page was *read* — by a human opening it or an agent
-    (chat/MCP) reading it. **Postgres-only**, keyed by the page's stable doc
-    id (``wiki_doc_ids``), not its path: renames/moves need no re-keying, a
-    restore from Trash keeps its history, and a page recreated at an old path
-    is a new id that inherits nothing. One row per page, updated with a
-    coarse throttle (a page read many times an hour writes once) — this feeds
-    staleness detection, which thinks in months, so second-precision
-    freshness is deliberately not a goal."""
-
-    __tablename__ = "page_views"
-
-    doc_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    last_viewed_at: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
-    )
-
-
 class WikiDocId(Base):
     """Stable identity for a wiki page or folder — the path↔id mapping.
 
@@ -1311,6 +1293,11 @@ class WikiDocId(Base):
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     path: Mapped[str] = mapped_column(Text, nullable=False)
+    # When the page was last *read* (human page open, or chat/MCP agent
+    # read at HEAD) — coarse (throttled ~1h) and NULL until a view is
+    # recorded. An attribute of the page, not an event log: a per-view
+    # history would earn its own table; a single timestamp lives here.
+    last_viewed_at: Mapped[str | None] = mapped_column(Text)
     kind: Mapped[str] = mapped_column(Text, nullable=False)  # "page" | "folder"
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT

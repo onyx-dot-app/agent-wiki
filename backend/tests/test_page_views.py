@@ -1,9 +1,10 @@
 """Last-viewed tracking — the read-side signal for staleness detection.
 
 A view = a human page open (HTTP HEAD read) or an agent read over chat/MCP
-(``read_doc``/``read_page``, HEAD only). Rows are keyed by stable doc id, so
-history survives moves and trash/restore with no re-keying, and a recreated
-page (new id) inherits nothing. Writes are coarse on purpose.
+(``read_doc``/``read_page``, HEAD only). The value is a column on the page's
+stable-id row (wiki_doc_ids), so it survives moves and trash/restore with no
+re-keying, and a recreated page (new id row) starts at NULL. Writes are
+coarse on purpose.
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import update as sa_update
 
-from app.db.models import PageView
+from app.db.models import WikiDocId
 from app.db.session import session
 from app.llm.agents.tools import dispatch as registry_dispatch
 from app.main import create_app
@@ -41,8 +42,8 @@ def _set_stored(path: str, dt: datetime) -> None:
     doc_id = doc_ids.id_for_path(path)
     with session() as s:
         s.execute(
-            sa_update(PageView)
-            .where(PageView.doc_id == doc_id)
+            sa_update(WikiDocId)
+            .where(WikiDocId.id == doc_id)
             .values(last_viewed_at=dt.strftime("%Y-%m-%d %H:%M:%S"))
         )
 
