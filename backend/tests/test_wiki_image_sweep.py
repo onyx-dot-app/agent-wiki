@@ -93,6 +93,22 @@ def test_never_referenced_image_is_flagged_after_grace_then_deleted_after_retent
     assert image_store.stat(image_id) is None
 
 
+def test_prefix_url_with_longer_hex_tail_is_not_a_reference(tmp_repo) -> None:
+    # A URL whose id merely starts with this image's id resolves elsewhere.
+    path = "guides/prefix.md"
+    image_id = _put_image(path)
+    _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
+    wiki_git.commit_file(
+        path, f"![x](/api/wiki/images/{image_id}ab)\n", "seed", author=None
+    )
+
+    _run_sweep()
+
+    row = _image_row(image_id)
+    assert row is not None
+    assert row.unreferenced_since is not None
+
+
 def test_bare_id_in_page_text_is_not_a_reference(tmp_repo) -> None:
     # Only the full serving URL counts. A coincidental 16-hex string in page
     # text (a sha, a random token) must not keep an orphan alive.

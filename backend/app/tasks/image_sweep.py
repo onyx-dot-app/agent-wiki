@@ -6,6 +6,7 @@ storage bounded without touching the wiki commit path.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from app.metrics import (
@@ -40,13 +41,21 @@ def _parse(ts: str | None) -> datetime | None:
 
 
 def _referenced(url_by_id: dict[str, str]) -> set[str]:
-    """Ids whose serving URL appears in the working tree or a live edit buffer."""
-    matched_urls = wiki_git.grep_working_tree_fixed(list(url_by_id.values()))
+    """Ids whose serving URL appears in the working tree or a live edit buffer.
+
+    Hex-bounded on both surfaces so a URL sharing this one's prefix (a longer
+    hex tail resolving to a different id) never counts as a reference.
+    """
+    matched_urls = wiki_git.grep_working_tree_hex_bounded(list(url_by_id.values()))
     draft_blob = "\n".join(coedit.active_buffer_texts())
     return {
         image_id
         for image_id, url in url_by_id.items()
-        if url in matched_urls or (draft_blob and url in draft_blob)
+        if url in matched_urls
+        or (
+            draft_blob
+            and re.search(re.escape(url) + r"([^0-9a-f]|$)", draft_blob) is not None
+        )
     }
 
 
