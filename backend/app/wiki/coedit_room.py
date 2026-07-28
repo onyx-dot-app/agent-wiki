@@ -242,13 +242,18 @@ def read_body_sync(room: Room, *, timeout: float = 2.0) -> str:
     its own worker thread pool, never the event loop, so they can't safely
     touch a ``Doc`` directly the way the WS route does — that wants a live
     room's current content (``app/api/wiki.py``'s session-aware live read).
-    Raises ``TimeoutError`` if the loop doesn't respond in time; the caller
-    should treat that as "couldn't get the live body" and fall back, not as
-    a request-failing error — the read itself is fast, pure in-memory work,
-    so a timeout means the loop is unusually busy, not that anything is
-    wrong with the room.
+    Raises ``TimeoutError`` if the loop doesn't respond in time, or the
+    bound loop is already closed (e.g. a room outlives the connection that
+    registered it, as can happen with a test client that runs each
+    connection on its own short-lived loop) — the caller should treat that
+    as "couldn't get the live body" and fall back, not as a request-failing
+    error. A live timeout means the loop is unusually busy, not that
+    anything is wrong with the room.
     """
     if _main_loop is None:
         raise RuntimeError("coedit_room: main loop not bound yet")
-    future = asyncio.run_coroutine_threadsafe(_read_body(room), _main_loop)
+    try:
+        future = asyncio.run_coroutine_threadsafe(_read_body(room), _main_loop)
+    except RuntimeError as e:
+        raise TimeoutError("coedit_room: main loop closed") from e
     return future.result(timeout=timeout)
