@@ -1,6 +1,6 @@
 {
   "name": "write_doc",
-  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. When CREATING a new page, optionally pass `template_id` (from `list_templates`) to seed the page's update policy from that template (auto-update default + update instruction). Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces.",
+  "description": "Overwrite a wiki markdown document with a new full body, OR create a new file if `path` doesn't exist. Use ONLY for new documents or wholesale restructures (more than ~half the file changing). Before CREATING a page for a topic the user described (rather than an explicitly named page/location), first `search_wiki` the topic and skim the hits — update or link the existing coverage instead of duplicating it. For surgical changes prefer `edit_doc`. Always pass the COMPLETE new body, not a patch. When CREATING a new page, optionally pass `template_id` (from `list_templates`) to seed the page's update policy from that template (auto-update default + update instruction). Returns the commit SHA, the unified diff, and any broken markdown links the new body introduces.",
   "input_schema": {
     "type": "object",
     "properties": {
