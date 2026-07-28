@@ -43,10 +43,10 @@ def _parse(ts: str | None) -> datetime | None:
 def _referenced(url_by_id: dict[str, str]) -> set[str]:
     """Ids whose serving URL appears in the working tree or a live edit buffer.
 
-    Hex-bounded on both surfaces so a URL sharing this one's prefix (a longer
-    hex tail resolving to a different id) never counts as a reference.
+    URL-bounded on both surfaces so a longer URL sharing this one's prefix
+    (a hex tail, a suffix like .png, a deeper segment) never counts.
     """
-    matched_urls = wiki_git.grep_working_tree_hex_bounded(list(url_by_id.values()))
+    matched_urls = wiki_git.grep_working_tree_url_bounded(list(url_by_id.values()))
     draft_blob = "\n".join(coedit.active_buffer_texts())
     return {
         image_id
@@ -54,7 +54,8 @@ def _referenced(url_by_id: dict[str, str]) -> set[str]:
         if url in matched_urls
         or (
             draft_blob
-            and re.search(re.escape(url) + r"([^0-9a-fA-F]|$)", draft_blob) is not None
+            and re.search(re.escape(url) + r"([^A-Za-z0-9._~%/-]|$)", draft_blob)
+            is not None
         )
     }
 
@@ -115,7 +116,9 @@ def sweep_wiki_images() -> None:
                             image_store.set_unreferenced_since(candidate.id, None)
                             cleared += 1
                             continue
-                        if image_store.delete(candidate.id):
+                        if image_store.delete_if_unreferenced_by_drafts(
+                            candidate.id, url_by_id[candidate.id]
+                        ):
                             deleted += 1
                 except Exception:
                     log.exception("image sweep: delete failed for %s", candidate.id)
