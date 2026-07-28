@@ -10,6 +10,7 @@ import {
   BlockIdentity,
   HeadingBackspace,
   HtmlBlock,
+  Image,
   InlineCode,
   MarkdownLink,
   OtherBlock,
@@ -22,19 +23,22 @@ import {
 } from "@/lib/editor/blocks";
 import { CommandMenu } from "@/lib/editor/commandMenu";
 import { AnchoredHighlights } from "@/lib/editor/highlights";
+import { imageSupport } from "@/lib/editor/images";
 import { presenceExtension } from "@/lib/editor/presence";
 
 /**
- * The Tiptap extension set for the live wiki editor. Images stay deferred
- * (unrelated, separate gap) — everything else the backend's markdown<->Yjs
- * codec can produce (`app/wiki/markdown_yjs.py`) has a matching node here;
- * see `blocks.ts` for why that's a correctness requirement, not scaffold
- * completeness.
+ * The Tiptap extension set for the live wiki editor. Every node the backend's
+ * markdown<->Yjs codec can produce (`app/wiki/markdown_yjs.py`) has a matching
+ * node here. See `blocks.ts` for why that's a correctness requirement, not
+ * scaffold completeness. `image` additionally gets paste/drop upload and a
+ * resize NodeView, both in `images.ts`, wired via `imageSupport(pagePath)`
+ * below (the upload endpoint is page-scoped).
  */
 export function tiptapExtensions(
   doc: Y.Doc,
   awareness: Awareness,
   placeholder?: string,
+  pagePath?: string,
 ): AnyExtension[] {
   return [
     StarterKit.configure({
@@ -73,6 +77,7 @@ export function tiptapExtensions(
     Table,
     TableRow,
     TableSeparator,
+    Image,
     Collaboration.configure({
       document: doc,
       // Must match the backend's ROOT_XML_KEY (app/wiki/markdown_yjs.py) —
@@ -88,5 +93,6 @@ export function tiptapExtensions(
     AnchoredHighlights,
     presenceExtension(awareness),
     CommandMenu,
+    imageSupport(pagePath),
   ];
 }

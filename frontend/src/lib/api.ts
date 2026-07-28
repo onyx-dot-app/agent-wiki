@@ -69,6 +69,22 @@ export async function apiFetchBlob(
   return res.blob();
 }
 
+/** Like {@link apiFetch} but POSTs a raw binary body (image bytes, etc.):
+ * same base URL, credentials, and `{error}`-envelope handling, but sends the
+ * `Blob` verbatim under its real `contentType` instead of a JSON body. Keeps
+ * binary uploads on the same network seam. The response is parsed as JSON. */
+export function apiUpload<T>(
+  path: string,
+  body: Blob,
+  contentType: string,
+): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "POST",
+    headers: { "content-type": contentType },
+    body,
+  });
+}
+
 /** Resolves `path` against `BASE` the same way {@link apiFetch} does, but as
  * a `ws://`/`wss://` URL for a `new WebSocket(...)` caller. Kept here (not in
  * the coedit-specific client) so `BASE`'s resolution logic — relative vs. an

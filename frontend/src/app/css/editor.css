@@ -1,6 +1,7 @@
 /* Tiptap/ProseMirror styling for the live wiki editor
    (frontend/src/lib/editor/). Every selector here targets ProseMirror's own
-   rendered output directly — Tiptap doesn't let us hand a className to each
+   rendered output directly, except the `.editor-image*` block, whose classes
+   are set by the NodeView in `lib/editor/images.ts` — Tiptap doesn't let us hand a className to each
    node without a custom NodeView per construct, so this is real CSS against
    the DOM ProseMirror actually produces, not Tailwind utilities on our own
    JSX. Opal tokens throughout, same as the rest of the app.
@@ -294,4 +295,99 @@
 }
 .editor-prose .ProseMirror-yjs-selection {
   opacity: 0.3;
+}
+
+/* Inline image node (lib/editor/images.ts). The NodeView renders this raw
+   token-styled DOM directly, so unlike every construct above these classes
+   are set by that view, not by ProseMirror's default rendering. Width comes
+   from the img's inline style (parsed from the src #w= fragment), capped to
+   the column by max-width. */
+.editor-prose .editor-image {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  vertical-align: bottom;
+}
+.editor-prose .editor-image-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-08);
+}
+.editor-prose .editor-image.ProseMirror-selectednode .editor-image-img {
+  outline: 2px solid var(--border-05);
+  outline-offset: 1px;
+}
+
+/* Resize handles, revealed only while the node is selected and the view is
+   editable (the view toggles .is-resizable). A right-edge and a bottom-right
+   corner handle, both driving width. */
+.editor-prose .editor-image-handle {
+  display: none;
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--background-tint-00);
+  border: 1px solid var(--background-tint-inverted-00);
+  border-radius: var(--radius-04);
+  z-index: 1;
+}
+.editor-prose .editor-image.is-resizable .editor-image-handle {
+  display: block;
+}
+.editor-prose .editor-image-handle-e {
+  top: 50%;
+  right: -5px;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+.editor-prose .editor-image-handle-se {
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
+}
+
+/* Broken-image fallback, swapped in by the view's img onerror. */
+.editor-prose .editor-image-broken {
+  display: none;
+}
+.editor-prose .editor-image.is-broken .editor-image-img {
+  display: none;
+}
+.editor-prose .editor-image.is-broken .editor-image-broken {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  min-height: 80px;
+  padding: 0.5rem 0.75rem;
+  border: 1px dashed var(--border-02);
+  border-radius: var(--radius-08);
+  background: var(--background-tint-02);
+  color: var(--text-03);
+  font-size: 0.85em;
+  line-height: 1.2;
+}
+
+/* Upload-in-progress placeholder (a widget decoration from the upload
+   plugin), replaced by the real image node on success or removed on
+   failure. */
+.editor-prose .editor-image-uploading {
+  display: inline-block;
+  width: 140px;
+  height: 100px;
+  vertical-align: bottom;
+  border-radius: var(--radius-08);
+  background: var(--background-tint-02);
+  animation: editor-image-pulse 1.2s ease-in-out infinite;
+}
+@keyframes editor-image-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
 }

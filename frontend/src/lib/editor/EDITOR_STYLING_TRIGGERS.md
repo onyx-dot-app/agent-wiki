@@ -20,7 +20,8 @@ RFC 2119.
   for constructs with a custom backspace behavior — see §2 — a hand-built
   keyboard-shortcut pair; see `blocks.ts`).
 - **UI-based** — reachable only through an explicit user action, today the
-  `/` slash command menu (`commandMenu.tsx`). No amount of typing markdown
+  `/` slash command menu (`commandMenu.tsx`) or, for images, pasting or
+  dropping the file itself. No amount of typing markdown
   syntax converts it; the raw characters stay inert text.
 
 ## 2. Backspace behavior for shortcut conversions
@@ -70,7 +71,7 @@ happens to land on.
 | Emoji shortcode (`:name:`)     | Text-shortcut           | Not yet implemented (neither the parser nor the editor recognizes shortcodes today)                                                                                                        |
 | Links                          | UI-only (slash command) | **Not yet compliant** — `Link`'s `autolink`/`linkOnPaste` are still on, and there's no slash-command entry to create one deliberately. Open follow-up.                                     |
 | Tables                         | UI-only (slash command) | No text-shortcut exists (correct), but there's also no slash-command entry yet — the opaque-row table shape has no sensible "insert blank table" seed to build one from. Open follow-up.   |
-| Images                         | UI-only (slash command) | Deferred entirely — not implemented on either end                                                                                                                                          |
+| Images                         | UI-only (paste / drop)  | Editor side implemented (`images.ts`). Pasting or dropping an image file uploads it (`POST /api/wiki/images`) and inserts an `image` node, resizable via NodeView drag handles. Pasted rich HTML containing `<img>` also becomes this node (no upload), via `parseHTML` in `blocks.ts`. No text-shortcut or slash entry is offered. Backend endpoint: `POST /api/wiki/images` (`backend/app/api/images.py`). |
 | Footnotes                      | UI-only (slash command) | Deferred entirely — not implemented on either end                                                                                                                                          |
 
 Note on the checkbox trigger: bullet list's own shortcut (`- ` alone) fires
