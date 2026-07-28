@@ -112,6 +112,12 @@ class ImageNodeView implements NodeView {
   private applyAttrs(): void {
     const src = this.node.attrs.src as string;
     this.img.alt = (this.node.attrs.alt as string) ?? "";
+    const title = this.node.attrs.title as string | null;
+    if (title) {
+      this.img.title = title;
+    } else {
+      this.img.removeAttribute("title");
+    }
     const nextBase = stripFragment(src);
     if (this.loadedBase !== nextBase) {
       this.loadedBase = nextBase;
