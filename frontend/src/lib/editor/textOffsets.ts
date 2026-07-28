@@ -13,10 +13,15 @@
  * headings/lists/blockquotes/inline marks/tables. A precise mapper would
  * need to mirror `app/wiki/markdown_yjs.py`'s serialization rules
  * client-side (or have the backend report PM-compatible positions
- * directly) — flagged as follow-up work, not solved here. Until then, this
- * backs comment/source anchoring and peer-cursor/deep-link scroll-to; a
- * wrong-by-a-few-characters anchor is the accepted cost of shipping the
- * live editor now rather than blocking on this.
+ * directly) — flagged as follow-up work, not solved here. This backs
+ * comment anchoring and peer-cursor/deep-link scroll-to; a
+ * wrong-by-a-few-characters *display* position is the accepted cost of
+ * shipping the live editor now rather than blocking on this. The one place
+ * that can't tolerate drift — the span persisted when a comment is
+ * created — is corrected server-side against the real markdown source
+ * before it's ever stored (`app/wiki/comments.py:create_thread`, via
+ * `comment_anchor.resolve_exact_span`), so this offset only has to get the
+ * *creation-time request* in the right neighborhood, not exactly right.
  */
 import type { Editor } from "@tiptap/core";
 

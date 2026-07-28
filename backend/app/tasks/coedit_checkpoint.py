@@ -90,6 +90,15 @@ def checkpoint_coedit_session_task(session_id: int, *, request_id: str | None = 
             )
     if not coedit.list_participants(session_id):
         coedit.close_if_clean(session_id)
+    # Checked by current status rather than close_if_clean's own return —
+    # checkpoint_session itself can also close a session directly (its
+    # missing-path guard), bypassing close_if_clean entirely. Notifying
+    # again for an already-closed session is harmless (evict_if_local
+    # no-ops once the room's gone), so this stays correct even for a
+    # duplicate/retried task on a session closed by an earlier attempt.
+    sess = coedit.get_session(session_id)
+    if sess is not None and sess.status == coedit.SessionStatus.CLOSED.value:
+        _notify_session_closed(session_id)
 
 
 @coedit_queue.periodic_task(crontab())
@@ -167,3 +176,22 @@ def _handle_remote_checkpoint_landed(payload: dict[str, object]) -> None:
 
 
 bus.register(_CHECKPOINT_LANDED_BUS_KIND, _handle_remote_checkpoint_landed)
+
+_SESSION_CLOSED_BUS_KIND = "coedit_session_closed"
+
+
+def _notify_session_closed(session_id: int) -> None:
+    """A session just closed (this task, on last-participant-out) — evict
+    its in-memory Room in whichever process (if any) holds it. Without
+    this, a closed session's Room (Doc + Awareness + tracker) pins memory
+    in its owning web app process forever: nothing else ever calls
+    ``coedit_room.close_room``."""
+    coedit_room.evict_if_local(session_id)
+    bus.emit({"kind": _SESSION_CLOSED_BUS_KIND, "session_id": session_id})
+
+
+def _handle_remote_session_closed(payload: dict[str, object]) -> None:
+    coedit_room.evict_if_local(int(payload["session_id"]))  # type: ignore[arg-type]
+
+
+bus.register(_SESSION_CLOSED_BUS_KIND, _handle_remote_session_closed)

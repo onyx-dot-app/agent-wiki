@@ -143,6 +143,43 @@ def _snap_to_words(body: str, start: int, end: int) -> tuple[int, int]:
     return start, end
 
 
+def resolve_exact_span(
+    body: str, approx_start: int, approx_end: int, quoted_text: str
+) -> tuple[int, int]:
+    """Correct an approximate ``[start, end)`` span against the *real*
+    markdown-source ``body``, using ``quoted_text`` to locate the true span.
+
+    The frontend's span is only an estimate: it comes from ``textOffsets.ts``'s
+    plain-text offset mapper, which strips markdown syntax (a heading's
+    plain-text content is ``"Heading"``, not ``"# Heading"``), so it
+    under-counts by exactly that syntax's overhead. Left uncorrected, the
+    stored offsets silently drift from the real source — and
+    ``remap_range`` above is an *exact* character diff between two bodies,
+    with no fuzzy matching, so an already-wrong starting span only ever
+    compounds through every future remap.
+
+    Returns the approximate span unchanged if ``quoted_text`` is empty, or
+    isn't found anywhere in ``body`` at all (nothing to correct against —
+    never worse than the caller's own estimate). When ``quoted_text``
+    occurs more than once, picks the occurrence whose start is closest to
+    ``approx_start``: the estimate is off by the syntax overhead *before*
+    the span, so the true position is always nearby, never far.
+    """
+    if not quoted_text:
+        return approx_start, approx_end
+    if body[approx_start:approx_end] == quoted_text:
+        return approx_start, approx_end  # already exact — no syntax preceded it
+    starts: list[int] = []
+    idx = body.find(quoted_text)
+    while idx != -1:
+        starts.append(idx)
+        idx = body.find(quoted_text, idx + 1)
+    if not starts:
+        return approx_start, approx_end
+    best = min(starts, key=lambda s: abs(s - approx_start))
+    return best, best + len(quoted_text)
+
+
 def remap_range(
     old_body: str, new_body: str, start: int, end: int
 ) -> tuple[int, int] | None:

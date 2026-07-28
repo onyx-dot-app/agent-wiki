@@ -134,18 +134,25 @@ def test_last_update_author_returns_most_recent(users):
 def test_rebase_onto_bumps_seq_and_clears_updates(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
-    res = coedit.rebase_onto(s.id, new_base_sha="sha2", checkpointed=False)
+    res = coedit.rebase_onto(s.id, new_base_sha="sha2", snapshot=b"snap", checkpointed=False)
     assert res is not None
     assert res.ydoc_seq == 2
     assert res.base_sha == "sha2"
     assert res.ydoc_checkpointed_seq == 0  # checkpointed=False leaves the watermark alone
     assert coedit.updates_since(s.id, 0).updates == []
+    # The snapshot moves with the rebase, to the new ydoc_seq — otherwise a
+    # later checkpoint would rebuild from a stale snapshot plus the
+    # now-empty update log and drop everything since the last advance.
+    row = coedit.get_session_for_checkpoint(s.id)
+    assert row is not None
+    assert row.ydoc_snapshot == b"snap"
+    assert row.ydoc_snapshot_seq == 2
 
 
 def test_rebase_onto_checkpointed_advances_watermark(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
-    res = coedit.rebase_onto(s.id, new_base_sha="sha2", checkpointed=True)
+    res = coedit.rebase_onto(s.id, new_base_sha="sha2", snapshot=b"snap", checkpointed=True)
     assert res is not None
     assert res.ydoc_checkpointed_seq == res.ydoc_seq
     assert res.last_checkpoint_at is not None
@@ -154,7 +161,7 @@ def test_rebase_onto_checkpointed_advances_watermark(users):
 def test_rebase_onto_closed_session_returns_none(users):
     s = coedit.open_session(_PATH, base_sha=None)
     coedit.close_session(s.id)
-    assert coedit.rebase_onto(s.id, new_base_sha="sha2", checkpointed=False) is None
+    assert coedit.rebase_onto(s.id, new_base_sha="sha2", snapshot=b"snap", checkpointed=False) is None
 
 
 def test_participants_join_touch_leave(users):

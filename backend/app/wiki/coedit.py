@@ -373,7 +373,9 @@ def updates_since(session_id: int, after_seq: int) -> UpdatesSince:
         )
 
 
-def rebase_onto(session_id: int, *, new_base_sha: str, checkpointed: bool) -> SessionRow | None:
+def rebase_onto(
+    session_id: int, *, new_base_sha: str, snapshot: bytes, checkpointed: bool
+) -> SessionRow | None:
     """Record that the session's document was rebased onto ``new_base_sha``
     — either a live-rebase re-seed (an out-of-band agent/ingest commit
     folded in by fully re-seeding the in-process room from the 3-way-merged
@@ -387,6 +389,17 @@ def rebase_onto(session_id: int, *, new_base_sha: str, checkpointed: bool) -> Se
     reconnecting client could meaningfully replay onto the post-rebase doc,
     so catch-up must start clean from the new seq rather than attempt to
     replay through the discontinuity.
+
+    ``snapshot`` — a throwaway ``Doc`` seeded from the rebased text, its
+    ``get_update()`` bytes — must move in lockstep with that clear:
+    ``ydoc_snapshot``/``ydoc_snapshot_seq`` advance to the new ``ydoc_seq``
+    in the same update. Skipping this was a real bug (caught in review): the
+    checkpoint engine never touches this room's live ``Doc``, only
+    ``(ydoc_snapshot, coedit_updates)`` (see ``coedit_checkpoint.py``) — with
+    the log cleared but the snapshot left pointing at its pre-rebase seq, a
+    later checkpoint would rebuild from that stale snapshot plus an empty
+    log, silently dropping every edit made since the snapshot was last
+    advanced.
     """
     now = _iso(_now())
     with session() as s:
@@ -404,6 +417,8 @@ def rebase_onto(session_id: int, *, new_base_sha: str, checkpointed: bool) -> Se
         ).one_or_none()
         if row is None:
             return None
+        row.ydoc_snapshot = snapshot
+        row.ydoc_snapshot_seq = row.ydoc_seq
         if checkpointed:
             row.ydoc_checkpointed_seq = row.ydoc_seq
             row.last_checkpoint_at = now

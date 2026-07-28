@@ -129,6 +129,33 @@ def close_room(session_id: int) -> None:
         _rooms.pop(session_id, None)
 
 
+async def _evict(session_id: int) -> None:
+    room = get_room(session_id)
+    if room is None:
+        return  # left/evicted between the schedule and this running
+    # A Doc-adjacent operation (unsubscribes the tracker's observe_deep
+    # callback) — must run inline on this room's own thread, not via
+    # to_thread; see the module docstring.
+    room.tracker.stop()
+    close_room(session_id)
+
+
+def evict_if_local(session_id: int) -> None:
+    """Evict this process's in-memory room for a session that's just
+    closed (``app/tasks/coedit_checkpoint.py``, on last-participant-out) —
+    a no-op dict lookup if this process holds no room for it, which is the
+    common case: rooms only ever live in a web app process (created by
+    ``create_room``, called only from the WS route), never a queue
+    worker's. Scheduled onto the room's own thread the same way
+    ``app/tasks/coedit_checkpoint.py``'s cross-process checkpoint-landed
+    notify schedules its own room-touching reconcile step — this is that
+    same "which process, if any, holds this session's room" problem again.
+    """
+    if get_room(session_id) is None:
+        return
+    run_on_main_loop(_evict(session_id))
+
+
 def reset_for_tests() -> None:
     """Clear the in-process room registry. Each test gets a fresh Postgres
     database whose ``coedit_sessions`` id sequence restarts at 1 (see

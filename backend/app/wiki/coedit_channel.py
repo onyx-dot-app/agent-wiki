@@ -240,6 +240,47 @@ _partial_started_at: dict[str, float] = {}
 _partial_lock = threading.Lock()
 _PARTIAL_TTL_SECONDS = 30.0
 
+# bus.emit() is a blocking Postgres NOTIFY round-trip. broadcast_yjs fires on
+# every content/awareness frame from the WS route's Doc-touching code path
+# (app/api/coedit.py's _apply_yjs_frame — several times a second per writer,
+# more for a chunked large paste), which must stay inline on the event loop
+# and can't itself go through asyncio.to_thread without also offloading the
+# Doc access it's interleaved with. A dedicated drain thread absorbs the
+# blocking NOTIFY so the event loop's own call here is a cheap, non-blocking
+# queue.put_nowait — mirrors app/realtime/bus.py's own LISTEN thread: started
+# explicitly from app/main.py's lifespan, not at import time.
+_emit_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+_emit_thread: threading.Thread | None = None
+_emit_stop = threading.Event()
+
+
+def start_emit_drain() -> None:
+    """Start the deferred cross-process emit thread — call once from the web
+    process at startup (``app/main.py``'s lifespan), alongside
+    ``bus.start_listener()``."""
+    global _emit_thread
+    if _emit_thread is not None and _emit_thread.is_alive():
+        return
+    _emit_stop.clear()
+    _emit_thread = threading.Thread(
+        target=_drain_emit_queue, name="coedit-emit-drain", daemon=True
+    )
+    _emit_thread.start()
+
+
+def stop_emit_drain() -> None:
+    """Signal the drain thread to exit. Mostly for tests + clean shutdown."""
+    _emit_stop.set()
+
+
+def _drain_emit_queue() -> None:
+    while not _emit_stop.is_set():
+        try:
+            payload = _emit_queue.get(timeout=1.0)
+        except queue.Empty:
+            continue
+        bus.emit(payload)  # already best-effort — logs + swallows its own errors
+
 
 def broadcast_yjs(coedit_session_id: int, payload: bytes) -> None:
     """Relay a raw Yjs sync/awareness protocol message to every connection in
@@ -250,18 +291,21 @@ def broadcast_yjs(coedit_session_id: int, payload: bytes) -> None:
     old op-based ``broadcast_op`` echoed to the sender too, for the same
     reason (relying on client-side ``client_id`` matching to skip re-
     applying, not on the server withholding the echo).
+
+    The cross-process fan-out is queued (``_emit_queue``), not emitted
+    inline — see that queue's own comment.
     """
     _deliver_local_bytes(coedit_session_id, payload)
     b64 = base64.b64encode(payload).decode("ascii")
     if len(b64) <= _MAX_CHUNK_B64_LEN:
-        bus.emit(
+        _emit_queue.put_nowait(
             {"kind": _YJS_BUS_KIND, "session_id": coedit_session_id, "i": 0, "n": 1, "group": None, "chunk": b64}
         )
         return
     group = uuid.uuid4().hex
     chunks = [b64[i : i + _MAX_CHUNK_B64_LEN] for i in range(0, len(b64), _MAX_CHUNK_B64_LEN)]
     for i, chunk in enumerate(chunks):
-        bus.emit(
+        _emit_queue.put_nowait(
             {
                 "kind": _YJS_BUS_KIND,
                 "session_id": coedit_session_id,

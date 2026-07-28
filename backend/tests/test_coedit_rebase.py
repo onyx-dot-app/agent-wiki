@@ -21,7 +21,7 @@ from app.models.wiki import ChangeKind
 from app.tasks import coedit_rebase as coedit_rebase_task
 from app.wiki import coedit, coedit_checkpoint, coedit_rebase, coedit_room
 from app.wiki import git as wiki_git
-from app.wiki.markdown_yjs import ROOT_XML_KEY, reconstruct_body
+from app.wiki.markdown_yjs import ROOT_XML_KEY, reconstruct_body, seed_doc_from_markdown
 from app.wiki.utils import commit_and_fan_out
 
 _PATH = "guides/setup.md"
@@ -127,7 +127,12 @@ def test_rebase_skips_stale_ancestor_head(repo):
     # base_sha advances to a descendant (e.g. a checkpoint committed ONE).
     new_sha = wiki_git.commit_file(_PATH, "ONE\ntwo\n", "checkpoint", author="A <a@x.com>")
     coedit_room.reseed(room, "ONE\ntwo\n", new_sha)
-    coedit.rebase_onto(sess.id, new_base_sha=new_sha, checkpointed=True)
+    coedit.rebase_onto(
+        sess.id,
+        new_base_sha=new_sha,
+        snapshot=seed_doc_from_markdown("ONE\ntwo\n").get_update(),
+        checkpointed=True,
+    )
 
     # The late trigger still carries old_sha (an ancestor of the current base_sha).
     outcome = _run(coedit_rebase.rebase_session(sess.id, old_sha))

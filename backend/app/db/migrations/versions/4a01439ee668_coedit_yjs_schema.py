@@ -2,7 +2,11 @@
 
 Migrates ``coedit_sessions``/``coedit_ops`` from the OT (plain-text
 buffer + range-op log) shape to a Yjs (CRDT doc + binary-update log) shape:
-drops ``buffer_text`` in favor of ``ydoc_snapshot`` (bytea), renames
+drops ``buffer_text`` in favor of ``ydoc_snapshot`` (bytea) +
+``ydoc_snapshot_seq`` (the ``ydoc_seq`` those bytes represent — a checkpoint
+rebuilds a throwaway ``Doc`` from the snapshot plus every ``coedit_updates``
+row with ``seq`` in ``(ydoc_snapshot_seq, ydoc_seq]``, rather than touching
+any process's live in-memory room directly), renames
 ``version``/``checkpointed_version`` to ``ydoc_seq``/``ydoc_checkpointed_seq``
 (same monotonic-watermark semantics, renamed for clarity), and replaces
 ``coedit_ops`` (JSONB range-op log) with ``coedit_updates`` (bytea Yjs-update
@@ -12,7 +16,7 @@ inspector because ``0001_initial`` builds fresh databases from the current
 models.
 
 Revision ID: 4a01439ee668
-Revises: b8d3f6a1c9e7
+Revises: c2e7a4d9f1b8
 Create Date: 2026-07-27 00:00:00.000000+00:00
 """
 from __future__ import annotations
@@ -24,7 +28,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = "4a01439ee668"
-down_revision: str | None = "b8d3f6a1c9e7"
+down_revision: str | None = "c2e7a4d9f1b8"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
@@ -60,6 +64,13 @@ def upgrade() -> None:
     if "ydoc_snapshot" not in cols:
         op.add_column(
             "coedit_sessions", sa.Column("ydoc_snapshot", sa.LargeBinary(), nullable=True)
+        )
+    if "ydoc_snapshot_seq" not in cols:
+        op.add_column(
+            "coedit_sessions",
+            sa.Column(
+                "ydoc_snapshot_seq", sa.BigInteger(), server_default=sa.text("0"), nullable=False
+            ),
         )
     _rename_or_drop("coedit_sessions", "version", "ydoc_seq")
     _rename_or_drop("coedit_sessions", "checkpointed_version", "ydoc_checkpointed_seq")
@@ -140,6 +151,8 @@ def downgrade() -> None:
         )
     if "ydoc_seq" in cols:
         op.alter_column("coedit_sessions", "ydoc_seq", new_column_name="version")
+    if "ydoc_snapshot_seq" in cols:
+        op.drop_column("coedit_sessions", "ydoc_snapshot_seq")
     if "ydoc_snapshot" in cols:
         op.drop_column("coedit_sessions", "ydoc_snapshot")
     if "buffer_text" not in cols:

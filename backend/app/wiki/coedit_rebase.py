@@ -96,8 +96,19 @@ async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         log.info("coedit live-rebase: conflict on %s", sess.path)
         return RebaseOutcome.CONFLICT
 
+    def _snapshot_for(merged: str) -> bytes:
+        # A throwaway Doc, seeded and immediately discarded after reading its
+        # bytes — never touched again, so building it off-loop is safe (same
+        # as coedit_checkpoint.py's own snapshot-on-diverge case).
+        return markdown_yjs.seed_doc_from_markdown(merged).get_update()
+
+    snapshot = await asyncio.to_thread(_snapshot_for, mr.merged)
     res = await asyncio.to_thread(
-        coedit.rebase_onto, session_id, new_base_sha=head_sha, checkpointed=False
+        coedit.rebase_onto,
+        session_id,
+        new_base_sha=head_sha,
+        snapshot=snapshot,
+        checkpointed=False,
     )
     if res is None:
         return RebaseOutcome.RACED
