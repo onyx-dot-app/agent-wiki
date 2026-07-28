@@ -136,7 +136,9 @@ def test_last_update_author_returns_most_recent(users):
 def test_rebase_onto_bumps_seq_and_clears_updates(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
-    res = coedit.rebase_onto(s.id, new_base_sha="sha2", snapshot=b"snap", body="body", checkpointed=False)
+    res = coedit.rebase_onto(
+        s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=1, checkpointed=False
+    )
     assert res is not None
     assert res.ydoc_seq == 2
     assert res.base_sha == "sha2"
@@ -154,7 +156,9 @@ def test_rebase_onto_bumps_seq_and_clears_updates(users):
 def test_rebase_onto_checkpointed_advances_watermark(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
-    res = coedit.rebase_onto(s.id, new_base_sha="sha2", snapshot=b"snap", body="body", checkpointed=True)
+    res = coedit.rebase_onto(
+        s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=1, checkpointed=True
+    )
     assert res is not None
     assert res.ydoc_checkpointed_seq == res.ydoc_seq
     assert res.last_checkpoint_at is not None
@@ -163,7 +167,34 @@ def test_rebase_onto_checkpointed_advances_watermark(users):
 def test_rebase_onto_closed_session_returns_none(users):
     s = coedit.open_session(_PATH, base_sha=None)
     coedit.close_session(s.id)
-    assert coedit.rebase_onto(s.id, new_base_sha="sha2", snapshot=b"snap", body="body", checkpointed=False) is None
+    assert (
+        coedit.rebase_onto(
+            s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=0, checkpointed=False
+        )
+        is None
+    )
+
+
+def test_rebase_onto_seq_mismatch_returns_none(users):
+    # A concurrent edit bumped ydoc_seq past what the caller observed when it
+    # built snapshot/body — same CAS-miss shape as a closed session: the
+    # rebase must no-op rather than clobber that edit's log row/content (the
+    # bug this test guards: main's OT-era rebase had a base_version CAS for
+    # exactly this race, lost in the CRDT rewrite until restored).
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
+    assert (
+        coedit.rebase_onto(
+            s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=0, checkpointed=False
+        )
+        is None
+    )
+    # Nothing observable changed: the concurrent edit's row/watermark survive.
+    fetched = coedit.get_active_session(_PATH)
+    assert fetched is not None
+    assert fetched.base_sha == "sha1"
+    assert fetched.ydoc_seq == 1
+    assert len(coedit.updates_since(s.id, 0).updates) == 1
 
 
 def test_participants_join_touch_leave(users):

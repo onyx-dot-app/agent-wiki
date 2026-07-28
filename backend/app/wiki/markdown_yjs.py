@@ -69,19 +69,14 @@ _KNOWN_INLINE_TYPES = {
     "s_close",
 }
 
-# Applied innermost-first when wrapping a diff run back into markdown syntax
-# (i.e. iterated in reverse of this tuple) — outer to inner: link, bold,
-# strike, italic, code. Handles arbitrary combinations deterministically; not
-# every combination is meaningfully round-trippable in CommonMark (e.g. code
-# spans can't semantically nest other marks), but this never raises — an
-# unsupported *combination* degrades to best-effort markup, only a fully
-# unrecognized inline *construct* (see _KNOWN_INLINE_TYPES) raises. "code" is
-# still listed here for that documentation value (and skipped defensively if
-# it ever does combine with something else), but in practice it's handled
-# entirely by `_wrap_code_run` before this loop runs — see `_wrap_run` — not
-# by a plain wrap-with-backticks step the way the other three are, since its
-# delimiter is stored as literal text already, not synthesized here.
-_MARK_WRAP_ORDER = ("link", "bold", "strike", "italic", "code")
+# Nesting order for the marks _serialize_inline_text treats as a delimiter
+# stack shared *across* adjacent runs — outer to inner: link, bold, strike,
+# italic. "code" isn't here: a code span's own fence is self-delimiting per
+# its own run's text (_wrap_code_run) and doesn't participate in this
+# cross-run nesting — matching CommonMark, where a code span can't
+# semantically nest (or be nested inside) other marks anyway.
+_NESTING_MARK_ORDER = ("link", "bold", "strike", "italic")
+_SYMMETRIC_MARK_DELIMS = {"italic": "*", "bold": "**", "strike": "~~"}
 
 # A text segment ("text", plain_text, mark_runs) or a hard-break leaf
 # ("hardbreak", None, None) — see module docstring for why a hard break is a
@@ -154,7 +149,16 @@ def _inline_runs(inline_token: Any) -> list[_Segment]:
             # library. A bare href string decodes as an attrs object with
             # every string index as a key, silently producing an empty
             # href. Must be `{href: ...}`.
-            active = {**active, "link": {"href": child.attrs.get("href", "")}}
+            link_attrs: dict[str, Any] = {"href": child.attrs.get("href", "")}
+            title = child.attrs.get("title")
+            if title:
+                # Dropping this on parse (only href was ever captured) was
+                # a real data-loss bug (confirmed in review): a link's
+                # title survived nowhere in the CRDT doc at all, so it was
+                # already gone by the time serialization ran, not just
+                # omitted there.
+                link_attrs["title"] = title
+            active = {**active, "link": link_attrs}
         elif child.type == "link_close":
             active = {k: v for k, v in active.items() if k != "link"}
 
@@ -235,40 +239,103 @@ def _wrap_code_run(text: str) -> str:
     return f"{fence}{pad}{inner}{pad}{fence}"
 
 
-def _wrap_run(text: str, attrs: dict[str, Any] | None) -> str:
-    attrs = attrs or {}
-    # Inline code spans are verbatim — CommonMark never processes escapes
-    # inside them, so escaping here would corrupt the code's actual text
-    # (a literal backslash would become part of the visible content).
-    if "code" in attrs:
-        text = _wrap_code_run(text)
-    else:
-        text = _escape_inline_text(text)
-    if not attrs:
-        return text
-    result = text
-    for mark in reversed(_MARK_WRAP_ORDER):
-        if mark not in attrs or mark == "code":
-            continue
-        if mark == "italic":
-            result = f"*{result}*"
-        elif mark == "bold":
-            result = f"**{result}**"
-        elif mark == "strike":
-            result = f"~~{result}~~"
-        elif mark == "link":
-            # attrs["link"] is {"href": ...} (matching y-prosemirror's
-            # mark-attrs convention) — but also accept a bare string
-            # defensively in case something upstream ever writes the old
-            # shape.
-            link_attrs = attrs["link"]
-            href = link_attrs["href"] if isinstance(link_attrs, dict) else link_attrs
-            result = f"[{result}]({href})"
-    return result
+def _link_href_title(link_attrs: Any) -> tuple[str, str | None]:
+    # {"href": ..., "title": ...} (matching y-prosemirror's mark-attrs
+    # convention) — but also accept a bare string defensively in case
+    # something upstream ever writes the old href-only shape.
+    if isinstance(link_attrs, dict):
+        return link_attrs.get("href", ""), link_attrs.get("title")
+    return link_attrs, None
+
+
+# A run's per-mark identity: the mark name for the three symmetric marks,
+# or an (href, title) tuple for "link" — a plain "link:{href}" *string* key
+# would collide with itself the moment href contains its own ":" (which an
+# "http://..." URL always does), so this uses a tuple instead of any
+# string-encoding scheme.
+_MarkKey = str | tuple[str, str, str | None]
+
+
+def _mark_key(mark: str, attrs: dict[str, Any]) -> _MarkKey:
+    """An opaque per-run identity for ``mark``, used to decide whether two
+    adjacent runs are "the same" open span (stay merged, no close/reopen)
+    or genuinely different (must close and reopen at the boundary) — for
+    "link" specifically, two adjacent runs both marked "link" but pointing
+    at *different* hrefs/titles are different links, not one span covering
+    both destinations, so the href/title ride along in the key itself
+    rather than just the mark name."""
+    if mark != "link":
+        return mark
+    href, title = _link_href_title(attrs["link"])
+    return ("link", href, title)
+
+
+def _open_delim(key: _MarkKey) -> str:
+    if isinstance(key, tuple):
+        return "["
+    return _SYMMETRIC_MARK_DELIMS[key]
+
+
+def _close_delim(key: _MarkKey) -> str:
+    if isinstance(key, tuple):
+        _, href, title = key
+        title_part = f' "{title}"' if title else ""
+        return f"]({href}{title_part})"
+    return _SYMMETRIC_MARK_DELIMS[key]
 
 
 def _serialize_inline_text(xt: XmlText) -> str:
-    return "".join(_wrap_run(text, attrs) for text, attrs in xt.diff())
+    """Serializes one ``XmlText``'s runs (``xt.diff()``) back to markdown.
+
+    Each run used to be wrapped in its marks' delimiters independently
+    (iterating ``_MARK_WRAP_ORDER`` per run) — for two *adjacent* runs that
+    both carry the same mark (e.g. bold text with an italic word in the
+    middle: "bold ", "and" [bold+italic], " italic", all bold), that closed
+    and reopened the shared delimiter at every run boundary regardless of
+    whether the mark was ever actually interrupted, producing doubled-up,
+    unbalanced delimiter runs (`*****` between "bold" and "bold+italic"
+    text) — invalid markdown, not just cosmetic, and in at least one shape
+    compounding further on every subsequent touch (confirmed in review).
+
+    Fixed by tracking a single stack of currently-open marks across the
+    *whole* run sequence — the standard "properly nested delimiters"
+    approach: at each run boundary, find the longest common prefix between
+    what's currently open and what the next run wants (both in
+    ``_NESTING_MARK_ORDER``, outer to inner), close everything after that
+    prefix (innermost first — a mark can't close while something opened
+    after it is still open, that's what "nested" means), then open
+    whatever the next run newly wants. A mark that's genuinely continuous
+    across runs never closes at all.
+
+    "code" is handled separately, per run (``_wrap_code_run``) — a code
+    span's own fence is already self-delimiting per its own text and
+    doesn't participate in this cross-run nesting.
+    """
+    open_keys: list[_MarkKey] = []
+    parts: list[str] = []
+    for text, attrs in xt.diff():
+        attrs = attrs or {}
+        target = [_mark_key(m, attrs) for m in _NESTING_MARK_ORDER if m in attrs]
+        common = 0
+        while (
+            common < len(open_keys)
+            and common < len(target)
+            and open_keys[common] == target[common]
+        ):
+            common += 1
+        for key in reversed(open_keys[common:]):
+            parts.append(_close_delim(key))
+        for key in target[common:]:
+            parts.append(_open_delim(key))
+        open_keys = target
+        # Inline code spans are verbatim — CommonMark never processes
+        # escapes inside them, so escaping here would corrupt the code's
+        # actual text (a literal backslash would become part of the
+        # visible content).
+        parts.append(_wrap_code_run(text) if "code" in attrs else _escape_inline_text(text))
+    for key in reversed(open_keys):
+        parts.append(_close_delim(key))
+    return "".join(parts)
 
 
 def _serialize_inline_children(children: list[Any]) -> str:
@@ -537,8 +604,14 @@ def _build_heading(raw: str, attrs: dict[str, str]) -> tuple[XmlElement, list[An
     )
 
 
-def _build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list[Any]]:
-    """Returns the (prelim) element plus a list of "finish" callbacks to run
+def build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list[Any]]:
+    """Build a single top-level block's ``XmlElement`` from its span in
+    ``body``. Public (no leading underscore) because
+    ``markdown_splice.apply_markdown_diff`` also calls this directly, to
+    splice individual replacement blocks into an existing ``Doc`` rather
+    than rebuilding one from scratch via ``seed_doc_from_markdown``.
+
+    Returns the (prelim) element plus a list of "finish" callbacks to run
     once the element is integrated into a doc (mark ``.format()`` calls need
     an already-integrated ``XmlText``).
 
@@ -626,7 +699,7 @@ def seed_doc_from_markdown(body: str) -> Doc:
     blocks = top_level_block_ranges(body)
     with doc.transaction():
         for block in blocks:
-            el, finishers = _build_block_element(body, block)
+            el, finishers = build_block_element(body, block)
             root.children.append(el)
             for finish in finishers:
                 finish()
@@ -749,9 +822,9 @@ _ORDERED_MARKER_RE = re.compile(r"^(\d{1,9})([.)])(\s|$)")
 # text" doesn't (confirmed against the forward parse, not assumed: a
 # trailing non-marker character on the line makes it an ordinary
 # paragraph). "*"/"_" thematic breaks ("***", "_ _ _") need no matching
-# case — every "*"/"_" is already escaped unconditionally by `_wrap_run`
-# for the emphasis/italic reason, which breaks the run regardless of
-# position.
+# case — every "*"/"_" is already escaped unconditionally by
+# `_escape_inline_text` (called from `_serialize_inline_text`) for the
+# emphasis/italic reason, which breaks the run regardless of position.
 _THEMATIC_BREAK_DASH_RE = re.compile(r"^-(?:[ \t]*-){2,}[ \t]*(?:\n|$)")
 
 # A setext heading underline: one or more *contiguous* "=" (level 1) or "-"
@@ -822,21 +895,22 @@ def _escape_block_start_ambiguity(text: str) -> str:
     that's only special as a *block*-start marker (heading ``#``, bullet
     ``-``/``+``, thematic break ``---``, blockquote ``>``, ordered-list
     ``1.``) must stay escaped, or the next parse reinterprets this
-    paragraph as a different block type entirely. Unlike ``_wrap_run``'s
-    mark-delimiter escaping (position-independent — a ``*``/``_``/`` ` ``/
-    ``[``/``]`` is ambiguous anywhere in the text, already handled there),
-    these are only ambiguous at the very start of *a line*, which is why
-    this checks every line a soft break produces, not just ``text[0]`` —
-    a multi-line paragraph's second line becomes just as much a fresh
+    paragraph as a different block type entirely. Unlike
+    ``_escape_inline_text``'s mark-delimiter escaping (position-independent
+    — a ``*``/``_``/`` ` ``/``[``/``]`` is ambiguous anywhere in the text,
+    already handled there, called from ``_serialize_inline_text``), these
+    are only ambiguous at the very start of *a line*, which is why this
+    checks every line a soft break produces, not just ``text[0]`` — a
+    multi-line paragraph's second line becomes just as much a fresh
     block-start position once it's re-emitted, whether that's the plain
     top level, prefixed with a list item's continuation indent (which
     CommonMark still parses as a block start through up to 3 spaces), or
     with a blockquote's repeated ``> `` (``_serialize_blockquote`` adds
     that per line unconditionally, including a paragraph's internal soft
     breaks). ``*`` as a bullet marker doesn't need a case here — it's
-    already escaped unconditionally by ``_wrap_run`` for the emphasis
-    reason, which covers every line's start position too as a side
-    effect.
+    already escaped unconditionally by ``_escape_inline_text`` for the
+    emphasis reason, which covers every line's start position too as a
+    side effect.
 
     The first line additionally gets the indented-code-block check
     (``_INDENTED_CODE_FIRST_LINE_RE``) first, since that ambiguity only

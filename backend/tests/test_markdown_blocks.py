@@ -142,3 +142,41 @@ def test_list_block_span_excludes_trailing_blank_line() -> None:
     assert blocks[1].kind is BlockKind.BLANK_LINE
     assert body[list_block.end : blocks[1].start] == ""
     assert body[blocks[1].end : blocks[2].start] == ""
+
+
+def test_link_reference_definition_gets_its_own_block() -> None:
+    """Regression test (review): a link reference definition produces no
+    markdown-it token at all (it's metadata, not rendered content), so the
+    naive "count newlines in the gap" reckoning used to treat its own text
+    as if it were blank-line filler — miscounting a handful of 1-char
+    blank-line blocks and leaving the rest of the definition's text
+    uncovered by any block. Every character of the body must now be
+    covered by exactly one block or an explicit (real) blank-line gap."""
+    body = "See [spec][ref] here.\n\n[ref]: https://example.com/spec\n\nTrailing paragraph.\n"
+    blocks = top_level_block_ranges(body)
+    # Full coverage, no gaps, no overlaps.
+    assert blocks[0].start == 0
+    prev_end = 0
+    for b in blocks:
+        assert b.start == prev_end, f"gap or overlap before {b!r}"
+        prev_end = b.end
+    assert prev_end == len(body)
+    ref_def_blocks = [b for b in blocks if b.kind is BlockKind.OTHER]
+    assert len(ref_def_blocks) == 1
+    ref_def = ref_def_blocks[0]
+    assert body[ref_def.start : ref_def.end] == "[ref]: https://example.com/spec\n"
+
+
+def test_footnote_definition_gets_its_own_opaque_block() -> None:
+    """Regression test (review): our gfm_parser() has no footnote plugin,
+    so `[^1]: The note body.` tokenizes as an ordinary paragraph — which
+    would otherwise feed its text through inline-mark escaping the moment
+    the block is touched, corrupting it into `\\[^1\\]: The note body.`.
+    Routed through the same opaque, byte-verbatim passthrough as any other
+    unrecognized construct instead."""
+    body = "Intro paragraph.\n\n[^1]: The note body.\n\nMore text.\n"
+    blocks = top_level_block_ranges(body)
+    kinds_and_text = [(b.kind, body[b.start : b.end]) for b in blocks]
+    assert (BlockKind.OTHER, "[^1]: The note body.\n") in kinds_and_text
+    footnote = next(b for b in blocks if body[b.start : b.end] == "[^1]: The note body.\n")
+    assert footnote.kind is BlockKind.OTHER

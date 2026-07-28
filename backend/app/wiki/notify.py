@@ -43,7 +43,17 @@ from app.tasks.reindex import drop_page_embedding, index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
-from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, doc_ids, drafts, update_policy
+from app.wiki import (
+    acl,
+    agent_activity,
+    coedit,
+    coedit_room,
+    comments,
+    constants as wiki_constants,
+    doc_ids,
+    drafts,
+    update_policy,
+)
 from app.wiki.comment_remap import remap_comments
 from app.wiki.provenance_remap import remap_source_ranges
 from app.models.wiki import ChangeKind, PathMove
@@ -231,7 +241,15 @@ def after_doc_trashed(
     """
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
-    coedit.on_path_moved(moves)
+    # coedit.py is pure DB bookkeeping (no pycrdt import) and so can't evict
+    # a superseded session's in-memory room itself — evict here, in whatever
+    # process(es) hold one, for each session it closed (a destination
+    # collision, e.g. someone opened the just-moved-to path in the seconds-
+    # wide window before this move landed). Left un-evicted, that room pins
+    # its Doc/Awareness/TouchedTracker in memory forever (confirmed in
+    # review).
+    for superseded_id in coedit.on_path_moved(moves):
+        coedit_room.evict_if_local(superseded_id)
     # Tombstone the id(s) at the *original* root rather than following the move
     # into `.trash/` — the id keeps resolving (to a deleted state), and restore
     # re-binds it. ACL/policy above deliberately follow into `.trash/` (so the
@@ -302,7 +320,10 @@ def after_path_move(
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
     doc_ids.on_path_moved(moves, root_move=root_move)
-    coedit.on_path_moved(moves)
+    # See after_doc_trashed's identical call for why this evicts rather
+    # than just re-keying.
+    for superseded_id in coedit.on_path_moved(moves):
+        coedit_room.evict_if_local(superseded_id)
     list_changed = False
     for mv in moves:
         old_p, new_p = mv.old, mv.new

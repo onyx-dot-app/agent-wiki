@@ -552,7 +552,7 @@ def test_on_path_moved_origin_wins_over_young_dirty_destination(repo):
     # Never replayed — this test only calls on_path_moved, no checkpoint.
     coedit.apply_update(young.id, update_bytes=b"few chars", author_user_id=uid)
 
-    coedit.on_path_moved([PathMove(old=_PATH, new="guides/target.md")])
+    superseded_ids = coedit.on_path_moved([PathMove(old=_PATH, new="guides/target.md")])
 
     # The origin session follows the page; the young session closes.
     at_dest = coedit.get_active_session("guides/target.md")
@@ -560,6 +560,10 @@ def test_on_path_moved_origin_wins_over_young_dirty_destination(repo):
     superseded = coedit.get_session(young.id)
     assert superseded is not None
     assert superseded.status == coedit.SessionStatus.CLOSED.value
+    # The caller (app/wiki/notify.py) needs this id to evict any in-memory
+    # room the superseded session had — coedit.py itself can't (no pycrdt
+    # import; see on_path_moved's own docstring).
+    assert superseded_ids == [young.id]
 
 
 def test_on_path_moved_supersedes_clean_destination_session(repo):

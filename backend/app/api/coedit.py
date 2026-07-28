@@ -117,6 +117,41 @@ def _connect_sync(path: str, user: User) -> tuple[coedit.SessionRow, bool]:
     return sess, can_write
 
 
+def _read_snapshot_for_rehydrate(
+    session_id: int,
+) -> tuple[coedit.CheckpointSessionRow, coedit.UpdatesSince] | None:
+    """Read ``(ydoc_snapshot, updates-logged-since-that-snapshot)`` as one
+    consistent pair, under ``checkpoint_lock`` — without the lock, a
+    checkpoint's own atomic prune+advance running *between* these two
+    otherwise-separate reads can leave a gap: by the time the second read
+    runs, the checkpoint may have already pruned rows this call needed to
+    bridge the snapshot it already read to the session's actual current
+    state, silently reconstructing a doc that's missing content (confirmed
+    in review).
+
+    Returns ``None`` if the session has no snapshot yet (a brand-new
+    session — the caller falls back to seeding fresh from git).
+
+    Raises if the lock can't be acquired within
+    ``coedit.checkpoint_lock``'s own timeout (a checkpoint has held it for
+    the full 30s — rare, a checkpoint is normally ms-to-low-seconds):
+    deliberately not a silent fallback to a fresh git-seed here, since a
+    snapshot *does* exist in that case and seeding fresh would put this
+    room on an incompatible CRDT lineage from whatever the in-flight
+    checkpoint is about to persist — exactly the bug this function exists
+    to close. The client's own reconnect loop retries the whole join
+    shortly after.
+    """
+    with coedit.checkpoint_lock(session_id) as acquired:
+        if not acquired:
+            raise RuntimeError(f"coedit ws: checkpoint lock busy for session {session_id}")
+        sess_ck = coedit.get_session_for_checkpoint(session_id)
+        if sess_ck is None or sess_ck.ydoc_snapshot is None:
+            return None
+        since = coedit.updates_since(session_id, sess_ck.ydoc_snapshot_seq)
+        return sess_ck, since
+
+
 def _apply_yjs_frame(
     outbox: queue.Queue[coedit_channel.QueueItem],
     session_id: int,
@@ -305,18 +340,27 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     sess, can_write = await asyncio.to_thread(_connect_sync, path, user)
     room = coedit_room.get_room(sess.id)
     if room is None:
-        sess_ck = await asyncio.to_thread(coedit.get_session_for_checkpoint, sess.id)
-        if sess_ck is not None and sess_ck.ydoc_snapshot is not None:
-            since = await asyncio.to_thread(
-                coedit.updates_since, sess.id, sess_ck.ydoc_snapshot_seq
-            )
+        rehydrate = await asyncio.to_thread(_read_snapshot_for_rehydrate, sess.id)
+        if rehydrate is not None:
+            sess_ck, since = rehydrate
+            assert sess_ck.ydoc_snapshot is not None  # _read_snapshot_for_rehydrate guarantees this
             # Doc construction + apply_update — must run inline on this
             # task's own thread (the event loop), not via to_thread; see
             # coedit_room.py.
             doc = Doc()
             doc.apply_update(sess_ck.ydoc_snapshot)
             for u in since.updates:
-                doc.apply_update(u.update_payload)
+                try:
+                    doc.apply_update(u.update_payload)
+                except Exception:
+                    # An undecodable row can't be allowed to make the page
+                    # permanently unopenable — skip it and log, same
+                    # reasoning as coedit_checkpoint.py's _rebuild_doc.
+                    log.exception(
+                        "coedit ws: session %s seq %d update failed to apply during rehydrate; skipping",
+                        sess.id,
+                        u.seq,
+                    )
             base_body = sess_ck.ydoc_snapshot_body
             room = coedit_room.create_room(sess.id, sess.path, doc, base_body, sess.base_sha)
         else:
@@ -328,12 +372,25 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
                 # A construct the codec can't encode (an image, a code
                 # block inside a list item, etc. — see markdown_yjs.py's
                 # module docstring) makes this page permanently unable to
-                # open in the live editor; retrying changes nothing, since
-                # the input is deterministic. _connect_sync already
-                # registered this user as a participant and broadcast
-                # their join — undo both, or they're stuck as a phantom
-                # participant forever, blocking the session's last-leave
-                # checkpoint trigger from ever firing (caught in review).
+                # open in the live editor *as this session*; retrying
+                # changes nothing, since the input is deterministic.
+                # _connect_sync already registered this user as a
+                # participant and broadcast their join — undo both, or
+                # they're stuck as a phantom participant forever, blocking
+                # the session's last-leave checkpoint trigger from ever
+                # firing (caught in review).
+                #
+                # Also close the session itself (caught in review): left
+                # ACTIVE, open_session's own "reuse any ACTIVE row for this
+                # path" means every future join attempt reuses *this*
+                # pinned base_sha/NULL-snapshot row forever, re-hitting the
+                # same git blob even after the offending content is fixed
+                # at HEAD — close_session is otherwise only reachable from
+                # checkpoint_session's missing-path branch, never a clean
+                # session like this one, so nothing else would ever do it.
+                # A closed, ydoc_seq==0, no-participants row is inert —
+                # closing it doesn't discard anything, since no room, no
+                # snapshot, and no updates were ever created for it.
                 #
                 # Accept then close, rather than denying pre-upgrade
                 # (raising here, as a PermissionDenied-style exception
@@ -349,6 +406,7 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
                 )
                 await asyncio.to_thread(coedit.leave, sess.id, user.id)
                 await asyncio.to_thread(coedit_channel.broadcast_presence, sess.id)
+                await asyncio.to_thread(coedit.close_session, sess.id)
                 await websocket.accept()
                 await websocket.send_json(
                     JoinErrorFrame(
@@ -362,12 +420,42 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
             # thread (the event loop, which just constructed the Doc), not
             # via to_thread; see coedit_room.py. The DB write itself is
             # plain bytes, offloaded normally. Conditional on ydoc_snapshot
-            # IS NULL (coedit.set_initial_snapshot), so this is safe to call
-            # every time a process creates a room for a session it didn't
-            # already know about — only the very first room, ever, for a
-            # brand-new session actually persists here.
+            # IS NULL, so this is safe to call every time a process creates
+            # a room for a session it didn't already know about — only the
+            # very first room, ever, for a brand-new session actually
+            # persists here.
             snapshot = room.doc.get_update()
-            await asyncio.to_thread(coedit.set_initial_snapshot, sess.id, snapshot, base_body)
+            won = await asyncio.to_thread(coedit.set_initial_snapshot, sess.id, snapshot, base_body)
+            if not won:
+                # Lost the race: two processes both saw ydoc_snapshot IS
+                # NULL and seeded independently (each seed_doc_from_markdown
+                # call invents its own CRDT lineage — see markdown_yjs.py),
+                # and the other process's write landed first. This
+                # process's freshly-seeded room is now on an orphaned,
+                # never-persisted lineage that no future checkpoint replay
+                # could ever integrate updates against (confirmed in
+                # review) — reseed onto whichever snapshot actually won
+                # instead, same rehydration path as the normal "already has
+                # a snapshot" case, so every process converges on one
+                # lineage regardless of who got here first.
+                rehydrate = await asyncio.to_thread(_read_snapshot_for_rehydrate, sess.id)
+                assert rehydrate is not None  # we just lost to someone else's write of it
+                sess_ck, since = rehydrate
+                assert sess_ck.ydoc_snapshot is not None
+                winner_doc = Doc()
+                winner_doc.apply_update(sess_ck.ydoc_snapshot)
+                for u in since.updates:
+                    try:
+                        winner_doc.apply_update(u.update_payload)
+                    except Exception:
+                        log.exception(
+                            "coedit ws: session %s seq %d update failed to apply during"
+                            " race-loss rehydrate; skipping",
+                            sess.id,
+                            u.seq,
+                        )
+                base_body = sess_ck.ydoc_snapshot_body
+                coedit_room.reseed(room, winner_doc.get_update(), base_body, sess.base_sha)
 
     # `_connect_sync` already registered the participant (`coedit.join`)
     # before returning, so from here on a disconnect — including one during

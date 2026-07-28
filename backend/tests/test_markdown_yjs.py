@@ -372,8 +372,8 @@ def test_escaping_does_not_corrupt_inline_code_content() -> None:
 
 def test_escaped_block_start_markers_round_trip_as_literal_text() -> None:
     # A leading "-"/"+"/">"/"1." in a paragraph's serialized text is only
-    # ambiguous as a *block*-start marker — _wrap_run's mark-delimiter
-    # escaping is position-independent and doesn't cover this ("*" is the
+    # ambiguous as a *block*-start marker — _escape_inline_text's mark-
+    # delimiter escaping is position-independent and doesn't cover this ("*" is the
     # one marker character that's already covered there, for the unrelated
     # emphasis reason). Without _escape_block_start_ambiguity, checkpointing
     # a touched paragraph beginning with one of these silently turns it into
@@ -439,7 +439,7 @@ def test_escaped_thematic_break_dash_run_stays_a_paragraph() -> None:
     # break — content-free — so reactivating it doesn't just change the
     # block type, it silently discards the paragraph's text entirely.
     # "***"/"_ _ _" thematic breaks need no dedicated case: every "*"/"_"
-    # is already escaped unconditionally by _wrap_run for the emphasis
+    # is already escaped unconditionally by _escape_inline_text for the emphasis
     # reason, which breaks the run regardless of position.
     for raw in ("\\---\n", "\\- - -\n"):
         doc = seed_doc_from_markdown(raw)
@@ -655,7 +655,7 @@ def test_paragraph_line_of_backticks_does_not_reactivate_as_a_fence() -> None:
     # Backtick is already in _escape_inline_text's char set, so this is
     # already protected as a side effect (confirmed, not assumed) — kept
     # as an explicit regression test alongside the tilde case rather than
-    # relying on that being obvious from reading _wrap_run alone.
+    # relying on that being obvious from reading _serialize_inline_text alone.
     doc = _build_live_paragraph("some text:\n```\nmore text")
     once = reconstruct_body(doc)
     tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
@@ -883,3 +883,76 @@ def test_reconstruct_body_with_block_map_finds_offset_within_touched_block() -> 
     # b1 is the blank-line block between the two paragraphs now.
     second = next(s for s in spans if s.block_id == "b2")
     assert body[second.start : second.end] == "Second paragraph.\n"
+
+
+# --- nested-mark serialization ------------------------------------------- #
+
+
+def test_bold_text_with_nested_italic_word_round_trips_validly() -> None:
+    """Regression test (review): a run that's a strict subset of its
+    neighbor's marks (bold continues, italic starts and ends in the
+    middle) used to close and reopen the shared "**" at every run
+    boundary regardless of continuity, producing invalid, unbalanced
+    delimiter runs ("*****") instead of properly nested ones."""
+    body = "A **bold _and_ italic** word.\n"
+    doc = seed_doc_from_markdown(body)
+    out = reconstruct_body(doc)
+    assert "*****" not in out
+    assert out == "A **bold *and* italic** word.\n"
+    # Stable under a second round trip (idempotent, not compounding further
+    # the way the pre-fix bug did on repeated touches).
+    doc2 = seed_doc_from_markdown(out)
+    assert reconstruct_body(doc2) == out
+
+
+def test_italic_quoted_code_run_stays_stable_across_touches() -> None:
+    """The exact corpus repro from review (Features/Triggers and Events.md):
+    a code span inside italics, adjacent to quote characters, used to grow
+    an extra pair of asterisks on every touch instead of staying stable."""
+    body = 'a b *"x `c` y"*.\n'
+    doc = seed_doc_from_markdown(body)
+    out1 = reconstruct_body(doc)
+    assert out1 == body
+    doc2 = seed_doc_from_markdown(out1)
+    out2 = reconstruct_body(doc2)
+    assert out2 == out1
+
+
+def test_three_overlapping_marks_nest_properly() -> None:
+    """bold+strike+italic all overlapping in a staggered pattern — each
+    mark's delimiter must open/close at exactly its own boundary, properly
+    nested (inner marks close before outer ones), not per-run independent
+    wrapping."""
+    doc = seed_doc_from_markdown("plain\n")
+    root = _root(doc)
+    xt = root.children[0].children[0]
+    with doc.transaction():
+        xt.format(0, 5, {"bold": True})
+        xt.format(1, 4, {"bold": True, "strike": True})
+        xt.format(2, 3, {"bold": True, "strike": True, "italic": True})
+    out = reconstruct_body(doc)
+    # Re-parsing must reproduce byte-identical marks — the real invariant
+    # (valid, round-trippable markdown), not a hardcoded expected string.
+    doc2 = seed_doc_from_markdown(out)
+    assert reconstruct_body(doc2) == out
+
+
+def test_link_title_round_trips() -> None:
+    """Regression test (review): a link's title used to be dropped at
+    parse time (only href was ever captured), so it was already gone
+    before serialization ever ran — real data loss, not just a formatting
+    choice."""
+    body = 'A [t](http://example.com "Title") x.\n'
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_adjacent_links_with_different_hrefs_do_not_merge() -> None:
+    doc = seed_doc_from_markdown("plain\n")
+    root = _root(doc)
+    xt = root.children[0].children[0]
+    with doc.transaction():
+        xt.format(0, 2, {"link": {"href": "http://a.example"}})
+        xt.format(2, 5, {"link": {"href": "http://b.example"}})
+    out = reconstruct_body(doc)
+    assert out == "[pl](http://a.example)[ain](http://b.example)\n"

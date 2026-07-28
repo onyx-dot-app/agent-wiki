@@ -106,7 +106,21 @@ async def transport_post(
     agent_token = agent_activity.agent_name_var.set(agent_name)
     try:
         with set_current_user(user), set_current_agent_session_id(agent_sid):
-            response, outgoing = dispatch(cast("dict[str, Any]", body), incoming, user)
+            # dispatch() is a genuinely blocking call — tool handlers do
+            # real DB/git work, and the four write tools reach a
+            # synchronous LLM AI-merge — so calling it directly here
+            # stalls this process's *entire* event loop for the duration,
+            # not just this request: with the coedit WS route now also
+            # running on this same loop (its own Doc math + every live
+            # WebSocket connection in the process), one slow agent tool
+            # call could freeze every live editing session on the pod
+            # (confirmed in review). asyncio.to_thread copies the current
+            # context (contextvars.copy_context()), so the
+            # set_current_user/set_current_agent_session_id bindings above
+            # are still visible to dispatch() on its worker thread.
+            response, outgoing = await asyncio.to_thread(
+                dispatch, cast("dict[str, Any]", body), incoming, user
+            )
     except UnknownSessionError as exc:
         # Stale/unknown session id → 404 so the client starts a new session.
         return Response(
