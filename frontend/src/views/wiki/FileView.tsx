@@ -559,15 +559,52 @@ export function FileView({ path }: FileViewProps) {
   const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(
     null,
   );
-  const [appliedTemplateBody, setAppliedTemplateBody] = useState<string | null>(
-    null,
-  );
   const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(
     null,
   );
   const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(
     null,
   );
+  // Whether the doc still matches the template as applied — set on a
+  // successful pick, cleared the moment a real edit is detected. Can't
+  // compare `coedit.buffer` (plain rendered text) against the raw template
+  // markdown directly: they're never equal even right after applying (a
+  // heading's `#`, a bullet's `-`, etc. don't survive getText()). Tracked
+  // instead against `coedit.connectionId`: applying a template commits it
+  // through the server (see onPickTemplate) so the already-correct backend
+  // codec parses it, which folds into the live room via the normal
+  // live-rebase path and reconnects this session — `connectionId` bumps
+  // once that lands. `templateSettleTimer` below gives the post-reconnect
+  // sync handshake a moment to finish delivering that content before we
+  // start treating buffer changes as user edits (otherwise the sync
+  // catching up looks identical to a keystroke).
+  const [templateUnmodified, setTemplateUnmodified] = useState(false);
+  const templateArmGenerationRef = useRef<number | null>(null);
+  const templateBaselineRef = useRef<{
+    generation: number;
+    buffer: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const armAt = templateArmGenerationRef.current;
+    if (armAt === null || coedit.connectionId < armAt) return;
+    templateArmGenerationRef.current = null;
+    const generation = coedit.connectionId;
+    const t = setTimeout(() => {
+      templateBaselineRef.current = { generation, buffer: coedit.buffer };
+    }, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coedit.connectionId]);
+
+  useEffect(() => {
+    const baseline = templateBaselineRef.current;
+    if (!baseline || baseline.generation !== coedit.connectionId) return;
+    if (coedit.buffer !== baseline.buffer) {
+      setTemplateUnmodified(false);
+      templateBaselineRef.current = null;
+    }
+  }, [coedit.buffer, coedit.connectionId]);
   const loadLatest = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -825,9 +862,20 @@ export function FileView({ path }: FileViewProps) {
     setError(null);
     try {
       const full = await getTemplate(template.id);
-      coedit.setDoc(full.body);
-      setAppliedTemplateBody(full.body);
+      // Commit the raw markdown through the normal write path (same one
+      // restoreVersion uses above) instead of inserting it into the editor
+      // as plain text: only the backend codec parses markdown into real
+      // structure (headings, lists, checkboxes, ...), and this commit folds
+      // into the live session via the existing live-rebase path, which
+      // reseeds the room's doc from the properly parsed result and
+      // reconnects this session to it.
+      await apiFetch("/wiki/file", {
+        method: "PUT",
+        body: JSON.stringify({ path, body: full.body, base_sha: headSha }),
+      });
       setAppliedTemplateId(template.id);
+      setTemplateUnmodified(true);
+      templateArmGenerationRef.current = coedit.connectionId + 1;
       await setDraftTemplate(path, template.id);
       await refreshDraftState();
     } catch (e) {
@@ -839,8 +887,10 @@ export function FileView({ path }: FileViewProps) {
 
   async function onPickBlank() {
     coedit.setDoc("");
-    setAppliedTemplateBody(null);
     setAppliedTemplateId(null);
+    setTemplateUnmodified(false);
+    templateArmGenerationRef.current = null;
+    templateBaselineRef.current = null;
     setError(null);
     try {
       await setDraftTemplate(path, null);
@@ -1268,8 +1318,8 @@ export function FileView({ path }: FileViewProps) {
                       coedit.active && coedit.buffer.trim() === "";
                     const matchesApplied =
                       coedit.active &&
-                      appliedTemplateBody !== null &&
-                      coedit.buffer === appliedTemplateBody;
+                      appliedTemplateId !== null &&
+                      templateUnmodified;
                     const showGallery =
                       (isBlank || matchesApplied) &&
                       templates !== null &&
