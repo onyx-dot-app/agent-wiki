@@ -565,28 +565,32 @@ def list_paths(prefix: str = "") -> list[str]:
     return [p for p in out.split("\0") if p and not p.startswith(TRASH_PREFIX)]
 
 
-def grep_working_tree_fixed(needles: Iterable[str]) -> set[str]:
-    """Fixed-string search over the working tree, INCLUDING ``.trash/``.
+def grep_working_tree_hex_bounded(needles: Iterable[str]) -> set[str]:
+    """Search the working tree, INCLUDING ``.trash/``, for needles that must
+    not be followed by another hex character.
 
-    Unlike ``list_paths`` (which filters ``TRASH_PREFIX``), git grep applies no
-    ``.trash/`` exclusion, so a reference inside a trashed page still counts.
-    Only the image sweep should rely on that bypass.
+    The boundary keeps a needle from matching inside a longer hex-suffixed
+    string (a different id sharing the prefix). Unlike ``list_paths`` (which
+    filters ``TRASH_PREFIX``), git grep applies no ``.trash/`` exclusion, so a
+    reference inside a trashed page still counts. Only the image sweep should
+    rely on that bypass.
     """
     wanted = {needle for needle in needles if needle}
     if not wanted:
         return set()
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=True) as f:
-        f.write("\n".join(wanted))
+        f.write("\n".join(f"{needle}([^0-9a-f]|$)" for needle in wanted))
         f.flush()
         res = _run(
-            ["grep", "--no-color", "-I", "-F", "-f", f.name, "-o", "-h"],
+            ["grep", "--no-color", "-I", "-E", "-f", f.name, "-o", "-h"],
             check=False,
         )
     if res.returncode == 1:
         return set()
     if res.returncode != 0:
         raise RuntimeError(f"git grep failed (exit {res.returncode}): {res.stderr.strip()!r}")
-    return {line for line in res.stdout.splitlines() if line} & wanted
+    matches = [line for line in res.stdout.splitlines() if line]
+    return {needle for needle in wanted if any(m.startswith(needle) for m in matches)}
 
 
 def bundle(dest_path: str) -> None:
