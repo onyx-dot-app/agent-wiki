@@ -72,6 +72,7 @@ from app.wiki import (
     filesystem,
     git as wiki_git,
     notify as wiki_notify,
+    page_views,
     provenance,
     recents as wiki_recents,
     search as wiki_search,
@@ -375,6 +376,11 @@ def get_document_by_path(
             if fallback is None:
                 raise HTTPException(status_code=404, detail="not found")
             body = fallback
+    # A successful HEAD read is a "view" — feeds staleness detection.
+    # Stamped only now, after the body was actually produced: a 404 or git
+    # failure must not mark the page as used (nor mint an id for a missing
+    # path). Throttled and failure-proof inside note_view.
+    page_views.note_view(rel)
     # Page-level (current HEAD), so both live reads share them.
     return GetDocumentResponse(
         path=rel,
