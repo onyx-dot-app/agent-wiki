@@ -158,7 +158,7 @@ def test_checkpoint_reseeds_room_and_syncs_merged_result(repo):
     # than just prove it was scheduled; matches how test_coedit_rebase.py
     # drives rebase_session directly rather than through _try_local for the
     # same reason.
-    asyncio.run(coedit_checkpoint_task._reconcile_room(outcome))
+    asyncio.run(coedit_checkpoint_task._reconcile_room(outcome.session_id, outcome.diverged))
 
     merged = "EDIT-one\ntwo\nthree\nfour\nFIVE\n"
     assert wiki_git.read_file(_PATH) == merged
