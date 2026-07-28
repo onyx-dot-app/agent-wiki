@@ -425,10 +425,28 @@ def test_apply_markdown_diff_preserves_lineage_of_untouched_blocks() -> None:
     the real, meaningful assertion.)"""
     old_body = "one\n\ntwo\n\nthree\n"
     doc = seed_doc_from_markdown(old_body)
+    # Created once, up front — matches production (a session's tracker is
+    # created alongside its Doc and observes every mutation for the doc's
+    # whole lifetime, see TouchedTracker's own docstring). A tracker built
+    # fresh *after* the mutations below can't retroactively know about them
+    # — confirmed by this test itself getting this wrong originally: with a
+    # fresh tracker at the end, checkpoint_body had no record the "one"
+    # block was touched and took a verbatim slice of new_body for it
+    # instead of reading the live (edited) text, silently discarding the
+    # late update in the assertion, not in apply_markdown_diff itself.
+    tracker = TouchedTracker(doc)
+    # The "late update" below must be generated against *this exact* doc's
+    # lineage — a second, independent seed_doc_from_markdown(old_body) call
+    # (even applied via apply_update rather than called directly) produces
+    # an incompatible lineage, the identical trap this whole fix exists to
+    # avoid elsewhere. Derives other_doc from doc's own snapshot bytes
+    # instead, matching how production always reconstructs "the same" doc
+    # — see coedit_checkpoint.py's _rebuild_doc / coedit_room.reseed.
+    snapshot = doc.get_update()
 
     new_body = "one\n\nTWO\n\nthree\n"
     assert apply_markdown_diff(doc, old_body, new_body) is True
-    assert checkpoint_body(new_body, doc, TouchedTracker(doc)) == new_body
+    assert checkpoint_body(new_body, doc, tracker) == new_body
 
     # A late Yjs update generated against the pre-diff doc's lineage — e.g.
     # a concurrent edit to the untouched "one" paragraph landing in the
@@ -436,14 +454,14 @@ def test_apply_markdown_diff_preserves_lineage_of_untouched_blocks() -> None:
     # repro) — must still integrate correctly afterward, since the
     # untouched paragraph's own item ids never changed.
     other_doc = Doc()
-    other_doc.apply_update(seed_doc_from_markdown(old_body).get_update())
+    other_doc.apply_update(snapshot)
     other_root = _root(other_doc)
     with other_doc.transaction():
         other_root.children[0].children[0].insert(0, "EDITED-")
     late_update = other_doc.get_update()
 
     doc.apply_update(late_update)
-    assert checkpoint_body(new_body, doc, TouchedTracker(doc)) == "EDITED-one\n\nTWO\n\nthree\n"
+    assert checkpoint_body(new_body, doc, tracker) == "EDITED-one\n\nTWO\n\nthree\n"
 
 
 def test_apply_markdown_diff_returns_false_on_child_count_drift() -> None:
