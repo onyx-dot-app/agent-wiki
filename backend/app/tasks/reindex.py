@@ -21,6 +21,7 @@ import logging
 import re
 
 from app.db import fts, page_embeddings
+from app.db.session import advisory_xact_lock, session
 from app.llm import embeddings
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
@@ -113,9 +114,9 @@ def index_path_inline(path: str) -> None:
 def reindex_all_inline() -> None:
     """Index every .md page currently in the wiki. Idempotent.
 
-    Runs from the seed path (fresh wiki) and from ``backfill_index_if_empty``
-    (pre-existing wiki, empty index) — never on a steady-state boot, where
-    the O(pages) inline walk would be wasted work.
+    Runs from the seed path (fresh wiki); a boot over pre-existing content
+    is covered by ``backfill_unindexed_pages``, which skips pages already
+    indexed.
     """
     paths = [p for p in wiki_git.list_paths() if p.endswith(".md")]
     if not paths:
@@ -125,18 +126,49 @@ def reindex_all_inline() -> None:
         index_path_inline(path)
 
 
-def backfill_index_if_empty() -> None:
-    """Startup backfill: index the whole wiki when the doc index is empty.
+# ASCII "ridx" — must stay distinct from other advisory-lock keys (e.g. the
+# triggers rebuild lock in app/triggers/repo.py).
+_BACKFILL_ADVISORY_LOCK = 0x72696478
+
+
+def backfill_unindexed_pages() -> None:
+    """Startup backfill: index every tracked .md page missing from the index.
 
     Covers a first boot over pre-existing content (restored volume,
     migration, an already-populated ``WIKI_DIR``) — that path skips seeding,
-    which is the only other boot path that indexes, so without this every
-    page would be invisible to search until it happened to be edited.
+    which is the only other boot path that indexes — and a partially
+    restored index, where some pages are present and the rest would stay
+    invisible to search until edited. Steady-state boots find no missing
+    pages and index nothing.
+
+    Concurrent replicas booting against the same index serialise on a
+    Postgres advisory lock, and the missing set is computed under it — so
+    followers observe the leader's writes and no-op instead of repeating
+    the walk (and its embedding calls).
+
     ``count_documents()`` returns None when OpenSearch is unreachable —
-    skip then too, since indexing would fail just the same.
+    skip then, since indexing would fail just the same; the next boot
+    retries. ``paths_under("")`` caps at 10k entries, so beyond that the
+    missing set over-approximates and re-indexes some already-indexed
+    pages — harmless (upserts are idempotent, embeddings skip on an
+    unchanged hash), just slower.
     """
-    if fts.count_documents() == 0:
-        reindex_all_inline()
+    if fts.count_documents() is None:
+        return
+    tracked = {p for p in wiki_git.list_paths() if p.endswith(".md")}
+    if not tracked:
+        return
+    try:
+        with session() as s:
+            advisory_xact_lock(s, _BACKFILL_ADVISORY_LOCK)
+            missing = sorted(tracked - set(fts.paths_under("")))
+            if not missing:
+                return
+            log.info("reindex: backfilling %d unindexed wiki page(s)", len(missing))
+            for path in missing:
+                index_path_inline(path)
+    except Exception:
+        log.warning("reindex: startup backfill failed", exc_info=True)
 
 
 @lightweight_maintenance_queue.periodic_task(crontab(minute="0"))

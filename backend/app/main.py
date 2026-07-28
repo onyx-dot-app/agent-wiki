@@ -64,7 +64,7 @@ from app.llm.errors import LLMError
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
 from app.db.session import init_db
 from app.tasks.agent_activity import schedule_all_pending_cleanups
-from app.tasks.reindex import backfill_index_if_empty
+from app.tasks.reindex import backfill_unindexed_pages
 from app.tasks.queues import QueueFullError
 from app.triggers import reconcile as triggers_reconcile
 from app.triggers import repo as triggers_repo
@@ -182,7 +182,7 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # content (restored volume, migration) skips seeding — the only other
     # boot path that indexes — and would otherwise leave every page
     # unsearchable until it happened to be edited.
-    backfill_index_if_empty()
+    backfill_unindexed_pages()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_reconcile.reconcile_legacy_slack_triggers()
     triggers_repo.rebuild_from_filesystem()

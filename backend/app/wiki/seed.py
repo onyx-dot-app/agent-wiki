@@ -17,7 +17,7 @@ Postgres on purpose, so wiping the wiki working tree alone doesn't
 re-arm seeding.
 
 Seeding indexes the pages it writes; a first boot over pre-existing
-content skips seeding, and the lifespan's ``backfill_index_if_empty``
+content skips seeding, and the lifespan's ``backfill_unindexed_pages``
 indexes that content instead.
 
 The CLI in ``app/scripts/seed_onboarding.py`` shares the helper below
@@ -144,7 +144,7 @@ def seed_if_empty(target_dir: str) -> bool:
         # Pre-existing content (admin seeded another way, migrating from
         # an older install). Stamp the marker so a future delete-all
         # doesn't trigger re-seeding. Indexing this content is the
-        # lifespan's job (backfill_index_if_empty).
+        # lifespan's job (backfill_unindexed_pages).
         log.info("wiki already has tracked pages, stamping marker without seeding")
         _stamp_seed_marker()
         return False
