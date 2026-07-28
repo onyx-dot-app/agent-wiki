@@ -93,6 +93,22 @@ def test_never_referenced_image_is_flagged_after_grace_then_deleted_after_retent
     assert image_store.stat(image_id) is None
 
 
+def test_delete_proceeds_when_draft_holds_only_a_suffixed_url(tmp_repo) -> None:
+    # The delete-time draft guard is URL-boundary matched too: a draft whose
+    # only mention extends the URL path must not keep the orphan alive.
+    path = "guides/draft-suffix.md"
+    image_id = _put_image(path)
+    _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
+    _set_unreferenced_since(image_id, _timestamp_ago(timedelta(days=31)))
+    coedit.open_session(
+        path, base_sha=None, initial_buffer=f"see /api/wiki/images/{image_id}.png"
+    )
+
+    _run_sweep()
+
+    assert _image_row(image_id) is None
+
+
 def test_non_hex_url_suffix_is_not_a_reference(tmp_repo) -> None:
     # A .png tail extends the URL path, so it resolves to a different route.
     path = "guides/suffix.md"

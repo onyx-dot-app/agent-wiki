@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import uuid
 
 from pydantic import BaseModel
@@ -145,23 +146,26 @@ def totals() -> tuple[int, int]:
 
 
 def delete_if_unreferenced_by_drafts(image_id: str, url: str) -> bool:
-    """Delete the image unless a live co-edit buffer references ``url``, as
-    one SERIALIZABLE transaction.
+    """Delete the image unless a live co-edit buffer references ``url``, in
+    one transaction (URL-boundary matched, same class as the tree scan).
 
-    Closes the window between a buffer read and the delete: a concurrent
-    buffer write forces a serialization failure instead of a lost reference.
-    On that failure the caller skips the candidate, the next daily run
-    retries. The git-side scan is the caller's job (it holds the commit lock
-    across this call). Returns True only when a row was deleted.
+    A buffer write that lands after this transaction commits produces a
+    draft referencing an already-deleted URL. That end state is reachable
+    with no race at all (a draft can paste any dead URL at any moment), so
+    no synchronization boundary can prevent it and none is pretended here.
+    What this transaction does guarantee: the check and the delete are
+    atomic, so no reference visible at delete time is ever lost. The
+    git-side scan is the caller's job (it holds the commit lock across this
+    call). Returns True only when a row was deleted.
     """
+    boundary = re.escape(url) + "([^A-Za-z0-9._~%/-]|$)"
     with session() as s:
-        s.connection(execution_options={"isolation_level": "SERIALIZABLE"})
         referenced = s.scalar(
             select(func.count())
             .select_from(CoeditSession)
             .where(
                 CoeditSession.status == SessionStatus.ACTIVE.value,
-                CoeditSession.buffer_text.contains(url),
+                CoeditSession.buffer_text.regexp_match(boundary),
             )
         )
         if referenced:
