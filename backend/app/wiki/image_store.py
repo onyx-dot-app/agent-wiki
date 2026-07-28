@@ -34,6 +34,12 @@ class ImageSweepRow(BaseModel):
     unreferenced_since: str | None
 
 
+def serving_url(image_id: str) -> str:
+    """The app URL pages embed for an image. Also the sweep's reference needle,
+    so a bare 16-hex coincidence in page text never counts as a reference."""
+    return f"/api/wiki/images/{image_id}"
+
+
 def sniff_image_type(data: bytes) -> str | None:
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
