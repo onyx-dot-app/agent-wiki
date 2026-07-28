@@ -1298,6 +1298,7 @@ export function FileView({ path }: FileViewProps) {
                       userDisplay={user?.name ?? user?.email}
                       onEditorReady={coedit.onEditorReady}
                       readOnly={!coedit.canWrite}
+                      pagePath={path}
                       commentHighlights={commentHighlights}
                       activeCommentIds={activeCommentIds}
                       onCommentCaret={handleCommentCaret}

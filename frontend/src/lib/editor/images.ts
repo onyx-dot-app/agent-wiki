@@ -1,0 +1,392 @@
+/** Editor-side image support: an upload plugin (paste/drop an image file,
+ * show a placeholder while it uploads, swap in the real node) and a
+ * resizable NodeView for the `image` node defined in `blocks.ts`.
+ *
+ * Width is never a schema attr (the backend codec would drop an unknown
+ * attr on the Yjs round trip). It lives only as an opaque `#w=<int>`
+ * fragment inside the node's `src`, which the codec keeps verbatim -
+ * `parseImageWidth`/`withImageWidth` are the sole readers/writers of that
+ * fragment, and a resize dispatches exactly one `src`-rewriting transaction.
+ *
+ * The NodeView is raw token-styled DOM, not a React component: this editor
+ * keeps NodeView DOM React-free (no React roots inside ProseMirror-managed
+ * DOM), so the sanctioned form is plain DOM pulling Opal tokens through CSS
+ * classes (see `src/app/css/editor.css`).
+ */
+import { Extension } from "@tiptap/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
+import { EditorState, Plugin, PluginKey } from "@tiptap/pm/state";
+import { insertPoint } from "@tiptap/pm/transform";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import type { EditorView, NodeView } from "@tiptap/pm/view";
+import { ApiError, apiUpload } from "@/lib/api";
+import { toast } from "@/hooks/useToast";
+
+/** Smallest width a resize can land on, in px. */
+const MIN_IMAGE_WIDTH = 80;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, Math.max(min, max)));
+}
+
+function stripFragment(src: string): string {
+  const hash = src.indexOf("#");
+  return hash === -1 ? src : src.slice(0, hash);
+}
+
+/** Read the opaque `w=<int>` width hint the backend keeps inside an image
+ * src's URL fragment. Returns null when there is no integer width there. */
+export function parseImageWidth(src: string): number | null {
+  const hash = src.indexOf("#");
+  if (hash === -1) return null;
+  for (const part of src.slice(hash + 1).split("&")) {
+    const match = /^w=(\d+)$/.exec(part);
+    if (match) return Number.parseInt(match[1]!, 10);
+  }
+  return null;
+}
+
+/** Return `src` with its `#w=<int>` fragment set to `width`, replacing any
+ * existing width token and preserving every other fragment part. */
+export function withImageWidth(src: string, width: number): string {
+  const base = stripFragment(src);
+  const hash = src.indexOf("#");
+  const fragment = hash === -1 ? "" : src.slice(hash + 1);
+  const parts = fragment
+    .split("&")
+    .filter((part) => part.length > 0 && !/^w=\d+$/.test(part));
+  parts.push(`w=${width}`);
+  return `${base}#${parts.join("&")}`;
+}
+
+/** Renders an `image` node as a token-styled wrapper + img, with corner and
+ * edge drag handles shown only while the node is selected and the view is
+ * editable. A drag previews width live on the img and commits one
+ * `src`-rewriting transaction on release. A load failure swaps to a
+ * placeholder box. */
+class ImageNodeView implements NodeView {
+  dom: HTMLElement;
+  private img: HTMLImageElement;
+  private handles: HTMLElement[] = [];
+  private broken: HTMLElement | null = null;
+  private node: PMNode;
+  private view: EditorView;
+  private getPos: () => number | undefined;
+  private selected = false;
+  private loadedBase: string | null = null;
+  private cleanupDrag: (() => void) | null = null;
+
+  constructor(
+    node: PMNode,
+    view: EditorView,
+    getPos: () => number | undefined,
+  ) {
+    this.node = node;
+    this.view = view;
+    this.getPos = getPos;
+
+    const wrapper = document.createElement("span");
+    wrapper.className = "editor-image";
+    this.dom = wrapper;
+
+    const img = document.createElement("img");
+    img.className = "editor-image-img";
+    // The whole node drags as a unit via ProseMirror's own draggable handling.
+    // The img must not start its own native image drag on top of that.
+    img.draggable = false;
+    img.addEventListener("error", this.onImgError);
+    this.img = img;
+    wrapper.appendChild(img);
+
+    for (const kind of ["e", "se"] as const) {
+      const handle = document.createElement("span");
+      handle.className = `editor-image-handle editor-image-handle-${kind}`;
+      handle.addEventListener("pointerdown", this.onHandleDown);
+      this.handles.push(handle);
+      wrapper.appendChild(handle);
+    }
+
+    this.applyAttrs();
+  }
+
+  private applyAttrs(): void {
+    const src = this.node.attrs.src as string;
+    this.img.alt = (this.node.attrs.alt as string) ?? "";
+    const nextBase = stripFragment(src);
+    if (this.loadedBase !== nextBase) {
+      this.loadedBase = nextBase;
+      this.dom.classList.remove("is-broken");
+      this.img.src = nextBase;
+    }
+    const width = parseImageWidth(src);
+    if (width != null) this.img.style.width = `${width}px`;
+    else this.img.style.removeProperty("width");
+  }
+
+  private onImgError = (): void => {
+    this.dom.classList.add("is-broken");
+    if (!this.broken) {
+      const box = document.createElement("span");
+      box.className = "editor-image-broken";
+      box.textContent = "Image failed to load";
+      this.broken = box;
+      this.dom.appendChild(box);
+    }
+  };
+
+  private columnWidth(): number {
+    return this.view.dom.clientWidth || MIN_IMAGE_WIDTH;
+  }
+
+  private syncSelectionUi(): void {
+    this.dom.classList.toggle(
+      "is-resizable",
+      this.selected && this.view.editable,
+    );
+  }
+
+  private onHandleDown = (event: PointerEvent): void => {
+    if (!this.view.editable) return;
+    // Keep the resize gesture out of ProseMirror's selection/drag handling.
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget as HTMLElement;
+    handle.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = this.img.getBoundingClientRect().width;
+    const maxWidth = this.columnWidth();
+    let preview = startWidth;
+
+    const onMove = (moveEvent: PointerEvent): void => {
+      preview = clamp(
+        startWidth + (moveEvent.clientX - startX),
+        MIN_IMAGE_WIDTH,
+        maxWidth,
+      );
+      this.img.style.width = `${Math.round(preview)}px`;
+    };
+    const onUp = (): void => {
+      this.cleanupDrag?.();
+      this.commitWidth(Math.round(preview));
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+    this.cleanupDrag = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      try {
+        handle.releasePointerCapture(event.pointerId);
+      } catch {
+        // pointer capture was already released - nothing to undo
+      }
+      this.cleanupDrag = null;
+    };
+  };
+
+  private commitWidth(width: number): void {
+    const pos = this.getPos();
+    if (typeof pos !== "number") return;
+    const current = this.node.attrs.src as string;
+    const next = withImageWidth(current, width);
+    if (next === current) return;
+    this.view.dispatch(this.view.state.tr.setNodeAttribute(pos, "src", next));
+  }
+
+  update(node: PMNode): boolean {
+    if (node.type.name !== "image") return false;
+    this.node = node;
+    this.applyAttrs();
+    this.syncSelectionUi();
+    return true;
+  }
+
+  selectNode(): void {
+    this.selected = true;
+    this.dom.classList.add("ProseMirror-selectednode");
+    this.syncSelectionUi();
+  }
+
+  deselectNode(): void {
+    this.selected = false;
+    this.dom.classList.remove("ProseMirror-selectednode");
+    this.syncSelectionUi();
+  }
+
+  stopEvent(event: Event): boolean {
+    const target = event.target as HTMLElement | null;
+    return (
+      target != null &&
+      this.handles.some((h) => h === target || h.contains(target))
+    );
+  }
+
+  ignoreMutation(): boolean {
+    // Leaf atom with no editable content: the handle/class DOM churn here is
+    // all view-only, never something ProseMirror should read back as content.
+    return true;
+  }
+
+  destroy(): void {
+    this.cleanupDrag?.();
+    this.img.removeEventListener("error", this.onImgError);
+  }
+}
+
+/** Registers the `image` NodeView as a raw ProseMirror plugin prop, the
+ * same `new Plugin(...)` idiom every other construct in this editor uses.
+ * Registered unconditionally (unlike the upload plugin) so images render
+ * for read-only viewers too. */
+function imageNodeViewPlugin(): Plugin {
+  return new Plugin({
+    props: {
+      nodeViews: {
+        image: (node, view, getPos) => new ImageNodeView(node, view, getPos),
+      },
+    },
+  });
+}
+
+interface UploadResponse {
+  id: string;
+  url: string;
+  markdown: string;
+}
+
+interface UploadAction {
+  add?: { id: object; pos: number };
+  remove?: { id: object };
+}
+
+function imageFilesFrom(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  return Array.from(data.files).filter((file) =>
+    file.type.startsWith("image/"),
+  );
+}
+
+function findPlaceholder(
+  key: PluginKey<DecorationSet>,
+  state: EditorState,
+  id: object,
+): number | null {
+  const set = key.getState(state);
+  if (!set) return null;
+  const found = set.find(undefined, undefined, (spec) => spec.id === id);
+  return found.length > 0 ? found[0]!.from : null;
+}
+
+/** Paste/drop-to-upload for image files. A placeholder widget decoration
+ * (keyed by a per-upload identity token, remapped through edits like the
+ * highlight plugins' decorations) holds the spot while the bytes upload.
+ * Success swaps it for an `image` node, failure removes it and surfaces the
+ * reason through the app toast. */
+function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
+  const key = new PluginKey<DecorationSet>("imageUpload");
+
+  const startUpload = (view: EditorView, file: File, rawPos: number): void => {
+    const imageType = view.state.schema.nodes.image;
+    if (!imageType) return;
+    // Land the placeholder (and later the node) at the nearest position an
+    // inline image is actually allowed, so a drop at a block boundary still
+    // produces a valid document.
+    const point = insertPoint(view.state.doc, rawPos, imageType);
+    if (point == null) return;
+    const id = {}; // identity token matched back to its decoration by reference
+    view.dispatch(view.state.tr.setMeta(key, { add: { id, pos: point } }));
+
+    const query = `path=${encodeURIComponent(pagePath)}&filename=${encodeURIComponent(file.name)}`;
+    apiUpload<UploadResponse>(`/wiki/images?${query}`, file, file.type)
+      .then((res) => {
+        const at = findPlaceholder(key, view.state, id);
+        if (at == null) return; // the target was deleted mid-upload - drop it
+        const node = imageType.create({
+          src: res.url,
+          alt: file.name,
+          title: null,
+        });
+        view.dispatch(
+          view.state.tr
+            .replaceWith(at, at, node)
+            .setMeta(key, { remove: { id } }),
+        );
+      })
+      .catch((err: unknown) => {
+        view.dispatch(view.state.tr.setMeta(key, { remove: { id } }));
+        toast.error(
+          err instanceof ApiError ? err.message : "Image upload failed",
+        );
+      });
+  };
+
+  return new Plugin<DecorationSet>({
+    key,
+    state: {
+      init: () => DecorationSet.empty,
+      apply(tr, set) {
+        set = set.map(tr.mapping, tr.doc);
+        const action = tr.getMeta(key) as UploadAction | undefined;
+        if (action?.add) {
+          const widget = document.createElement("span");
+          widget.className = "editor-image-uploading";
+          set = set.add(tr.doc, [
+            Decoration.widget(action.add.pos, widget, { id: action.add.id }),
+          ]);
+        }
+        if (action?.remove) {
+          const removeId = action.remove.id;
+          set = set.remove(
+            set.find(undefined, undefined, (spec) => spec.id === removeId),
+          );
+        }
+        return set;
+      },
+    },
+    props: {
+      decorations(state) {
+        return key.getState(state);
+      },
+      handlePaste(view, event) {
+        if (!view.editable) return false; // a viewer's paste never uploads
+        const files = imageFilesFrom(event.clipboardData);
+        if (files.length === 0) return false;
+        event.preventDefault();
+        const at = view.state.selection.from;
+        for (const file of files) startUpload(view, file, at);
+        return true;
+      },
+      handleDrop(view, event, _slice, moved) {
+        if (!view.editable) return false; // a viewer's drop never uploads
+        if (moved) return false; // an internal node move, not a file drop
+        const files = imageFilesFrom(event.dataTransfer);
+        if (files.length === 0) return false;
+        event.preventDefault();
+        const coords = view.posAtCoords({
+          left: event.clientX,
+          top: event.clientY,
+        });
+        const at = coords?.pos ?? view.state.selection.from;
+        for (const file of files) startUpload(view, file, at);
+        return true;
+      },
+    },
+  });
+}
+
+/** All editor-side image behavior in one extension, mirroring
+ * `presenceExtension(awareness)`'s factory shape. The NodeView is always
+ * active so images render for read-only viewers. The paste/drop upload
+ * plugin is added only when a `pagePath` is known (the upload endpoint is
+ * page-scoped), so the scaffold/verification harness with no real page just
+ * lets an image paste fall through to default handling. */
+export function imageSupport(pagePath: string | undefined): Extension {
+  return Extension.create({
+    name: "imageSupport",
+    addProseMirrorPlugins() {
+      const plugins: Plugin[] = [imageNodeViewPlugin()];
+      if (pagePath) plugins.push(imageUploadPlugin(pagePath));
+      return plugins;
+    },
+  });
+}
