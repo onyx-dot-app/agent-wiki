@@ -809,6 +809,28 @@ def test_find_by_row_id() -> None:
     assert find_by_row_id(doc, "nonexistent") is None
 
 
+def test_image_src_with_balanced_parens_round_trips_byte_stable() -> None:
+    body = "![x](a(1).png)\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_live_edited_image_src_with_space_serializes_reparseable() -> None:
+    # Only a live session can produce a spaced src (attrs set editor-side,
+    # never through markdown-it). It must serialize to the angle-bracket
+    # form so the checkpoint output still parses as an image.
+    doc = seed_doc_from_markdown("![x](ok.png)\n")
+    para = _root(doc).children[0]
+    image = next(c for c in para.children if getattr(c, "tag", None) == "image")
+    with doc.transaction():
+        image.attributes["src"] = "a b.png"
+    once = reconstruct_body(doc)
+    assert "![x](<a b.png>)" in once
+    reseeded = seed_doc_from_markdown(once)
+    re_para = _root(reseeded).children[0]
+    assert any(getattr(c, "tag", None) == "image" for c in re_para.children)
+
+
 def test_unrecognized_inline_construct_raises_not_implemented() -> None:
     # This parser config folds every inline construct into a token type this
     # codec encodes, so exercise the fail-loud guard with a synthetic unknown

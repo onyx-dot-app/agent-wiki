@@ -229,13 +229,34 @@ def _escape_title(title: str) -> str:
     return title.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _image_destination(src: str) -> str:
+    # A bare destination cannot carry whitespace, control characters, angle
+    # brackets, or unbalanced parens and still re-parse as an image, and a
+    # live session can set src attrs that never passed through markdown-it's
+    # normalization. Those spellings get the angle-bracket form, brackets
+    # escaped inside it, which markdown-it normalizes on the next parse
+    # (idempotent after that). Balanced parens stay bare: markdown-it accepts
+    # and stores them raw, so wrapping them would break byte stability.
+    depth = 0
+    unbalanced = False
+    for ch in src:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                unbalanced = True
+                break
+    unbalanced = unbalanced or depth != 0
+    if not src or unbalanced or any(ch.isspace() or ch in "<>" for ch in src):
+        escaped = src.replace("\\", "\\\\").replace("<", "\\<").replace(">", "\\>")
+        return f"<{escaped}>"
+    return src
+
+
 def _serialize_image(node: XmlElement) -> str:
-    # Src is emitted verbatim, the same discipline link hrefs use. markdown-it
-    # normalizes destination spellings (angle-bracket form, encoded spaces) at
-    # parse time, so the normalized destination is this codec's canonical form
-    # and re-parsing the output is a no-op. See the link branch of _wrap_run.
     attrs = dict(node.attributes)
-    src = attrs.get("src", "")
+    src = _image_destination(attrs.get("src", ""))
     alt = _escape_inline_text(attrs.get("alt", ""))
     title = attrs.get("title")
     if title is not None:
