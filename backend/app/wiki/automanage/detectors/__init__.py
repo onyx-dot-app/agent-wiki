@@ -12,6 +12,7 @@ from app.wiki.automanage.detectors import (
     case_collision,
     empty_folder,
     folder_chain,
+    stale_page,
     stub_page,
     template_echo,
 )
@@ -29,6 +30,10 @@ DETECTORS: list[Detector] = [
     case_collision.DETECTOR,
     folder_chain.DETECTOR,
     stub_page.DETECTOR,
+    # Last on purpose: registry order is selection priority, and the LLM
+    # detector's judgment-based deletions should never outrank a mechanical
+    # detector's deterministic claim on a page.
+    stale_page.DETECTOR,
 ]
 
 # Validation dispatch: a proposal records which detector authored it, and the
