@@ -30,6 +30,10 @@ async def upload_image(
         rel = filesystem.safe_rel_path(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    # Anchors are wiki pages. Folders and tracked non-page files (trigger
+    # YAML, .gitkeep) must not accumulate image anchors.
+    if not rel.endswith(".md"):
+        raise HTTPException(status_code=400, detail="anchor must be a wiki page")
     await run_in_threadpool(require_can, "write", rel, user)
 
     buf = bytearray()
