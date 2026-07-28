@@ -27,6 +27,7 @@ import json
 import logging
 from typing import Any
 
+from app.auth import PermissionDenied
 from app.auth import require_can
 from app.mcp_server import jobs as mcp_jobs
 from app.mcp_server import pubsub as mcp_pubsub
@@ -135,7 +136,6 @@ def subscribe_resource(sess: McpSession, uri: str) -> dict[str, Any]:
         job_id = _strip_job_uri(uri)
         job = mcp_jobs.get(job_id)
         if job is None or job["user_id"] != sess.user_id:
-            from app.auth import PermissionDenied  # noqa: PLC0415
 
             raise PermissionDenied(f"forbidden: cannot subscribe to {uri}")
         mcp_pubsub.subscribe_job(sess.id, job_id)

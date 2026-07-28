@@ -54,6 +54,8 @@ from typing import Any
 from pydantic import BaseModel
 from sqlalchemy import delete, select
 
+from app.mcp_server import session as mcp_session
+from app.wiki import acl
 from app.db import models as orm
 from app.db.session import execute_dml, session as db_session
 from app.models.wiki import ChangeKind
@@ -420,7 +422,6 @@ def publish_list_changed() -> None:
     # Walk every locally-active session — sessions with an open SSE on
     # this process. Other replicas walk their own sets via the NOTIFY
     # relay below.
-    from app.mcp_server import session as mcp_session  # noqa: PLC0415
 
     for session_id in mcp_session.all_session_ids():
         _deliver(session_id, notif)
@@ -489,8 +490,6 @@ def _should_deliver(session_id: str, rel: str) -> bool:
     """Per-subscriber ACL recheck. Returns False when the session is
     gone or its user can no longer read ``rel``."""
     # Local imports — these modules import this one transitively.
-    from app.mcp_server import session as mcp_session  # noqa: PLC0415
-    from app.wiki import acl  # noqa: PLC0415
 
     sess = mcp_session.get(session_id)
     if sess is None:
@@ -560,7 +559,6 @@ def _on_delete(payload: dict[str, Any]) -> None:
 
 def _on_list_changed(payload: dict[str, Any]) -> None:
     notif = Notification(method="notifications/resources/list_changed", params={})
-    from app.mcp_server import session as mcp_session  # noqa: PLC0415
 
     for session_id in mcp_session.all_session_ids():
         _deliver(session_id, notif)

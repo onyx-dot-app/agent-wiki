@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 
+from app.wiki import acl
 import logging
 import threading
 
@@ -80,6 +81,10 @@ def _get_client() -> object | None:
     with _client_lock:
         if _client_ready:
             return _client
+
+        # Call-time import on purpose: the test conftest REPLACES
+        # app.config.CONFIG, so a module-level binding would pin the
+        # pre-test object (wrong OpenSearch URL/index in tests).
         from app.config import CONFIG  # noqa: PLC0415
 
         url = CONFIG.opensearch_url
@@ -145,7 +150,9 @@ _MAPPING = {
 }
 
 def _index_name() -> str:
+    # Call-time import — see _get_client.
     from app.config import CONFIG  # noqa: PLC0415
+
     return CONFIG.opensearch_index
 
 def _ensure_index(client: object) -> None:
@@ -342,6 +349,5 @@ def _visible_paths(
     """
     if is_admin or not paths:
         return paths
-    from app.wiki import acl  # noqa: PLC0415
 
     return set(acl.filter_paths_in_python(user_id, is_admin, paths))

@@ -33,6 +33,7 @@ import time
 from prometheus_client import start_http_server
 from sqlalchemy import text
 
+from app.db.session import session
 from app.config import verify_secret_key
 from app.tasks.queues import QUEUES
 from app.tasks.queue import install_signal_handlers, request_shutdown, run_consumer
@@ -70,7 +71,6 @@ def _wait_for_db(timeout_s: float = 60.0, poll_s: float = 1.0) -> None:
     table exists so we know alembic has finished before we try to use
     the DB.
     """
-    from app.db.session import session  # noqa: PLC0415
 
     deadline = time.monotonic() + timeout_s
     while True:
