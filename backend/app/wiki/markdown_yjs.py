@@ -6,8 +6,8 @@ stable, positional ``_blockId`` attribute. Structural treatment (real
 ProseMirror-shaped nodes, editable node-by-node, not opaque text) covers:
 ``heading``, ``paragraph`` (inline content — text runs + bold/italic/strike/
 code/link marks, represented via a ``pycrdt.XmlText``'s ``.format()`` runs, plus
-an explicit ``hardBreak`` leaf element interspersed as a sibling wherever a
-hard line break occurs — y-prosemirror maps a PM leaf/atom node to an empty
+explicit ``hardBreak`` and ``image`` leaf elements interspersed as siblings
+wherever a hard line break or image occurs — y-prosemirror maps a PM leaf/atom node to an empty
 sibling ``XmlElement``, not to a text mark, since a break is a node boundary,
 not formatting), ``bulletList``/``orderedList``/``listItem`` (arbitrarily
 nested — CommonMark's own grammar is already recursive here, so supporting
@@ -27,8 +27,8 @@ padding, and still achieves the byte-stability goal for every row that isn't
 touched — cells aren't decomposed or individually editable. Thematic break
 and html block stay opaque verbatim, tagged ``_raw="1"``.
 
-Unrecognized inline constructs (an image — anything this module doesn't
-have an explicit encoder for) raise ``NotImplementedError`` rather than
+Unrecognized inline constructs (anything this module doesn't have an
+explicit encoder for) raise ``NotImplementedError`` rather than
 silently drop or mis-serialize content — the byte-stability
 requirement this whole engine exists for is only meaningful if failures are
 loud, never silent. Same for a list item that isn't a clean sequence of
@@ -58,6 +58,7 @@ _KNOWN_INLINE_TYPES = {
     "text",
     "softbreak",
     "hardbreak",
+    "image",
     "strong_open",
     "strong_close",
     "em_open",
@@ -78,12 +79,32 @@ _KNOWN_INLINE_TYPES = {
 _NESTING_MARK_ORDER = ("link", "bold", "strike", "italic")
 _SYMMETRIC_MARK_DELIMS = {"italic": "*", "bold": "**", "strike": "~~"}
 
-# A text segment ("text", plain_text, mark_runs) or a hard-break leaf
-# ("hardbreak", None, None) — see module docstring for why a hard break is a
-# sibling element, not foldable into a text run's marks.
+# A text segment or a leaf segment. The 4th slot carries a leaf's attrs
+# dict, used for images and ``None`` for text runs or hard breaks.
 _Segment = tuple[
-    Literal["text", "hardbreak"], str | None, list[tuple[int, int, dict[str, Any]]] | None
+    Literal["text", "hardbreak", "image"],
+    str | None,
+    list[tuple[int, int, dict[str, Any]]] | None,
+    dict[str, str] | None,
 ]
+
+
+def _image_alt_text(children: list[Any] | None) -> str:
+    return "".join(
+        "\n" if child.type in ("softbreak", "hardbreak") else str(getattr(child, "content", ""))
+        for child in (children or [])
+    )
+
+
+def _image_attrs(image_token: Any) -> dict[str, str]:
+    attrs = image_token.attrs or {}
+    image_attrs = {
+        "src": str(attrs.get("src", "")),
+        "alt": _image_alt_text(image_token.children),
+    }
+    if "title" in attrs:
+        image_attrs["title"] = str(attrs["title"])
+    return image_attrs
 
 
 def _inline_runs(inline_token: Any) -> list[_Segment]:
@@ -98,7 +119,7 @@ def _inline_runs(inline_token: Any) -> list[_Segment]:
     def _flush_text() -> None:
         nonlocal parts, pos, runs
         if parts:
-            segments.append(("text", "".join(parts), runs))
+            segments.append(("text", "".join(parts), runs, None))
         parts, pos, runs = [], 0, []
 
     def _emit(content: str, attrs: dict[str, Any]) -> None:
@@ -113,7 +134,10 @@ def _inline_runs(inline_token: Any) -> list[_Segment]:
             raise NotImplementedError(f"unrecognized inline construct: {child.type!r}")
         if child.type == "hardbreak":
             _flush_text()
-            segments.append(("hardbreak", None, None))
+            segments.append(("hardbreak", None, None, None))
+        elif child.type == "image":
+            _flush_text()
+            segments.append(("image", None, None, _image_attrs(child)))
         elif child.type == "text":
             _emit(child.content, active)
         elif child.type == "softbreak":
@@ -338,6 +362,45 @@ def _serialize_inline_text(xt: XmlText) -> str:
     return "".join(parts)
 
 
+def _escape_title(title: str) -> str:
+    return title.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _image_destination(src: str) -> str:
+    # A bare destination cannot carry whitespace, control characters, angle
+    # brackets, or unbalanced parens and still re-parse as an image, and a
+    # live session can set src attrs that never passed through markdown-it's
+    # normalization. Those spellings get the angle-bracket form, brackets
+    # escaped inside it, which markdown-it normalizes on the next parse
+    # (idempotent after that). Balanced parens stay bare: markdown-it accepts
+    # and stores them raw, so wrapping them would break byte stability.
+    depth = 0
+    unbalanced = False
+    for ch in src:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                unbalanced = True
+                break
+    unbalanced = unbalanced or depth != 0
+    if not src or unbalanced or any(ch.isspace() or ch in "<>" for ch in src):
+        escaped = src.replace("\\", "\\\\").replace("<", "\\<").replace(">", "\\>")
+        return f"<{escaped}>"
+    return src
+
+
+def _serialize_image(node: XmlElement) -> str:
+    attrs = dict(node.attributes)
+    src = _image_destination(attrs.get("src", ""))
+    alt = _escape_inline_text(attrs.get("alt", ""))
+    title = attrs.get("title")
+    if title is not None:
+        return f'![{alt}]({src} "{_escape_title(title)}")'
+    return f"![{alt}]({src})"
+
+
 def _serialize_inline_children(children: list[Any]) -> str:
     """Inverse of ``_element_from_segments``: walks a paragraph/heading's
     ``contents`` list, which may interleave ``XmlText`` runs with
@@ -352,6 +415,8 @@ def _serialize_inline_children(children: list[Any]) -> str:
             # necessarily byte-identical" tradeoff already accepted
             # elsewhere in this module for touched blocks.
             parts.append("  \n")
+        elif isinstance(child, XmlElement) and child.tag == "image":
+            parts.append(_serialize_image(child))
         else:
             raise NotImplementedError(f"unrecognized inline child: {child!r}")
     return "".join(parts)
@@ -384,9 +449,12 @@ def _element_from_segments(
     rest of this module."""
     contents: list[Any] = []
     finishers: list[Any] = []
-    for kind, text, runs in segments:
+    for kind, text, runs, image_attrs in segments:
         if kind == "hardbreak":
             contents.append(XmlElement("hardBreak", {}))
+        elif kind == "image":
+            assert image_attrs is not None
+            contents.append(XmlElement("image", image_attrs))
         else:
             xt = XmlText(text or "")
             contents.append(xt)
