@@ -93,6 +93,21 @@ def test_never_referenced_image_is_flagged_after_grace_then_deleted_after_retent
     assert image_store.stat(image_id) is None
 
 
+def test_bare_id_in_page_text_is_not_a_reference(tmp_repo) -> None:
+    # Only the full serving URL counts. A coincidental 16-hex string in page
+    # text (a sha, a random token) must not keep an orphan alive.
+    path = "guides/coincidence.md"
+    image_id = _put_image(path)
+    _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
+    wiki_git.commit_file(path, f"hex soup: {image_id}\n", "seed", author=None)
+
+    _run_sweep()
+
+    row = _image_row(image_id)
+    assert row is not None
+    assert row.unreferenced_since is not None
+
+
 def test_committed_page_reference_keeps_image_live(tmp_repo) -> None:
     path = "guides/kept.md"
     image_id = _put_image(path)
@@ -110,7 +125,11 @@ def test_active_draft_buffer_reference_keeps_image_live(tmp_repo) -> None:
     path = "drafts/live.md"
     image_id = _put_image(path)
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
-    coedit.open_session(path, base_sha=None, initial_buffer=f"draft keeps {image_id} live")
+    coedit.open_session(
+        path,
+        base_sha=None,
+        initial_buffer=f"draft keeps ![x](/api/wiki/images/{image_id}) live",
+    )
 
     _run_sweep()
 

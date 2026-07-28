@@ -75,7 +75,7 @@ async def upload_image(
         await run_in_threadpool(image_store.delete, image_id)
         raise HTTPException(status_code=404, detail="anchor page not found")
 
-    url = f"/api/wiki/images/{image_id}"
+    url = image_store.serving_url(image_id)
     alt = (filename or "").replace("\n", " ").replace("\r", " ").replace("]", "")
     return UploadImageResponse(id=image_id, url=url, markdown=f"![{alt}]({url})")
 

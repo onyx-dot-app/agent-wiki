@@ -39,6 +39,17 @@ def _parse(ts: str | None) -> datetime | None:
         return None
 
 
+def _referenced(url_by_id: dict[str, str]) -> set[str]:
+    """Ids whose serving URL appears in the working tree or a live edit buffer."""
+    matched_urls = wiki_git.grep_working_tree_fixed(list(url_by_id.values()))
+    draft_blob = "\n".join(coedit.active_buffer_texts())
+    return {
+        image_id
+        for image_id, url in url_by_id.items()
+        if url in matched_urls or (draft_blob and url in draft_blob)
+    }
+
+
 def _refresh_gauges() -> None:
     count, total_bytes = image_store.totals()
     wiki_images_total.set(count)
@@ -56,13 +67,8 @@ def sweep_wiki_images() -> None:
             log.info("image sweep: scanned=0 referenced=0 flagged=0 cleared=0 deleted=0")
             return
 
-        candidate_ids = [candidate.id for candidate in candidates]
-        referenced_ids = wiki_git.grep_working_tree_fixed(candidate_ids)
-        draft_blob = "\n".join(coedit.active_buffer_texts())
-        if draft_blob:
-            referenced_ids.update(
-                image_id for image_id in candidate_ids if image_id in draft_blob
-            )
+        url_by_id = {c.id: image_store.serving_url(c.id) for c in candidates}
+        referenced_ids = _referenced(url_by_id)
 
         now = datetime.now(timezone.utc)
         # 0 disables deletion, matching the trash-purge retention contract.
@@ -88,6 +94,12 @@ def sweep_wiki_images() -> None:
             if unreferenced_since is None or not deletion_enabled:
                 continue
             if now - unreferenced_since > timedelta(days=_DEREFERENCE_RETENTION_DAYS):
+                # Re-check right before deleting: a reference committed after the
+                # batch scan must clear the flag, never lose the image.
+                if candidate.id in _referenced({candidate.id: url_by_id[candidate.id]}):
+                    image_store.set_unreferenced_since(candidate.id, None)
+                    cleared += 1
+                    continue
                 # One bad row must not abort the rest of the sweep.
                 try:
                     if image_store.delete(candidate.id):
