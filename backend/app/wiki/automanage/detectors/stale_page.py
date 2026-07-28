@@ -173,8 +173,11 @@ class _StalePageDetector:
         candidate_set = set(candidates)
         # The scope is one same-audience bucket (pairs_paths), so any
         # member's fingerprint is the bucket's: every search result must
-        # share it before the model may see the path/title.
-        audience_fp = fingerprint.combined_fingerprint([candidates[0]])
+        # share it before the model may see the path/title. (Per-path
+        # fingerprints — combined_fingerprint re-hashes and never matches.)
+        audience_fp = fingerprint.fingerprints_for_paths([candidates[0]])[
+            candidates[0]
+        ]
         for _ in range(MAX_STEPS):
             result = llm_client.complete(messages, tools=_tools())
             if not result.tool_calls:

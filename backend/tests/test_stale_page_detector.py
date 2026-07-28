@@ -267,7 +267,7 @@ def test_search_never_surfaces_cross_audience_pages(monkeypatch, tmp_repo):
     monkeypatch.setattr(sp.fts, "search", lambda *a, **k: hits)
 
     det = _StalePageDetector()
-    fp = fingerprint.combined_fingerprint(["public/page.md"])
+    fp = fingerprint.fingerprints_for_paths(["public/page.md"])["public/page.md"]
     out = det._tool("search_wiki", {"query": "q"}, {"public/page.md"}, fp)
 
     assert out == [{"path": "public/page.md", "title": "Public"}]
