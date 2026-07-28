@@ -111,13 +111,11 @@ def index_path_inline(path: str) -> None:
 
 
 def reindex_all_inline() -> None:
-    """Index every .md page currently in the wiki.
+    """Index every .md page currently in the wiki. Idempotent.
 
-    Called at backend startup so freshly-seeded pages (and any pages that
-    missed indexing due to a worker race at boot) are searchable immediately
-    without waiting for the hourly reconcile or the worker queue.
-
-    Upserts are idempotent — re-indexing an already-indexed page is safe.
+    Runs only from the seed path, not every boot (O(pages) inline work) —
+    so a wiki booted over pre-existing content stays unindexed until pages
+    are edited or this is run manually.
     """
     paths = [p for p in wiki_git.list_paths() if p.endswith(".md")]
     if not paths:
