@@ -70,11 +70,7 @@ import type {
 } from "@/lib/editor/comments";
 import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
-import {
-  Coeditor,
-  CoeditPresenceBar,
-  type CoeditorHandle,
-} from "@/lib/editor/components";
+import { Coeditor, type CoeditorHandle } from "@/lib/editor/components";
 import { useCoeditSession } from "@/lib/editor/hooks";
 import {
   useAgentsBarHost,
@@ -1249,12 +1245,6 @@ export function FileView({ path }: FileViewProps) {
                     onOpenPolicy={() => openPanel("updates")}
                   />
                   <Path2ReviewBanner path={path} canWrite={canWrite} />
-                  <CoeditPresenceBar
-                    participants={coedit.participants}
-                    peers={coedit.peers}
-                    typing={coedit.typing}
-                    selfUserId={user?.id ?? null}
-                  />
                   {(() => {
                     // Cards visible while the body is still "empty enough"
                     // to discard without losing user work: truly blank, or
