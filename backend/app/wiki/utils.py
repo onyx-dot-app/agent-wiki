@@ -20,7 +20,10 @@ from typing import Any
 from app.auth import PermissionDenied, require_can
 from app.db import agent_sessions as _sessions
 from app.launchers.current_session import current_agent_session_id
-from app.tasks.agent_activity import schedule_cleanup_for_natural_key
+# Module import (attribute resolved at call time): tests patch
+# app.tasks.agent_activity.schedule_cleanup_for_natural_key, and a bound
+# name here would bypass the patch.
+from app.tasks import agent_activity as agent_activity_tasks
 from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
@@ -366,7 +369,7 @@ def _commit_resolved(
         expires_at = agent_activity.upsert_activity(**upsert_kwargs)
         # Local import: avoids loading the tasks package at tool-load time.
 
-        schedule_cleanup_for_natural_key(
+        agent_activity_tasks.schedule_cleanup_for_natural_key(
             user_id=user.id,
             agent_name=agent_name,
             expires_at=expires_at,
@@ -410,7 +413,7 @@ def mark_doc_read(path: str) -> None:
         agent_session_id=launcher_sid,
     )
 
-    schedule_cleanup_for_natural_key(
+    agent_activity_tasks.schedule_cleanup_for_natural_key(
         user_id=user.id,
         agent_name=agent_name,
         expires_at=expires_at,
