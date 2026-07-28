@@ -9,8 +9,10 @@ from fastapi.testclient import TestClient
 
 from app.auth import users as users_repo
 from app.main import create_app
+from app.db.models import Image
 from app.wiki import acl, doc_ids, image_store
 from app.wiki import git as wiki_git
+from tests._seed import count_rows
 from app.wiki.image_store import sniff_image_type
 from tests._auth import login_fastapi
 
@@ -26,6 +28,30 @@ def client(tmp_repo):
     wiki_git.commit_file("guides/setup.md", "# Setup\n", "seed")
     wiki_git.commit_file("priv/secret.md", "# Secret\n", "seed")
     return TestClient(create_app())
+
+
+def test_upload_cleans_up_when_page_vanishes_mid_upload(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Simulates the page being trashed between the pre-mint existence check
+    # and the post-put re-check: first probe sees the page, second does not.
+    uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
+    login_fastapi(client, uid)
+    real = wiki_git.head_sha_for_path
+    calls = {"n": 0}
+
+    def racing(rel_path: str) -> str | None:
+        calls["n"] += 1
+        return None if calls["n"] > 1 else real(rel_path)
+
+    monkeypatch.setattr("app.api.images.wiki_git.head_sha_for_path", racing)
+    resp = client.post(
+        "/api/wiki/images?path=guides/setup.md",
+        content=PNG_BYTES,
+        headers={"content-type": "image/png"},
+    )
+    assert resp.status_code == 404
+    assert count_rows(Image) == 0
 
 
 def test_upload_404_for_nonexistent_anchor_page(client: TestClient) -> None:
