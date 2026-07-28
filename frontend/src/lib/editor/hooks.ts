@@ -308,20 +308,21 @@ export function useCoeditSession(opts: {
     setJoinError(null);
 
     void (async () => {
-      let firstConnect = true;
       while (!cancelled) {
-        // Fresh doc/awareness per connection attempt — see the field
-        // comment on `doc` above.
-        const freshDoc = firstConnect ? doc : new Y.Doc();
-        const freshAwareness = firstConnect
-          ? awareness
-          : new Awareness(freshDoc);
-        if (!firstConnect) {
-          setDocInstance(freshDoc);
-          setAwareness(freshAwareness);
-          editorRef.current = null;
-          setBuffer("");
-        }
+        // Fresh doc/awareness every iteration, including the first — never
+        // reuse the outer `doc`/`awareness` state: this effect re-runs on
+        // every path change (deps: [enabled, path, retryToken]), and since
+        // `doc`/`awareness` state isn't reset by React on that re-run, a
+        // "first connect reuses the existing state" shortcut here would
+        // hand the *previous* path's populated doc to this path's brand
+        // new session — syncing its content in and risking it getting
+        // checkpointed under the wrong page.
+        const freshDoc = new Y.Doc();
+        const freshAwareness = new Awareness(freshDoc);
+        setDocInstance(freshDoc);
+        setAwareness(freshAwareness);
+        editorRef.current = null;
+        setBuffer("");
         setConnectionId((n) => n + 1);
 
         let snap;
@@ -386,7 +387,6 @@ export function useCoeditSession(opts: {
           if (editor) setPeers(derivePeers(editor, freshAwareness));
         };
         freshAwareness.on("change", recomputeForThisAwareness);
-        firstConnect = false;
 
         const { expected } = await snap.closed;
         freshAwareness.off("change", recomputeForThisAwareness);
