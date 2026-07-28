@@ -54,7 +54,7 @@ def _referenced(url_by_id: dict[str, str]) -> set[str]:
         if url in matched_urls
         or (
             draft_blob
-            and re.search(re.escape(url) + r"([^0-9a-f]|$)", draft_blob) is not None
+            and re.search(re.escape(url) + r"([^0-9a-fA-F]|$)", draft_blob) is not None
         )
     }
 
@@ -103,16 +103,20 @@ def sweep_wiki_images() -> None:
             if unreferenced_since is None or not deletion_enabled:
                 continue
             if now - unreferenced_since > timedelta(days=_DEREFERENCE_RETENTION_DAYS):
-                # Re-check right before deleting: a reference committed after the
-                # batch scan must clear the flag, never lose the image.
-                if candidate.id in _referenced({candidate.id: url_by_id[candidate.id]}):
-                    image_store.set_unreferenced_since(candidate.id, None)
-                    cleared += 1
-                    continue
+                # The commit lock serializes this re-check + delete against every
+                # page writer, so no commit can add a reference in between. A
+                # reference that landed since the batch scan clears the flag.
                 # One bad row must not abort the rest of the sweep.
                 try:
-                    if image_store.delete(candidate.id):
-                        deleted += 1
+                    with wiki_git.commit_lock():
+                        if candidate.id in _referenced(
+                            {candidate.id: url_by_id[candidate.id]}
+                        ):
+                            image_store.set_unreferenced_since(candidate.id, None)
+                            cleared += 1
+                            continue
+                        if image_store.delete(candidate.id):
+                            deleted += 1
                 except Exception:
                     log.exception("image sweep: delete failed for %s", candidate.id)
 

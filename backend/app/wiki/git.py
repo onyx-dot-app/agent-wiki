@@ -579,7 +579,7 @@ def grep_working_tree_hex_bounded(needles: Iterable[str]) -> set[str]:
     if not wanted:
         return set()
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=True) as f:
-        f.write("\n".join(f"{needle}([^0-9a-f]|$)" for needle in wanted))
+        f.write("\n".join(f"{needle}([^0-9a-fA-F]|$)" for needle in wanted))
         f.flush()
         res = _run(
             ["grep", "--no-color", "-I", "-E", "-f", f.name, "-o", "-h"],
