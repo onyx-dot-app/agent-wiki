@@ -70,6 +70,10 @@ def note_view(path: str) -> None:
     try:
         touch(path)
     except Exception:
+        # Un-latch the gate: a failed stamp must not suppress recording for
+        # the rest of the window — the next view retries.
+        with _lock:
+            _last_enqueued.pop(path, None)
         log.warning("page view stamp failed for %s", path, exc_info=True)
 
 
