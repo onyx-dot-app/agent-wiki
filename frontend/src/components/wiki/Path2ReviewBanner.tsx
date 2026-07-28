@@ -104,10 +104,7 @@ function ProposalRow({
   const [outcome, setOutcome] = useState<Outcome>("idle");
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => void (alive.current = false);
-  }, []);
+  useEffect(() => () => void (alive.current = false), []);
 
   // Once a row has shown its terminal outcome, briefly leave it up, then refresh
   // the list so it drops out (it has left `pending`). `onActioned` is SWR's

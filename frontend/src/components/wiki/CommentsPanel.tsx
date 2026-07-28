@@ -11,7 +11,8 @@ import { Section } from "@onyx-ai/opal/layouts";
 
 import { useAuth } from "@/lib/auth";
 import { createComment } from "@/lib/comments";
-import type { CoeditorHandle, CommentDraft } from "@/lib/editor/types";
+import type { CommentDraft } from "@/lib/editor/comments";
+import type { CoeditorHandle } from "@/lib/editor/components";
 import { useIsMobile } from "@/lib/viewport";
 import type { CommentThreadView } from "@/types";
 

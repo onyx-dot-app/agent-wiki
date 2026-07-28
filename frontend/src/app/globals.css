@@ -1,6 +1,5 @@
 @import "@onyx-ai/opal/root.css";
 @import "./css/z-index.css";
-@import "./css/editor.css";
 @config "../../tailwind.config.cjs";
 
 /* The app shell is height-capped and scrolls inside its own columns, so
@@ -460,19 +459,4 @@ body {
   font-family: var(--font-dm-mono);
   font-size: 14px;
   line-height: 20px;
-}
-
-/* Suggestions-card row highlight (mock annotation "Click to highlight
-   folder"): a brief tint flash on the targeted listing row. */
-.wiki-row-flash {
-  animation: wiki-row-flash 2s ease-out;
-}
-@keyframes wiki-row-flash {
-  0%,
-  60% {
-    background-color: var(--background-tint-03);
-  }
-  100% {
-    background-color: transparent;
-  }
 }

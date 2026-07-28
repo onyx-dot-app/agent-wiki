@@ -1,19 +1,4 @@
-import type { CommitAgent, CommitAuthor, UpdateHealth } from "@/lib/wiki/types";
-
-export type UpdateWarnLevel = "over" | "near" | null;
-
-/** The page's auto-update warning level: "over" once the 24h cap is hit,
- * "near" once activity reaches the alert threshold. Single predicate so
- * every surface rendering update-health chrome agrees. */
-export function updateWarnLevel(
-  health: UpdateHealth | null | undefined,
-): UpdateWarnLevel {
-  if (!health) return null;
-  if (health.cap_24h > 0 && health.count_24h >= health.cap_24h) return "over";
-  if (health.count_24h > 0 && health.count_24h >= health.threshold_24h)
-    return "near";
-  return null;
-}
+import type { CommitAgent, CommitAuthor } from "@/lib/wiki/types";
 
 /** Last path segment as a display name — drops a trailing `.md`. Shared by the
  * share + transfer dialogs so the two copies don't drift. See also
@@ -24,11 +9,6 @@ export function lastSegment(path: string): string {
   if (!clean) return "Wiki";
   const seg = clean.split("/").pop() ?? clean;
   return seg.endsWith(".md") ? seg.slice(0, -3) : seg;
-}
-
-/** Scope flavor for policy copy: .md paths are pages, all else folders. */
-export function pathKind(path: string): "page" | "folder" {
-  return path.endsWith(".md") ? "page" : "folder";
 }
 
 /** Strip the directory prefix and `.md` extension from a wiki file path to

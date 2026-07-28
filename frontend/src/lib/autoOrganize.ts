@@ -95,7 +95,7 @@ export interface Proposal {
 
 /** Pending proposals touching `path` (a page or folder subtree) that the caller
  * can act on — the server write-scopes to edit access, so a read-only viewer
- * gets an empty list.
+ * gets an empty list. Backs the Path-2 review banner on the page/folder.
  *
  * `enabled` (default true) gates the fetch — pass the caller's known write
  * capability to skip polling for viewers; the server remains the authority. */
