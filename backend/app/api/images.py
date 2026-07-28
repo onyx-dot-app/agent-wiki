@@ -48,8 +48,10 @@ async def upload_image(
     if declared != sniffed:
         raise HTTPException(status_code=415, detail="content-type does not match image data")
 
-    # Uploading to a page that doesn't exist would mint a live doc id for it.
-    if await run_in_threadpool(wiki_git.head_sha_for_path, rel) is None:
+    # Uploading to a page that doesn't exist at HEAD would mint a live doc id
+    # for it. Presence check, not history: a deleted or trashed page still has
+    # commits touching its old path.
+    if not await run_in_threadpool(wiki_git.exists_at_head, rel):
         raise HTTPException(status_code=404, detail="anchor page not found")
     anchor_doc_id = await run_in_threadpool(doc_ids.get_or_mint, rel)
     image_id = await run_in_threadpool(
@@ -60,8 +62,8 @@ async def upload_image(
         uploaded_by=user.id,
     )
     # Brackets the mint+put against a concurrent page move/trash/delete: if
-    # the page vanished in the window, drop the blob instead of orphaning it.
-    if await run_in_threadpool(wiki_git.head_sha_for_path, rel) is None:
+    # the page left HEAD in the window, drop the blob instead of orphaning it.
+    if not await run_in_threadpool(wiki_git.exists_at_head, rel):
         await run_in_threadpool(image_store.delete, image_id)
         raise HTTPException(status_code=404, detail="anchor page not found")
 

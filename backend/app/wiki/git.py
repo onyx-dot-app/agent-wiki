@@ -278,6 +278,16 @@ def read_file(rel_path: str, ref: str = "HEAD") -> str:
         raise UnknownSha(ref) from e
 
 
+def exists_at_head(rel_path: str) -> bool:
+    """True when ``rel_path`` is present in HEAD's tree.
+
+    Presence, not history: ``head_sha_for_path`` answers "which commit last
+    touched this path" and stays truthy forever after a delete or trash move,
+    so it must never gate on whether a page currently exists.
+    """
+    return _run(["cat-file", "-e", f"HEAD:{rel_path}"], check=False).returncode == 0
+
+
 def read_file_opt(rel_path: str, ref: str = "HEAD") -> str | None:
     """Like ``read_file`` but returns ``None`` when the path doesn't exist
     at ``ref`` — and stays quiet about it.
