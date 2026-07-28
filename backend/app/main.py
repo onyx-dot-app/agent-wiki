@@ -64,6 +64,7 @@ from app.llm.errors import LLMError
 from app.models._helpers import ErrorResponse, QueueFullErrorResponse, RequestError
 from app.db.session import init_db
 from app.tasks.agent_activity import schedule_all_pending_cleanups
+from app.tasks.reindex import backfill_unindexed_pages
 from app.tasks.queues import QueueFullError
 from app.triggers import reconcile as triggers_reconcile
 from app.triggers import repo as triggers_repo
@@ -177,6 +178,11 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # The index persists across reboots, so steady-state boots skip this.
     if comment_fts.count() == 0:
         _comments_repo.reindex_all_inline()
+    # Same backfill for the doc index: a first boot over pre-existing wiki
+    # content (restored volume, migration) skips seeding — the only other
+    # boot path that indexes — and would otherwise leave every page
+    # unsearchable until it happened to be edited.
+    backfill_unindexed_pages()
     triggers_repo.purge_invalid_triggers(actor="system <system@agent-wiki>")
     triggers_reconcile.reconcile_legacy_slack_triggers()
     triggers_repo.rebuild_from_filesystem()
