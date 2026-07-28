@@ -16,7 +16,6 @@ import {
 } from "@onyx-ai/opal/icons";
 
 import { toast } from "@/hooks/useToast";
-import { OrganizeComingSoonRow } from "@/components/wiki/UpdatePolicyPanel";
 import { pathKind } from "@/lib/wiki/utils";
 import {
   getUpdatePolicy,
@@ -198,51 +197,54 @@ export function PolicyPopover({
       onClick={onOpenUpdatesPanel}
     >
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
+        {/* Group header — the switches live on the two rows below:
+            Update = ingestion auto-update, Organize = auto management. */}
         <InputHorizontal
           icon={SvgSparkle}
           title="AI Auto-Edits"
           description={`Let AI update/organize this ${kind} on its own.`}
+        />
+        <Section
+          justifyContent="start"
+          alignItems="stretch"
+          height="fit"
+          gap={0.5}
+          className="mt-2 ml-6"
         >
-          <span onClick={(e) => e.stopPropagation()}>
-            <Switch
-              checked={allowed}
-              // Held until this path's policy loads (toggling against the
-              // null default would persist a wrong override) and while a
-              // save is in flight (a second click would race the PATCH).
-              disabled={!canWrite || !loaded || saving}
-              onCheckedChange={() =>
-                void patchField({ ai_management_allowed: !allowed })
-              }
-            />
-          </span>
-        </InputHorizontal>
-        {allowed && (
-          <Section
-            justifyContent="start"
-            alignItems="stretch"
-            height="fit"
-            gap={0.5}
-            className="mt-2 ml-6"
+          <InputHorizontal
+            title="Update"
+            description="Periodically scan ingested data sources to add relevant new information."
           >
-            <InputHorizontal
-              title="Update"
-              description="Periodically scan ingested data sources to add relevant new information."
-            >
-              <span onClick={(e) => e.stopPropagation()}>
-                <Switch
-                  checked={!autoUpdateDisabled}
-                  disabled={!canWrite || !loaded || saving}
-                  onCheckedChange={() =>
-                    void patchField({
-                      ingestion_auto_update_disabled: !autoUpdateDisabled,
-                    })
-                  }
-                />
-              </span>
-            </InputHorizontal>
-            <OrganizeComingSoonRow kind={kind} />
-          </Section>
-        )}
+            <span onClick={(e) => e.stopPropagation()}>
+              <Switch
+                checked={!autoUpdateDisabled}
+                // Held until this path's policy loads (toggling against the
+                // null default would persist a wrong override) and while a
+                // save is in flight (a second click would race the PATCH).
+                disabled={!canWrite || !loaded || saving}
+                onCheckedChange={() =>
+                  void patchField({
+                    ingestion_auto_update_disabled: !autoUpdateDisabled,
+                  })
+                }
+              />
+            </span>
+          </InputHorizontal>
+          <InputHorizontal
+            title="Organize"
+            description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
+          >
+            <span onClick={(e) => e.stopPropagation()}>
+              <Switch
+                checked={allowed}
+                disabled={!canWrite || !loaded || saving}
+                onCheckedChange={() =>
+                  void patchField({ ai_management_allowed: !allowed })
+                }
+              />
+            </span>
+          </InputHorizontal>
+        </Section>
       </Section>
       <Divider />
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>

@@ -73,27 +73,6 @@ function capNote(health: UpdateHealth): string {
   return "Auto-updating frequently.";
 }
 
-interface OrganizeComingSoonRowProps {
-  kind: string;
-}
-
-/** The Organize policy row, disabled until the backend grows the field. */
-export function OrganizeComingSoonRow({ kind }: OrganizeComingSoonRowProps) {
-  return (
-    <InputHorizontal
-      title="Organize"
-      description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
-    >
-      <Tooltip tooltip="Coming soon" side="left">
-        {/* raw-ok: a disabled control emits no pointer events, so Tooltip needs this enabled span as its hover target */}
-        <span className="inline-flex">
-          <Switch checked={false} disabled />
-        </span>
-      </Tooltip>
-    </InputHorizontal>
-  );
-}
-
 function errorMessage(e: unknown): string {
   if (e instanceof ApiError && e.status === 403) {
     return "You don't have permission to change this.";
@@ -306,18 +285,14 @@ export function UpdatePolicyPanel({
               className="group/policy rounded-(--radius-12) border border-(--border-01)"
             >
               <div className="flex flex-col gap-2 p-2">
+                {/* Group header — the switches live on the two rows below:
+                    Update = ingestion auto-update, Organize = auto
+                    management (Auto Organize may act on this scope). */}
                 <InputHorizontal
                   icon={SvgSparkle}
                   title="AI Auto-Edits"
                   description={`Let AI update/organize this ${kind} on its own.`}
-                >
-                  {policySwitch(
-                    aiSwitchOn,
-                    onToggleAiManaged,
-                    aiManagedSetHere,
-                    () => void save({ ai_management_allowed: null }),
-                  )}
-                </InputHorizontal>
+                />
                 <div className="flex flex-col gap-2 pl-6">
                   <InputHorizontal
                     title="Update"
@@ -330,7 +305,17 @@ export function UpdatePolicyPanel({
                       () => void save({ ingestion_auto_update_disabled: null }),
                     )}
                   </InputHorizontal>
-                  <OrganizeComingSoonRow kind={kind} />
+                  <InputHorizontal
+                    title="Organize"
+                    description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
+                  >
+                    {policySwitch(
+                      aiSwitchOn,
+                      onToggleAiManaged,
+                      aiManagedSetHere,
+                      () => void save({ ai_management_allowed: null }),
+                    )}
+                  </InputHorizontal>
                 </div>
               </div>
 
