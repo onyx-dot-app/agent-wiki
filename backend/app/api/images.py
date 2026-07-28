@@ -9,6 +9,7 @@ from app.auth import User, require_can
 from app.auth.deps import require_user, require_user_or_bearer
 from app.models.images import UploadImageResponse
 from app.wiki import doc_ids, filesystem, image_store
+from app.wiki import git as wiki_git
 
 router = APIRouter()
 
@@ -47,6 +48,9 @@ async def upload_image(
     if declared != sniffed:
         raise HTTPException(status_code=415, detail="content-type does not match image data")
 
+    # Uploading to a page that doesn't exist would mint a live doc id for it.
+    if await run_in_threadpool(wiki_git.head_sha_for_path, rel) is None:
+        raise HTTPException(status_code=404, detail="anchor page not found")
     anchor_doc_id = await run_in_threadpool(doc_ids.get_or_mint, rel)
     image_id = await run_in_threadpool(
         image_store.put,

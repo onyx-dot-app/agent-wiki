@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.auth import users as users_repo
 from app.main import create_app
 from app.wiki import acl, doc_ids, image_store
+from app.wiki import git as wiki_git
 from app.wiki.image_store import sniff_image_type
 from tests._auth import login_fastapi
 
@@ -21,7 +22,23 @@ WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 8
 
 @pytest.fixture
 def client(tmp_repo):
+    # Upload anchors must be real pages, so seed the ones the tests target.
+    wiki_git.commit_file("guides/setup.md", "# Setup\n", "seed")
+    wiki_git.commit_file("priv/secret.md", "# Secret\n", "seed")
     return TestClient(create_app())
+
+
+def test_upload_404_for_nonexistent_anchor_page(client: TestClient) -> None:
+    uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
+    login_fastapi(client, uid)
+    resp = client.post(
+        "/api/wiki/images?path=nope/missing.md",
+        content=PNG_BYTES,
+        headers={"content-type": "image/png"},
+    )
+    assert resp.status_code == 404
+    # No doc id row may be minted for the nonexistent page.
+    assert doc_ids.id_for_path("nope/missing.md") is None
 
 
 def _make_private(path: str, owner_uid: str) -> None:
