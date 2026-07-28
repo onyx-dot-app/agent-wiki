@@ -429,3 +429,64 @@ def test_search_wiki_returns_results_via_mcp(client):
     assert is_error is False
     paths = [r["path"] for r in payload["results"]]
     assert "guide.md" in paths
+    # Every hit also carries the absolute app URL for its page.
+    assert all(
+        r["url"] == f"http://testserver/app/wiki/{r['path']}" for r in payload["results"]
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Absolute URL enrichment                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def test_read_doc_carries_absolute_url(client):
+    """Path-bearing results gain an absolute ``url`` built on
+    PUBLIC_BASE_URL (``http://testserver`` under tests) — MCP clients live
+    outside the deployment, so a relative path alone isn't linkable."""
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("dir with space/guide.md", "# Guide\n", "seed", author=None)
+
+    headers = _handshake(client, _mint(uid))
+    rpc = _call_tool(client, headers, "read_doc", {"path": "dir with space/guide.md"})
+    payload, is_error = _payload_from_call_response(rpc)
+
+    assert is_error is False
+    assert payload["path"] == "dir with space/guide.md"
+    assert payload["url"] == "http://testserver/app/wiki/dir%20with%20space/guide.md"
+
+
+def test_move_path_carries_old_and_new_urls(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("old.md", "# Doc\n", "seed", author=None)
+
+    headers = _handshake(client, _mint(uid))
+    rpc = _call_tool(
+        client,
+        headers,
+        "move_path",
+        {"old_path": "old.md", "new_path": "new.md", "commit_message": "rename"},
+    )
+    payload, is_error = _payload_from_call_response(rpc)
+
+    assert is_error is False
+    assert payload["old_url"] == "http://testserver/app/wiki/old.md"
+    assert payload["new_url"] == "http://testserver/app/wiki/new.md"
+
+
+def test_comment_link_is_absolute(client):
+    uid = seed_user(uid="u1", email="u1@x.com")
+    wiki_git.commit_file("guide.md", "# Guide\nThe pool size is 20.\n", "seed", author=None)
+
+    headers = _handshake(client, _mint(uid))
+    rpc = _call_tool(
+        client,
+        headers,
+        "add_comment",
+        {"path": "guide.md", "quoted_text": "The pool size is 20.", "body": "confirm?"},
+    )
+    payload, is_error = _payload_from_call_response(rpc)
+
+    assert is_error is False
+    assert payload["doc_url"] == "http://testserver/app/wiki/guide.md"
+    assert payload["link"].startswith("http://testserver/app/wiki/guide.md?comment=")

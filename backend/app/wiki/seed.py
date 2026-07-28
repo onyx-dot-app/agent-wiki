@@ -16,12 +16,20 @@ and reboots gets an empty wiki, not a re-seed. The marker lives in
 Postgres on purpose, so wiping the wiki working tree alone doesn't
 re-arm seeding.
 
+Seeding indexes the pages it writes; a first boot over pre-existing
+content skips seeding, and the lifespan's ``backfill_unindexed_pages``
+indexes that content instead.
+
 The CLI in ``app/scripts/seed_onboarding.py`` shares the helper below
 to write pages onto an already-populated wiki without nuking it. The
 CLI bypasses the marker because it's explicitly user-driven.
 """
 from __future__ import annotations
 
+from app.db.session import session
+from app.models.wiki import ChangeKind
+from app.wiki.git import commit_file, list_paths
+from app.wiki.notify import after_doc_write
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,9 +77,6 @@ def write_seed_pages(
     """
     # Local imports to avoid pulling DB/notify deps into modules that just
     # want SEED_SOURCE_DIR.
-    from app.wiki.git import commit_file
-    from app.wiki.notify import after_doc_write
-    from app.models.wiki import ChangeKind
 
     processed = 0
     for rel, body in iter_seed_pages():
@@ -91,7 +96,6 @@ def write_seed_pages(
 
 def _read_seed_marker() -> str | None:
     """Return the ``seeded_at`` ISO timestamp, or None if not yet stamped."""
-    from app.db.session import session
 
     with session() as s:
         row = s.execute(
@@ -102,7 +106,6 @@ def _read_seed_marker() -> str | None:
 
 def _stamp_seed_marker() -> None:
     """Stamp ``seeded_at`` to now (UTC, ISO). Upserts the singleton row."""
-    from app.db.session import session
 
     now_iso = datetime.now(timezone.utc).isoformat()
     with session() as s:
@@ -136,12 +139,12 @@ def seed_if_empty(target_dir: str) -> bool:
     if not SEED_SOURCE_DIR.is_dir():
         log.debug("no bundled wiki seed at %s, skipping", SEED_SOURCE_DIR)
         return False
-    from app.wiki.git import list_paths
 
     if any(p.endswith(".md") for p in list_paths()):
         # Pre-existing content (admin seeded another way, migrating from
         # an older install). Stamp the marker so a future delete-all
-        # doesn't trigger re-seeding.
+        # doesn't trigger re-seeding. Indexing this content is the
+        # lifespan's job (backfill_unindexed_pages).
         log.info("wiki already has tracked pages, stamping marker without seeding")
         _stamp_seed_marker()
         return False

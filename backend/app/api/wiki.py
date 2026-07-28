@@ -58,6 +58,7 @@ from app.models.file_system import (
     TrashItemView,
     TrashListResponse,
 )
+from app.llm.agents import draft_generator, draft_reviser
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
@@ -72,6 +73,7 @@ from app.wiki import (
     filesystem,
     git as wiki_git,
     notify as wiki_notify,
+    page_views,
     provenance,
     recents as wiki_recents,
     search as wiki_search,
@@ -390,6 +392,11 @@ def get_document_by_path(
             if fallback is None:
                 raise HTTPException(status_code=404, detail="not found")
             body = fallback
+    # A successful HEAD read is a "view" — feeds staleness detection.
+    # Stamped only now, after the body was actually produced: a 404 or git
+    # failure must not mark the page as used (nor mint an id for a missing
+    # path). Throttled and failure-proof inside note_view.
+    page_views.note_view(rel)
     # Page-level (current HEAD), so both live reads share them.
     return GetDocumentResponse(
         path=rel,
@@ -888,7 +895,6 @@ def generate_draft(
     user: User = Depends(require_user),
 ) -> GenerateDraftResponse:
     """Generate a draft (title + body) from a free-text prompt for review."""
-    from app.llm.agents import draft_generator
 
     result = draft_generator.generate(req.prompt)
     return GenerateDraftResponse(title=result["title"], body=result["body"])
@@ -900,7 +906,6 @@ def revise_draft(
     user: User = Depends(require_user),
 ) -> ReviseDraftResponse:
     """Apply an instruction to an unsaved draft body; return the revised body."""
-    from app.llm.agents import draft_reviser
 
     return ReviseDraftResponse(body=draft_reviser.revise(req.body, req.instruction))
 

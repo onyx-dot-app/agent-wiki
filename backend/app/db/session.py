@@ -119,7 +119,7 @@ def _alembic_config():
     so ``alembic`` itself can stay an install-time-only dependency for
     parts of the app that never call ``init_db()``.
     """
-    from alembic.config import Config as AlembicConfig
+    from alembic.config import Config as AlembicConfig  # noqa: PLC0415
 
     cfg = AlembicConfig()
     cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
@@ -149,8 +149,8 @@ def init_db() -> None:
     process simultaneously, so without this lock they race to CREATE TABLE
     alembic_version and the second writer crashes with UniqueViolation.
     """
-    import sqlalchemy as sa
-    from alembic import command
+    import sqlalchemy as sa  # noqa: PLC0415
+    from alembic import command  # noqa: PLC0415
 
     engine = get_engine()
     with engine.connect() as conn:

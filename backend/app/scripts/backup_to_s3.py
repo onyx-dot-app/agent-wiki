@@ -77,7 +77,7 @@ class BackupConfig(BaseModel):
 def _s3_client(cfg: BackupConfig) -> Any:
     """``boto3.client`` behind an ``Any`` boundary — botocore is untyped, so
     the unavoidable Unknown is confined to this one seam."""
-    import boto3
+    import boto3  # noqa: PLC0415
 
     return boto3.client(  # pyright: ignore
         "s3", endpoint_url=cfg.endpoint_url, region_name=cfg.region

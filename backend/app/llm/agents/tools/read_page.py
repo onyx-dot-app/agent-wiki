@@ -9,9 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app.auth import PermissionDenied, require_can
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
-from app.wiki import agent_activity, git as wiki_git, update_policy
+from app.wiki import agent_activity, git as wiki_git, page_views, update_policy
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -23,7 +24,6 @@ def handle(args: dict[str, Any]) -> Any:
     if not wiki_utils.file_exists(path):
         return {"error": f"file not found: {path}"}
 
-    from app.auth import PermissionDenied, require_can
 
     try:
         require_can("read", path)
@@ -36,6 +36,9 @@ def handle(args: dict[str, Any]) -> Any:
         return {"error": f"could not read {path}: {exc}"}
 
     wiki_utils.mark_doc_read(path)
+    # A successful read is a "view" — stamped only after the body was
+    # produced (a failed read must not mark the page as used).
+    page_views.note_view(path)
 
     result: dict[str, Any] = {
         "path": path,

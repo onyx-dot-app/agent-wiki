@@ -13,19 +13,13 @@ candidate search (that path queries the document index, never comments).
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 from app.auth import current_user
 from app.db import comment_fts
+from app.llm.agents.tools._links import thread_link
 
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 20
-
-
-def _thread_link(doc_path: str, thread_root_id: str) -> str:
-    """`/app/wiki/<encoded path>?comment=<root>` — the shipped deep-link route."""
-    encoded = "/".join(quote(seg) for seg in doc_path.split("/") if seg)
-    return f"/app/wiki/{encoded}?comment={quote(thread_root_id, safe='')}"
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -57,7 +51,7 @@ def handle(args: dict[str, Any]) -> Any:
                 "doc_path": h.doc_path,
                 "thread_root_id": h.thread_root_id,
                 "snippet": h.snippet,
-                "link": _thread_link(h.doc_path, h.thread_root_id),
+                "link": thread_link(h.doc_path, h.thread_root_id),
             }
             for h in hits
         ]

@@ -1,7 +1,7 @@
 "use client";
 
 /** Auto-Organize suggestions card (mocks 2236:78296 / 2240:59533): pending
- * change proposals for a folder subtree with per-row approve/dismiss, bulk
+ * change proposals for a folder subtree with per-row approve/reject, bulk
  * actions, and the admin shortcut. Rows keep their outcome in place. Once
  * all rows are handled the list refreshes them away after a beat (mock
  * annotation: leave time for user confirmation). */
@@ -32,7 +32,7 @@ import { useAuth } from "@/lib/auth";
 import {
   type Proposal,
   approveProposal,
-  dismissProposal,
+  rejectProposal,
   fetchProposal,
   useProposalsByPath,
 } from "@/lib/autoOrganize";
@@ -41,11 +41,11 @@ type Outcome =
   | "working"
   | "applying"
   | "applied"
-  | "dismissed"
+  | "rejected"
   | "stale"
   | "error";
 
-const HANDLED = new Set<Outcome>(["applied", "dismissed", "stale"]);
+const HANDLED = new Set<Outcome>(["applied", "rejected", "stale"]);
 
 /** Row glyph per the mock (2236:78296): merges show the scope being
  * merged (pages icon for a page, folder for a folder), empty-folder
@@ -125,21 +125,31 @@ export function SuggestionsCard({
     if (alive.current) void refresh();
   }
 
-  async function act(id: number, kind: "approve" | "dismiss") {
+  async function act(id: number, kind: "approve" | "reject") {
     setOutcome(id, "working");
     try {
       if (kind === "approve") {
         await approveProposal(id);
         if (alive.current) void pollApplied(id);
       } else {
-        await dismissProposal(id);
-        setOutcome(id, "dismissed");
+        await rejectProposal(id);
+        setOutcome(id, "rejected");
       }
     } catch (e) {
       if (!alive.current) return;
-      // 409: someone else already actioned it. The refresh drops it.
-      if (e instanceof ApiError && e.status === 409)
-        return setOutcome(id, "dismissed");
+      // 409: someone else already actioned it. Clear the local outcome so
+      // the row cannot strand at working if the refresh fails, then sync
+      // to the server's reality instead of guessing which outcome won.
+      if (e instanceof ApiError && e.status === 409) {
+        if (!alive.current) return;
+        setOutcomes((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+        void refresh();
+        return;
+      }
       setOutcome(id, "error");
     }
   }
@@ -154,7 +164,7 @@ export function SuggestionsCard({
   // Bulk actions hit every untouched or failed row (mock annotation:
   // "apply to any that is not already selected"). Rows show their
   // outcomes in place.
-  async function actAll(kind: "approve" | "dismiss") {
+  async function actAll(kind: "approve" | "reject") {
     for (const id of pendingIds) await act(id, kind);
   }
 
@@ -225,7 +235,7 @@ export function SuggestionsCard({
               proposal={p}
               outcome={outcomes[p.id]}
               onApprove={() => void act(p.id, "approve")}
-              onDismiss={() => void act(p.id, "dismiss")}
+              onDismiss={() => void act(p.id, "reject")}
               onClick={
                 onHighlight ? () => onHighlight(p.source_paths) : undefined
               }
@@ -277,9 +287,9 @@ export function SuggestionsCard({
                 prominence="secondary"
                 rightIcon={SvgSlashCircle}
                 disabled={pendingIds.length === 0}
-                onClick={() => void actAll("dismiss")}
+                onClick={() => void actAll("reject")}
               >
-                Dismiss All
+                Reject All
               </Button>
               <Button
                 size="sm"
@@ -301,7 +311,7 @@ const OUTCOME_LABEL: Partial<Record<Outcome, string>> = {
   applying: "Applying…",
   applied: "Applied",
   stale: "Skipped",
-  dismissed: "Dismissed",
+  rejected: "Rejected",
   error: "Failed",
 };
 
@@ -314,8 +324,8 @@ interface SuggestionRowProps {
 }
 
 /** One suggestion (mock Line, 56px): op icon, summary over the path chip,
- * dismiss/approve controls. Handled rows keep their place with the outcome
- * shown (strikethrough for dismissed, check for applied). */
+ * reject/approve controls. Handled rows keep their place with the outcome
+ * shown (strikethrough for rejected, check for applied). */
 function SuggestionRow({
   proposal,
   outcome,
@@ -324,7 +334,7 @@ function SuggestionRow({
   onClick,
 }: SuggestionRowProps) {
   const Icon = opIcon(proposal.op, proposal.source_paths[0] ?? "");
-  const struck = outcome === "dismissed";
+  const struck = outcome === "rejected";
   const chipPath = proposal.source_paths[0] ?? proposal.target_paths[0] ?? "";
   return (
     <Section
@@ -372,7 +382,7 @@ function SuggestionRow({
               icon={SvgSlashCircle}
               size="sm"
               prominence="tertiary"
-              tooltip="Dismiss"
+              tooltip="Reject"
               disabled={outcome === "working"}
               onClick={onDismiss}
             />

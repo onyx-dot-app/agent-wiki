@@ -59,6 +59,16 @@ include = ["app*"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint]
+# PLC0415: imports belong at the top of the file. Function-local imports are
+# allowed only as explicit, commented exceptions (lazy cycle-breakers) via
+# `# noqa: PLC0415`. Existing sites were frozen with --add-noqa; don't add new
+# ones. Tests are exempt until their own sweep.
+extend-select = ["PLC0415"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLC0415"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # ``-n auto`` runs tests across one process per CPU core via pytest-xdist.

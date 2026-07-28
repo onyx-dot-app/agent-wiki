@@ -110,7 +110,7 @@ def require_can(action: str, path: str, user: User | None = None) -> None:
     same treatment as any principal without grants. Imported lazily
     so ``app.wiki.acl`` can depend on ``app.auth`` without a cycle.
     """
-    from app.wiki import acl as _acl
+    from app.wiki import acl as _acl  # noqa: PLC0415
 
     if user is None:
         user = current_user()

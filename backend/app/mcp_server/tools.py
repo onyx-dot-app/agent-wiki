@@ -25,8 +25,18 @@ import json
 import logging
 from typing import Any, cast
 
+import hashlib
+
+from app.auth import PermissionDenied, require_can
+from app.config import CONFIG
+from app.llm.agents.tools.errors import ToolError
+from app.wiki import agent_activity, git as wiki_git, utils as wiki_utils
 from app.llm.agents.tools import TOOL_SPECS, dispatch as registry_dispatch
+from app.mcp_server import jobs as mcp_jobs
+from app.mcp_server import pubsub as mcp_pubsub
 from app.mcp_server.session import McpSession
+from app.tasks.wiki_update import agent_update_document_nl
+from app.wiki.links import doc_url
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +60,7 @@ MCP_ALLOWED_TOOLS: frozenset[str] = frozenset(
         "write_doc",
         "apply_patch",
         "move_path",
+        "delete_doc",
         "create_directory",
         "add_comment",
         "reply_comment",
@@ -64,6 +75,36 @@ MCP_ALLOWED_TOOLS: frozenset[str] = frozenset(
 # chat-agent handler. ``tools/call`` routes these through
 # ``_call_async_nl_update`` and family.
 MCP_ASYNC_TOOLS: frozenset[str] = frozenset({"update_doc_nl"})
+
+# Path-bearing payload fields → the absolute-URL sibling _add_urls adds.
+# MCP clients live outside the deployment, so a bare relative path isn't
+# linkable; paths remain the canonical identifier for tool arguments.
+_PATH_KEY_TO_URL_KEY: dict[str, str] = {
+    "path": "url",
+    "old_path": "old_url",
+    "new_path": "new_url",
+    "doc_path": "doc_url",
+}
+
+
+def _add_urls(node: Any) -> None:
+    """Add absolute-URL siblings for path-bearing fields, recursively and
+    in place, and absolutize relative ``link`` deep-links — links have no
+    argument role, so nothing needs the relative form."""
+    if isinstance(node, dict):
+        d = cast("dict[str, Any]", node)
+        for path_key, url_key in _PATH_KEY_TO_URL_KEY.items():
+            rel = d.get(path_key)
+            if isinstance(rel, str) and rel and url_key not in d:
+                d[url_key] = doc_url(rel)
+        link = d.get("link")
+        if isinstance(link, str) and link.startswith("/"):
+            d["link"] = f"{CONFIG.public_base_url}{link}"
+        for child in d.values():
+            _add_urls(child)
+    elif isinstance(node, list):
+        for item in cast("list[Any]", node):
+            _add_urls(item)
 
 
 def list_for_mcp() -> list[dict[str, Any]]:
@@ -108,7 +149,6 @@ def _maybe_auto_subscribe(
     if not isinstance(rel, str) or not rel:
         return
     # Local import — pubsub depends on this module transitively.
-    from app.mcp_server import pubsub as mcp_pubsub
 
     mcp_pubsub.subscribe_doc(sess.id, rel)
 
@@ -126,6 +166,8 @@ def call_for_mcp(
     True)`` — same shape the chat agent already produces, so the MCP
     wrapper doesn't need a custom translation table.
 
+    Payloads are URL-enriched via ``_add_urls`` before returning.
+
     Every successful payload also carries a ``stale_paths`` array —
     paths the session has subscribed to that have changed since the
     last tool call. Phase 4 always returns ``[]`` here because
@@ -138,7 +180,9 @@ def call_for_mcp(
         return {"error": f"unknown tool: {name}", "stale_paths": []}, True
 
     if name in MCP_ASYNC_TOOLS:
-        return _call_async_nl_update(sess, arguments)
+        payload, is_error = _call_async_nl_update(sess, arguments)
+        _add_urls(payload)
+        return payload, is_error
 
     try:
         result = registry_dispatch(name, arguments)
@@ -152,6 +196,7 @@ def call_for_mcp(
     )
     _maybe_auto_subscribe(sess, name, arguments, payload, is_error)
     payload.setdefault("stale_paths", _compute_stale_paths(sess))
+    _add_urls(payload)
     guidance = _guidance_for(payload)
     if guidance is not None:
         payload["guidance"] = guidance
@@ -175,15 +220,7 @@ def _call_async_nl_update(
     # Local imports — these modules pull in the queue + worker which
     # we don't want loaded at module-import time for tools.py callers
     # that just want list_for_mcp.
-    import hashlib
 
-    from app.auth import PermissionDenied, require_can
-    from app.llm.agents.tools.errors import ToolError
-    from app.wiki import utils as wiki_utils
-    from app.mcp_server import jobs as mcp_jobs
-    from app.mcp_server import pubsub as mcp_pubsub
-    from app.tasks.wiki_update import agent_update_document_nl
-    from app.wiki import git as wiki_git
 
     # ---- Validate ----
     raw_path = arguments.get("path")
@@ -246,7 +283,6 @@ def _call_async_nl_update(
     # Capture the per-key agent identity here so the worker can rebind
     # it before commit_and_fan_out — the bearer ContextVar is gone by
     # the time the worker runs.
-    from app.wiki import agent_activity
 
     payload: dict[str, Any] = {
         "path": rel,
@@ -276,6 +312,10 @@ def _job_response(
         "deduplicated": deduplicated,
         "stale_paths": _compute_stale_paths(sess),
     }
+    # Echo the target page so URL enrichment can link the caller to it.
+    target = cast("dict[str, Any]", job.get("payload") or {}).get("path")
+    if isinstance(target, str) and target:
+        out["path"] = target
     if job.get("result") is not None:
         out["result"] = job["result"]
     if job.get("error") is not None:
@@ -295,7 +335,6 @@ def _compute_stale_paths(sess: McpSession) -> list[str]:
     poll-based fallback for clients that aren't holding a stream open
     — empty in the steady state for a connected, attentive client.
     """
-    from app.mcp_server import pubsub as mcp_pubsub
 
     q = mcp_pubsub.queue_for(sess.id)
     drained: list[Any] = []

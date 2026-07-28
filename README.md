@@ -40,6 +40,6 @@ Run Agent Wiki with a single command:
 curl -fsSL https://raw.githubusercontent.com/onyx-dot-app/agent-wiki/main/install.sh | bash
 ```
 
-Or clone the repo and run `docker compose up -d` yourself. Either way, open `http://localhost:8090`, sign up to claim admin, and you're in.
+Or clone the repo, copy `.env.example` to `.env` (set `PUBLIC_BASE_URL=http://localhost:8090` — the URL the stack is reached on), and run `docker compose --profile app up -d --build` yourself. Either way, open `http://localhost:8090`, sign up to claim admin, and you're in.
 
 Kubernetes (Helm + optional Terraform for EKS) is also supported — see [`deploy/README.md`](deploy/README.md).
