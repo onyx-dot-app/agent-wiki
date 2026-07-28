@@ -219,7 +219,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         # Local import: app.wiki.utils (indirectly, via notify -> tasks) imports
         # back into this module through app.tasks.coedit_checkpoint, so a
         # module-level import here is circular.
-        from app.wiki.utils import commit_and_fan_out
+        from app.wiki.utils import commit_and_fan_out  # noqa: PLC0415
 
         # System-initiated write: editors' write permission was already
         # enforced when they joined/applied updates, so skip the ACL gate;
