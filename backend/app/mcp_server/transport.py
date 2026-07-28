@@ -41,7 +41,7 @@ Loading context. Before you start a task — and again whenever you turn to a ne
 
 Keeping it current. When your work produces something durable — a decision and its rationale, a non-obvious gotcha, a status change, or a change to how something the wiki documents actually works — record it on the right page. Do this at meaningful checkpoints, not on every step. Refine existing pages instead of appending; keep them free of bloat and changelog noise, and add cross-links between related pages so the graph stays navigable. If your work produces a significant new deliverable, ask the user whether they'd like a dedicated page — never create one proactively.
 
-Showing your work. Name the pages you read and the pages you changed (by path) in your reply, so humans and other agents can see what informed your work and follow up.
+Showing your work. Name the pages you read and the pages you changed in your reply, so humans and other agents can see what informed your work and follow up. Tool results carry both a relative `path` and an absolute `url` for each page — pass the `path` values back as tool arguments, and use the `url` values when giving a human a link to open.
 
 Staying proportionate. All of this serves the user's task — keep wiki actions timely and in proportion. Don't over-search or over-update, and surface what matters rather than narrating every step. This wiki is for both humans and AI agents: keep it organized, current, and free from bloat."""
 

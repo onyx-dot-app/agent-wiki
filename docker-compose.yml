@@ -173,7 +173,9 @@ services:
     profiles: ["app"]
     build: ./nginx
     ports:
-      - "8090:80"
+      # Keep in sync with PUBLIC_BASE_URL in .env — this is the port the
+      # stack is reachable on, so links the backend mints point here.
+      - "${AGENT_WIKI_PORT:-8090}:80"
     depends_on:
       - backend
       - frontend
