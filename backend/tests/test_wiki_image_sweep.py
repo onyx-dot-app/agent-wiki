@@ -93,6 +93,22 @@ def test_never_referenced_image_is_flagged_after_grace_then_deleted_after_retent
     assert image_store.stat(image_id) is None
 
 
+def test_non_hex_url_suffix_is_not_a_reference(tmp_repo) -> None:
+    # A .png tail extends the URL path, so it resolves to a different route.
+    path = "guides/suffix.md"
+    image_id = _put_image(path)
+    _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
+    wiki_git.commit_file(
+        path, f"![x](/api/wiki/images/{image_id}.png)\n", "seed", author=None
+    )
+
+    _run_sweep()
+
+    row = _image_row(image_id)
+    assert row is not None
+    assert row.unreferenced_since is not None
+
+
 def test_uppercase_hex_tail_is_not_a_reference(tmp_repo) -> None:
     # The boundary is case-insensitive hex, so an uppercase tail is still a
     # longer different identifier, not this image's reference.

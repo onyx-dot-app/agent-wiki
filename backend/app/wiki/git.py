@@ -565,21 +565,22 @@ def list_paths(prefix: str = "") -> list[str]:
     return [p for p in out.split("\0") if p and not p.startswith(TRASH_PREFIX)]
 
 
-def grep_working_tree_hex_bounded(needles: Iterable[str]) -> set[str]:
-    """Search the working tree, INCLUDING ``.trash/``, for needles that must
-    not be followed by another hex character.
+def grep_working_tree_url_bounded(needles: Iterable[str]) -> set[str]:
+    """Search the working tree, INCLUDING ``.trash/``, for URL needles that
+    must not be followed by another URL-path character.
 
-    The boundary keeps a needle from matching inside a longer hex-suffixed
-    string (a different id sharing the prefix). Unlike ``list_paths`` (which
-    filters ``TRASH_PREFIX``), git grep applies no ``.trash/`` exclusion, so a
-    reference inside a trashed page still counts. Only the image sweep should
-    rely on that bypass.
+    The boundary keeps a needle from matching inside a longer URL (a hex
+    tail, a ``.png`` suffix, a deeper path segment), all of which resolve to
+    something else. Unlike ``list_paths`` (which filters ``TRASH_PREFIX``),
+    git grep applies no ``.trash/`` exclusion, so a reference inside a
+    trashed page still counts. Only the image sweep should rely on that
+    bypass.
     """
     wanted = {needle for needle in needles if needle}
     if not wanted:
         return set()
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=True) as f:
-        f.write("\n".join(f"{needle}([^0-9a-fA-F]|$)" for needle in wanted))
+        f.write("\n".join(f"{needle}([^A-Za-z0-9._~%/-]|$)" for needle in wanted))
         f.flush()
         res = _run(
             ["grep", "--no-color", "-I", "-E", "-f", f.name, "-o", "-h"],

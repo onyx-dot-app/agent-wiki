@@ -10,7 +10,8 @@ from sqlalchemy import delete as sqla_delete
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import defer
 
-from app.db.models import Image
+from app.db.models import CoeditSession, Image
+from app.wiki.coedit import SessionStatus
 from app.db.session import execute_dml, session
 
 
@@ -141,6 +142,36 @@ def totals() -> tuple[int, int]:
             select(func.count(), func.coalesce(func.sum(Image.size_bytes), 0))
         ).one()
         return int(count), int(total_bytes)
+
+
+def delete_if_unreferenced_by_drafts(image_id: str, url: str) -> bool:
+    """Delete the image unless a live co-edit buffer references ``url``, as
+    one SERIALIZABLE transaction.
+
+    Closes the window between a buffer read and the delete: a concurrent
+    buffer write forces a serialization failure instead of a lost reference.
+    On that failure the caller skips the candidate, the next daily run
+    retries. The git-side scan is the caller's job (it holds the commit lock
+    across this call). Returns True only when a row was deleted.
+    """
+    with session() as s:
+        s.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+        referenced = s.scalar(
+            select(func.count())
+            .select_from(CoeditSession)
+            .where(
+                CoeditSession.status == SessionStatus.ACTIVE.value,
+                CoeditSession.buffer_text.contains(url),
+            )
+        )
+        if referenced:
+            return False
+        stmt = (
+            sqla_delete(Image)
+            .where(Image.id == image_id)
+            .execution_options(synchronize_session=False)
+        )
+        return execute_dml(s, stmt) > 0
 
 
 def delete(image_id: str) -> bool:
