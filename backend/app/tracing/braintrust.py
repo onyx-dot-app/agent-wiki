@@ -61,7 +61,7 @@ def _get_logger() -> Any | None:
     if _logger_cache is not None and _logger_cache[0] == cache_key:
         return _logger_cache[1]
     try:
-        import braintrust
+        import braintrust  # noqa: PLC0415
 
         logger = braintrust.init_logger(project=s.project, api_key=s.api_key)
     except Exception:
@@ -160,8 +160,8 @@ def start_llm_span(
         yield None
         return
     try:
-        import braintrust
-        from braintrust.span_types import SpanTypeAttribute
+        import braintrust  # noqa: PLC0415
+        from braintrust.span_types import SpanTypeAttribute  # noqa: PLC0415
 
         # braintrust's start_span member typing varies across SDK versions; the
         # ignore keeps the check stable whatever version CI resolves.
@@ -196,8 +196,8 @@ def start_tool_span(
         yield None
         return
     try:
-        import braintrust
-        from braintrust.span_types import SpanTypeAttribute
+        import braintrust  # noqa: PLC0415
+        from braintrust.span_types import SpanTypeAttribute  # noqa: PLC0415
 
         # braintrust's start_span member typing varies across SDK versions; the
         # ignore keeps the check stable whatever version CI resolves.
@@ -268,7 +268,7 @@ def push_dataset(
     if not rows:
         return 0
     try:
-        import braintrust
+        import braintrust  # noqa: PLC0415
     except ImportError:
         log.warning("braintrust SDK not installed; skipping dataset push")
         return 0
@@ -317,7 +317,7 @@ def push_experiment(
     if not rows:
         return 0
     try:
-        import braintrust
+        import braintrust  # noqa: PLC0415
     except ImportError:
         log.warning("braintrust SDK not installed; skipping experiment push")
         return 0

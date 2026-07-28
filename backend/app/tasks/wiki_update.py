@@ -24,6 +24,7 @@ import os
 import time
 from typing import Any
 
+from app.auth import current_user
 from app.config import CONFIG
 from app.ingest import eval_sample as ingest_eval_sample
 from app.ingest import settings as ingest_settings
@@ -239,7 +240,6 @@ def _current_user_id() -> str:
     """Read the user id off the ContextVar — bound by
     ``set_current_user(...)`` in the outer task. Asserts rather than
     degrades because every caller is inside that context manager."""
-    from app.auth import current_user
 
     user = current_user()
     assert user is not None, "_run_inner must execute inside set_current_user(...)"

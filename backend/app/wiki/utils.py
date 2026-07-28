@@ -17,6 +17,13 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+from app.auth import PermissionDenied, require_can
+from app.db import agent_sessions as _sessions
+from app.launchers.current_session import current_agent_session_id
+# Module import (attribute resolved at call time): tests patch
+# app.tasks.agent_activity.schedule_cleanup_for_natural_key, and a bound
+# name here would bypass the patch.
+from app.tasks import agent_activity as agent_activity_tasks
 from app.auth import current_user
 from app.llm.agents import merge_conflict_update
 from app.llm.agents.tools.errors import ToolError
@@ -207,7 +214,6 @@ def commit_and_fan_out(
     # Creating a new page is always allowed for the calling user — they
     # become the owner via the seeding hook in ``after_doc_write``.
     if change_kind == ChangeKind.EDIT and not skip_acl:
-        from app.auth import PermissionDenied, require_can
 
         try:
             require_can("write", path)
@@ -315,12 +321,10 @@ def _commit_resolved(
     # Resolve the acting agent once: an explicit agent_name_var wins, else a
     # driving launcher session's tool_id, so the activity rail and the
     # provenance ledger both attribute the edit to "claude-code" / "codex".
-    from app.launchers.current_session import current_agent_session_id
 
     launcher_sid = current_agent_session_id()
     agent_name = agent_activity.agent_name_var.get()
     if launcher_sid is not None and agent_name is None:
-        from app.db import agent_sessions as _sessions
 
         sess_row = _sessions.get(launcher_sid)
         if sess_row is not None:
@@ -364,9 +368,8 @@ def _commit_resolved(
             upsert_kwargs["ttl"] = activity_ttl
         expires_at = agent_activity.upsert_activity(**upsert_kwargs)
         # Local import: avoids loading the tasks package at tool-load time.
-        from app.tasks.agent_activity import schedule_cleanup_for_natural_key
 
-        schedule_cleanup_for_natural_key(
+        agent_activity_tasks.schedule_cleanup_for_natural_key(
             user_id=user.id,
             agent_name=agent_name,
             expires_at=expires_at,
@@ -394,8 +397,6 @@ def mark_doc_read(path: str) -> None:
         return
     agent_name = agent_activity.agent_name_var.get()
     # derive agent_name from launcher session if not set.
-    from app.launchers.current_session import current_agent_session_id
-    from app.db import agent_sessions as _sessions
 
     launcher_sid = current_agent_session_id()
     if launcher_sid is not None and agent_name is None:
@@ -411,9 +412,8 @@ def mark_doc_read(path: str) -> None:
         description=None,
         agent_session_id=launcher_sid,
     )
-    from app.tasks.agent_activity import schedule_cleanup_for_natural_key
 
-    schedule_cleanup_for_natural_key(
+    agent_activity_tasks.schedule_cleanup_for_natural_key(
         user_id=user.id,
         agent_name=agent_name,
         expires_at=expires_at,

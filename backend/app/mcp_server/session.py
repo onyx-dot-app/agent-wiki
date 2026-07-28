@@ -238,7 +238,7 @@ def drop(session_id: str) -> None:
         log.info("mcp session SSE disconnected id=%s (DB row retained)", session_id)
     # Local import: pubsub depends on session for the ACL recheck, so
     # importing it at module load creates a cycle.
-    from app.mcp_server import pubsub as mcp_pubsub
+    from app.mcp_server import pubsub as mcp_pubsub  # noqa: PLC0415
 
     mcp_pubsub.forget(session_id)
 
@@ -253,7 +253,7 @@ def terminate(session_id: str) -> None:
         _local_sessions.pop(session_id, None)
     with db_session() as s:
         execute_dml(s, delete(orm.McpSession).where(orm.McpSession.id == session_id))
-    from app.mcp_server import pubsub as mcp_pubsub
+    from app.mcp_server import pubsub as mcp_pubsub  # noqa: PLC0415
 
     mcp_pubsub.forget(session_id)
 
@@ -278,6 +278,6 @@ def reset_for_tests() -> None:
     schema, dropped on teardown."""
     with _local_lock:
         _local_sessions.clear()
-    from app.mcp_server import pubsub as mcp_pubsub
+    from app.mcp_server import pubsub as mcp_pubsub  # noqa: PLC0415
 
     mcp_pubsub.reset_for_tests()

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.auth import PermissionDenied, require_can
 from app.wiki import utils as wiki_utils
 from app.llm.agents.tools.errors import ToolError
 from app.wiki import git as wiki_git, provenance
@@ -28,7 +29,6 @@ def handle(args: dict[str, Any]) -> Any:
         limit = DEFAULT_LIMIT
     limit = max(1, min(limit, MAX_LIMIT))
 
-    from app.auth import PermissionDenied, require_can
 
     try:
         require_can("read", path)

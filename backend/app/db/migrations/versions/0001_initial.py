@@ -35,7 +35,7 @@ def upgrade() -> None:
 
     # Materialize every ORM-declared table. Imported inside the function
     # so test fixtures that swap modules don't bind to a stale ``Base``.
-    from app.db.models import Base
+    from app.db.models import Base  # noqa: PLC0415
     Base.metadata.create_all(bind)
 
     # Seed the v0 trigger destination. ``"event_log"`` means "record the
