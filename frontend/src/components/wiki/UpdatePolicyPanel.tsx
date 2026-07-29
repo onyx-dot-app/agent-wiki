@@ -126,6 +126,11 @@ export function UpdatePolicyPanel({
     policy?.explicit?.ingestion_auto_update_disabled != null;
   const effAiManaged = policy?.effective.ai_management_allowed ?? false;
   const aiManagedSetHere = policy?.explicit?.ai_management_allowed != null;
+  // Master "AI Auto-Edits": overrides the two children server-side without
+  // changing their stored values; this panel gets the display view, so the
+  // children render as set even while overridden.
+  const masterOn = !(policy?.effective.ai_edits_disabled ?? false);
+  const masterSetHere = policy?.explicit?.ai_edits_disabled != null;
   const ownInstruction = policy?.explicit?.update_instruction ?? "";
   const effInstruction = policy?.effective.update_instruction ?? "";
   // Per-page warning threshold, null = using the workspace default.
@@ -267,40 +272,50 @@ export function UpdatePolicyPanel({
               className="group/policy rounded-(--radius-12) border border-(--border-01)"
             >
               <div className="flex flex-col gap-2 p-2">
-                {/* Group header — the switches live on the two rows below:
-                    Update = ingestion auto-update, Organize = auto
-                    management (Auto Organize may act on this scope). */}
+                {/* Master switch: overrides Update + Organize server-side
+                    without changing their stored values, and hides them
+                    while off (they come back as they were). */}
                 <InputHorizontal
                   icon={SvgSparkle}
                   title="AI Auto-Edits"
                   description={`Let AI update/organize this ${kind} on its own.`}
-                />
-                <div className="flex flex-col gap-2 pl-6">
-                  <InputHorizontal
-                    title="Update"
-                    description="Periodically scan ingested data sources to add relevant new information."
-                  >
-                    {/* ON = auto-update enabled, so the stored flag inverts. */}
-                    {policySwitch(
-                      !effDisabled,
-                      (on) =>
-                        void save({ ingestion_auto_update_disabled: !on }),
-                      disableSetHere,
-                      () => void save({ ingestion_auto_update_disabled: null }),
-                    )}
-                  </InputHorizontal>
-                  <InputHorizontal
-                    title="Organize"
-                    description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
-                  >
-                    {policySwitch(
-                      effAiManaged,
-                      (on) => void save({ ai_management_allowed: on }),
-                      aiManagedSetHere,
-                      () => void save({ ai_management_allowed: null }),
-                    )}
-                  </InputHorizontal>
-                </div>
+                >
+                  {policySwitch(
+                    masterOn,
+                    (on) => void save({ ai_edits_disabled: !on }),
+                    masterSetHere,
+                    () => void save({ ai_edits_disabled: null }),
+                  )}
+                </InputHorizontal>
+                {masterOn && (
+                  <div className="flex flex-col gap-2 pl-6">
+                    <InputHorizontal
+                      title="Update"
+                      description="Periodically scan ingested data sources to add relevant new information."
+                    >
+                      {/* ON = auto-update enabled, so the stored flag inverts. */}
+                      {policySwitch(
+                        !effDisabled,
+                        (on) =>
+                          void save({ ingestion_auto_update_disabled: !on }),
+                        disableSetHere,
+                        () =>
+                          void save({ ingestion_auto_update_disabled: null }),
+                      )}
+                    </InputHorizontal>
+                    <InputHorizontal
+                      title="Organize"
+                      description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
+                    >
+                      {policySwitch(
+                        effAiManaged,
+                        (on) => void save({ ai_management_allowed: on }),
+                        aiManagedSetHere,
+                        () => void save({ ai_management_allowed: null }),
+                      )}
+                    </InputHorizontal>
+                  </div>
+                )}
               </div>
 
               <Divider />
@@ -443,7 +458,7 @@ export function UpdatePolicyPanel({
                           <Text font="main-ui-action" color="text-04">
                             {String(health.count_24h)}
                           </Text>
-                          {(overCap || nearCap) && (
+                          {masterOn && (overCap || nearCap) && (
                             <Tooltip tooltip={capNote(health)} side="top">
                               <span className="flex size-4 items-center justify-center text-(--text-04)">
                                 {overCap ? (
@@ -482,34 +497,39 @@ export function UpdatePolicyPanel({
                       />
                     )}
                   </div>
-                  <div className="shrink-0">
-                    {kind === "page" &&
-                    health.can_manage &&
-                    health.cap_24h > 0 ? (
-                      // raw-ok: the mock's dialog trigger is the usage chart region itself. SelectCard, Opal's clickable card, is a selection-state div with no native button semantics, so a bare button keeps aria and keyboard.
-                      <button
-                        type="button"
-                        aria-label="Auto-edit limits"
-                        onClick={() => setLimitOpen(true)}
-                        className="block w-full cursor-pointer rounded-(--radius-08) border-none bg-transparent p-[2px] text-left hover:bg-(--background-tint-02)"
-                      >
-                        <UsageBar
-                          count={health.count_24h}
-                          threshold={health.threshold_24h}
-                          cap={health.cap_24h}
-                        />
-                      </button>
-                    ) : (
-                      <div className="rounded-(--radius-08) p-[2px]">
-                        <UsageBar
-                          count={health.count_24h}
-                          threshold={health.threshold_24h}
-                          cap={health.cap_24h}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  {(overCap || nearCap) && (
+                  {/* No master = no auto-edits, so no limit bar; the limit
+                      itself is server state and NOT reset by toggling.
+                      History above stays — it's the full edit record. */}
+                  {masterOn && (
+                    <div className="shrink-0">
+                      {kind === "page" &&
+                      health.can_manage &&
+                      health.cap_24h > 0 ? (
+                        // raw-ok: the mock's dialog trigger is the usage chart region itself. SelectCard, Opal's clickable card, is a selection-state div with no native button semantics, so a bare button keeps aria and keyboard.
+                        <button
+                          type="button"
+                          aria-label="Auto-edit limits"
+                          onClick={() => setLimitOpen(true)}
+                          className="block w-full cursor-pointer rounded-(--radius-08) border-none bg-transparent p-[2px] text-left hover:bg-(--background-tint-02)"
+                        >
+                          <UsageBar
+                            count={health.count_24h}
+                            threshold={health.threshold_24h}
+                            cap={health.cap_24h}
+                          />
+                        </button>
+                      ) : (
+                        <div className="rounded-(--radius-08) p-[2px]">
+                          <UsageBar
+                            count={health.count_24h}
+                            threshold={health.threshold_24h}
+                            cap={health.cap_24h}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {masterOn && (overCap || nearCap) && (
                     <div className="flex shrink-0 items-start gap-0.5">
                       <span className="flex size-4 shrink-0 items-center justify-center text-(--text-04)">
                         {overCap ? (

@@ -150,6 +150,7 @@ export function PolicyPopover({
 
   const allowed = !!effective?.ai_management_allowed;
   const autoUpdateDisabled = !!effective?.ingestion_auto_update_disabled;
+  const masterOn = !effective?.ai_edits_disabled;
   const toggle = (patch: UpdatePolicyPatch) => {
     if (!policy) return;
     setSaving(true);
@@ -171,40 +172,48 @@ export function PolicyPopover({
       className="w-full"
     >
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
-        {/* Group header — the switches live on the two rows below:
-            Update = ingestion auto-update, Organize = auto management. */}
+        {/* Master switch: overrides Update + Organize server-side without
+            changing their stored values, and hides them while off. */}
         <InputHorizontal
           icon={SvgSparkle}
           title="AI Auto-Edits"
           description={`Let AI update/organize this ${kind} on its own.`}
-        />
-        {/* raw-ok: Section drops pl-* for its own inline padding, and ml-*
-            pushes the right-aligned switches past the popover edge. */}
-        <div className="mt-2 flex flex-col gap-2 pl-6">
-          <InputHorizontal
-            title="Update"
-            description="Periodically scan ingested data sources to add relevant new information."
-          >
-            <Switch
-              checked={!autoUpdateDisabled}
-              // Unloaded would persist a wrong override, in-flight would race.
-              disabled={!canWrite || !effective || saving}
-              onCheckedChange={(on) =>
-                toggle({ ingestion_auto_update_disabled: !on })
-              }
-            />
-          </InputHorizontal>
-          <InputHorizontal
-            title="Organize"
-            description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
-          >
-            <Switch
-              checked={allowed}
-              disabled={!canWrite || !effective || saving}
-              onCheckedChange={(on) => toggle({ ai_management_allowed: on })}
-            />
-          </InputHorizontal>
-        </div>
+        >
+          <Switch
+            checked={masterOn}
+            disabled={!canWrite || !effective || saving}
+            onCheckedChange={(on) => toggle({ ai_edits_disabled: !on })}
+          />
+        </InputHorizontal>
+        {masterOn && (
+          // raw-ok: Section drops pl-* for its own inline padding, and ml-*
+          // pushes the right-aligned switches past the popover edge.
+          <div className="mt-2 flex flex-col gap-2 pl-6">
+            <InputHorizontal
+              title="Update"
+              description="Periodically scan ingested data sources to add relevant new information."
+            >
+              <Switch
+                checked={!autoUpdateDisabled}
+                // Unloaded would persist a wrong override, in-flight would race.
+                disabled={!canWrite || !effective || saving}
+                onCheckedChange={(on) =>
+                  toggle({ ingestion_auto_update_disabled: !on })
+                }
+              />
+            </InputHorizontal>
+            <InputHorizontal
+              title="Organize"
+              description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
+            >
+              <Switch
+                checked={allowed}
+                disabled={!canWrite || !effective || saving}
+                onCheckedChange={(on) => toggle({ ai_management_allowed: on })}
+              />
+            </InputHorizontal>
+          </div>
+        )}
       </Section>
       <Divider />
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
