@@ -130,6 +130,64 @@ def test_checkpoint_commits_and_attributes_last_editor(repo):
     assert wiki_git.history(_PATH)[0].author == "Ada"
 
 
+def test_checkpoint_folds_in_late_update_landing_during_its_own_commit(repo, monkeypatch):
+    """Regression test (review): a coedit_updates row logged *during*
+    checkpoint_session's own commit_and_fan_out call — after _rebuild_doc
+    already replayed up to some seq, but before advance_checkpoint would
+    persist past it — must not be silently discarded. A prior fix attempt
+    skipped the room reseed in this scenario, which didn't help: the
+    checkpoint engine never touches the room at all, so the loss was
+    already final by the time that reseed decision even ran. The real fix
+    has to be in checkpoint_session itself, and the only assertion that
+    can actually see this class of bug is against committed git content,
+    not room.doc (see review's own critique of the room-level assertion
+    below)."""
+    uid_a = users_repo.create(email="alice@x.com", password="hunter2-x", name="Alice")
+    uid_b = users_repo.create(email="bob@x.com", password="hunter2-x", name="Bob")
+    body = "Block A original.\n\nBlock B original.\n"
+    sha = _seed_page(body)
+    sess = coedit.open_session(_PATH, base_sha=sha)
+    coedit.join(sess.id, uid_a)
+    coedit.join(sess.id, uid_b)
+    room = _room(sess, body)
+    _edit(sess, room, uid_a, "ALICE: ")
+
+    from app.wiki import utils as wiki_utils
+
+    real_commit_and_fan_out = wiki_utils.commit_and_fan_out
+    calls = {"n": 0}
+
+    def fake_commit_and_fan_out(*args, **kwargs):
+        calls["n"] += 1
+        result = real_commit_and_fan_out(*args, **kwargs)
+        if calls["n"] == 1:
+            # Bob's edit lands on a *different* block, durably logged,
+            # while checkpoint_session's own first commit_and_fan_out call
+            # is still "in flight" from its own perspective.
+            root = _root(room.doc)
+            with room.doc.transaction():
+                root.children[2].children[0].insert(0, "BOB: ")
+            coedit.apply_update(
+                sess.id, update_bytes=room.doc.get_update(), author_user_id=uid_b
+            )
+        return result
+
+    monkeypatch.setattr(wiki_utils, "commit_and_fan_out", fake_commit_and_fan_out)
+
+    outcome = coedit_checkpoint.checkpoint_session(sess.id)
+
+    assert outcome is not None
+    assert calls["n"] == 2, f"expected one fold-in retry, got {calls['n']} commit attempts"
+    committed = wiki_git.read_file(_PATH)
+    assert "ALICE: Block A original." in committed
+    assert "BOB: Block B original." in committed, (
+        "bob's late-arriving edit was lost — the black hole bug is back"
+    )
+    st = coedit.get_active_session(_PATH)
+    assert st is not None
+    assert st.ydoc_checkpointed_seq == st.ydoc_seq, "session must be fully clean, not just partially"
+
+
 def test_checkpoint_reseeds_room_and_syncs_merged_result(repo):
     # When the checkpoint's 3-way merge folds in a concurrent agent commit,
     # any live room holding this session must be reconciled (reseeded) —
