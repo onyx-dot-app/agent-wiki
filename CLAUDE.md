@@ -187,12 +187,11 @@ head` on every boot so deploys apply pending migrations
   the catalog rows the app expects (e.g. `trigger_destinations`).
   Everything after it should be an explicit `op.alter_table` /
   `op.add_column` diff.
-- **Raw SQL is allowed only for things the ORM can't express** — today
-  that means pg_textsearch's `<@>` operator + `to_bm25query()` (in
-  `app/db/fts.py`) and pgmq's `pgmq.send/read/delete/archive` (in
-  `app/tasks/queue.py`). Both go through `session.execute(text(...))`.
-  Don't add new raw-SQL sites elsewhere — write the model expression
-  instead.
+- **Go through the ORM — no raw SQL.** BM25 search lives in OpenSearch
+  (`app/db/fts.py`, via `opensearch-py`) and task queues live in Redis
+  Streams (`app/tasks/queue.py`, via `redis-py`), so Postgres access is
+  pure ORM with no `session.execute(text(...))` sites left. Don't add new
+  raw-SQL sites — write the model expression instead.
 - **Tests**: shared seed/inspection helpers live in `tests/_seed.py`
   (`seed_user`, `seed_trigger`, `insert_event`, `list_events`,
   `list_fts_rows`, `count_rows`, `clear_events`). They use the ORM
@@ -441,8 +440,9 @@ of props so they're trivially testable.
 - Don't shell out to `git` outside `app/wiki/git.py`.
 - Don't put business logic inside a FastAPI route handler — push it to a
   domain module.
-- Don't write raw SQL outside `app/db/fts.py` (pg_textsearch operator)
-  and `app/tasks/queue.py` (pgmq functions). Use the ORM session.
+- Don't write raw SQL — Postgres access goes through the ORM session.
+  (BM25 search is OpenSearch in `app/db/fts.py`; queues are Redis Streams
+  in `app/tasks/queue.py` — neither touches Postgres.)
 - Don't read provider keys from `os.environ` or `CONFIG` at call time —
   go through `app/llm/settings.py:get()` so the admin UI overrides take effect.
 - Don't leak raw exceptions through the API. Translate to `{error: msg}` with

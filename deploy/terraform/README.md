@@ -17,8 +17,9 @@ that lives in a private repo and is intentionally not linked from here.
 - Optional `letsencrypt-prod` `ClusterIssuer` if `cert_manager_email` is set
 
 No RDS, Redis, or S3 — this template only provisions the cluster + ingress.
-agent-wiki itself needs a Postgres 17 (with `pg_textsearch` and `pgmq`) for
-app state and task queues, plus an RWO PVC for the wiki git working tree.
+agent-wiki itself needs a stock Postgres 17 for app state (BM25 search runs
+on OpenSearch, task queues on Redis Streams — no Postgres extensions
+required), plus an RWO PVC for the wiki git working tree.
 Provision Postgres separately (RDS, Cloud SQL, or self-managed) and wire
 it via `DATABASE_URL` on the chart. See `local_data/wiki/infra/infra.md`.
 
