@@ -252,6 +252,10 @@ export function FileView({ path }: FileViewProps) {
     () => setOpenInstructionEditor(false),
     [],
   );
+  // Keyed on the tab, not on each close path, so none can forget to clear.
+  useEffect(() => {
+    if (panelTab !== "updates") setOpenInstructionEditor(false);
+  }, [panelTab]);
 
   const closePanel = useCallback(() => {
     setPanelTab(null);

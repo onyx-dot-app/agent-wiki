@@ -137,8 +137,7 @@ interface PolicyPopoverProps {
 }
 
 /** The Auto popover (mock 1929:362227 "Policy Panel"): a read-write shortcut
- * into the scope's update policy, editing the same cache the side panel
- * reads. */
+ * into the update policy, on the cache the side panel reads. */
 export function PolicyPopover({
   path,
   canWrite,
@@ -180,8 +179,7 @@ export function PolicyPopover({
           description={`Let AI update/organize this ${kind} on its own.`}
         />
         {/* raw-ok: Section drops pl-* for its own inline padding, and ml-*
-            would shift the row and push the right-aligned switches past the
-            popover edge. */}
+            pushes the right-aligned switches past the popover edge. */}
         <div className="mt-2 flex flex-col gap-2 pl-6">
           <InputHorizontal
             title="Update"
@@ -189,9 +187,7 @@ export function PolicyPopover({
           >
             <Switch
               checked={!autoUpdateDisabled}
-              // Held until this path's policy loads (toggling against the
-              // null default would persist a wrong override) and while a
-              // save is in flight (a second click would race the PATCH).
+              // Unloaded would persist a wrong override, in-flight would race.
               disabled={!canWrite || !effective || saving}
               onCheckedChange={(on) =>
                 toggle({ ingestion_auto_update_disabled: !on })

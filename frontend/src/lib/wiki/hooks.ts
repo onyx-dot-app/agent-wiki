@@ -10,23 +10,19 @@ import {
 } from "@/lib/updatePolicy";
 import type { ListResponse, UpdateHealth } from "@/lib/wiki/types";
 
-/** The scope's update policy as a shared SWR subscription. Every subscriber
- * keyed on this path reads one cache entry, so a write reflects everywhere.
- * Pass `null` to disable. */
+/** One cache entry per path, so a write reflects everywhere. `null` disables. */
 export function useUpdatePolicy(path: string | null) {
   const key = path ? SWR_KEYS.updatePolicy(path) : null;
   const { data, error, isLoading } = useSWR<UpdatePolicyResponse>(key, {
-    // Callers gate their switches on a loaded policy rather than on isLoading,
-    // so the app-wide keep-previous-data would let one scope's values render
-    // and be PATCHed against another's path.
+    // Callers gate on a loaded policy, not isLoading, so keeping previous data
+    // would PATCH one scope's values against another's path.
     keepPreviousData: false,
   });
   return { policy: data ?? null, error: error as Error | undefined, isLoading };
 }
 
-/** Only the toggles merge optimistically. `!= null` so a clear-to-null patch
- * doesn't guess the inherited value, which is also why the free-text
- * instruction stays out: it saves from the panel's editor, never a switch. */
+/** Only the toggles merge. `!= null` so a clear-to-null patch doesn't guess
+ * the inherited value. */
 function merged(
   current: UpdatePolicyResponse,
   patch: UpdatePolicyPatch,
@@ -40,9 +36,8 @@ function merged(
   return { ...current, effective };
 }
 
-/** PATCH the policy through the shared cache. An in-place toggle flips
- * immediately and snaps back if the request fails. `current` is the caller's
- * loaded policy, which the optimistic value is built from. */
+/** PATCH through the shared cache. The toggle flips immediately and snaps back
+ * if the request fails. */
 export async function saveUpdatePolicy(
   path: string,
   patch: UpdatePolicyPatch,

@@ -443,6 +443,13 @@ function Explorer({ dir }: ExplorerProps) {
     () => setOpenInstructionEditor(false),
     [],
   );
+  const updatesPanelShowing = isMobile
+    ? policyOpen
+    : panelOpen && panelTab === "updates";
+  // Keyed on visibility, not on each close path, so none can forget to clear.
+  useEffect(() => {
+    if (!updatesPanelShowing) setOpenInstructionEditor(false);
+  }, [updatesPanelShowing]);
   // Mock annotation "Click to highlight folder": flash the listing row for
   // the proposal's first path segment under this folder.
   const highlightPath = useCallback(

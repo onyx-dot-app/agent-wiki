@@ -54,9 +54,8 @@ interface Props {
   /** All-time commit count for the "Total Edits" summary column. Null while
    * the host hasn't loaded history yet, which hides the column. */
   totalEdits?: number | null;
-  /** Opens the instruction editor once the policy loads. The panel clears it
-   * through `onInstructionEditorOpened` so a later ordinary open, or a remount
-   * after the panel closes, does not replay the request. */
+  /** Opens the instruction editor once the policy loads. Cleared through
+   * `onInstructionEditorOpened` so a remount cannot replay it. */
   openInstructionEditor?: boolean;
   onInstructionEditorOpened?: () => void;
 }
@@ -156,9 +155,7 @@ export function UpdatePolicyPanel({
     setEditing(true);
   }, [ownInstruction]);
 
-  // Waits for the policy so the draft seeds from it, then clears the request:
-  // this panel unmounts when it closes, so an uncleared one would reopen the
-  // editor on the next ordinary open.
+  // Waits for the policy so the draft seeds from it, then clears the request.
   useEffect(() => {
     if (!openInstructionEditor || !loaded) return;
     beginEditing();
