@@ -328,3 +328,69 @@ def test_schedule_payload_doc_scope_carries_doc_despite_large_siblings(repo_with
     )
     assert "--- auth/passwords.md" in payload
     assert "0_early/huge.md" not in payload
+
+
+# --------------------------------------------------------------------------- #
+# Schedule change entries: diff-first rendering + dynamic budget              #
+# --------------------------------------------------------------------------- #
+
+
+def test_dense_edit_on_long_page_keeps_tail_changes_visible():
+    """The standup-trigger miss: a dense edit to a long page used to render
+    as head-truncated BEFORE/AFTER bodies, losing the tail — where the new
+    completions lived. The diff-first rule keeps the changed hunks whatever
+    their position and density."""
+    lines = [f"- [x] item {i} stays unchanged and has padding\n" for i in range(400)]
+    before = "".join(lines) + "- [ ] ship the feature\n"
+    # Touch ~40% of the lines: the diff is dense (well past the old 0.5
+    # density threshold) but still smaller than both bodies together.
+    changed = [
+        line.replace("stays unchanged", "was reworded") if i % 5 < 2 else line
+        for i, line in enumerate(lines)
+    ]
+    after = "".join(changed) + "- [x] ship the feature\n"
+    entry = _change_entry("Individual Notes/Bo TODO.md", before, after, budget=60_000)
+    assert entry is not None
+    assert "(edited)" in entry
+    assert "+- [x] ship the feature" in entry  # the tail change survived
+
+
+def test_bodies_fallback_only_when_diff_exceeds_both_bodies():
+    """Total replacement: every line differs, the diff repeats both bodies
+    plus markers — showing the bodies is genuinely smaller."""
+    before = "".join(f"alpha {i}\n" for i in range(50))
+    after = "".join(f"omega {i}\n" for i in range(50))
+    entry = _change_entry("doc.md", before, after, budget=60_000)
+    assert entry is not None
+    assert "(rewritten)" in entry
+    assert "BEFORE:" in entry and "AFTER:" in entry
+
+
+def test_single_doc_window_gets_the_block_budget(repo_with_docs, monkeypatch):
+    """One changed doc in the window → its entry may use the whole block
+    budget instead of the fixed per-body cap (no head-truncation of a long
+    page's changes)."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.wiki import git as wiki_git
+
+    import time
+
+    long_body = "".join(f"- [ ] item {i} with some padding text\n" for i in range(600))
+    done_body = long_body.replace("- [ ] item 5 ", "- [x] item 5 ").replace(
+        "- [ ] item 599", "- [x] item 599"
+    )
+    wiki_git.commit_file("todo.md", long_body, "seed", author=None)
+    time.sleep(2.2)  # commit timestamps are second-granular
+    # Boundary strictly between the two commits: git --since excludes
+    # same-second commits, so "now" can race the second commit's timestamp.
+    since = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(
+        timespec="seconds"
+    )
+    wiki_git.commit_file("todo.md", done_body, "check items", author=None)
+
+    block = diff_helper.build_changes_since(scope_path="todo.md", since_iso=since)
+
+    assert "(no changes in this window)" not in block
+    # The last item's completion — deep past the old 8k cap — is visible.
+    assert "+- [x] item 599" in block
