@@ -394,3 +394,41 @@ def test_single_doc_window_gets_the_block_budget(repo_with_docs, monkeypatch):
     assert "(no changes in this window)" not in block
     # The last item's completion — deep past the old 8k cap — is visible.
     assert "+- [x] item 599" in block
+
+
+def test_rewritten_entry_stays_within_its_budget():
+    """The BEFORE/AFTER fallback shares one entry budget between the two
+    bodies — a rewritten entry must never weigh ~2x its allowance."""
+    before = "".join(f"alpha {i} padding padding padding\n" for i in range(3000))
+    after = "".join(f"omega {i} padding padding padding\n" for i in range(3000))
+    budget = 10_000
+    entry = _change_entry("doc.md", before, after, budget=budget)
+    assert entry is not None and "(rewritten)" in entry
+    assert len(entry) <= budget + 200  # headers/labels only beyond the shared budget
+
+
+def test_reverted_paths_do_not_dilute_the_budget(repo_with_docs):
+    """A touched-then-reverted page renders nothing and must not shrink the
+    genuinely-changed long page's budget share."""
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    from app.wiki import git as wiki_git
+
+    long_body = "".join(f"- [ ] item {i} with some padding text\n" for i in range(600))
+    done_body = long_body.replace("- [ ] item 599", "- [x] item 599")
+    wiki_git.commit_file("todo.md", long_body, "seed", author=None)
+    wiki_git.commit_file("noise.md", "# noise\noriginal\n", "seed", author=None)
+    time.sleep(2.2)
+    since = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(
+        timespec="seconds"
+    )
+    # Touch-and-revert noise.md inside the window; really change todo.md.
+    wiki_git.commit_file("noise.md", "# noise\nedited\n", "edit", author=None)
+    wiki_git.commit_file("noise.md", "# noise\noriginal\n", "revert", author=None)
+    wiki_git.commit_file("todo.md", done_body, "check item", author=None)
+
+    block = diff_helper.build_changes_since(scope_path="", since_iso=since)
+
+    assert "noise.md" not in block  # net-zero renders nothing
+    assert "+- [x] item 599" in block  # tail change fully visible
