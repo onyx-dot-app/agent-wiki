@@ -143,6 +143,36 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
 
     root = doc.get(ROOT_XML_KEY, type=XmlFragment)
     parts: list[str] = []
+    # Ids restamp_block_ids has already emitted an untouched, verbatim
+    # range for — restamp_block_ids can assign the *same* id to more than
+    # one doc child (when a fresh reparse of base_body merges what the doc
+    # still models as separate elements — e.g. two adjacent bullet lists;
+    # see its own docstring), and orig_by_id/leading_gap_start are keyed by
+    # id, not by child, so every child sharing an id resolves to the exact
+    # same base_body range in *this* (whole-range verbatim slice) branch.
+    # Emitting that range on more than one child duplicates it outright —
+    # and since the duplicated output becomes the *next* checkpoint's own
+    # base_body, still carrying the same shared id, it compounds on every
+    # subsequent untouched checkpoint rather than staying merely wrong once
+    # (confirmed in review — a real regression from restamp_block_ids' own
+    # id-sharing fix, not present before it).
+    #
+    # Deliberately NOT applied to the table branch just below: unlike this
+    # branch (one shared base_body range covering everything, requiring
+    # dedup to avoid duplicating it per sharing child), _splice_table
+    # already emits only *this specific child's own rows* — an id-sharing
+    # table child was already handled correctly per-child before this fix
+    # (confirmed in review: two identical adjacent tables were byte-exact
+    # stable across repeated checkpoints). Applying the same dedup there
+    # was a second, different regression this fix introduced: it drops a
+    # second table sharing an id entirely, not just its duplicate content.
+    #
+    # The *touched* path (below, for both branches) needs no such guard
+    # either way: touching any child sharing an id marks the whole shared
+    # id touched (the membership check there is by id, not by child), so
+    # every sharing child independently re-serializes its own actual
+    # content — concatenation, not duplication.
+    emitted_untouched_ids: set[str] = set()
     for child in root.children:
         if not isinstance(child, XmlElement):
             raise NotImplementedError(f"unexpected top-level child: {type(child)!r}")
@@ -161,6 +191,9 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
         )
         if not touched:
             assert orig is not None and block_id is not None
+            if block_id in emitted_untouched_ids:
+                continue
+            emitted_untouched_ids.add(block_id)
             parts.append(base_body[leading_gap_start[block_id] : orig.end])
             continue
 

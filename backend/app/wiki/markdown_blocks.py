@@ -70,7 +70,7 @@ _KIND_BY_TOKEN_TYPE: dict[str, BlockKind] = {
 def gfm_parser() -> MarkdownIt:
     """The one GFM config used everywhere a wiki page's markdown gets parsed
     for structure. ``html: False`` matches
-    ``frontend/src/lib/editor/AGENT_WIKI_MARKDOWN_STANDARD.md`` §5 — raw HTML tags are never
+    ``docs/AGENT_WIKI_MARKDOWN_STANDARD.md`` §5 — raw HTML tags are never
     parsed as tags, so ``html_block``/``html_inline`` tokens never appear;
     ``BlockKind.HTML_BLOCK`` above is unreachable in practice, kept only
     because ``markdown-it-py`` still exposes the token type name.
