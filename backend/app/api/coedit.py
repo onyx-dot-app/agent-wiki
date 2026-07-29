@@ -458,13 +458,19 @@ async def _resolve_room(
             base_body = sess_ck.ydoc_snapshot_body
             coedit_room.reseed(room, winner_doc.get_update(), base_body, sess.base_sha)
         return room
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         # Any *other* failure here (e.g. _read_snapshot_for_rehydrate
-        # raising on a busy checkpoint_lock) — _connect_sync already
+        # raising on a busy checkpoint_lock), *including* this task being
+        # cancelled (a client disconnect mid-``await`` races this exact
+        # window — ``CancelledError`` derives from ``BaseException``, not
+        # ``Exception``, so a bare ``except Exception`` silently let it
+        # through uncleaned; confirmed via repro) — _connect_sync already
         # registered this user as a participant and broadcast their join;
         # undo both before letting the exception propagate, or they're
         # stuck as a phantom participant forever (confirmed in review —
-        # this exact path had no cleanup at all before this fix).
+        # this exact path had no cleanup at all before this fix). Bare
+        # ``raise`` re-raises whatever was actually caught, so a
+        # cancellation still actually cancels the task afterward.
         await asyncio.to_thread(coedit.leave, sess.id, user.id)
         await asyncio.to_thread(coedit_channel.broadcast_presence, sess.id)
         raise

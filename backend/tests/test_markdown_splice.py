@@ -413,6 +413,47 @@ def test_restamp_assigns_shared_id_when_reparse_merges_adjacent_lists() -> None:
     assert cp2_body == "- new\n- EDITED\n", cp2_body
 
 
+def test_checkpoint_body_does_not_dedup_shared_id_tables() -> None:
+    """Regression test (review): the dedup guard added for the shared-id
+    duplication bug above must NOT apply to the table branch —
+    _splice_table already emits only its own child's rows (it was already
+    correct, per-child, for two identical adjacent tables sharing a
+    restamped id before that dedup guard existed), so applying the same
+    "emit once" guard there drops a second table sharing an id entirely
+    instead of just de-duplicating its content."""
+    from app.wiki.markdown_blocks import top_level_block_ranges
+    from app.wiki.markdown_yjs import build_block_element
+
+    table = "| a | b |\n| --- | --- |\n| 1 | 2 |\n"
+    doc = Doc()
+    root = _root(doc)
+    with doc.transaction():
+        for _ in range(2):
+            el, finishers = build_block_element(table, top_level_block_ranges(table)[0])
+            root.children.append(el)
+            for f in finishers:
+                f()
+
+    cp0_body = table + table
+    # Sanity: two adjacent tables with no blank line between them reparse
+    # as one table (the drift condition restamp_block_ids' id-sharing
+    # exists for) — same mechanism as the adjacent-lists case above, just
+    # for tables.
+    assert len(top_level_block_ranges(cp0_body)) == 1
+    restamp_block_ids(doc, cp0_body)
+    ids = [dict(c.attributes).get(BLOCK_ID_ATTR) for c in root.children]
+    assert ids == ["b0", "b0"], ids
+
+    cp1 = checkpoint_body(cp0_body, doc, TouchedTracker(doc))
+    assert cp1 == cp0_body, cp1
+
+    # Stable across a second untouched round too — not just "not lost
+    # once", but not compounding/drifting either.
+    restamp_block_ids(doc, cp1)
+    cp2 = checkpoint_body(cp1, doc, TouchedTracker(doc))
+    assert cp2 == cp1, cp2
+
+
 def test_apply_markdown_diff_preserves_lineage_of_untouched_blocks() -> None:
     """The whole point of apply_markdown_diff over a fresh
     seed_doc_from_markdown reseed: a block the diff doesn't touch keeps its

@@ -43,6 +43,16 @@ from app.wiki.markdown_splice import TouchedTracker
 
 log = logging.getLogger(__name__)
 
+# Bound on folding a late-arriving row into the *same* checkpoint attempt
+# (see checkpoint_session's own docstring) before giving up and finalizing
+# on the last attempt regardless. Each attempt is a real git commit —
+# additive history, never amended, but still real commits — so this stays
+# small; the realistic case (one or two stray keystrokes landing during a
+# single git-commit-plus-AI-merge window) converges in one retry, and a
+# session that's still dirty after the bound is hit just gets picked up
+# completely fresh by the next trigger.
+_LATE_UPDATE_FOLD_ATTEMPTS = 3
+
 
 def _user(user_id: str) -> User | None:
     row = users_repo.get_by_id(user_id)
@@ -229,36 +239,94 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             return None
 
         doc, base_body, tracker, replayed_seq = _rebuild_doc(sess)
-        body = markdown_splice.checkpoint_body(base_body, doc, tracker)
         change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
 
         primary_id = coedit.last_update_author(session_id)
         author = _user(primary_id) if primary_id else None
-        message = _commit_message(session_id, primary_author_id=primary_id)
 
         # Local import: app.wiki.utils (indirectly, via notify -> tasks) imports
         # back into this module through app.tasks.coedit_checkpoint, so a
         # module-level import here is circular.
         from app.wiki.utils import commit_and_fan_out  # noqa: PLC0415
 
-        # System-initiated write: editors' write permission was already
-        # enforced when they joined/applied updates, so skip the ACL gate;
-        # not "agent activity".
-        with set_current_user(author):
-            result = commit_and_fan_out(
-                path,
-                body,
-                message,
-                change_kind=change_kind,
-                base_body=base_body if sess.base_sha else None,
-                ai_merge=True,
-                skip_acl=True,
-                record_activity=False,
-                # This is the session's own commit — don't fold it back into
-                # the session as an inbound rebase (the notify step below
-                # already reconciles any live room directly).
-                trigger_coedit_rebase=False,
-            )
+        # A row logged *after* replayed_seq but *before* this commit lands
+        # (the commit-plus-AI-merge call below takes real wall-clock time)
+        # is durably in coedit_updates but isn't reflected in what's about
+        # to be committed. Persisting a snapshot/watermark past it anyway
+        # would silently strand it forever: the moment either this merge
+        # diverges (the apply_markdown_diff branch below) or a future
+        # checkpoint reseeds, the block(s) it touches get a fresh CRDT
+        # identity, and a stranded update can never integrate against a
+        # lineage it wasn't generated from (confirmed in review, across two
+        # earlier attempts at fixing this from the *reconcile* side —
+        # after this function has already finalized past a row, there's no
+        # undoing it: the row's already deleted and the watermark's already
+        # advanced).
+        #
+        # So: loop. Commit, then check for exactly such a row before ever
+        # calling advance_checkpoint. If one landed, it was generated
+        # against this doc's own lineage — still fully intact, since
+        # nothing has been spliced or reseeded yet — so fold it in and
+        # commit again, treating the commit just made as the next
+        # attempt's own diff base. Each iteration's commit is real,
+        # additive git history (never amended). Bounded so continuous
+        # typing can't loop forever; if the bound is hit while a row is
+        # still pending, this stops folding and finalizes on the last
+        # attempt instead — that row stays unpruned (advance_checkpoint
+        # only prunes up to the seq actually captured below), so it isn't
+        # lost, just deferred to whatever checkpoint attempt runs next.
+        # This narrows the window to "N consecutive commit-plus-merge
+        # cycles' worth of edits landing on the same block, back to back,
+        # bound never caught up" — not a mathematical guarantee for a
+        # pathological non-stop-typing case, but that's a materially
+        # smaller window than the single-shot version this replaces.
+        result = None
+        body = base_body
+        for attempt in range(_LATE_UPDATE_FOLD_ATTEMPTS):
+            body = markdown_splice.checkpoint_body(base_body, doc, tracker)
+            message = _commit_message(session_id, primary_author_id=primary_id)
+
+            # System-initiated write: editors' write permission was already
+            # enforced when they joined/applied updates, so skip the ACL gate;
+            # not "agent activity".
+            with set_current_user(author):
+                result = commit_and_fan_out(
+                    path,
+                    body,
+                    message,
+                    change_kind=change_kind,
+                    base_body=base_body if change_kind == ChangeKind.EDIT else None,
+                    ai_merge=True,
+                    skip_acl=True,
+                    record_activity=False,
+                    # This is the session's own commit — don't fold it back into
+                    # the session as an inbound rebase (the notify step below
+                    # already reconciles any live room directly).
+                    trigger_coedit_rebase=False,
+                )
+
+            late = coedit.updates_since(session_id, replayed_seq)
+            if not late.updates or attempt == _LATE_UPDATE_FOLD_ATTEMPTS - 1:
+                break
+            # Fold the late rows into *this* doc — still the same lineage
+            # they were generated against — before the next attempt's own
+            # checkpoint_body/commit. base_body becomes what was actually
+            # just committed (or, for a no-op attempt, what was already at
+            # HEAD) so the next attempt's diff is against real git state.
+            base_body = result.new_body if result is not None else body
+            change_kind = ChangeKind.EDIT
+            tracker.reset()
+            for u in late.updates:
+                try:
+                    doc.apply_update(u.update_payload)
+                except Exception:
+                    log.exception(
+                        "coedit checkpoint: session %s seq %d update failed to apply"
+                        " while folding a late row; skipping",
+                        session_id,
+                        u.seq,
+                    )
+            replayed_seq = late.head_seq if late.head_seq is not None else replayed_seq
 
         if result is None:
             # The merge produced exactly the current HEAD (doc already
@@ -294,13 +362,15 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         # result must become the new snapshot's content. Splice it onto
         # this doc's own lineage (apply_markdown_diff) rather than
         # discarding that lineage for a fresh seed_doc_from_markdown parse
-        # — a concurrent edit logged during the git-commit-plus-merge
-        # window above (still live, still landing on the *room's* doc the
-        # whole time — checkpointing never touches it) is durably in
-        # coedit_updates beyond replayed_seq, generated against *this*
-        # doc's lineage; a fresh, unrelated lineage can't integrate it
-        # (confirmed in review — silent, total loss, not an error). See
-        # apply_markdown_diff's own docstring.
+        # — any edit logged *up to* replayed_seq is already folded into
+        # this doc by the loop above; only a concurrent edit logged beyond
+        # the fold-in bound (still live, still landing on the *room's* doc
+        # the whole time — checkpointing never touches it) is generated
+        # against this doc's lineage without being reflected in it yet,
+        # and a fresh, unrelated lineage couldn't integrate it later
+        # either way (confirmed in review — silent, total loss, not an
+        # error) — preserving lineage here is strictly better regardless.
+        # See apply_markdown_diff's own docstring.
         diverged = result.new_body != body
         if diverged:
             if not markdown_splice.apply_markdown_diff(doc, body, result.new_body):

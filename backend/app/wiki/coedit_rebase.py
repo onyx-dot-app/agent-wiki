@@ -114,36 +114,44 @@ async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         return markdown_yjs.seed_doc_from_markdown(merged).get_update()
 
     snapshot = await asyncio.to_thread(_snapshot_for, mr.merged)
+
+    # The real gate, checked *before* rebase_onto's DB write (not after —
+    # a prior version of this check ran post-write, so a raced edit still
+    # got its update row silently deleted and the snapshot silently
+    # advanced past it before anything noticed; confirmed in review, with
+    # a repro: every edit in the session was discarded from then on, with
+    # no recovery path, since rebase_onto's own delete-all-then-advance
+    # had already committed by the time the check ran). Aborting here
+    # keeps the DB write and the room reseed all-or-nothing: nothing is
+    # persisted at all for this attempt once a concurrent edit is
+    # detected, so there's nothing to reconcile afterward — the next
+    # trigger (or the bounded retry in app/tasks/coedit_rebase.py) just
+    # tries again from scratch with the now-current state.
+    #
+    # This narrows the race to the (materially smaller) gap between this
+    # check and rebase_onto's own DB transaction actually landing — an
+    # edit whose Doc mutation bumps room.generation *after* this check but
+    # whose DB log write completes before rebase_onto's transaction commits
+    # is still caught by rebase_onto's own expected_seq CAS (ydoc_seq will
+    # have moved). The one residual case neither guard can close: a Doc
+    # mutation that lands in that same narrow window whose DB write is
+    # *still in flight* when rebase_onto's transaction commits — bounded by
+    # how long asyncio.to_thread + one DB round-trip takes, milliseconds in
+    # practice. Not claiming that's eliminated, only that it's now the
+    # narrowest of the three points this function used to be exposed at.
+    if room.generation != expected_generation:
+        return RebaseOutcome.RACED
+
     res = await asyncio.to_thread(
         coedit.rebase_onto,
         session_id,
         new_base_sha=head_sha,
         snapshot=snapshot,
         body=mr.merged,
-        # A secondary, DB-level guard (best-effort — see room.generation's
-        # check below for the one that actually matters for room.doc's own
-        # safety): catches a concurrent edit whose DB log write landed
-        # during the awaits above, pruning coedit_updates and advancing
-        # ydoc_snapshot_seq only when nothing new has been logged since
-        # _load_sess observed this seq.
         expected_seq=sess.ydoc_seq,
         checkpointed=False,
     )
     if res is None:
-        return RebaseOutcome.RACED
-
-    # The real gate, checked immediately before reseed with no `await` in
-    # between — a concurrent edit landing anywhere above (whether or not
-    # its DB log write has completed yet) bumps this, and reseeding over
-    # it would replace a Doc that edit already touched with a fresh one
-    # its own update can never integrate into (confirmed in review — see
-    # Room.generation's own docstring). rebase_onto's own DB write above
-    # may already have advanced base_sha/the persisted snapshot at this
-    # point regardless of this check failing; that's fine — it's
-    # consistent with mr.merged, just not safe to apply to *this* room's
-    # Doc anymore, and a future checkpoint reconciles the room normally
-    # from the DB state either way (see app/wiki/coedit_checkpoint.py).
-    if room.generation != expected_generation:
         return RebaseOutcome.RACED
     if mr.merged == room_body:
         return RebaseOutcome.NOOP

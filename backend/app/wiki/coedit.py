@@ -470,7 +470,7 @@ def rebase_onto(
     ``RACED`` and (as of this fix) retries.
     """
     now = _iso(_now())
-    with checkpoint_lock(session_id) as acquired:
+    with checkpoint_lock(session_id, timeout_ms=_REBASE_LOCK_TIMEOUT_MS) as acquired:
         if not acquired:
             return None
         return _rebase_onto_locked(
@@ -804,6 +804,13 @@ _CHECKPOINT_LOCK_NS = 0xC0ED
 # worker thread) indefinitely. On timeout the waiter skips; the periodic scan
 # re-enqueues if the session is still dirty.
 _CHECKPOINT_LOCK_TIMEOUT_MS = 30_000
+# rebase_onto's own use of checkpoint_lock — deliberately much shorter. Its
+# contention is a fast, momentary Doc-mutation race (not a slow AI merge, the
+# scenario the timeout above is tuned for), and it's retried a bounded few
+# times on a RACED outcome — waiting the full 30s on each retry would tie up a
+# shared asyncio.to_thread worker for minutes under contention (caught in
+# review). See checkpoint_lock's own docstring.
+_REBASE_LOCK_TIMEOUT_MS = 3_000
 
 
 def checkpoint_lock_key(session_id: int) -> int:
@@ -811,23 +818,36 @@ def checkpoint_lock_key(session_id: int) -> int:
 
 
 @contextmanager
-def checkpoint_lock(session_id: int) -> Generator[bool]:
+def checkpoint_lock(session_id: int, *, timeout_ms: int | None = None) -> Generator[bool]:
     """Serialize checkpoints of one session across concurrent workers.
 
     Yields True if this caller holds the lock (proceed), False if another worker
-    held it past ``_CHECKPOINT_LOCK_TIMEOUT_MS`` (skip — a later trigger/scan
-    retries). Different sessions still checkpoint in parallel (the lock is keyed
-    on session_id); two workers that both dequeued a checkpoint for the *same*
-    session run one at a time, so the loser re-reads a clean/closed session and
-    no-ops instead of committing the same document twice. Uses a *transaction*-
-    scoped advisory lock (auto-released on commit/rollback), so a worker that
-    dies mid-checkpoint can't strand it. Chosen over ``SELECT ... FOR UPDATE`` on
-    the session row because that row is written by every live ``apply_update`` —
-    a row lock held across the checkpoint's (possibly LLM) merge would freeze
-    live editing; an abstract advisory lock doesn't. See ``coedit_checkpoint``."""
+    held it past ``timeout_ms`` (default ``_CHECKPOINT_LOCK_TIMEOUT_MS`` — skip,
+    a later trigger/scan retries). Different sessions still checkpoint in
+    parallel (the lock is keyed on session_id); two workers that both dequeued a
+    checkpoint for the *same* session run one at a time, so the loser re-reads a
+    clean/closed session and no-ops instead of committing the same document
+    twice. Uses a *transaction*-scoped advisory lock (auto-released on
+    commit/rollback), so a worker that dies mid-checkpoint can't strand it.
+    Chosen over ``SELECT ... FOR UPDATE`` on the session row because that row is
+    written by every live ``apply_update`` — a row lock held across the
+    checkpoint's (possibly LLM) merge would freeze live editing; an abstract
+    advisory lock doesn't. See ``coedit_checkpoint``.
+
+    ``timeout_ms`` override: ``coedit_rebase.rebase_onto``'s own use of this
+    lock isn't waiting out a slow AI merge (a checkpoint's own scenario, which
+    is what ``_CHECKPOINT_LOCK_TIMEOUT_MS`` is tuned for) — it's guarding a
+    fast, momentary Doc-mutation race, and (as of a recent fix) gets retried a
+    bounded few times on ``RACED``. Waiting the full 30s on each of those
+    retries would tie up a shared ``asyncio.to_thread`` worker for minutes
+    under lock contention (caught in review); a caller with a narrower,
+    faster-to-detect contention window should pass a shorter one.
+    """
     with session() as s:
         yield try_advisory_xact_lock(
-            s, checkpoint_lock_key(session_id), timeout_ms=_CHECKPOINT_LOCK_TIMEOUT_MS
+            s,
+            checkpoint_lock_key(session_id),
+            timeout_ms=timeout_ms if timeout_ms is not None else _CHECKPOINT_LOCK_TIMEOUT_MS,
         )
 
 
