@@ -195,24 +195,41 @@ def _read_or_empty(path: str, ref: str) -> str:
     return wiki_git.read_file_opt(path, ref) or ""
 
 
-def _change_entry(path: str, before: str, after: str) -> str | None:
+def _change_entry(
+    path: str, before: str, after: str, budget: int = _CHANGE_BODY_BUDGET
+) -> str | None:
     """One ``--- <path> (kind)`` entry for the changes-since block. Returns
-    ``None`` when there's no effective change (touched then reverted)."""
+    ``None`` when there's no effective change (touched then reverted).
+
+    ``budget`` is per rendered body/diff; the schedule path passes a dynamic
+    value (few docs changed → each gets most of the block budget), because a
+    fixed cap head-truncates long pages and silently drops the tail — the
+    exact place a long page's newest edits tend to live.
+
+    Rendering prefers the unified diff even when it's dense: hunks carry the
+    changed regions wherever they sit in the page, while BEFORE/AFTER bodies
+    lose everything past the truncation point. The bodies fallback is kept
+    only for the degenerate case where the diff is literally bigger than
+    showing both bodies."""
     if before == after:
         return None
     if not before:
-        body = _truncate(after, _CHANGE_BODY_BUDGET)
+        body = _truncate(after, budget)
         return f"--- {path}  (new file)\n{body.rstrip()}\n"
     if not after:
         return f"--- {path}  (deleted)\n"
     diff = _unified_diff(before, after)
-    if diff and _diff_density(diff, after) <= _DIFF_DENSITY_FALLBACK:
-        return f"--- {path}  (edited)\n{_truncate(diff, _CHANGE_BODY_BUDGET).rstrip()}\n"
-    # High-density rewrite: the diff is noise; show both bodies.
+    if diff and len(diff) <= len(before) + len(after):
+        return f"--- {path}  (edited)\n{_truncate(diff, budget).rstrip()}\n"
+    # Degenerate: the diff exceeds both bodies together — show the bodies,
+    # sharing the entry budget between them so one rewritten entry can never
+    # weigh ~2x its allowance (an oversized payload risks a model-context
+    # error, which skips the fire while the window advances).
+    half = max(budget // 2, 1)
     return (
         f"--- {path}  (rewritten)\n"
-        f"BEFORE:\n{_truncate(before, _CHANGE_BODY_BUDGET).rstrip()}\n\n"
-        f"AFTER:\n{_truncate(after, _CHANGE_BODY_BUDGET).rstrip()}\n"
+        f"BEFORE:\n{_truncate(before, half).rstrip()}\n\n"
+        f"AFTER:\n{_truncate(after, half).rstrip()}\n"
     )
 
 
@@ -237,13 +254,12 @@ def build_changes_since(*, scope_path: str, since_iso: str) -> str:
     if not touched:
         return empty
 
-    chunks = [header]
-    total = len(header)
-    truncated = 0
+    # Gather the bodies first and drop net-zero paths (touched then
+    # reverted) BEFORE dividing the budget — they render nothing, and
+    # counting them would dilute the genuine docs' share back toward the
+    # static cap.
+    changes: list[tuple[str, str, str]] = []
     for path in touched:
-        if total >= _CHANGES_TOTAL_BUDGET:
-            truncated += 1
-            continue
         after = _read_or_empty(path, "HEAD")
         # The doc may have been renamed within the window; read its *before*
         # body at the name it had at ``before_ref``, or the diff degrades to a
@@ -252,7 +268,25 @@ def build_changes_since(*, scope_path: str, since_iso: str) -> str:
         if before_ref:
             before_path = wiki_git.path_at_ref(path, before_ref) or path
             before = _read_or_empty(before_path, before_ref)
-        entry = _change_entry(path, before, after)
+        if before != after:
+            changes.append((path, before, after))
+    if not changes:
+        return empty
+
+    chunks = [header]
+    total = len(header)
+    truncated = 0
+    # Dynamic per-entry budget: the block budget shared across the docs that
+    # actually changed, floored at the static per-body cap. A quiet window
+    # that touched one long page gets to show that page's changes whole
+    # instead of head-truncating them (the standup-trigger miss: the page's
+    # newest edits sat past the fixed cap and the LLM gate never saw them).
+    per_entry = max(_CHANGE_BODY_BUDGET, _CHANGES_TOTAL_BUDGET // len(changes))
+    for path, before, after in changes:
+        if total >= _CHANGES_TOTAL_BUDGET:
+            truncated += 1
+            continue
+        entry = _change_entry(path, before, after, budget=per_entry)
         if entry is None:
             continue
         chunks.append(entry)
