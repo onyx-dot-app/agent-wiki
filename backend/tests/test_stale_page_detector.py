@@ -215,7 +215,7 @@ def test_agent_can_read_candidates_and_search(monkeypatch, tmp_repo):
         _finish({"path": "notes/old.md", "evidence": "agenda; covered elsewhere"}),
     )
     monkeypatch.setattr(
-        "app.wiki.automanage.detectors.stale_page.fts.search", lambda *a, **k: []
+        "app.wiki.automanage.detectors.llm_agent.fts.search", lambda *a, **k: []
     )
 
     (draft,) = _StalePageDetector().detect(_scope("notes/old.md"))
@@ -279,7 +279,7 @@ def test_search_never_surfaces_cross_audience_pages(monkeypatch, tmp_repo):
 
     from app.wiki import acl
     from app.wiki.automanage import fingerprint
-    from app.wiki.automanage.detectors import stale_page as sp
+    from app.wiki.automanage.detectors import llm_agent
 
     wiki_git.commit_file("public/page.md", _OLD_BODY, "seed", author=None)
     wiki_git.commit_file("secret/page.md", _OLD_BODY + "s", "seed", author=None)
@@ -290,10 +290,11 @@ def test_search_never_surfaces_cross_audience_pages(monkeypatch, tmp_repo):
         SimpleNamespace(path="public/page.md", title="Public"),
         SimpleNamespace(path="secret/page.md", title="Secret"),
     ]
-    monkeypatch.setattr(sp.fts, "search", lambda *a, **k: hits)
+    monkeypatch.setattr(llm_agent.fts, "search", lambda *a, **k: hits)
 
-    det = _StalePageDetector()
     fp = fingerprint.fingerprints_for_paths(["public/page.md"])["public/page.md"]
-    out = det._tool("search_wiki", {"query": "q"}, {"public/page.md"}, fp)
+    out = llm_agent.dispatch_tool(
+        "stale_page", "search_wiki", {"query": "q"}, {"public/page.md"}, fp
+    )
 
     assert out == [{"path": "public/page.md", "title": "Public"}]
