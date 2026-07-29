@@ -50,6 +50,7 @@ import { SWR_KEYS } from "@/lib/swr-keys";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
+import { type OpenUpdatesPanelOpts } from "@/components/wiki/policyPanels";
 import { CommentMarginRail } from "@/components/wiki/CommentMarginRail";
 import { PresenceAvatars } from "@/components/wiki/PresenceAvatars";
 import { toast } from "@/hooks/useToast";
@@ -232,12 +233,21 @@ export function FileView({ path }: FileViewProps) {
   // A `?comment=<id>` deep-link is focused once per id (reset on path change).
   const focusedCommentRef = useRef<string | null>(null);
 
+  const [editInstructionsNonce, setEditInstructionsNonce] = useState(0);
   // Opening the panel closes history mode, the other rail occupant. Every
   // entry point routes through here.
   const openPanel = useCallback((tab: DocPanelTab) => {
     setHistoryOpen(false);
     setPanelTab(tab);
   }, []);
+
+  const openUpdatesPanel = useCallback(
+    (opts?: OpenUpdatesPanelOpts) => {
+      openPanel("updates");
+      if (opts?.editInstructions) setEditInstructionsNonce((n) => n + 1);
+    },
+    [openPanel],
+  );
 
   const closePanel = useCallback(() => {
     setPanelTab(null);
@@ -968,7 +978,7 @@ export function FileView({ path }: FileViewProps) {
                 void onPickCommit(sha);
               })();
             }}
-            onOpenUpdatesPanel={() => openPanel("updates")}
+            onOpenUpdatesPanel={openUpdatesPanel}
           />
         )}
         <Button
@@ -1051,6 +1061,7 @@ export function FileView({ path }: FileViewProps) {
               historyList={versionList}
               totalEdits={commits ? commits.length : null}
               fullHeight
+              editInstructionsNonce={editInstructionsNonce}
             />
           </div>
         );

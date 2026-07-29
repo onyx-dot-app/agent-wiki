@@ -22,6 +22,7 @@ import {
   AnchoredPanel,
   AutoGlyph,
   PolicyPopover,
+  type OpenUpdatesPanelOpts,
 } from "@/components/wiki/policyPanels";
 import { relativeTime } from "@/lib/users";
 import { fetchFileHistory } from "@/lib/wiki/svc";
@@ -78,8 +79,8 @@ interface PresenceAvatarsProps {
   onScrollToOffset?: (offset: number) => void;
   /** Opens the given commit in the history view (edit-row click). */
   onOpenCommit?: (sha: string) => void;
-  /** Opens the updates side panel (Page Instructions expand). */
-  onOpenUpdatesPanel?: () => void;
+  /** Opens the updates side panel. */
+  onOpenUpdatesPanel?: (opts?: OpenUpdatesPanelOpts) => void;
 }
 
 interface AvatarCircleProps {
@@ -603,9 +604,9 @@ export function PresenceAvatars({
             canWrite={canWrite}
             // The popover hands off to the side panel in place: same UI,
             // so it dismisses as the panel opens.
-            onOpenUpdatesPanel={() => {
+            onOpenUpdatesPanel={(opts) => {
               setOpenPanel(null);
-              onOpenUpdatesPanel?.();
+              onOpenUpdatesPanel?.(opts);
             }}
           />
         </AnchoredPanel>

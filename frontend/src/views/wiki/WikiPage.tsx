@@ -56,6 +56,7 @@ import {
   AutoGlyph,
   PanelSurface,
   PolicyPopover,
+  type OpenUpdatesPanelOpts,
 } from "@/components/wiki/policyPanels";
 import { useProposalsByPath } from "@/lib/autoOrganize";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
@@ -425,14 +426,19 @@ function Explorer({ dir }: ExplorerProps) {
     setHoverOpen(false);
   }, [dir]);
   const showPopup = !popupHidden && !panelVisible && proposals.length > 0;
-  const openSidePanel = useCallback(() => {
-    setHoverOpen(false);
-    if (isMobile) setPolicyOpen(true);
-    else {
-      setPanelOpen(true);
-      setPanelTab("updates");
-    }
-  }, [isMobile]);
+  const [editInstructionsNonce, setEditInstructionsNonce] = useState(0);
+  const openSidePanel = useCallback(
+    (opts?: OpenUpdatesPanelOpts) => {
+      setHoverOpen(false);
+      if (opts?.editInstructions) setEditInstructionsNonce((n) => n + 1);
+      if (isMobile) setPolicyOpen(true);
+      else {
+        setPanelOpen(true);
+        setPanelTab("updates");
+      }
+    },
+    [isMobile],
+  );
   // Mock annotation "Click to highlight folder": flash the listing row for
   // the proposal's first path segment under this folder.
   const highlightPath = useCallback(
@@ -481,7 +487,7 @@ function Explorer({ dir }: ExplorerProps) {
           type="button"
           aria-label="AI auto-edits"
           className="flex cursor-pointer items-center justify-center px-[2px]"
-          onClick={openSidePanel}
+          onClick={() => openSidePanel()}
           onPointerEnter={() => {
             holdOpen();
             setHoverOpen(true);
@@ -794,7 +800,9 @@ function Explorer({ dir }: ExplorerProps) {
                 <SuggestionsCard
                   path={dir}
                   onClose={() => setPopupHidden(true)}
-                  onOpenPanel={openSidePanel}
+                  // Wrapped: the prop is wired to onClick, so a bare reference
+                  // would pass the MouseEvent as the opts argument.
+                  onOpenPanel={() => openSidePanel()}
                   onHighlight={highlightPath}
                 />
               )}
@@ -818,7 +826,10 @@ function Explorer({ dir }: ExplorerProps) {
           >
             {panelTab === "updates" ? (
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-1">
-                <UpdatePolicyPanel path={dir} />
+                <UpdatePolicyPanel
+                  path={dir}
+                  editInstructionsNonce={editInstructionsNonce}
+                />
                 {/* Not at root — a wiki-wide review is the admin queue's job. */}
                 {dir && (
                   <SuggestionsCard path={dir} onHighlight={highlightPath} />
@@ -890,6 +901,7 @@ function Explorer({ dir }: ExplorerProps) {
                 path={dir}
                 onClose={() => setPolicyOpen(false)}
                 fullHeight
+                editInstructionsNonce={editInstructionsNonce}
               />
               {dir && (
                 <div className="px-2 pb-2">
