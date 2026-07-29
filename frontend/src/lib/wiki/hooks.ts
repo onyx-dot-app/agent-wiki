@@ -33,6 +33,8 @@ function merged(
       patch.ingestion_auto_update_disabled;
   if (patch.ai_management_allowed != null)
     effective.ai_management_allowed = patch.ai_management_allowed;
+  if (patch.ai_edits_disabled != null)
+    effective.ai_edits_disabled = patch.ai_edits_disabled;
   return { ...current, effective };
 }
 
