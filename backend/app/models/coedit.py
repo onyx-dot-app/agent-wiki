@@ -74,6 +74,7 @@ class CheckpointResultFrame(BaseModel):
     type: str = "checkpoint_result"
     request_id: str
     ok: bool
+    error: str | None = None  # "no_active_session" | "forbidden"
 
 
 class GetOpsMessage(BaseModel):

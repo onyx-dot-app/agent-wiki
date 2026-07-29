@@ -14,9 +14,12 @@ from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from starlette.testclient import WebSocketDenialResponse
 
 from app.auth import users as users_repo
+from app.db.models import CoeditConnection
+from app.db.session import session as db_session
 from app.main import create_app
 from app.tasks.queues import coedit_queue
 from app.wiki import acl, coedit, git
@@ -98,6 +101,18 @@ def _wait_for(predicate, timeout: float = 15.0) -> None:
         time.sleep(0.02)
 
 
+def _connection_count(session_id: int) -> int:
+    with db_session() as s:
+        return int(
+            s.scalar(
+                select(func.count())
+                .select_from(CoeditConnection)
+                .where(CoeditConnection.session_id == session_id)
+            )
+            or 0
+        )
+
+
 def test_connect_requires_auth(client):
     with pytest.raises(WebSocketDenialResponse) as exc_info:
         with client.websocket_connect(f"/api/coedit/ws?path={_PATH}"):
@@ -129,6 +144,26 @@ def test_connect_is_idempotent_and_shared(client):
             # Same shared session; both users are participants.
             assert first["session_id"] == second["session_id"]
             assert {p["user_id"] for p in second["participants"]} == {a, b}
+
+
+def test_one_of_users_two_connections_closing_keeps_session_active(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("hello")
+
+    with coedit_queue.immediate_mode():
+        with _ws(client) as (first_ws, first_join):
+            sid = first_join["session_id"]
+            with _ws(client) as (_second_ws, second_join):
+                assert second_join["session_id"] == sid
+                assert _connection_count(sid) == 2
+
+            _wait_for(lambda: _connection_count(sid) == 1)
+            assert [p.user_id for p in coedit.list_participants(sid)] == [uid]
+            assert coedit.get_active_session(_PATH) is not None
+            assert _apply_op(
+                first_ws, 0, [{"from": 0, "to": 0, "insert": "x"}]
+            ) == 1
 
 
 def test_connect_without_read_is_forbidden(client):
@@ -249,7 +284,12 @@ def test_checkpoint_message_commits_buffer(client):
             sid = joined["session_id"]
             _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
             result = _checkpoint(ws)
-            assert result == {"type": "checkpoint_result", "request_id": "c", "ok": True}
+            assert result == {
+                "type": "checkpoint_result",
+                "request_id": "c",
+                "ok": True,
+                "error": None,
+            }
             # An explicit checkpoint doesn't close a session with an active
             # participant — must assert this before the connection closes;
             # disconnecting drops the last participant too, which (with an
@@ -283,7 +323,27 @@ def test_checkpoint_requires_write(client):
         login_fastapi(client, other)
         with _ws(client) as (ws, _joined2):
             result = _checkpoint(ws)
-            assert result == {"type": "checkpoint_result", "request_id": "c", "ok": False}
+            assert result == {
+                "type": "checkpoint_result",
+                "request_id": "c",
+                "ok": False,
+                "error": "forbidden",
+            }
+
+
+def test_checkpoint_on_closed_session_reports_terminal_error(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page()
+
+    with _ws(client) as (ws, joined):
+        coedit.close_session(joined["session_id"])
+        assert _checkpoint(ws) == {
+            "type": "checkpoint_result",
+            "request_id": "c",
+            "ok": False,
+            "error": "no_active_session",
+        }
 
 
 def _login_and_join(client, email="ada@x.com"):

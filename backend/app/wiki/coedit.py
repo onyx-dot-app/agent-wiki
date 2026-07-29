@@ -7,11 +7,12 @@ presence labels editors client-side from their live caret frames, which never
 touch this store), and its editors converge on a single server-authoritative
 ``buffer_text`` + monotonic ``version``.
 
-This module is the *storage* seam only: get-or-create a session, join/leave/
-touch participants, and compare-and-swap the buffer. The op/patch channel and
-the checkpoint-to-git path (3-way merge through ``commit_and_fan_out``) build on
-top of these primitives and live elsewhere. ``base_sha`` is the HEAD the buffer
-was last checkpointed against — the merge base for that future checkpoint.
+This module is the *storage* seam only: get-or-create a session, track shared
+WebSocket leases and participants, and compare-and-swap the buffer. The
+op/patch channel and the checkpoint-to-git path (3-way merge through
+``commit_and_fan_out``) build on top of these primitives and live elsewhere.
+``base_sha`` is the HEAD the buffer was last checkpointed against — the merge
+base for that future checkpoint.
 
 Git stays the source of truth for *committed* pages; this store only holds the
 unsaved buffer. See
@@ -29,9 +30,16 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import CoeditOp, CoeditParticipant, CoeditSession, User
+from app.db.models import (
+    CoeditConnection,
+    CoeditOp,
+    CoeditParticipant,
+    CoeditSession,
+    User,
+)
 from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
 
@@ -105,6 +113,25 @@ class ParticipantRow(BaseModel):
     last_seen_at: str
     # NULL until the participant applies an edit op.
     last_edited_at: str | None = None
+
+
+class ConnectionLeave(BaseModel):
+    """Result of removing one process-shared WebSocket lease."""
+
+    model_config = ConfigDict(frozen=True)
+
+    session_id: int | None = None
+    participant_removed: bool = False
+    session_empty: bool = False
+
+
+class ConnectionExpiry(BaseModel):
+    """Roster changes made while expiring abandoned connection leases."""
+
+    model_config = ConfigDict(frozen=True)
+
+    changed_session_ids: list[int] = Field(default_factory=list)
+    empty_session_ids: list[int] = Field(default_factory=list)
 
 
 def _session_row(s: CoeditSession) -> SessionRow:
@@ -631,8 +658,11 @@ def on_path_moved(moves: list[PathMove]) -> None:
 
 
 def close_if_clean(session_id: int) -> bool:
-    """Close the session only if it's clean (``version == checkpointed_version``).
-    Returns True if it closed.
+    """Close an empty session only if ``version == checkpointed_version``.
+
+    Returns True if it closed. The participant predicate makes the close
+    atomic with ``register_connection`` so a concurrent join cannot land in a
+    session that was just closed.
 
     Atomic, to avoid orphaning a late edit: after a checkpoint commits, an op can
     still land (the session is ``active`` until this runs) and re-dirty the
@@ -648,6 +678,9 @@ def close_if_clean(session_id: int) -> bool:
                 CoeditSession.id == session_id,
                 CoeditSession.status == SessionStatus.ACTIVE.value,
                 CoeditSession.version == CoeditSession.checkpointed_version,
+                ~select(CoeditParticipant.session_id)
+                .where(CoeditParticipant.session_id == session_id)
+                .exists(),
             )
             .values(status=SessionStatus.CLOSED.value, updated_at=_iso(_now()))
             .returning(CoeditSession.id)
@@ -750,7 +783,243 @@ def delete_for_path(path: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Participants                                                                 #
+# Process-shared WebSocket connections                                        #
+# --------------------------------------------------------------------------- #
+
+
+def register_connection(session_id: int, user_id: str, connection_id: str) -> bool:
+    """Register one WebSocket lease and ensure its participant is present.
+
+    Both rows live in Postgres so a disconnect handled by one uvicorn worker
+    sees connections owned by every other worker/replica.  The participant
+    upsert also serializes against ``disconnect_connection`` for this
+    session/user pair, closing the connect-vs-final-disconnect race.
+    """
+    now = _iso(_now())
+    with session() as s:
+        active = s.scalar(
+            select(CoeditSession.id)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.status == SessionStatus.ACTIVE.value,
+            )
+            .with_for_update()
+        )
+        if active is None:
+            return False
+        participant = pg_insert(CoeditParticipant).values(
+            session_id=session_id,
+            user_id=user_id,
+            joined_at=now,
+            last_seen_at=now,
+        )
+        s.execute(
+            participant.on_conflict_do_update(
+                index_elements=["session_id", "user_id"],
+                set_={"last_seen_at": now},
+            )
+        )
+        s.execute(
+            pg_insert(CoeditConnection)
+            .values(
+                id=connection_id,
+                session_id=session_id,
+                user_id=user_id,
+                connected_at=now,
+                last_seen_at=now,
+            )
+            .on_conflict_do_nothing(index_elements=["id"])
+        )
+        return True
+
+
+def touch_connection(connection_id: str, *, edited: bool = False) -> bool:
+    """Refresh a WebSocket lease and its participant; return False if gone.
+
+    A missing row means the stale-lease cleanup already expired this socket.
+    The send loop treats that as a terminal connection so the browser rejoins
+    instead of continuing on a lease the shared roster no longer recognizes.
+    """
+    now = _iso(_now())
+    with session() as s:
+        conn = s.get(CoeditConnection, connection_id)
+        if conn is None:
+            return False
+        session_id = conn.session_id
+        user_id = conn.user_id
+        participant = s.scalar(
+            select(CoeditParticipant)
+            .where(
+                CoeditParticipant.session_id == session_id,
+                CoeditParticipant.user_id == user_id,
+            )
+            .with_for_update()
+        )
+        if participant is None:
+            return False
+        alive = s.execute(
+            update(CoeditConnection)
+            .where(CoeditConnection.id == connection_id)
+            .values(last_seen_at=now)
+            .returning(CoeditConnection.id)
+            .execution_options(synchronize_session=False)
+        ).scalar_one_or_none()
+        if alive is None:
+            return False
+        values: dict[str, str] = {"last_seen_at": now}
+        if edited:
+            values["last_edited_at"] = now
+        s.execute(
+            update(CoeditParticipant)
+            .where(
+                CoeditParticipant.session_id == session_id,
+                CoeditParticipant.user_id == user_id,
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        return True
+
+
+def disconnect_connection(connection_id: str) -> ConnectionLeave:
+    """Remove one WebSocket lease and, if it was the last, its participant.
+
+    The participant row is locked before the lease is removed.  Registration
+    upserts that same row, so a new connection and a final disconnect cannot
+    cross in a way that deletes a newly rejoined participant.
+    """
+    with session() as s:
+        conn = s.get(CoeditConnection, connection_id)
+        if conn is None:
+            return ConnectionLeave()
+        session_id = conn.session_id
+        user_id = conn.user_id
+        participant = s.scalar(
+            select(CoeditParticipant)
+            .where(
+                CoeditParticipant.session_id == session_id,
+                CoeditParticipant.user_id == user_id,
+            )
+            .with_for_update()
+        )
+        removed = s.execute(
+            delete(CoeditConnection)
+            .where(CoeditConnection.id == connection_id)
+            .returning(CoeditConnection.id)
+            .execution_options(synchronize_session=False)
+        ).scalar_one_or_none()
+        if removed is None:
+            return ConnectionLeave()
+        another = s.scalar(
+            select(CoeditConnection.id)
+            .where(
+                CoeditConnection.session_id == session_id,
+                CoeditConnection.user_id == user_id,
+            )
+            .limit(1)
+        )
+        if another is not None:
+            return ConnectionLeave(session_id=session_id)
+        if participant is not None:
+            s.delete(participant)
+            s.flush()
+        session_empty = (
+            s.scalar(
+                select(CoeditParticipant.session_id)
+                .where(CoeditParticipant.session_id == session_id)
+                .limit(1)
+            )
+            is None
+        )
+        return ConnectionLeave(
+            session_id=session_id,
+            participant_removed=participant is not None,
+            session_empty=session_empty,
+        )
+
+
+def expire_stale_connections(*, stale_seconds: int, limit: int = 500) -> ConnectionExpiry:
+    """Remove abandoned leases/participants after their heartbeat grace.
+
+    Normal disconnects unregister immediately. This is the process-crash
+    backstop: every minute the worker drops old connection rows and removes a
+    participant only when both its heartbeat and all its leases are stale.
+    """
+    cutoff = _iso(_now() - timedelta(seconds=stale_seconds))
+    changed_sessions: set[int] = set()
+    with session() as s:
+        stale_connection = (
+            select(CoeditConnection.id)
+            .where(
+                CoeditConnection.session_id == CoeditParticipant.session_id,
+                CoeditConnection.user_id == CoeditParticipant.user_id,
+                CoeditConnection.last_seen_at <= cutoff,
+            )
+            .exists()
+        )
+        candidates = s.execute(
+            select(CoeditParticipant.session_id, CoeditParticipant.user_id)
+            .where(
+                or_(
+                    CoeditParticipant.last_seen_at <= cutoff,
+                    stale_connection,
+                )
+            )
+            .order_by(CoeditParticipant.last_seen_at.asc())
+            .limit(limit)
+        ).all()
+        for session_id, user_id in candidates:
+            participant = s.scalar(
+                select(CoeditParticipant)
+                .where(
+                    CoeditParticipant.session_id == session_id,
+                    CoeditParticipant.user_id == user_id,
+                )
+                .with_for_update()
+            )
+            if participant is None:
+                continue
+            s.execute(
+                delete(CoeditConnection)
+                .where(
+                    CoeditConnection.session_id == session_id,
+                    CoeditConnection.user_id == user_id,
+                    CoeditConnection.last_seen_at <= cutoff,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            fresh_connection = s.scalar(
+                select(CoeditConnection.id)
+                .where(
+                    CoeditConnection.session_id == session_id,
+                    CoeditConnection.user_id == user_id,
+                )
+                .limit(1)
+            )
+            if fresh_connection is not None:
+                continue
+            if participant.last_seen_at > cutoff:
+                continue
+            s.delete(participant)
+            changed_sessions.add(session_id)
+        s.flush()
+        nonempty_sessions: set[int] = set()
+        if changed_sessions:
+            nonempty_sessions = set(
+                s.scalars(
+                    select(CoeditParticipant.session_id).where(
+                        CoeditParticipant.session_id.in_(changed_sessions)
+                    )
+                ).all()
+            )
+    return ConnectionExpiry(
+        changed_session_ids=sorted(changed_sessions),
+        empty_session_ids=sorted(changed_sessions - nonempty_sessions),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Participants (direct helpers retained for tasks/tests without a WebSocket)  #
 # --------------------------------------------------------------------------- #
 
 

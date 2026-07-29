@@ -24,6 +24,7 @@ from sqlalchemy import (
     CheckConstraint,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     LargeBinary,
@@ -1012,6 +1013,38 @@ class CoeditParticipant(Base):
     last_edited_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
+
+
+class CoeditConnection(Base):
+    """One live WebSocket lease for a co-edit participant.
+
+    Unlike ``coedit_channel``'s delivery queues, these rows are shared across
+    every uvicorn worker and backend replica. A participant leaves only after
+    their final connection row is gone; ``last_seen_at`` lets the periodic
+    cleanup recover leases abandoned by a crashed process.
+    """
+
+    __tablename__ = "coedit_connections"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    connected_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    last_seen_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["session_id", "user_id"],
+            ["coedit_participants.session_id", "coedit_participants.user_id"],
+            ondelete="CASCADE",
+        ),
+        Index("idx_coedit_connections_session_user", "session_id", "user_id"),
+        Index("idx_coedit_connections_last_seen", "last_seen_at"),
+    )
 
 
 class CoeditOp(Base):

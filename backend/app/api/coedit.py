@@ -31,6 +31,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import queue
+import time
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -96,7 +98,13 @@ def _require_active(session_id: int, user: User, action: str) -> coedit.SessionR
     return sess
 
 
-def _handle_op(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
+def _handle_op(
+    outbox: queue.Queue[coedit_channel.QueueItem],
+    session_id: int,
+    connection_id: str,
+    user: User,
+    raw: dict[str, Any],
+) -> None:
     """All handlers below enqueue onto ``outbox`` (the connection's own
     ``coedit_channel`` queue) rather than calling ``websocket.send_json``
     directly. Found the hard way (a real test failure, not a hypothetical):
@@ -133,7 +141,7 @@ def _handle_op(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, u
             OpResultFrame(request_id=msg.request_id, ok=False, error="stale_version").model_dump(by_alias=True)
         )
         return
-    coedit.touch(session_id, user.id, edited=True)
+    coedit.touch_connection(connection_id, edited=True)
     outbox.put_nowait(
         OpResultFrame(request_id=msg.request_id, ok=True, version=out.version).model_dump(by_alias=True)
     )
@@ -176,8 +184,12 @@ def _handle_checkpoint(outbox: queue.Queue[coedit_channel.QueueItem], session_id
     msg = CheckpointMessage.model_validate(raw)
     try:
         _require_active(session_id, user, "write")
-    except _WsActionError:
-        outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=False).model_dump(by_alias=True))
+    except _WsActionError as e:
+        outbox.put_nowait(
+            CheckpointResultFrame(
+                request_id=msg.request_id, ok=False, error=e.error
+            ).model_dump(by_alias=True)
+        )
         return
     checkpoint_coedit_session(session_id)
     outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=True).model_dump(by_alias=True))
@@ -217,7 +229,13 @@ def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: i
     )
 
 
-async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User) -> None:
+async def _recv_loop(
+    websocket: WebSocket,
+    outbox: queue.Queue[coedit_channel.QueueItem],
+    session_id: int,
+    connection_id: str,
+    user: User,
+) -> None:
     while True:
         raw = await websocket.receive_json()
         msg_type = raw.get("type")
@@ -229,7 +247,9 @@ async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[coedit_channel.Qu
             # automatically; a sync call made *from inside* an `async def`
             # route (this one, since it's a WebSocket route) does not.
             if msg_type == "op":
-                await asyncio.to_thread(_handle_op, outbox, session_id, user, raw)
+                await asyncio.to_thread(
+                    _handle_op, outbox, session_id, connection_id, user, raw
+                )
             elif msg_type == "cursor":
                 await asyncio.to_thread(_handle_cursor, session_id, user, raw)
             elif msg_type == "checkpoint":
@@ -262,9 +282,9 @@ _SEND_LOOP_POLL_SECONDS = 1.0
 
 
 async def _send_loop(
-    websocket: WebSocket, conn: coedit_channel.Connection, session_id: int, user_id: str
+    websocket: WebSocket, conn: coedit_channel.Connection
 ) -> None:
-    idle_elapsed = 0.0
+    last_heartbeat = time.monotonic()
     while True:
         frame = await asyncio.to_thread(coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS)
         if frame is coedit_channel.CLOSE_SIGNAL:
@@ -277,18 +297,18 @@ async def _send_loop(
             # waiting on a CancelledError that might arrive after the value
             # already did.
             return
-        if frame is None:
-            idle_elapsed += _SEND_LOOP_POLL_SECONDS
-            if idle_elapsed >= _HEARTBEAT_SECONDS:
-                idle_elapsed = 0.0
-                await asyncio.to_thread(coedit.touch, session_id, user_id)
-                await websocket.send_json({"type": "ping"})
-            continue
-        idle_elapsed = 0.0
-        await websocket.send_json(frame)
+        now = time.monotonic()
+        if now - last_heartbeat >= _HEARTBEAT_SECONDS:
+            last_heartbeat = now
+            alive = await asyncio.to_thread(coedit.touch_connection, conn.id)
+            if not alive:
+                return
+            await websocket.send_json({"type": "ping"})
+        if frame is not None:
+            await websocket.send_json(frame)
 
 
-def _connect_sync(path: str, user: User) -> coedit.SessionRow:
+def _connect_sync(path: str, user: User, connection_id: str) -> coedit.SessionRow:
     """The whole pre-accept handshake's DB/git work, bundled into one
     thread hop. ``require_can`` must run (and be free to raise
     ``PermissionDenied``) before ``websocket.accept()`` — verified directly
@@ -297,10 +317,12 @@ def _connect_sync(path: str, user: User) -> coedit.SessionRow:
     same as it does from a plain ``async def`` route body; offloading to a
     thread via ``asyncio.to_thread`` doesn't change that propagation."""
     require_can("read", path, user)
-    head = git.head_sha_for_path(path)
-    initial = git.read_file_opt(path) or ""
-    sess = coedit.open_session(path, base_sha=head, initial_buffer=initial)
-    coedit.join(sess.id, user.id)
+    while True:
+        head = git.head_sha_for_path(path)
+        initial = git.read_file_opt(path) or ""
+        sess = coedit.open_session(path, base_sha=head, initial_buffer=initial)
+        if coedit.register_connection(sess.id, user.id, connection_id):
+            break
     # Announce the new participant to existing connections *before*
     # registering this one — otherwise the broadcast lands in our own queue
     # and the send loop would emit it on top of the inline `joined` frame
@@ -321,19 +343,19 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     session is seeded from the page's current HEAD; an already-open session
     is adopted as-is (its live buffer wins) — see ``coedit.open_session``.
     """
-    sess = await asyncio.to_thread(_connect_sync, path, user)
+    connection_id = f"conn_{uuid.uuid4().hex}"
+    sess = await asyncio.to_thread(_connect_sync, path, user, connection_id)
 
-    # `_connect_sync` already registered the participant (`coedit.join`)
-    # before returning, so from here on a disconnect — including one during
+    # `_connect_sync` already registered the shared connection lease before
+    # returning, so from here on a disconnect — including one during
     # `accept()` itself, which the client can trigger mid-handshake since
     # `_connect_sync`'s git/DB work takes measurable time — must still reach
     # `record_leave` to undo it. Otherwise the user is stuck as a
-    # phantom participant forever, which also blocks
-    # `_checkpoint_if_last_left` from ever firing for this session.
+    # phantom participant and keeps the session from closing.
     conn: coedit_channel.Connection | None = None
     try:
         await websocket.accept()
-        conn = coedit_channel.connect(sess.id, user.id)
+        conn = coedit_channel.connect(sess.id, connection_id=connection_id)
         participants = await asyncio.to_thread(_participants_out, sess.id)
         await websocket.send_json(
             JoinedFrame(
@@ -345,8 +367,10 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
             ).model_dump(by_alias=True)
         )
 
-        recv_task = asyncio.create_task(_recv_loop(websocket, conn.queue, sess.id, user))
-        send_task = asyncio.create_task(_send_loop(websocket, conn, sess.id, user.id))
+        recv_task = asyncio.create_task(
+            _recv_loop(websocket, conn.queue, sess.id, connection_id, user)
+        )
+        send_task = asyncio.create_task(_send_loop(websocket, conn))
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED
         )
@@ -380,10 +404,10 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         # nothing can cancel, durable across the shutdown that caused it.
         # `record_leave` is idempotent, so the rare both-ran overlap is safe.
         try:
-            await asyncio.to_thread(record_leave, sess.id, user.id)
+            await asyncio.to_thread(record_leave, connection_id)
         except asyncio.CancelledError:
             try:
-                leave_coedit_session(sess.id, user.id)  # enqueue, no await
+                leave_coedit_session(sess.id, connection_id)  # enqueue, no await
             except Exception:
                 log.exception(
                     "coedit: queued-leave fallback failed for session %s", sess.id

@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from sqlalchemy import text
+from sqlalchemy import text, update
 
-from app.db.models import CoeditSession
+from app.db.models import CoeditConnection, CoeditParticipant, CoeditSession
 from app.db.session import session as db_session
 from app.wiki import coedit
 from tests._seed import count_rows, seed_user
@@ -130,6 +130,99 @@ def test_participants_join_touch_leave(users):
     assert [r.user_id for r in coedit.list_participants(s.id)] == ["usr_b"]
 
 
+def test_connection_leases_remove_participant_only_after_final_disconnect(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.register_connection(s.id, "usr_a", "conn_worker_a")
+    coedit.register_connection(s.id, "usr_a", "conn_worker_b")
+
+    first = coedit.disconnect_connection("conn_worker_a")
+    assert first.participant_removed is False
+    assert first.session_empty is False
+    assert [p.user_id for p in coedit.list_participants(s.id)] == ["usr_a"]
+
+    final = coedit.disconnect_connection("conn_worker_b")
+    assert final.participant_removed is True
+    assert final.session_empty is True
+    assert coedit.list_participants(s.id) == []
+
+    # Teardown is deliberately idempotent: the cancellation fallback may run
+    # after the normal disconnect already removed the same lease.
+    assert coedit.disconnect_connection("conn_worker_b").session_id is None
+
+
+def test_participant_delete_cascades_connection_lease(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.register_connection(s.id, "usr_a", "conn_worker_a")
+    coedit.leave(s.id, "usr_a")
+    assert count_rows(CoeditConnection) == 0
+
+
+def test_connection_heartbeat_and_stale_lease_expiry(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.register_connection(s.id, "usr_a", "stale_conn")
+    coedit.register_connection(s.id, "usr_b", "fresh_conn")
+    old = "2000-01-01T00:00:00+00:00"
+    with db_session() as db:
+        db.execute(
+            update(CoeditConnection)
+            .where(CoeditConnection.id == "stale_conn")
+            .values(last_seen_at=old)
+        )
+        db.execute(
+            update(CoeditParticipant)
+            .where(
+                CoeditParticipant.session_id == s.id,
+                CoeditParticipant.user_id == "usr_a",
+            )
+            .values(last_seen_at=old)
+        )
+
+    expired = coedit.expire_stale_connections(stale_seconds=60)
+    assert expired.changed_session_ids == [s.id]
+    assert expired.empty_session_ids == []
+    assert [p.user_id for p in coedit.list_participants(s.id)] == ["usr_b"]
+    assert coedit.touch_connection("stale_conn") is False
+    assert coedit.touch_connection("fresh_conn") is True
+
+
+def test_stale_lease_is_removed_while_same_user_stays_connected(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.register_connection(s.id, "usr_a", "stale_conn")
+    coedit.register_connection(s.id, "usr_a", "fresh_conn")
+    with db_session() as db:
+        db.execute(
+            update(CoeditConnection)
+            .where(CoeditConnection.id == "stale_conn")
+            .values(last_seen_at="2000-01-01T00:00:00+00:00")
+        )
+
+    expired = coedit.expire_stale_connections(stale_seconds=60)
+    assert expired.changed_session_ids == []
+    assert count_rows(CoeditConnection) == 1
+    assert [p.user_id for p in coedit.list_participants(s.id)] == ["usr_a"]
+    assert coedit.touch_connection("stale_conn") is False
+    assert coedit.touch_connection("fresh_conn") is True
+
+
+def test_stale_legacy_participant_without_lease_is_expired(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.join(s.id, "usr_a")
+    with db_session() as db:
+        db.execute(
+            update(CoeditParticipant)
+            .where(
+                CoeditParticipant.session_id == s.id,
+                CoeditParticipant.user_id == "usr_a",
+            )
+            .values(last_seen_at="2000-01-01T00:00:00+00:00")
+        )
+
+    expired = coedit.expire_stale_connections(stale_seconds=60)
+    assert expired.changed_session_ids == [s.id]
+    assert expired.empty_session_ids == [s.id]
+    assert coedit.list_participants(s.id) == []
+
+
 def test_mark_checkpointed(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.mark_checkpointed(s.id, base_sha="sha2", version=3)
@@ -241,6 +334,14 @@ def test_close_if_clean_closes_a_clean_session(users):
     assert coedit.get_active_session(_PATH) is None
 
 
+def test_close_if_clean_skips_session_with_participant(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    assert coedit.register_connection(s.id, "usr_a", "conn-a") is True
+    assert coedit.close_if_clean(s.id) is False
+    active = coedit.get_active_session(_PATH)
+    assert active is not None and active.id == s.id
+
+
 def test_close_if_clean_skips_a_dirty_session(users):
     # A late op after the checkpoint (version > checkpointed_version) must not be
     # sealed in a closed session — close_if_clean leaves it active for the scan.
@@ -266,11 +367,12 @@ def test_close_frees_path_for_new_session(users):
 
 def test_close_session_with_participants_cascades(users):
     s = coedit.open_session(_PATH, base_sha=None)
-    coedit.join(s.id, "usr_a")
+    coedit.register_connection(s.id, "usr_a", "conn-a")
     coedit.delete_for_path(_PATH)
     assert coedit.get_active_session(_PATH) is None
     assert count_rows(CoeditSession) == 0
-    # Participant rows cascade with the session.
+    assert count_rows(CoeditConnection) == 0
+    # Participant and connection rows cascade with the session.
     fresh = coedit.open_session(_PATH, base_sha=None)
     assert coedit.list_participants(fresh.id) == []
 
