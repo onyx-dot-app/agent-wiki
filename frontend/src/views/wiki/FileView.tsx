@@ -50,6 +50,7 @@ import { SWR_KEYS } from "@/lib/swr-keys";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
+import { type OpenUpdatesPanelOpts } from "@/components/wiki/policyPanels";
 import { CommentMarginRail } from "@/components/wiki/CommentMarginRail";
 import { PresenceAvatars } from "@/components/wiki/PresenceAvatars";
 import { toast } from "@/hooks/useToast";
@@ -232,12 +233,33 @@ export function FileView({ path }: FileViewProps) {
   // A `?comment=<id>` deep-link is focused once per id (reset on path change).
   const focusedCommentRef = useRef<string | null>(null);
 
+  const [openInstructionEditor, setOpenInstructionEditor] = useState(false);
   // Opening the panel closes history mode, the other rail occupant. Every
   // entry point routes through here.
   const openPanel = useCallback((tab: DocPanelTab) => {
     setHistoryOpen(false);
     setPanelTab(tab);
   }, []);
+
+  const openUpdatesPanel = useCallback(
+    (opts?: OpenUpdatesPanelOpts) => {
+      openPanel("updates");
+      if (opts?.editInstructions) setOpenInstructionEditor(true);
+    },
+    [openPanel],
+  );
+  const clearInstructionEditorRequest = useCallback(
+    () => setOpenInstructionEditor(false),
+    [],
+  );
+  // A request is only good for the page and panel it was made in. Keyed on
+  // those rather than on each close path, so none can forget to clear.
+  useEffect(() => {
+    if (panelTab !== "updates") setOpenInstructionEditor(false);
+  }, [panelTab]);
+  useEffect(() => {
+    setOpenInstructionEditor(false);
+  }, [path]);
 
   const closePanel = useCallback(() => {
     setPanelTab(null);
@@ -968,7 +990,7 @@ export function FileView({ path }: FileViewProps) {
                 void onPickCommit(sha);
               })();
             }}
-            onOpenUpdatesPanel={() => openPanel("updates")}
+            onOpenUpdatesPanel={openUpdatesPanel}
           />
         )}
         <Button
@@ -1051,6 +1073,8 @@ export function FileView({ path }: FileViewProps) {
               historyList={versionList}
               totalEdits={commits ? commits.length : null}
               fullHeight
+              openInstructionEditor={openInstructionEditor}
+              onInstructionEditorOpened={clearInstructionEditorRequest}
             />
           </div>
         );

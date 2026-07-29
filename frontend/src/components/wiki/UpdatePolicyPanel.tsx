@@ -19,7 +19,7 @@ import {
   SvgSparkle,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -27,12 +27,12 @@ import {
   AutoEditLimitModal,
   UsageBar,
 } from "@/components/wiki/AutoEditLimitModal";
+import { type UpdatePolicyPatch } from "@/lib/updatePolicy";
 import {
-  getUpdatePolicy,
-  patchUpdatePolicy,
-  type UpdatePolicyResponse,
-} from "@/lib/updatePolicy";
-import { useUpdateHealth } from "@/lib/wiki/hooks";
+  saveUpdatePolicy,
+  useUpdateHealth,
+  useUpdatePolicy,
+} from "@/lib/wiki/hooks";
 import type { UpdateHealth } from "@/lib/wiki/types";
 import { pathKind, updateWarnLevel } from "@/lib/wiki/utils";
 import { absoluteTime } from "@/lib/time";
@@ -54,6 +54,10 @@ interface Props {
   /** All-time commit count for the "Total Edits" summary column. Null while
    * the host hasn't loaded history yet, which hides the column. */
   totalEdits?: number | null;
+  /** Opens the instruction editor once the policy loads. Cleared through
+   * `onInstructionEditorOpened` so a remount cannot replay it. */
+  openInstructionEditor?: boolean;
+  onInstructionEditorOpened?: () => void;
 }
 
 function capNote(health: UpdateHealth): string {
@@ -88,14 +92,17 @@ export function UpdatePolicyPanel({
   historyOpen,
   historyList,
   totalEdits,
+  openInstructionEditor,
+  onInstructionEditorOpened,
 }: Props) {
   const kind = pathKind(path);
 
-  const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState(false); // first fetch succeeded
-  const [policy, setPolicy] = useState<UpdatePolicyResponse | null>(null);
-  const [pendingOn, setPendingOn] = useState<boolean | null>(null); // optimistic toggle
-  const [pendingAiOn, setPendingAiOn] = useState<boolean | null>(null); // optimistic AI toggle
+  const {
+    policy,
+    isLoading: loading,
+    error: loadError,
+  } = useUpdatePolicy(path);
+  const loaded = !!policy;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [limitOpen, setLimitOpen] = useState(false);
@@ -106,28 +113,10 @@ export function UpdatePolicyPanel({
   const { health, refresh: refreshHealth } = useUpdateHealth(path);
   const { user } = useAuth();
 
+  // Drop the previous scope's unsaved editor state and stale save error.
   useEffect(() => {
-    let alive = true;
-    setLoading(true);
-    setLoaded(false);
-    setError(null);
     setEditing(false);
-    getUpdatePolicy(path)
-      .then((r) => {
-        if (alive) {
-          setPolicy(r);
-          setLoaded(true);
-        }
-      })
-      .catch((e) => {
-        if (alive) setError(errorMessage(e));
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
+    setError(null);
   }, [path]);
 
   // A field is "set here" only when explicit carries a value for it,
@@ -142,45 +131,36 @@ export function UpdatePolicyPanel({
   // Per-page warning threshold, null = using the workspace default.
   const ownThreshold = policy?.explicit?.warn_update_threshold ?? null;
 
-  async function save(
-    patch: Parameters<typeof patchUpdatePolicy>[1],
-    after?: () => void,
-  ): Promise<boolean> {
+  async function save(patch: UpdatePolicyPatch): Promise<boolean> {
+    if (!policy) return false;
     setSaving(true);
     setError(null);
     try {
-      setPolicy(await patchUpdatePolicy(path, patch));
+      await saveUpdatePolicy(path, patch, policy);
       // A policy change can move the health facts (auto-update on/off, the
       // threshold), so revalidate the shared update-health cache now. The
       // page-view banner reuses the same key and updates in lockstep.
       void refreshHealth();
-      after?.();
       return true;
     } catch (e) {
       setError(errorMessage(e));
       return false;
     } finally {
       setSaving(false);
-      setPendingOn(null);
-      setPendingAiOn(null);
     }
   }
 
-  // "Update" ON = ingestion auto-update enabled (NOT disabled).
-  function onToggle(on: boolean) {
-    setPendingOn(on);
-    void save({ ingestion_auto_update_disabled: !on });
-  }
+  const beginEditing = useCallback(() => {
+    setDraft(ownInstruction);
+    setEditing(true);
+  }, [ownInstruction]);
 
-  const switchOn = pendingOn ?? !effDisabled;
-
-  // "AI Auto-Edits" ON = ai_management_allowed (stored positively, no inversion).
-  function onToggleAiManaged(on: boolean) {
-    setPendingAiOn(on);
-    void save({ ai_management_allowed: on });
-  }
-
-  const aiSwitchOn = pendingAiOn ?? effAiManaged;
+  // Waits for the policy so the draft seeds from it, then clears the request.
+  useEffect(() => {
+    if (!openInstructionEditor || !loaded) return;
+    beginEditing();
+    onInstructionEditorOpened?.();
+  }, [openInstructionEditor, loaded, beginEditing, onInstructionEditorOpened]);
 
   // The switch carries the inheritance story out of the card body: origin
   // in its tooltip, and a reset affordance that appears only while the card
@@ -269,7 +249,9 @@ export function UpdatePolicyPanel({
           // Load failed: never render the cards, the policy card's default
           // values would overwrite a real policy if the user interacted with it.
           <div className="py-1 text-xs text-(--status-text-error-05)">
-            {error ?? "Couldn't load the update policy."}
+            {loadError
+              ? errorMessage(loadError)
+              : "Couldn't load the update policy."}
           </div>
         ) : (
           <>
@@ -298,9 +280,11 @@ export function UpdatePolicyPanel({
                     title="Update"
                     description="Periodically scan ingested data sources to add relevant new information."
                   >
+                    {/* ON = auto-update enabled, so the stored flag inverts. */}
                     {policySwitch(
-                      switchOn,
-                      onToggle,
+                      !effDisabled,
+                      (on) =>
+                        void save({ ingestion_auto_update_disabled: !on }),
                       disableSetHere,
                       () => void save({ ingestion_auto_update_disabled: null }),
                     )}
@@ -310,8 +294,8 @@ export function UpdatePolicyPanel({
                     description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
                   >
                     {policySwitch(
-                      aiSwitchOn,
-                      onToggleAiManaged,
+                      effAiManaged,
+                      (on) => void save({ ai_management_allowed: on }),
                       aiManagedSetHere,
                       () => void save({ ai_management_allowed: null }),
                     )}
@@ -355,8 +339,7 @@ export function UpdatePolicyPanel({
                           setEditing(false);
                           return;
                         }
-                        setDraft(ownInstruction);
-                        setEditing(true);
+                        beginEditing();
                       }}
                     />
                   }

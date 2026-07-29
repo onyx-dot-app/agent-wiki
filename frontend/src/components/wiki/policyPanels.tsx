@@ -17,11 +17,8 @@ import {
 
 import { toast } from "@/hooks/useToast";
 import { pathKind } from "@/lib/wiki/utils";
-import {
-  getUpdatePolicy,
-  patchUpdatePolicy,
-  type EffectivePolicy,
-} from "@/lib/updatePolicy";
+import { type UpdatePolicyPatch } from "@/lib/updatePolicy";
+import { saveUpdatePolicy, useUpdatePolicy } from "@/lib/wiki/hooks";
 
 interface AutoGlyphProps {
   size?: number;
@@ -126,75 +123,52 @@ export function AnchoredPanel({
   );
 }
 
+export interface OpenUpdatesPanelOpts {
+  /** Open the side panel with the Page Instructions editor expanded. */
+  editInstructions?: boolean;
+}
+
 interface PolicyPopoverProps {
   path: string;
   /** The policy PATCH is write-gated, so read-only viewers get a
    * disabled switch instead of a doomed request. */
   canWrite: boolean;
-  onOpenUpdatesPanel?: () => void;
+  onOpenUpdatesPanel?: (opts?: OpenUpdatesPanelOpts) => void;
 }
 
-/** The Auto popover (mock 1929:362227 "Policy Panel"): the AI auto-edit
- * toggles and the scope's update instruction, all live on the update
- * policy the full panel edits. */
+/** The Auto popover (mock 1929:362227 "Policy Panel"): a read-write shortcut
+ * into the update policy, on the cache the side panel reads. */
 export function PolicyPopover({
   path,
   canWrite,
   onOpenUpdatesPanel,
 }: PolicyPopoverProps) {
   const kind = pathKind(path);
-  // The policy carries the path it was fetched for: a mismatch reads as
-  // unloaded in the same render a navigation lands, so a stale page's
-  // value can never be shown or PATCHed against the new path.
-  const [policy, setPolicy] = useState<{
-    forPath: string;
-    effective: EffectivePolicy;
-  } | null>(null);
+  const { policy } = useUpdatePolicy(path);
+  const effective = policy?.effective ?? null;
   const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    getUpdatePolicy(path)
-      .then(
-        (p) => alive && setPolicy({ forPath: path, effective: p.effective }),
-      )
-      .catch(() => alive && setPolicy(null));
-    return () => {
-      alive = false;
-    };
-  }, [path]);
-  const loaded = policy?.forPath === path ? policy.effective : null;
 
-  const allowed = !!loaded?.ai_management_allowed;
-  const autoUpdateDisabled = !!loaded?.ingestion_auto_update_disabled;
-  const patchField = async (patch: Partial<EffectivePolicy>) => {
-    if (!loaded) return;
+  const allowed = !!effective?.ai_management_allowed;
+  const autoUpdateDisabled = !!effective?.ingestion_auto_update_disabled;
+  const toggle = (patch: UpdatePolicyPatch) => {
+    if (!policy) return;
     setSaving(true);
-    setPolicy({ forPath: path, effective: { ...loaded, ...patch } });
-    try {
-      await patchUpdatePolicy(path, patch);
-    } catch (e) {
-      // The pre-patch snapshot is still in `loaded`; putting it back
-      // rolls the optimistic write off.
-      setPolicy({ forPath: path, effective: loaded });
-      toast.error(
-        e instanceof Error ? e.message : "Couldn't update the policy",
-      );
-    } finally {
-      setSaving(false);
-    }
+    saveUpdatePolicy(path, patch, policy)
+      .catch((e) =>
+        toast.error(
+          e instanceof Error ? e.message : "Couldn't update the policy",
+        ),
+      )
+      .finally(() => setSaving(false));
   };
 
-  // Mock 2079:379824 annotation: clicking the popover body (any field)
-  // opens the full side panel; the switches keep their inline toggles by
-  // stopping the bubble.
   return (
     <Section
       justifyContent="start"
       alignItems="stretch"
       height="fit"
       gap={0.25}
-      className="w-full cursor-pointer"
-      onClick={onOpenUpdatesPanel}
+      className="w-full"
     >
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
         {/* Group header — the switches live on the two rows below:
@@ -204,47 +178,33 @@ export function PolicyPopover({
           title="AI Auto-Edits"
           description={`Let AI update/organize this ${kind} on its own.`}
         />
-        <Section
-          justifyContent="start"
-          alignItems="stretch"
-          height="fit"
-          gap={0.5}
-          className="mt-2 ml-6"
-        >
+        {/* raw-ok: Section drops pl-* for its own inline padding, and ml-*
+            pushes the right-aligned switches past the popover edge. */}
+        <div className="mt-2 flex flex-col gap-2 pl-6">
           <InputHorizontal
             title="Update"
             description="Periodically scan ingested data sources to add relevant new information."
           >
-            <span onClick={(e) => e.stopPropagation()}>
-              <Switch
-                checked={!autoUpdateDisabled}
-                // Held until this path's policy loads (toggling against the
-                // null default would persist a wrong override) and while a
-                // save is in flight (a second click would race the PATCH).
-                disabled={!canWrite || !loaded || saving}
-                onCheckedChange={() =>
-                  void patchField({
-                    ingestion_auto_update_disabled: !autoUpdateDisabled,
-                  })
-                }
-              />
-            </span>
+            <Switch
+              checked={!autoUpdateDisabled}
+              // Unloaded would persist a wrong override, in-flight would race.
+              disabled={!canWrite || !effective || saving}
+              onCheckedChange={(on) =>
+                toggle({ ingestion_auto_update_disabled: !on })
+              }
+            />
           </InputHorizontal>
           <InputHorizontal
             title="Organize"
             description={`Reorganize, move, and/or merge content in this ${kind} when needed.`}
           >
-            <span onClick={(e) => e.stopPropagation()}>
-              <Switch
-                checked={allowed}
-                disabled={!canWrite || !loaded || saving}
-                onCheckedChange={() =>
-                  void patchField({ ai_management_allowed: !allowed })
-                }
-              />
-            </span>
+            <Switch
+              checked={allowed}
+              disabled={!canWrite || !effective || saving}
+              onCheckedChange={(on) => toggle({ ai_management_allowed: on })}
+            />
           </InputHorizontal>
-        </Section>
+        </div>
       </Section>
       <Divider />
       <Section gap={0} height="fit" alignItems="stretch" padding={0.5}>
@@ -254,7 +214,8 @@ export function PolicyPopover({
           icon={SvgAddLines}
           title="Page Instructions"
           description={
-            loaded?.update_instruction || `How should this ${kind} be updated?`
+            effective?.update_instruction ||
+            `How should this ${kind} be updated?`
           }
           descriptionMaxLines={3}
           sizePreset="main-ui"
@@ -266,13 +227,8 @@ export function PolicyPopover({
               icon={SvgExpand}
               size="md"
               prominence="tertiary"
-              tooltip="Open in panel"
-              // stopPropagation: the popover body opens the panel too, and
-              // the bubble would double-fire the handler.
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenUpdatesPanel?.();
-              }}
+              tooltip="Edit in panel"
+              onClick={() => onOpenUpdatesPanel?.({ editInstructions: true })}
             />
           }
         />

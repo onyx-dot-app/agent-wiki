@@ -42,12 +42,6 @@ export interface UpdatePolicyPatch {
   warn_update_threshold?: number | null;
 }
 
-export function getUpdatePolicy(path: string): Promise<UpdatePolicyResponse> {
-  return apiFetch<UpdatePolicyResponse>(
-    `/update-policy?path=${encodeURIComponent(path)}`,
-  );
-}
-
 export function patchUpdatePolicy(
   path: string,
   patch: UpdatePolicyPatch,
