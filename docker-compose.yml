@@ -10,10 +10,7 @@ services:
   #   opensearch 127.0.0.1:9201
   # ------------------------------------------------------------------ #
   postgres:
-    image: ${AGENT_WIKI_POSTGRES_IMAGE:-onyxdotapp/agent-wiki-postgres:${IMAGE_TAG:-latest}}
-    build:
-      context: ./deploy/postgres
-    command: ["postgres", "-c", "shared_preload_libraries=pg_textsearch"]
+    image: ${AGENT_WIKI_POSTGRES_IMAGE:-postgres:17}
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
@@ -175,8 +172,9 @@ services:
 
   nginx:
     profiles: ["app"]
-    image: ${AGENT_WIKI_NGINX_IMAGE:-onyxdotapp/agent-wiki-nginx:${IMAGE_TAG:-latest}}
-    build: ./nginx
+    image: ${AGENT_WIKI_NGINX_IMAGE:-nginx:1.27-alpine}
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     ports:
       # Keep in sync with PUBLIC_BASE_URL in .env — this is the port the
       # stack is reachable on, so links the backend mints point here.
