@@ -19,13 +19,7 @@ import {
   SvgSparkle,
   SvgX,
 } from "@onyx-ai/opal/icons";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -60,8 +54,11 @@ interface Props {
   /** All-time commit count for the "Total Edits" summary column. Null while
    * the host hasn't loaded history yet, which hides the column. */
   totalEdits?: number | null;
-  /** Any change to this value opens the instruction editor. */
-  editInstructionsNonce?: number;
+  /** Opens the instruction editor once the policy loads. The panel clears it
+   * through `onInstructionEditorOpened` so a later ordinary open, or a remount
+   * after the panel closes, does not replay the request. */
+  openInstructionEditor?: boolean;
+  onInstructionEditorOpened?: () => void;
 }
 
 function capNote(health: UpdateHealth): string {
@@ -96,7 +93,8 @@ export function UpdatePolicyPanel({
   historyOpen,
   historyList,
   totalEdits,
-  editInstructionsNonce,
+  openInstructionEditor,
+  onInstructionEditorOpened,
 }: Props) {
   const kind = pathKind(path);
 
@@ -158,19 +156,14 @@ export function UpdatePolicyPanel({
     setEditing(true);
   }, [ownInstruction]);
 
-  // Each bump opens the editor once, after the policy lands so the draft seeds
-  // from it.
-  const lastEditNonce = useRef(0);
+  // Waits for the policy so the draft seeds from it, then clears the request:
+  // this panel unmounts when it closes, so an uncleared one would reopen the
+  // editor on the next ordinary open.
   useEffect(() => {
-    if (
-      editInstructionsNonce &&
-      editInstructionsNonce !== lastEditNonce.current &&
-      loaded
-    ) {
-      lastEditNonce.current = editInstructionsNonce;
-      beginEditing();
-    }
-  }, [editInstructionsNonce, loaded, beginEditing]);
+    if (!openInstructionEditor || !loaded) return;
+    beginEditing();
+    onInstructionEditorOpened?.();
+  }, [openInstructionEditor, loaded, beginEditing, onInstructionEditorOpened]);
 
   // The switch carries the inheritance story out of the card body: origin
   // in its tooltip, and a reset affordance that appears only while the card

@@ -233,7 +233,7 @@ export function FileView({ path }: FileViewProps) {
   // A `?comment=<id>` deep-link is focused once per id (reset on path change).
   const focusedCommentRef = useRef<string | null>(null);
 
-  const [editInstructionsNonce, setEditInstructionsNonce] = useState(0);
+  const [openInstructionEditor, setOpenInstructionEditor] = useState(false);
   // Opening the panel closes history mode, the other rail occupant. Every
   // entry point routes through here.
   const openPanel = useCallback((tab: DocPanelTab) => {
@@ -244,9 +244,13 @@ export function FileView({ path }: FileViewProps) {
   const openUpdatesPanel = useCallback(
     (opts?: OpenUpdatesPanelOpts) => {
       openPanel("updates");
-      if (opts?.editInstructions) setEditInstructionsNonce((n) => n + 1);
+      if (opts?.editInstructions) setOpenInstructionEditor(true);
     },
     [openPanel],
+  );
+  const clearInstructionEditorRequest = useCallback(
+    () => setOpenInstructionEditor(false),
+    [],
   );
 
   const closePanel = useCallback(() => {
@@ -1061,7 +1065,8 @@ export function FileView({ path }: FileViewProps) {
               historyList={versionList}
               totalEdits={commits ? commits.length : null}
               fullHeight
-              editInstructionsNonce={editInstructionsNonce}
+              openInstructionEditor={openInstructionEditor}
+              onInstructionEditorOpened={clearInstructionEditorRequest}
             />
           </div>
         );

@@ -426,11 +426,11 @@ function Explorer({ dir }: ExplorerProps) {
     setHoverOpen(false);
   }, [dir]);
   const showPopup = !popupHidden && !panelVisible && proposals.length > 0;
-  const [editInstructionsNonce, setEditInstructionsNonce] = useState(0);
+  const [openInstructionEditor, setOpenInstructionEditor] = useState(false);
   const openSidePanel = useCallback(
     (opts?: OpenUpdatesPanelOpts) => {
       setHoverOpen(false);
-      if (opts?.editInstructions) setEditInstructionsNonce((n) => n + 1);
+      if (opts?.editInstructions) setOpenInstructionEditor(true);
       if (isMobile) setPolicyOpen(true);
       else {
         setPanelOpen(true);
@@ -438,6 +438,10 @@ function Explorer({ dir }: ExplorerProps) {
       }
     },
     [isMobile],
+  );
+  const clearInstructionEditorRequest = useCallback(
+    () => setOpenInstructionEditor(false),
+    [],
   );
   // Mock annotation "Click to highlight folder": flash the listing row for
   // the proposal's first path segment under this folder.
@@ -828,7 +832,8 @@ function Explorer({ dir }: ExplorerProps) {
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 py-1">
                 <UpdatePolicyPanel
                   path={dir}
-                  editInstructionsNonce={editInstructionsNonce}
+                  openInstructionEditor={openInstructionEditor}
+                  onInstructionEditorOpened={clearInstructionEditorRequest}
                 />
                 {/* Not at root — a wiki-wide review is the admin queue's job. */}
                 {dir && (
@@ -901,7 +906,8 @@ function Explorer({ dir }: ExplorerProps) {
                 path={dir}
                 onClose={() => setPolicyOpen(false)}
                 fullHeight
-                editInstructionsNonce={editInstructionsNonce}
+                openInstructionEditor={openInstructionEditor}
+                onInstructionEditorOpened={clearInstructionEditorRequest}
               />
               {dir && (
                 <div className="px-2 pb-2">
