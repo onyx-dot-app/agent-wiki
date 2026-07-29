@@ -10,7 +10,7 @@ services:
   #   opensearch 127.0.0.1:9201
   # ------------------------------------------------------------------ #
   postgres:
-    image: agent-wiki-postgres:local
+    image: ${AGENT_WIKI_POSTGRES_IMAGE:-onyxdotapp/agent-wiki-postgres:${IMAGE_TAG:-latest}}
     build:
       context: ./deploy/postgres
     command: ["postgres", "-c", "shared_preload_libraries=pg_textsearch"]
@@ -71,6 +71,7 @@ services:
   # ------------------------------------------------------------------ #
   backend:
     profiles: ["app"]
+    image: ${AGENT_WIKI_BACKEND_IMAGE:-onyxdotapp/agent-wiki-backend:${IMAGE_TAG:-latest}}
     build: ./backend
     env_file: .env
     environment:
@@ -98,6 +99,7 @@ services:
   # OOM can't take down the real-time/interactive/fast `light` tenants.
   worker-heavy:
     profiles: ["app"]
+    image: ${AGENT_WIKI_BACKEND_IMAGE:-onyxdotapp/agent-wiki-backend:${IMAGE_TAG:-latest}}
     build: ./backend
     command:
       [
@@ -129,6 +131,7 @@ services:
 
   worker-light:
     profiles: ["app"]
+    image: ${AGENT_WIKI_BACKEND_IMAGE:-onyxdotapp/agent-wiki-backend:${IMAGE_TAG:-latest}}
     build: ./backend
     command:
       [
@@ -160,6 +163,7 @@ services:
 
   frontend:
     profiles: ["app"]
+    image: ${AGENT_WIKI_FRONTEND_IMAGE:-onyxdotapp/agent-wiki-frontend:${IMAGE_TAG:-latest}}
     build: ./frontend
     env_file: .env
     environment:
@@ -171,6 +175,7 @@ services:
 
   nginx:
     profiles: ["app"]
+    image: ${AGENT_WIKI_NGINX_IMAGE:-onyxdotapp/agent-wiki-nginx:${IMAGE_TAG:-latest}}
     build: ./nginx
     ports:
       # Keep in sync with PUBLIC_BASE_URL in .env — this is the port the
