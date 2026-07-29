@@ -208,7 +208,7 @@ def test_rebase_onto_returns_none_when_checkpoint_lock_busy(users, monkeypatch):
     # a busy lock must make the whole call a no-op (same as a CAS miss),
     # never proceed unprotected.
     @contextmanager
-    def fake_busy_lock(session_id: int):
+    def fake_busy_lock(session_id: int, *, timeout_ms: int | None = None):
         yield False
 
     monkeypatch.setattr(coedit, "checkpoint_lock", fake_busy_lock)
