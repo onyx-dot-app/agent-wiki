@@ -252,10 +252,14 @@ export function FileView({ path }: FileViewProps) {
     () => setOpenInstructionEditor(false),
     [],
   );
-  // Keyed on the tab, not on each close path, so none can forget to clear.
+  // A request is only good for the page and panel it was made in. Keyed on
+  // those rather than on each close path, so none can forget to clear.
   useEffect(() => {
     if (panelTab !== "updates") setOpenInstructionEditor(false);
   }, [panelTab]);
+  useEffect(() => {
+    setOpenInstructionEditor(false);
+  }, [path]);
 
   const closePanel = useCallback(() => {
     setPanelTab(null);

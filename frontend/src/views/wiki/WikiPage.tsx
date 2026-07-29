@@ -446,10 +446,14 @@ function Explorer({ dir }: ExplorerProps) {
   const updatesPanelShowing = isMobile
     ? policyOpen
     : panelOpen && panelTab === "updates";
-  // Keyed on visibility, not on each close path, so none can forget to clear.
+  // A request is only good for the folder and panel it was made in. Keyed on
+  // those rather than on each close path, so none can forget to clear.
   useEffect(() => {
     if (!updatesPanelShowing) setOpenInstructionEditor(false);
   }, [updatesPanelShowing]);
+  useEffect(() => {
+    setOpenInstructionEditor(false);
+  }, [dir]);
   // Mock annotation "Click to highlight folder": flash the listing row for
   // the proposal's first path segment under this folder.
   const highlightPath = useCallback(
