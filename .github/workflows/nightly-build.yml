@@ -1,6 +1,6 @@
 name: Nightly Image Build
 
-# Builds + pushes `onyxdotapp/agent-wiki-{backend,frontend}:nightly-latest-YYYYMMDD`
+# Builds + pushes `onyxdotapp/agent-wiki-{backend,frontend,nginx,postgres}:nightly-latest-YYYYMMDD`
 # to Docker Hub on a daily cron. The downstream deploy job in
 # cloud-deployment-yamls picks up the tag an hour later.
 #
@@ -32,7 +32,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [backend, frontend]
+        # ``context`` is explicit because postgres does not live at ./<component>.
+        include:
+          - component: backend
+            context: ./backend
+          - component: frontend
+            context: ./frontend
+          - component: nginx
+            context: ./nginx
+          - component: postgres
+            context: ./deploy/postgres
 
     steps:
       - name: Checkout
@@ -68,8 +77,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
-          context: ./${{ matrix.component }}
-          file: ./${{ matrix.component }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
           push: true
           platforms: linux/amd64
           tags: ${{ env.DOCKERHUB_USERNAME }}/agent-wiki-${{ matrix.component }}:${{ steps.tag.outputs.tag }}
