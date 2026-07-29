@@ -346,20 +346,67 @@ def apply_markdown_diff(doc: Doc, old_body: str, new_body: str) -> bool:
     new_texts = [new_body[b.start : b.end] for b in new_blocks]
     opcodes = difflib.SequenceMatcher(a=old_texts, b=new_texts, autojunk=False).get_opcodes()
 
+    # A pure insert at i1 == i2 == 0 (brand-new leading content, nothing
+    # old being replaced) has no *left* neighbor to anchor against at all
+    # — every other insert this function does (a replace's insert point is
+    # always immediately after the still-present old range being replaced;
+    # a trailing append anchors against the last existing item) has one.
+    # Confirmed via direct, repeated pycrdt reproduction: inserting with a
+    # left anchor into a replayed doc (apply_update(snapshot), not a
+    # direct seed_doc_from_markdown call — every real caller's doc) is
+    # fully deterministic; inserting at position 0 with none is not —
+    # Yjs's CRDT origin resolution has nothing stable to compare the new
+    # item against, so it falls back to a client-id tie-break that's
+    # random per this process's own randomly-assigned Doc client_id,
+    # silently scrambling block order roughly half the time. No pycrdt API
+    # exists to force a specific origin for this one case (no
+    # insert-before/prepend/move on XmlChildrenView — only
+    # append/insert-by-index). Rather than risk a silently-wrong splice,
+    # bail before mutating anything at all; the caller's existing
+    # not-splice-safe fallback (a fresh reseed) handles it correctly, just
+    # without lineage preservation for this rarer case.
+    if any(tag == "insert" and i1 == 0 and i2 == 0 for tag, i1, i2, _j1, _j2 in opcodes):
+        return False
+
     # Reverse order: mutating the tail of root.children first keeps every
     # not-yet-processed i1/i2 (computed against the pre-mutation sequence)
     # valid — an insert/delete earlier in the list would otherwise shift
     # every later index out from under the remaining opcodes.
+    #
+    # Within each opcode: insert the new blocks *before* deleting the old
+    # range, anchored at i2 (immediately after the still-present old
+    # range) rather than at i1 (the slot a delete would just have
+    # vacated). Confirmed via direct pycrdt reproduction that this ordering
+    # matters, not just style: inserting into a position a delete just
+    # vacated gives Yjs's CRDT origin resolution no causally-stable
+    # neighbor to anchor the new item against — this doc was rebuilt via
+    # apply_update(snapshot) (a live-rebase/checkpoint splice's own doc
+    # never comes from a direct seed_doc_from_markdown call), so a
+    # replayed neighbor and this transaction's own fresh local insert have
+    # no prior shared history establishing a strict left-of relationship.
+    # Yjs then falls back to a client-id tie-break for the ambiguous
+    # origin — non-deterministic per this process's own randomly-assigned
+    # Doc client_id — which silently scrambled top-level block order
+    # roughly half the time in a direct repro before this fix (never
+    # reproduced against a freshly-seeded doc, only a replayed one — the
+    # exact shape every real caller of this function uses). Inserting
+    # first, anchored against the still-present old range's own right
+    # boundary (or the transaction's own just-inserted sibling, for a
+    # second-or-later new block at the same opcode — equally
+    # unambiguous, since it was created in this same transaction),
+    # gives every new item a stable, already-known neighbor to originate
+    # from; deleting the old range afterward doesn't move the new items,
+    # since they were placed after it.
     with doc.transaction():
         for tag, i1, i2, j1, j2 in reversed(opcodes):
             if tag == "equal":
                 continue
-            del root.children[i1:i2]
-            insert_at = i1
+            insert_at = i2
             for block in new_blocks[j1:j2]:
                 el, finishers = build_block_element(new_body, block)
                 root.children.insert(insert_at, el)
                 insert_at += 1
                 for finish in finishers:
                     finish()
+            del root.children[i1:i2]
     return True

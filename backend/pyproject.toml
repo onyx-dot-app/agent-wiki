@@ -176,6 +176,20 @@ reportArgumentType = "none"
 reportCallIssue = "none"
 reportAttributeAccessIssue = "none"
 
+# Same pycrdt stub relaxation as markdown_splice.py above — this is the
+# seam module that constructs/replays `Doc` instances for every live-
+# session read (join handshake, live body read, checkpoint's own replay).
+[[tool.basedpyright.executionEnvironments]]
+root = "app/wiki/coedit_live.py"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportMissingTypeArgument = "none"
+reportArgumentType = "none"
+reportCallIssue = "none"
+reportAttributeAccessIssue = "none"
+
 # Same pycrdt stub relaxation as coedit_room.py above — the WS route calls
 # handle_sync_message/create_sync_message and reads room.doc directly.
 [[tool.basedpyright.executionEnvironments]]

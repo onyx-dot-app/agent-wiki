@@ -15,7 +15,12 @@ from app.wiki.markdown_splice import (
     checkpoint_body,
     restamp_block_ids,
 )
-from app.wiki.markdown_yjs import BLOCK_ID_ATTR, ROOT_XML_KEY, seed_doc_from_markdown
+from app.wiki.markdown_yjs import (
+    BLOCK_ID_ATTR,
+    ROOT_XML_KEY,
+    reconstruct_body,
+    seed_doc_from_markdown,
+)
 
 _SAMPLE = """# Heading
 
@@ -503,6 +508,67 @@ def test_apply_markdown_diff_preserves_lineage_of_untouched_blocks() -> None:
 
     doc.apply_update(late_update)
     assert checkpoint_body(new_body, doc, tracker) == "EDITED-one\n\nTWO\n\nthree\n"
+
+
+def test_apply_markdown_diff_preserves_order_on_a_replayed_doc() -> None:
+    """Regression test (review): every real caller's doc is built via
+    ``Doc() + apply_update(snapshot)`` replay (``coedit_live.rebuild_doc``
+    and its callers), never a direct ``seed_doc_from_markdown`` call the
+    way the test above builds its doc — and splicing onto a
+    *replay-constructed* doc was found to silently, non-deterministically
+    scramble untouched blocks' order: confirmed with a direct pycrdt
+    repro, splicing a change into the first of three blocks reordered the
+    result (to the *other two* blocks swapping ahead of the spliced one)
+    on roughly half of repeated runs, with no exception and no other
+    observable signal — ``apply_markdown_diff`` returned ``True`` and
+    ``checkpoint_body``'s own untouched-block dedup logic never noticed,
+    since it only tracks *which* blocks are touched, not their order.
+    Root cause: inserting into the position a delete just vacated gives
+    Yjs's CRDT origin resolution no causally-stable neighbor on a doc
+    whose existing items came from a replayed update rather than this
+    transaction's own local history, so it falls back to a client-id
+    tie-break that's random per this process's own randomly-assigned Doc
+    client_id. Fixed by inserting each replacement *before* deleting the
+    old range, anchored against the still-present old range's own right
+    boundary — a stable, already-known neighbor either way.
+
+    Run many times (flaky bugs pass most single runs) against a doc built
+    the same way production builds one.
+    """
+    old_body = "one\n\ntwo\n\nthree\n"
+    new_body = "ONE\n\ntwo\n\nthree\n"
+    for _ in range(30):
+        seed = seed_doc_from_markdown(old_body)
+        snapshot = seed.get_update()
+        doc = Doc()
+        doc.apply_update(snapshot)
+        assert apply_markdown_diff(doc, old_body, new_body) is True
+        tracker = TouchedTracker(doc)
+        assert checkpoint_body(new_body, doc, tracker) == new_body
+
+
+def test_apply_markdown_diff_bails_on_pure_leading_insert() -> None:
+    """A pure insert at the very start of the document (brand-new content,
+    nothing old being replaced) has no *left* neighbor to anchor against
+    at all — unlike every other insert this function does (a replace
+    anchors against the still-present old range; a trailing append anchors
+    against the last existing item). Confirmed via repro that this
+    specific shape is non-deterministic on a replayed doc with no pycrdt
+    API available to force a stable origin for it (no insert-before/
+    prepend/move on XmlChildrenView). ``apply_markdown_diff`` detects this
+    upfront and bails (``False``, doc left completely untouched) rather
+    than risk a silently-scrambled splice — the caller's existing
+    not-splice-safe fallback (a fresh reseed) handles it correctly
+    instead, same as the child-count-drift case below."""
+    old_body = "one\n\ntwo\n"
+    new_body = "ZERO\n\none\n\ntwo\n"
+    for _ in range(10):
+        seed = seed_doc_from_markdown(old_body)
+        snapshot = seed.get_update()
+        doc = Doc()
+        doc.apply_update(snapshot)
+        assert apply_markdown_diff(doc, old_body, new_body) is False
+        assert reconstruct_body(doc) == old_body
 
 
 def test_apply_markdown_diff_returns_false_on_child_count_drift() -> None:
