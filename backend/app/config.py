@@ -40,6 +40,9 @@ class Config(BaseModel):
     opensearch_url: str
     opensearch_index: str
     max_queue_size: int
+    # Threads backing ``asyncio.to_thread`` in the web process. Sized for
+    # concurrent connections, not cores — see ``app/main.py``'s lifespan.
+    web_thread_pool_size: int
 
     auth_mode: str  # "basic" | "oidc"
     oidc_issuer: str
@@ -199,6 +202,7 @@ def load_config() -> Config:
         opensearch_url=os.environ.get("OPENSEARCH_URL", "http://opensearch:9200"),
         opensearch_index=os.environ.get("OPENSEARCH_INDEX", "wiki-docs"),
         max_queue_size=_positive_int("MAX_QUEUE_SIZE", 1000),
+        web_thread_pool_size=_positive_int("WEB_THREAD_POOL_SIZE", 64),
         ingest_bm25_min_score=_positive_float("INGEST_BM25_MIN_SCORE", 5.0),
         ingest_bm25_title_boost=_positive_float("INGEST_BM25_TITLE_BOOST", 2.0),
         ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 20),
