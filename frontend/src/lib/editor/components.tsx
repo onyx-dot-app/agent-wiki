@@ -15,6 +15,7 @@ import {
   EditorState,
   StateEffect,
   StateField,
+  Text,
 } from "@codemirror/state";
 import {
   Decoration,
@@ -32,11 +33,12 @@ import type {
   CoeditPeer,
   CoeditSessionHandle,
 } from "@/lib/editor/types";
-import { getOps, sendOp } from "@/lib/editor/svc";
+import { getOps, getSession, sendOp } from "@/lib/editor/svc";
 import { IDLE_UNFOCUS_MS } from "@/lib/editor/constants";
 import {
   changeSetToChanges,
   colorFor,
+  diffToChange,
   syncedDocLength,
 } from "@/lib/editor/utils";
 import { wysiwygMarkdown } from "@/lib/editor/wysiwyg";
@@ -585,6 +587,8 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
       // The synced version we last sent an op at — so we don't re-send the same
       // op while awaiting its echo (which advances synced past this).
       const sentAtVersion = { current: -1 };
+      // Consecutive non-409 push rejections, for exponential backoff.
+      const pushBackoff = { current: 0 };
 
       // Idle auto-unfocus: N minutes without local activity blurs the editor.
       // The blur runs the normal focus-loss path (caret clear broadcast,
@@ -615,6 +619,57 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         }
       };
 
+      // The document at `getSyncedVersion()`. Maintained here because it is not
+      // recoverable from the current state: inverting the un-acked ChangeSets
+      // would need the very document they were applied to. `applyServerBuffer`
+      // needs it as the base to diff against, and every confirmation must go
+      // through `confirmUpdates` to keep it true — a path that bypasses it
+      // computes the diff against the wrong base and lands edits in the wrong
+      // place, which is the bug class this whole change exists to close.
+      const syncedDoc = { current: Text.of(session.startDoc.split("\n")) };
+
+      const confirmUpdates = (
+        updates: readonly { changes: ChangeSet; clientID: string }[],
+      ): void => {
+        for (const u of updates)
+          syncedDoc.current = u.changes.apply(syncedDoc.current);
+        dispatchRemote(receiveUpdates(v.state, updates));
+      };
+
+      // The buffer was replaced out of band — a checkpoint's merge folded in a
+      // committed change, or an agent commit was rebased into the session. That
+      // is a git commit, so it logged no op and `pull` has nothing to return.
+      //
+      // Hand it to collab as the update the server never wrote: one synthesized
+      // change from the synced text to the server's. `receiveUpdates` then does
+      // what it does for any remote op — applies it, advances the version, and
+      // rebases our un-acked edits over it. So local typing survives (it lands
+      // at the boundary if it fell inside the rewritten span), and the caret,
+      // selection and undo history survive too, because the editor is not
+      // rebuilt. Empty padding updates carry the version the rest of the way
+      // when more than one bump happened, since collab counts versions in
+      // updates.
+      const applyServerBuffer = (buffer: string, version: number): void => {
+        const synced = getSyncedVersion(v.state);
+        if (version <= synced) return; // stale read; a newer one already landed
+        const base = syncedDoc.current.toString();
+        if (base === buffer && version === synced + 1) return;
+        const change = diffToChange(base, buffer);
+        const updates = [
+          {
+            changes: ChangeSet.of(change ? [change] : [], base.length),
+            clientID: "",
+          },
+        ];
+        while (updates.length < version - synced)
+          updates.push({
+            changes: ChangeSet.empty(buffer.length),
+            clientID: "",
+          });
+        confirmUpdates(updates);
+        if (sendableUpdates(v.state).length > 0) void doPush();
+      };
+
       // Push the first un-acked op at the synced version (our /op is one op per
       // version). We do NOT confirm locally — the op echoes back over the stream
       // (client_id === ours) and is confirmed via receiveUpdates like any other,
@@ -640,9 +695,19 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
             getCaretSeqRef.current(),
           );
           sentAtVersion.current = version;
+          pushBackoff.current = 0;
         } catch (e) {
-          if (e instanceof ApiError && e.status === 409) await pull();
-          // else transient — the op stays sendable; a later echo/edit retries
+          if (e instanceof ApiError && e.status === 409) {
+            await pull();
+            pushBackoff.current = 0;
+          } else {
+            // Not a stale version, so rebasing won't clear it — `invalid_op`
+            // (our offsets don't fit the server's buffer) repeats forever
+            // otherwise, since the tail below re-pushes immediately. Back off
+            // so a permanently-rejected op can't spin on the socket.
+            const wait = Math.min(8000, 250 * 2 ** pushBackoff.current++);
+            await new Promise((r) => setTimeout(r, wait));
+          }
         } finally {
           pushing.current = false;
         }
@@ -677,7 +742,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
             len = cs.newLength;
             return { changes: cs, clientID: o.client_id ?? "" };
           });
-          dispatchRemote(receiveUpdates(v.state, updates));
+          confirmUpdates(updates);
           if (sendableUpdates(v.state).length > 0) void doPush();
         })();
         pullPromise.current = run;
@@ -693,7 +758,21 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
 
       const applyFrame = (frame: CoeditFrame): void => {
         if (frame.type === "resync") {
-          void pull();
+          // Two causes, and the cheap one first: `broadcast_op` degrades to a
+          // resync when an op's frame exceeds the bus payload cap, and that op
+          // *is* in the log, so a pull closes the gap and keeps our pending
+          // edits untouched. Only if the log can't get us there was the buffer
+          // actually replaced, which needs the whole-buffer read.
+          void (async () => {
+            await pull();
+            if (getSyncedVersion(v.state) >= frame.version) return;
+            try {
+              const snap = await getSession(session.id);
+              applyServerBuffer(snap.buffer, snap.version);
+            } catch {
+              // Transient; the next resync, gap or reconnect retries.
+            }
+          })();
           return;
         }
         if (frame.type !== "op") return;
@@ -712,11 +791,7 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         }
         try {
           const cs = ChangeSet.of(frame.changes, syncedDocLength(v.state));
-          dispatchRemote(
-            receiveUpdates(v.state, [
-              { changes: cs, clientID: frame.client_id ?? "" },
-            ]),
-          );
+          confirmUpdates([{ changes: cs, clientID: frame.client_id ?? "" }]);
         } catch (err) {
           // A malformed / mis-anchored op would otherwise be swallowed by the SSE
           // reader. Surface it and re-sync from the authoritative op log.
