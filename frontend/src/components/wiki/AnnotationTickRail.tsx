@@ -1,0 +1,182 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+
+import type { CoeditorHandle } from "@/lib/editor/components";
+import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
+
+// Min px between shown ticks, closer regions collapse into one.
+const TICK_SLOT = 12;
+
+interface Tick {
+  kind: "comment" | "source";
+  id: string;
+  /** Occurrence index among this id's surviving spans, a source cited in
+   * several regions gets a tick per region. */
+  nth: number;
+  /** Content fraction of the doc, 0..1. */
+  fraction: number;
+}
+
+/**
+ * Overview tick strip at the doc's right margin (mock 1855:281488): one
+ * line per commented or source-attributed region at its proportional doc
+ * position, the active region's tick heavier (Weight/Bar/Medium,
+ * Border/05) than the rest (Weight/Bar/Small, Border/02). Clicking a tick
+ * scrolls to and activates its region. Reads both live-mapped highlight
+ * fields and shows a tick for every populated target.
+ */
+export function AnnotationTickRail({
+  editorRef,
+  commentTargets,
+  sourceTargets,
+  activeCommentIds,
+  activeSourceIds,
+  onPickComment,
+  onPickSource,
+}: {
+  editorRef: RefObject<CoeditorHandle | null>;
+  /** The page's current targets, retriggering layout when they change.
+   * Tick positions read the editor's live-mapped copies. */
+  commentTargets: AnchoredHighlightTarget[];
+  sourceTargets: AnchoredHighlightTarget[];
+  activeCommentIds?: string[];
+  activeSourceIds?: string[];
+  onPickComment?: (id: string) => void;
+  /** nth picks the clicked region among the source's spans. */
+  onPickSource?: (key: string, nth: number) => void;
+}) {
+  const [ticks, setTicks] = useState<Tick[]>([]);
+  const [trackH, setTrackH] = useState(0);
+  const rafId = useRef(0);
+
+  // The slot collapse needs the strip's real px height, which only exists
+  // after the first tick-bearing render (measured on mount and resize).
+  const trackObserver = useRef<ResizeObserver | null>(null);
+  const measureTrack = useCallback((el: HTMLDivElement | null) => {
+    trackObserver.current?.disconnect();
+    trackObserver.current = null;
+    if (!el) return;
+    setTrackH(el.clientHeight);
+    const ro = new ResizeObserver(() => setTrackH(el.clientHeight));
+    ro.observe(el);
+    trackObserver.current = ro;
+  }, []);
+
+  const relayout = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const sh = editor.scrollHeight();
+    if (sh <= 0) return;
+    // Every surviving span from the live-mapped fields, so ticks ride
+    // edits like the highlights do.
+    const next: Tick[] = [];
+    const occurrences = new Map<string, number>();
+    const collect = (
+      targets: AnchoredHighlightTarget[],
+      kind: Tick["kind"],
+    ) => {
+      for (const t of targets) {
+        if (!t.id || t.startOffset >= t.endOffset) continue;
+        // nth counts surviving spans, mirroring scrollToSource's filter.
+        const key = `${kind}:${t.id}`;
+        const nth = occurrences.get(key) ?? 0;
+        occurrences.set(key, nth + 1);
+        const line = editor.anchorLine(t.startOffset);
+        if (!line) continue;
+        next.push({
+          kind,
+          id: t.id,
+          nth,
+          fraction: Math.min(1, Math.max(0, line.top / sh)),
+        });
+      }
+    };
+    collect(editor.commentTargets(), "comment");
+    collect(editor.sourceTargets(), "source");
+    next.sort((a, b) => a.fraction - b.fraction);
+    setTicks(next);
+  }, [editorRef]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const scheduled = () => {
+      cancelAnimationFrame(rafId.current);
+      rafId.current = requestAnimationFrame(relayout);
+    };
+    // Synchronous first pass, rAF is throttled in occluded tabs.
+    relayout();
+    // Ticks are content-fraction positioned, so plain scrolling never
+    // moves them and only geometry changes matter.
+    const unsub = editor.subscribeLayout((kind) => {
+      if (kind === "geometry") scheduled();
+    });
+    return () => {
+      unsub();
+      cancelAnimationFrame(rafId.current);
+    };
+  }, [relayout, editorRef]);
+
+  // Retrigger on target-set changes that reach the editor via effects,
+  // which produce no geometry notification of their own.
+  useEffect(relayout, [relayout, commentTargets, sourceTargets]);
+
+  if (ticks.length === 0) return null;
+
+  const isActive = (t: Tick) =>
+    t.kind === "comment"
+      ? !!activeCommentIds?.includes(t.id)
+      : !!activeSourceIds?.includes(t.id);
+
+  // Collapse ticks that share a slot, keeping an active one visible.
+  const shown: Tick[] = [];
+  for (const t of ticks) {
+    const prev = shown[shown.length - 1];
+    if (
+      prev &&
+      trackH > 0 &&
+      (t.fraction - prev.fraction) * trackH < TICK_SLOT &&
+      !isActive(t)
+    )
+      continue;
+    shown.push(t);
+  }
+
+  return (
+    <div
+      ref={measureTrack}
+      className="pointer-events-none absolute inset-y-2 right-5 z-10 w-5"
+    >
+      {shown.map((t) => (
+        // raw-ok: no Opal control renders a 2px proportional minimap tick
+        <button
+          key={`${t.kind}:${t.id}:${t.nth}`}
+          type="button"
+          aria-label={t.kind === "comment" ? "Comment" : "Source"}
+          className="pointer-events-auto absolute inset-x-[2px] flex h-2 cursor-pointer items-center"
+          style={{ top: `calc(${t.fraction * 100}% - 4px)` }}
+          onClick={() =>
+            t.kind === "comment"
+              ? onPickComment?.(t.id)
+              : onPickSource?.(t.id, t.nth)
+          }
+        >
+          <span
+            className={
+              isActive(t)
+                ? "h-[4px] w-full rounded-full bg-(--border-05)"
+                : "h-[2px] w-full rounded-full bg-(--border-02)"
+            }
+          />
+        </button>
+      ))}
+    </div>
+  );
+}

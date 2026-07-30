@@ -41,6 +41,7 @@ import {
 } from "@/components/wiki/VersionHistoryList";
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
+import { AnnotationTickRail } from "@/components/wiki/AnnotationTickRail";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { EditorEdgeScrollbar } from "@/components/wiki/EditorEdgeScrollbar";
 import { sourceKey } from "@/components/wiki/sources";
@@ -357,8 +358,8 @@ export function FileView({ path }: FileViewProps) {
   }, [sourcesTabOpen, sourceSpans]);
   // Scrolls via the editor's live-mapped span, not the raw server offset,
   // so a click after local edits lands on the moved text.
-  const activateSource = useCallback((key: string) => {
-    coeditorRef.current?.scrollToSource(key);
+  const activateSource = useCallback((key: string, nth?: number) => {
+    coeditorRef.current?.scrollToSource(key, nth);
   }, []);
   // Attribution runs both ways: hovering a card lights only that source's
   // spans, and a caret inside a span lights its card (the editor reports
@@ -1396,6 +1397,17 @@ export function FileView({ path }: FileViewProps) {
             run={runMargin}
             onSubmitDraft={(body) => void submitMarginDraft(body)}
             onCancelDraft={() => setCommentDraft(null)}
+          />
+        )}
+        {panelScrollDocked && (
+          <AnnotationTickRail
+            editorRef={coeditorRef}
+            commentTargets={commentHighlights}
+            sourceTargets={sourceHighlights}
+            activeCommentIds={activeCommentIds}
+            activeSourceIds={activeSourceIds}
+            onPickComment={activateComment}
+            onPickSource={activateSource}
           />
         )}
       </div>
