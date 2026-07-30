@@ -619,13 +619,12 @@ export const Coeditor = forwardRef<CoeditorHandle, CoeditorProps>(
         }
       };
 
-      // The document at `getSyncedVersion()`. Maintained here because it is not
-      // recoverable from the current state: inverting the un-acked ChangeSets
-      // would need the very document they were applied to. `applyServerBuffer`
-      // needs it as the base to diff against, and every confirmation must go
-      // through `confirmUpdates` to keep it true — a path that bypasses it
-      // computes the diff against the wrong base and lands edits in the wrong
-      // place, which is the bug class this whole change exists to close.
+      // The document at `getSyncedVersion()` — the base `applyServerBuffer`
+      // diffs against. Tracked because it is not recoverable from the current
+      // state (inverting the un-acked ChangeSets would need the very document
+      // they were applied to). Invariant: every confirmation goes through
+      // `confirmUpdates`; a path that bypasses it diffs against the wrong
+      // base and anchors edits at the wrong offsets.
       const syncedDoc = { current: Text.of(session.startDoc.split("\n")) };
 
       const confirmUpdates = (
