@@ -203,18 +203,17 @@
   border-top: 1px solid var(--border-02);
 }
 
-/* Placeholder (@tiptap/extensions' Placeholder). `.is-empty` is applied to
-   whichever textblock currently holds the cursor when it's empty —
-   confirmed against the installed extension's source
-   (buildPlaceholderDecorations.ts): with showOnlyCurrent (the default),
-   that class is NOT limited to a document that's empty overall, so this
-   correctly shows a placeholder on any freshly-created empty block (e.g.
-   pressing Enter after typing a line), not only when the whole doc is
-   still blank. `.is-editor-empty` (additionally applied only when the
-   *entire* document is empty) is deliberately not referenced here — no
-   `:first-child` needed either, since the decoration targets the specific
-   empty node directly rather than a shared wrapper. */
-.editor-prose .is-empty::before {
+/* Placeholder (@tiptap/extensions' Placeholder), keyed on `.is-editor-empty`
+   rather than `.is-empty`. Both land on the same decoration — the empty
+   textblock holding the cursor — but per the installed extension's source
+   only `.is-editor-empty` is conditional on `editor.isEmpty`, i.e. the whole
+   document being blank.
+   `.is-empty` alone matches any empty block, so pressing Enter part-way down a
+   written page put "Start typing, or pick a template above…" in the middle of
+   it: wrong twice over, since there is nothing to start and a template can't be
+   applied to a page that already has content. No `:first-child` needed — the
+   decoration targets the empty node itself, not a shared wrapper. */
+.editor-prose .is-editor-empty::before {
   content: attr(data-placeholder);
   color: var(--text-02);
   float: left;
