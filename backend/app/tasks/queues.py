@@ -35,16 +35,16 @@ Queues:
   Onyx Craft launches also ride this queue (each blocks ~10-60s on Onyx
   sandbox provisioning).
 
-* ``coedit_queue`` — **co-edit session checkpoints.** Commits a live session
-  buffer to git and, on a concurrent agent/ingest commit, runs an AI merge —
-  so like ``documents_queue`` it commits and may hit the LLM, and can't live on
-  ``lightweight_maintenance_queue``. It gets its *own* queue because a
-  checkpoint's freshness is user-visible (readers see git HEAD): parked behind
-  hours of connector ingest on ``documents_queue``, a session's committed page
-  goes stale and, in the limit, pins readers to a lagging buffer. Runs wider
-  than ``documents`` because per-session safety comes from
-  a Postgres advisory lock (``coedit.checkpoint_lock_key``), not single-threading
-  — different sessions checkpoint in parallel; the same session is serialized.
+* ``coedit_queue`` — **co-edit checkpointing + session leave fallback.** A
+  session's document is ``(ydoc_snapshot, coedit_updates)``, rebuilt on demand
+  by whoever needs it (see ``app/wiki/coedit_live.py``), so nothing about a
+  session belongs to a particular process. ``checkpoint_coedit_session_task``
+  (``app/tasks/coedit_checkpoint.py``) is therefore a plain task any worker can
+  dequeue for any session — a periodic scan enqueues one per dirty session,
+  explicit save and a connection's own teardown enqueue directly. A teardown
+  enqueue has to survive its task being cancelled (server shutdown), so that
+  path sends inline rather than through a thread — see ``app/api/coedit.py``'s
+  ``finally``.
 
 Wiki Auto Management splits by **latency tier** — whether anyone is waiting on
 the result (see the "Queues and Workers" design doc):

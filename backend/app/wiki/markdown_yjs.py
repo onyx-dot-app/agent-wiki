@@ -4,8 +4,8 @@ Every top-level block (``markdown_blocks.top_level_block_ranges``) becomes an
 ``XmlElement`` in a ``pycrdt`` doc's root ``XmlFragment``, tagged with a
 stable, positional ``_blockId`` attribute. Structural treatment (real
 ProseMirror-shaped nodes, editable node-by-node, not opaque text) covers:
-``heading``, ``paragraph`` (inline content — text runs + bold/italic/code/
-link marks, represented via a ``pycrdt.XmlText``'s ``.format()`` runs, plus
+``heading``, ``paragraph`` (inline content — text runs + bold/italic/strike/
+code/link marks, represented via a ``pycrdt.XmlText``'s ``.format()`` runs, plus
 an explicit ``hardBreak`` leaf element interspersed as a sibling wherever a
 hard line break occurs — y-prosemirror maps a PM leaf/atom node to an empty
 sibling ``XmlElement``, not to a text mark, since a break is a node boundary,
@@ -27,9 +27,9 @@ padding, and still achieves the byte-stability goal for every row that isn't
 touched — cells aren't decomposed or individually editable. Thematic break
 and html block stay opaque verbatim, tagged ``_raw="1"``.
 
-Unrecognized inline constructs (an image, GFM strikethrough — anything this
-module doesn't have an explicit encoder for) raise ``NotImplementedError``
-rather than silently drop or mis-serialize content — the byte-stability
+Unrecognized inline constructs (an image — anything this module doesn't
+have an explicit encoder for) raise ``NotImplementedError`` rather than
+silently drop or mis-serialize content — the byte-stability
 requirement this whole engine exists for is only meaningful if failures are
 loud, never silent. Same for a list item that isn't a clean sequence of
 paragraph/list/blockquote children (e.g. a list item containing a table) —
@@ -46,11 +46,10 @@ from pydantic import BaseModel, ConfigDict
 
 from app.wiki.markdown_blocks import BlockKind, BlockRange, gfm_parser, top_level_block_ranges
 
-# Root-fragment key. Must match the frontend PM schema's y-prosemirror
-# `field` config exactly (see frontend/src/lib/editor/schema.ts).
+# Root-fragment key. Must match the frontend's Collaboration extension
+# `field` config exactly (see frontend/src/lib/tiptapEditor/extensions.ts).
 ROOT_XML_KEY = "prosemirror"
 
-_NL_ATTR = "_nl"  # "1" if this block's raw text ends with a trailing newline
 _RAW_ATTR = "_raw"  # "1" for an opaque verbatim-text block
 BLOCK_ID_ATTR = "_blockId"
 ROW_ID_ATTR = "_rowId"
@@ -66,21 +65,25 @@ _KNOWN_INLINE_TYPES = {
     "code_inline",
     "link_open",
     "link_close",
+    "s_open",
+    "s_close",
 }
 
-# Applied innermost-first when wrapping a diff run back into markdown syntax
-# (i.e. iterated in reverse of this tuple) — outer to inner: link, bold,
-# italic, code. Handles arbitrary combinations deterministically; not every
-# combination is meaningfully round-trippable in CommonMark (e.g. code spans
-# can't semantically nest other marks), but this never raises — an
-# unsupported *combination* degrades to best-effort markup, only a fully
-# unrecognized inline *construct* (see _KNOWN_INLINE_TYPES) raises.
-_MARK_WRAP_ORDER = ("link", "bold", "italic", "code")
+# Nesting order for the marks _serialize_inline_text treats as a delimiter
+# stack shared *across* adjacent runs — outer to inner: link, bold, strike,
+# italic. "code" isn't here: a code span's own fence is self-delimiting per
+# its own run's text (_wrap_code_run) and doesn't participate in this
+# cross-run nesting — matching CommonMark, where a code span can't
+# semantically nest (or be nested inside) other marks anyway.
+_NESTING_MARK_ORDER = ("link", "bold", "strike", "italic")
+_SYMMETRIC_MARK_DELIMS = {"italic": "*", "bold": "**", "strike": "~~"}
 
 # A text segment ("text", plain_text, mark_runs) or a hard-break leaf
 # ("hardbreak", None, None) — see module docstring for why a hard break is a
 # sibling element, not foldable into a text run's marks.
-_Segment = tuple[Literal["text", "hardbreak"], str | None, list[tuple[int, int, dict[str, Any]]] | None]
+_Segment = tuple[
+    Literal["text", "hardbreak"], str | None, list[tuple[int, int, dict[str, Any]]] | None
+]
 
 
 def _inline_runs(inline_token: Any) -> list[_Segment]:
@@ -123,15 +126,39 @@ def _inline_runs(inline_token: Any) -> list[_Segment]:
             active = {**active, "italic": True}
         elif child.type == "em_close":
             active = {k: v for k, v in active.items() if k != "italic"}
+        elif child.type == "s_open":
+            active = {**active, "strike": True}
+        elif child.type == "s_close":
+            active = {k: v for k, v in active.items() if k != "strike"}
         elif child.type == "code_inline":
-            _emit(child.content, {**active, "code": True})
+            # The flanking backtick fence is stored as literal text inside
+            # the mark, not stripped - matching the frontend's own
+            # InlineCode mark (blocks.ts), which keeps the backticks as
+            # real DOM characters on purpose (a mark's boundary is an
+            # otherwise zero-width, ambiguous caret position). Both ends of
+            # the shared Yjs doc need to agree on this shape, since a live
+            # session's doc *is* the same CRDT structure this seeds.
+            # `child.markup` is the exact fence markdown-it matched (1+
+            # backticks - a longer one only when the source deliberately
+            # used it, e.g. content containing an inner single backtick).
+            fence = child.markup or "`"
+            _emit(f"{fence}{child.content}{fence}", {**active, "code": True})
         elif child.type == "link_open":
             # y-prosemirror treats a mark's XmlText-format value as that
             # mark's *attrs object* — verified directly against the real
             # library. A bare href string decodes as an attrs object with
             # every string index as a key, silently producing an empty
             # href. Must be `{href: ...}`.
-            active = {**active, "link": {"href": child.attrs.get("href", "")}}
+            link_attrs: dict[str, Any] = {"href": child.attrs.get("href", "")}
+            title = child.attrs.get("title")
+            if title:
+                # Dropping this on parse (only href was ever captured) was
+                # a real data-loss bug (confirmed in review): a link's
+                # title survived nowhere in the CRDT doc at all, so it was
+                # already gone by the time serialization ran, not just
+                # omitted there.
+                link_attrs["title"] = title
+            active = {**active, "link": link_attrs}
         elif child.type == "link_close":
             active = {k: v for k, v in active.items() if k != "link"}
 
@@ -151,38 +178,164 @@ def _escape_inline_text(text: str) -> str:
     return text
 
 
-def _wrap_run(text: str, attrs: dict[str, Any] | None) -> str:
-    attrs = attrs or {}
-    # Inline code spans are verbatim — CommonMark never processes escapes
-    # inside them, so escaping here would corrupt the code's actual text
-    # (a literal backslash would become part of the visible content).
-    if "code" not in attrs:
-        text = _escape_inline_text(text)
-    if not attrs:
-        return text
-    result = text
-    for mark in reversed(_MARK_WRAP_ORDER):
-        if mark not in attrs:
-            continue
-        if mark == "code":
-            result = f"`{result}`"
-        elif mark == "italic":
-            result = f"*{result}*"
-        elif mark == "bold":
-            result = f"**{result}**"
-        elif mark == "link":
-            # attrs["link"] is {"href": ...} (matching y-prosemirror's
-            # mark-attrs convention) — but also accept a bare string
-            # defensively in case something upstream ever writes the old
-            # shape.
-            link_attrs = attrs["link"]
-            href = link_attrs["href"] if isinstance(link_attrs, dict) else link_attrs
-            result = f"[{result}]({href})"
-    return result
+def _contains_backtick_run(text: str, length: int) -> bool:
+    """Whether ``text`` contains a contiguous run of backticks at least
+    ``length`` long anywhere inside it — the condition that makes a fence of
+    exactly ``length`` backticks ambiguous as a delimiter (the next parse's
+    leftmost-match scan would close on that interior run instead of the
+    intended trailing fence)."""
+    run = 0
+    for ch in text:
+        run = run + 1 if ch == "`" else 0
+        if run >= length:
+            return True
+    return False
+
+
+def _wrap_code_run(text: str) -> str:
+    """Serializes a code-marked run. ``text`` is normally already a
+    complete, self-delimited code span (``fence + content + fence``, one
+    contiguous run of backticks on each end) — matching what ``_inline_runs``
+    builds when seeding from markdown and what the frontend's own
+    ``InlineCode`` mark builds on live typing (``blocks.ts``): keeping the
+    delimiters as real characters is deliberate there, so the common case
+    here is to pass ``text`` straight through unchanged, not add another
+    layer of backticks on top.
+
+    Two cases need real handling instead of pass-through:
+
+    - ``text`` has no backtick at all: the "code" mark reached this run
+      without ever going through a backtick-based conversion (e.g. via the
+      ``toggleCode``/``Mod-e`` command on already-existing plain text) — a
+      fresh fence has to be added.
+    - ``text``'s own leading/trailing backticks no longer safely delimit —
+      e.g. a live edit landed a new backtick inside an already-marked span
+      (typing while the cursor sits between two already-marked characters
+      picks up the active marks like any other character), so the stored
+      text's interior now contains a run as long as its own edges. Repaired
+      with the same fence-length-bumping idea ``_serialize_code_block``
+      uses for fenced code blocks: strip the (no-longer-trustworthy) edges
+      and rebuild a fence guaranteed longer than anything left inside.
+
+    Not handled: markdown deliberately using a longer fence than strictly
+    needed so its content can itself start/end with fewer backticks than
+    the fence (e.g. fence "``" wrapping content "`x`"). Flattened into one
+    literal string, that's indistinguishable on the next parse from a
+    single longer run — a narrow, pre-existing ambiguity in representing a
+    code span as flat text at all, not something introduced here."""
+    leading = len(text) - len(text.lstrip("`"))
+    trailing = len(text) - len(text.rstrip("`"))
+    if leading and leading == trailing and len(text) >= 2 * leading:
+        inner = text[leading : len(text) - trailing]
+        if not _contains_backtick_run(inner, leading):
+            return text
+    else:
+        inner = text
+    inner = inner.strip("`")
+    fence = "`"
+    while fence in inner:
+        fence += "`"
+    pad = " " if inner[:1] == "`" or inner[-1:] == "`" else ""
+    return f"{fence}{pad}{inner}{pad}{fence}"
+
+
+def _link_href_title(link_attrs: Any) -> tuple[str, str | None]:
+    # {"href": ..., "title": ...} (matching y-prosemirror's mark-attrs
+    # convention) — but also accept a bare string defensively in case
+    # something upstream ever writes the old href-only shape.
+    if isinstance(link_attrs, dict):
+        return link_attrs.get("href", ""), link_attrs.get("title")
+    return link_attrs, None
+
+
+# A run's per-mark identity: the mark name for the three symmetric marks,
+# or an (href, title) tuple for "link" — a plain "link:{href}" *string* key
+# would collide with itself the moment href contains its own ":" (which an
+# "http://..." URL always does), so this uses a tuple instead of any
+# string-encoding scheme.
+_MarkKey = str | tuple[str, str, str | None]
+
+
+def _mark_key(mark: str, attrs: dict[str, Any]) -> _MarkKey:
+    """An opaque per-run identity for ``mark``, used to decide whether two
+    adjacent runs are "the same" open span (stay merged, no close/reopen)
+    or genuinely different (must close and reopen at the boundary) — for
+    "link" specifically, two adjacent runs both marked "link" but pointing
+    at *different* hrefs/titles are different links, not one span covering
+    both destinations, so the href/title ride along in the key itself
+    rather than just the mark name."""
+    if mark != "link":
+        return mark
+    href, title = _link_href_title(attrs["link"])
+    return ("link", href, title)
+
+
+def _open_delim(key: _MarkKey) -> str:
+    if isinstance(key, tuple):
+        return "["
+    return _SYMMETRIC_MARK_DELIMS[key]
+
+
+def _close_delim(key: _MarkKey) -> str:
+    if isinstance(key, tuple):
+        _, href, title = key
+        title_part = f' "{title}"' if title else ""
+        return f"]({href}{title_part})"
+    return _SYMMETRIC_MARK_DELIMS[key]
 
 
 def _serialize_inline_text(xt: XmlText) -> str:
-    return "".join(_wrap_run(text, attrs) for text, attrs in xt.diff())
+    """Serializes one ``XmlText``'s runs (``xt.diff()``) back to markdown.
+
+    Each run used to be wrapped in its marks' delimiters independently
+    (iterating ``_MARK_WRAP_ORDER`` per run) — for two *adjacent* runs that
+    both carry the same mark (e.g. bold text with an italic word in the
+    middle: "bold ", "and" [bold+italic], " italic", all bold), that closed
+    and reopened the shared delimiter at every run boundary regardless of
+    whether the mark was ever actually interrupted, producing doubled-up,
+    unbalanced delimiter runs (`*****` between "bold" and "bold+italic"
+    text) — invalid markdown, not just cosmetic, and in at least one shape
+    compounding further on every subsequent touch (confirmed in review).
+
+    Fixed by tracking a single stack of currently-open marks across the
+    *whole* run sequence — the standard "properly nested delimiters"
+    approach: at each run boundary, find the longest common prefix between
+    what's currently open and what the next run wants (both in
+    ``_NESTING_MARK_ORDER``, outer to inner), close everything after that
+    prefix (innermost first — a mark can't close while something opened
+    after it is still open, that's what "nested" means), then open
+    whatever the next run newly wants. A mark that's genuinely continuous
+    across runs never closes at all.
+
+    "code" is handled separately, per run (``_wrap_code_run``) — a code
+    span's own fence is already self-delimiting per its own text and
+    doesn't participate in this cross-run nesting.
+    """
+    open_keys: list[_MarkKey] = []
+    parts: list[str] = []
+    for text, attrs in xt.diff():
+        attrs = attrs or {}
+        target = [_mark_key(m, attrs) for m in _NESTING_MARK_ORDER if m in attrs]
+        common = 0
+        while (
+            common < len(open_keys)
+            and common < len(target)
+            and open_keys[common] == target[common]
+        ):
+            common += 1
+        for key in reversed(open_keys[common:]):
+            parts.append(_close_delim(key))
+        for key in target[common:]:
+            parts.append(_open_delim(key))
+        open_keys = target
+        # Inline code spans are verbatim — CommonMark never processes
+        # escapes inside them, so escaping here would corrupt the code's
+        # actual text (a literal backslash would become part of the
+        # visible content).
+        parts.append(_wrap_code_run(text) if "code" in attrs else _escape_inline_text(text))
+    for key in reversed(open_keys):
+        parts.append(_close_delim(key))
+    return "".join(parts)
 
 
 def _serialize_inline_children(children: list[Any]) -> str:
@@ -204,6 +357,23 @@ def _serialize_inline_children(children: list[Any]) -> str:
     return "".join(parts)
 
 
+def _serialize_paragraph_text(children: list[Any]) -> str:
+    """A paragraph's own serialized text, block-start-escaped. Strips a
+    leading/trailing literal "\\n" first — the only way one ends up there is
+    a stranded softbreak character: splitting a multi-line paragraph
+    (Enter mid-text, not through any of this editor's own state machines —
+    just Tiptap's default paragraph split) leaves the *old* softbreak's
+    "\\n" as an ordinary leading/trailing character in whichever half didn't
+    consume it, since that split has no markdown-syntax awareness at all.
+    Left in, it stacks with this block's own trailing newline (every block
+    contributes exactly one — see ``serialize_block``) to produce an extra,
+    unwanted blank line around the split point. A leading/trailing "\\n" is
+    never meaningful paragraph content either way (an *interior* one still
+    is — a real softbreak — and is untouched here, since ``str.strip`` only
+    touches the ends)."""
+    return _escape_block_start_ambiguity(_serialize_inline_children(children).strip("\n"))
+
+
 def _element_from_segments(
     tag: str, attrs: dict[str, str], segments: list[_Segment]
 ) -> tuple[XmlElement, list[Any]]:
@@ -221,7 +391,7 @@ def _element_from_segments(
             xt = XmlText(text or "")
             contents.append(xt)
             if runs:
-                finishers.append(lambda xt=xt, runs=runs: _apply_runs(xt, runs))
+                finishers.append(lambda xt=xt, text=text, runs=runs: _apply_runs(xt, text, runs))
     if not contents:
         contents = [XmlText("")]
     return XmlElement(tag, attrs, contents=contents), finishers
@@ -247,10 +417,20 @@ def _make_inline_element(
     return _element_from_segments(tag, attrs, _inline_runs(inline_token))
 
 
-def _apply_runs(xt: XmlText, runs: list[tuple[int, int, dict[str, Any]]]) -> None:
+def _apply_runs(xt: XmlText, text: str, runs: list[tuple[int, int, dict[str, Any]]]) -> None:
+    """``runs``' offsets are character offsets into ``text`` (Python string
+    indexing, from ``_inline_runs``), but ``XmlText.format()`` indexes in
+    UTF-8 *bytes* — verified directly against pycrdt. Any multi-byte
+    character before a mark (an em dash, a curly quote, an emoji) shifts
+    the mark boundary if applied as-is, silently corrupting existing
+    bold/italic/etc. the instant a page containing one is opened (measured
+    over a real wiki: 10.5% of content blocks affected). Convert to byte
+    offsets first."""
     for start, end, attrs in runs:
         if start < end:
-            xt.format(start, end, attrs)
+            byte_start = len(text[:start].encode("utf-8"))
+            byte_end = len(text[:end].encode("utf-8"))
+            xt.format(byte_start, byte_end, attrs)
 
 
 def _matching_close(tokens: list[Any], open_idx: int, close_type: str) -> int:
@@ -267,7 +447,9 @@ def _build_paragraph_from_inline(inline_token: Any) -> tuple[XmlElement, list[An
     return _element_from_segments("paragraph", {}, _inline_runs(inline_token))
 
 
-def _build_block_sequence(tokens: list[Any], start: int, end: int) -> tuple[list[XmlElement], list[Any]]:
+def _build_block_sequence(
+    tokens: list[Any], start: int, end: int
+) -> tuple[list[XmlElement], list[Any]]:
     """Build a sequence of paragraph/list/blockquote child elements from a
     flat markdown-it token range ``[start, end)`` — used for list-item and
     blockquote content, recursing into ``_build_list``/``_build_blockquote``
@@ -310,7 +492,9 @@ def _build_block_sequence(tokens: list[Any], start: int, end: int) -> tuple[list
 _TASK_MARKER_RE = re.compile(r"^\[([ xX])\](?:\s+|$)")
 
 
-def _list_item_task_marker(tokens: list[Any], item_start: int, item_end: int) -> re.Match[str] | None:
+def _list_item_task_marker(
+    tokens: list[Any], item_start: int, item_end: int
+) -> re.Match[str] | None:
     """If a list item's first block is a paragraph beginning with a
     checkbox marker, the match against that paragraph's leading text run;
     else ``None``. ``item_start``/``item_end`` bracket the item's own
@@ -373,7 +557,7 @@ def _build_list(
             item_children, item_finishers = _build_block_sequence(tokens, item_start, item_end)
             items.append(
                 XmlElement(
-                    "taskItem", {"checked": "true" if checked else "false"}, contents=item_children
+                    "taskItem", {"checked": checked}, contents=item_children
                 )
             )
         else:
@@ -394,9 +578,7 @@ def _build_blockquote(
 def _build_code_block(raw: str, attrs: dict[str, str]) -> XmlElement:
     tok = next(t for t in gfm_parser().parse(raw) if t.type in ("fence", "code_block"))
     language = tok.info.strip() if tok.type == "fence" else ""
-    return XmlElement(
-        "codeBlock", {**attrs, "language": language}, contents=[XmlText(tok.content)]
-    )
+    return XmlElement("codeBlock", {**attrs, "language": language}, contents=[XmlText(tok.content)])
 
 
 def _build_heading(raw: str, attrs: dict[str, str]) -> tuple[XmlElement, list[Any]]:
@@ -422,39 +604,61 @@ def _build_heading(raw: str, attrs: dict[str, str]) -> tuple[XmlElement, list[An
     )
 
 
-def _build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list[Any]]:
-    """Returns the (prelim) element plus a list of "finish" callbacks to run
+def build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list[Any]]:
+    """Build a single top-level block's ``XmlElement`` from its span in
+    ``body``. Public (no leading underscore) because
+    ``markdown_splice.apply_markdown_diff`` also calls this directly, to
+    splice individual replacement blocks into an existing ``Doc`` rather
+    than rebuilding one from scratch via ``seed_doc_from_markdown``.
+
+    Returns the (prelim) element plus a list of "finish" callbacks to run
     once the element is integrated into a doc (mark ``.format()`` calls need
-    an already-integrated ``XmlText``)."""
+    an already-integrated ``XmlText``).
+
+    No ``_nl`` attribute anywhere below, deliberately: every block's own
+    trailing newline is no longer conditional on anything stored — see
+    ``serialize_block``, which now always emits exactly one, unconditionally,
+    for every block kind. Trying to track "does this block's raw text end in
+    a newline" as stamped, frozen state was the root cause of a whole family
+    of bugs (a stored value going stale relative to a block's actual current
+    content); the fix is to never store the decision at all.
+    """
     raw = body[block.start : block.end]
-    trailing_nl = raw.endswith("\n")
-    nl_attr = "1" if trailing_nl else "0"
+
+    if block.kind is BlockKind.BLANK_LINE:
+        # Always an empty paragraph - matches exactly what a live Enter-press
+        # on an empty paragraph already produces, so it round-trips through
+        # the same, unmodified `serialize_block` paragraph branch with no
+        # special-casing there.
+        return (
+            XmlElement("paragraph", {BLOCK_ID_ATTR: block.block_id}, contents=[XmlText("")]),
+            [],
+        )
 
     if block.kind is BlockKind.HEADING:
-        return _build_heading(raw, {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr})
+        return _build_heading(raw, {BLOCK_ID_ATTR: block.block_id})
 
     if block.kind is BlockKind.PARAGRAPH:
-        line = raw[:-1] if trailing_nl else raw
-        return _make_inline_element(
-            "paragraph", {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr}, line
-        )
+        line = raw[:-1] if raw.endswith("\n") else raw
+        line = _strip_indented_code_ambiguity_for_parse(line)
+        return _make_inline_element("paragraph", {BLOCK_ID_ATTR: block.block_id}, line)
 
     if block.kind is BlockKind.LIST:
         tokens = gfm_parser().parse(raw)
         el, finishers = _build_list(
-            tokens, 0, len(tokens), extra_attrs={BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr}
+            tokens, 0, len(tokens), extra_attrs={BLOCK_ID_ATTR: block.block_id}
         )
         return el, finishers
 
     if block.kind is BlockKind.BLOCKQUOTE:
         tokens = gfm_parser().parse(raw)
         el, finishers = _build_blockquote(
-            tokens, 0, len(tokens), extra_attrs={BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr}
+            tokens, 0, len(tokens), extra_attrs={BLOCK_ID_ATTR: block.block_id}
         )
         return el, finishers
 
     if block.kind is BlockKind.CODE_BLOCK:
-        el = _build_code_block(raw, {BLOCK_ID_ATTR: block.block_id, _NL_ATTR: nl_attr})
+        el = _build_code_block(raw, {BLOCK_ID_ATTR: block.block_id})
         return el, []
 
     if block.kind is BlockKind.TABLE:
@@ -495,7 +699,7 @@ def seed_doc_from_markdown(body: str) -> Doc:
     blocks = top_level_block_ranges(body)
     with doc.transaction():
         for block in blocks:
-            el, finishers = _build_block_element(body, block)
+            el, finishers = build_block_element(body, block)
             root.children.append(el)
             for finish in finishers:
                 finish()
@@ -522,7 +726,11 @@ def find_by_row_id(doc: Doc, row_id: str) -> XmlElement | None:
 
 
 def serialize_row(row: XmlElement) -> str:
-    return row.children[0].to_py()  # type: ignore[return-value]
+    """A row's verbatim source line. Empty-safe for the same reason as
+    ``_serialize_code_block``: delete a row's text and the XmlText child goes
+    with it, leaving a childless element whose ``children[0]`` raises."""
+    kids = list(row.children)
+    return kids[0].to_py() if kids else ""  # type: ignore[return-value]
 
 
 def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
@@ -538,9 +746,7 @@ def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
             # line is just as much a fresh block-start position as the
             # top of the document, so a literal leading "-"/">"/"#"/"---"
             # needs the same escaping, not just the top-level case.
-            parts.append(
-                _escape_block_start_ambiguity(_serialize_inline_children(list(child.children)))
-            )
+            parts.append(_serialize_paragraph_text(list(child.children)))
         elif child.tag in ("bulletList", "orderedList", "taskList"):
             parts.append(_serialize_list(child).rstrip("\n"))
         elif child.tag == "blockquote":
@@ -570,7 +776,7 @@ def _serialize_list(node: XmlElement) -> str:
     lines: list[str] = []
     for idx, item in enumerate(node.children):
         if is_task:
-            checked = dict(item.attributes).get("checked") == "true"
+            checked = _is_checked(dict(item.attributes).get("checked"))
             marker = f"- [{'x' if checked else ' '}] "
         elif ordered:
             marker = f"{start + idx}. "
@@ -579,6 +785,32 @@ def _serialize_list(node: XmlElement) -> str:
         body = _serialize_block_sequence(list(item.children), " " * len(marker))  # type: ignore[arg-type]
         lines.append(marker + body)
     return "\n\n".join(lines) + "\n"
+
+
+def _is_checked(value: object) -> bool:
+    """Whether a ``taskItem``'s ``checked`` attribute means checked.
+
+    Tolerant on purpose, because two writers disagree on the type. This codec
+    writes a real ``bool``; a Tiptap client goes through ``y-prosemirror``, which
+    stores the ProseMirror attribute value as-is — a ``bool`` normally, but the
+    string ``"true"``/``"false"`` if the node was built from an older snapshot or
+    parsed from ``data-checked`` HTML.
+
+    A strict ``== "true"`` silently lost every box checked in the editor: the
+    value was ``True``, the comparison was ``False``, and the box serialized back
+    to ``- [ ]``. Verified directly against pycrdt, not assumed.
+
+    Note the string case cannot be handled by truthiness — ``"false"`` is a
+    non-empty string, so it would read as checked. That asymmetry is also why
+    this codec now writes booleans: ``"false"`` is truthy in JavaScript too, so
+    a string-valued attribute made an *unchecked* markdown box render as ticked
+    in the editor.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "checked", "")
+    return False
 
 
 def _serialize_blockquote(node: XmlElement) -> str:
@@ -591,13 +823,27 @@ def _serialize_code_block(node: XmlElement) -> str:
     """Always emits fenced syntax, even if the source was an indented code
     block — semantically identical, and simpler/more robust than
     reconstructing 4-space indentation. Same non-byte-identical-but-correct
-    tradeoff as ``_serialize_list``."""
+    tradeoff as ``_serialize_list``.
+
+    An *empty* code block has no text child at all, not a child holding "".
+    Indexing it raised ``IndexError`` straight out of pycrdt, which surfaced as
+    a checkpoint that crashed and retried forever: the page could never be
+    saved again, and every editor on it saw "could not save". Trivially reached
+    — insert a code block from the slash menu, type nothing, save."""
     attrs = dict(node.attributes)
     language = attrs.get("language", "")
-    content = node.children[0].to_py()  # type: ignore[union-attr]
+    kids = list(node.children)
+    content = kids[0].to_py() if kids else ""  # type: ignore[union-attr]
     fence = "```"
     while fence in content:
         fence += "`"
+    # The closing fence has to start its own line, and the editor stores code
+    # text without a trailing newline — nobody types a blank last line — so
+    # without this the fence glued itself to the final line ("daskjqwer```"),
+    # which CommonMark doesn't read as a fence at all: the block silently stopped
+    # being a code block on the next round trip. Seen in an exported page.
+    if content and not content.endswith("\n"):
+        content += "\n"
     return f"{fence}{language}\n{content}{fence}\n"
 
 
@@ -620,9 +866,9 @@ _ORDERED_MARKER_RE = re.compile(r"^(\d{1,9})([.)])(\s|$)")
 # text" doesn't (confirmed against the forward parse, not assumed: a
 # trailing non-marker character on the line makes it an ordinary
 # paragraph). "*"/"_" thematic breaks ("***", "_ _ _") need no matching
-# case — every "*"/"_" is already escaped unconditionally by `_wrap_run`
-# for the emphasis/italic reason, which breaks the run regardless of
-# position.
+# case — every "*"/"_" is already escaped unconditionally by
+# `_escape_inline_text` (called from `_serialize_inline_text`) for the
+# emphasis/italic reason, which breaks the run regardless of position.
 _THEMATIC_BREAK_DASH_RE = re.compile(r"^-(?:[ \t]*-){2,}[ \t]*(?:\n|$)")
 
 # A setext heading underline: one or more *contiguous* "=" (level 1) or "-"
@@ -667,26 +913,48 @@ _FENCE_OPENER_RE = re.compile(r"^(?:`{3,}|~{3,})")
 _INDENTED_CODE_FIRST_LINE_RE = re.compile(r"^(?: {4}| {0,3}\t)")
 
 
+def _strip_indented_code_ambiguity_for_parse(line: str) -> str:
+    """Parse-side mirror of ``_escape_block_start_ambiguity``'s first-line
+    handling, below.
+
+    ``top_level_block_ranges`` splits a multi-line paragraph into one
+    ``BlockRange`` per soft-break line (every newline is its own block
+    boundary now - see that function's docstring). A continuation line with
+    4+ leading columns of indentation was always safe as part of a bigger
+    paragraph (an indented code block can't interrupt one already started),
+    but once split out it becomes its own block and gets reparsed standalone
+    by ``_make_inline_element`` - exactly the indented-code-block trigger,
+    which has no ``inline`` token at all, so the paragraph's content would
+    silently come back empty instead of just losing its indentation. Strip
+    the same leading run stripped on the write side so the round-trip stays
+    symmetric: a promoted continuation line still parses as a paragraph."""
+    lines = line.split("\n")
+    if lines[0] and _INDENTED_CODE_FIRST_LINE_RE.match(lines[0]):
+        lines[0] = lines[0].lstrip(" \t")
+    return "\n".join(lines)
+
+
 def _escape_block_start_ambiguity(text: str) -> str:
     """A paragraph's serialized text starting with a character or pattern
     that's only special as a *block*-start marker (heading ``#``, bullet
     ``-``/``+``, thematic break ``---``, blockquote ``>``, ordered-list
     ``1.``) must stay escaped, or the next parse reinterprets this
-    paragraph as a different block type entirely. Unlike ``_wrap_run``'s
-    mark-delimiter escaping (position-independent — a ``*``/``_``/`` ` ``/
-    ``[``/``]`` is ambiguous anywhere in the text, already handled there),
-    these are only ambiguous at the very start of *a line*, which is why
-    this checks every line a soft break produces, not just ``text[0]`` —
-    a multi-line paragraph's second line becomes just as much a fresh
+    paragraph as a different block type entirely. Unlike
+    ``_escape_inline_text``'s mark-delimiter escaping (position-independent
+    — a ``*``/``_``/`` ` ``/``[``/``]`` is ambiguous anywhere in the text,
+    already handled there, called from ``_serialize_inline_text``), these
+    are only ambiguous at the very start of *a line*, which is why this
+    checks every line a soft break produces, not just ``text[0]`` — a
+    multi-line paragraph's second line becomes just as much a fresh
     block-start position once it's re-emitted, whether that's the plain
     top level, prefixed with a list item's continuation indent (which
     CommonMark still parses as a block start through up to 3 spaces), or
     with a blockquote's repeated ``> `` (``_serialize_blockquote`` adds
     that per line unconditionally, including a paragraph's internal soft
     breaks). ``*`` as a bullet marker doesn't need a case here — it's
-    already escaped unconditionally by ``_wrap_run`` for the emphasis
-    reason, which covers every line's start position too as a side
-    effect.
+    already escaped unconditionally by ``_escape_inline_text`` for the
+    emphasis reason, which covers every line's start position too as a
+    side effect.
 
     The first line additionally gets the indented-code-block check
     (``_INDENTED_CODE_FIRST_LINE_RE``) first, since that ambiguity only
@@ -755,25 +1023,29 @@ def _escape_line_start(line: str) -> str:
 
 
 def serialize_block(node: XmlElement) -> str:
+    """No stored newline state anywhere in this function, deliberately: every
+    block - including an empty paragraph (a ``BlockKind.BLANK_LINE`` spacer,
+    or a fresh one from an Enter press with nothing typed) - contributes
+    exactly its own text plus one trailing newline, unconditionally, with no
+    exception for empty content. `checkpoint_body` concatenates every
+    block's own output directly with no separator of its own added on top
+    (see its module docstring) - it's the block's own newline that supplies
+    the entire boundary, so an empty block still needs to contribute one:
+    it represents exactly one blank line, not the absence of one."""
     attrs = dict(node.attributes)
-    trailing = attrs.get(_NL_ATTR) == "1"
 
     if node.tag == "heading":
         level = int(attrs["level"])
         text = _serialize_inline_children(list(node.children))
-        return "#" * level + " " + text + ("\n" if trailing else "")
+        return "#" * level + " " + text + "\n"
     if node.tag == "paragraph":
-        text = _escape_block_start_ambiguity(_serialize_inline_children(list(node.children)))
-        return text + ("\n" if trailing else "")
+        return _serialize_paragraph_text(list(node.children)) + "\n"
     if node.tag in ("bulletList", "orderedList", "taskList"):
-        text = _serialize_list(node)
-        return text if trailing else text.rstrip("\n")
+        return _serialize_list(node)
     if node.tag == "blockquote":
-        text = _serialize_blockquote(node)
-        return text if trailing else text.rstrip("\n")
+        return _serialize_blockquote(node)
     if node.tag == "codeBlock":
-        text = _serialize_code_block(node)
-        return text if trailing else text.rstrip("\n")
+        return _serialize_code_block(node)
     if node.tag == "table":
         return "".join(serialize_row(row) for row in node.children)
     if attrs.get(_RAW_ATTR) == "1":
@@ -815,14 +1087,14 @@ def reconstruct_body_with_block_map(doc: Doc) -> tuple[str, list[BlockSpan]]:
     """Like ``reconstruct_body``, but also returns each top-level block's
     character span within the returned text. See ``BlockSpan``.
 
-    Each block's own serialized text already carries its own trailing
-    newline (``BlockRange.end`` is inclusive of it, per
-    ``markdown_blocks.py``) — bare concatenation would silently merge
-    adjacent blocks (e.g. two paragraphs collapse into one) rather than just
-    losing exact spacing, so a blank-line separator is inserted between
-    blocks whose own text doesn't already end in one (a raw/opaque block's
-    captured span sometimes already includes its trailing blank line;
-    headings/paragraphs never do, per ``_build_block_element``). A table's
+    No separator is synthesized between blocks: each block's own
+    ``serialize_block`` output already supplies its complete boundary (one
+    trailing newline if it has content, nothing if it doesn't — see that
+    function), and any actual blank line the document contains is its own
+    separate, empty ``BlockKind.BLANK_LINE`` block, not something inferred
+    here. Bare concatenation is therefore already correct — two blocks with
+    truly nothing between them are supposed to read back as one soft-broken
+    paragraph, not silently gain a separator that was never there. A table's
     span covers its whole reserialized text (every row concatenated) — rows
     aren't tracked individually, matching this codec's row-level (not
     per-cell) granularity everywhere else.
@@ -832,9 +1104,6 @@ def reconstruct_body_with_block_map(doc: Doc) -> tuple[str, list[BlockSpan]]:
     spans: list[BlockSpan] = []
     pos = 0
     for child in root.children:
-        if parts and not parts[-1].endswith("\n\n"):
-            parts.append("\n")
-            pos += 1
         text = serialize_block(child)  # type: ignore[arg-type]
         block_id = dict(child.attributes).get(BLOCK_ID_ATTR)  # type: ignore[union-attr]
         start = pos

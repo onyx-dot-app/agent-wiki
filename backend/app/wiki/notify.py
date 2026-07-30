@@ -43,7 +43,16 @@ from app.tasks.reindex import drop_page_embedding, index_path
 from app.tasks.triggers import fan_out_trigger_eval
 from app.tasks.update_frequency import check_update_frequency
 from app.triggers import repo as triggers_repo
-from app.wiki import acl, agent_activity, coedit, comments, constants as wiki_constants, doc_ids, drafts, update_policy
+from app.wiki import (
+    acl,
+    agent_activity,
+    coedit,
+    comments,
+    constants as wiki_constants,
+    doc_ids,
+    drafts,
+    update_policy,
+)
 from app.wiki.comment_remap import remap_comments
 from app.wiki.provenance_remap import remap_source_ranges
 from app.models.wiki import ChangeKind, PathMove
@@ -231,6 +240,10 @@ def after_doc_trashed(
     """
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
+    # A superseded session (a destination collision — someone opened the
+    # just-moved-to path in the seconds-wide window before this move landed) is
+    # closed in the DB by on_path_moved and needs nothing else: no process holds
+    # a live document that would have to be evicted.
     coedit.on_path_moved(moves)
     # Tombstone the id(s) at the *original* root rather than following the move
     # into `.trash/` — the id keeps resolving (to a deleted state), and restore

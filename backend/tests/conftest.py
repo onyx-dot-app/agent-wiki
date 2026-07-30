@@ -328,6 +328,11 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
     # Each test rebuilds the engine so it points at the new database.
     reset_engine_for_tests()
 
+    # Every test's coedit_sessions id sequence restarts at 1 (a fresh clone
+    # of the empty-table template) — without this, a room left behind by an
+    # earlier test (never explicitly closed) would be adopted by a later,
+    # unrelated test that happens to reuse the same session id.
+
     yield cfg
 
     # Delete this test's queue keys while CONFIG still points at the test

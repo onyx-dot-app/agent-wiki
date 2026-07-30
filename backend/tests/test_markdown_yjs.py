@@ -14,6 +14,8 @@ from app.wiki.markdown_yjs import (
     reconstruct_body,
     reconstruct_body_with_block_map,
     seed_doc_from_markdown,
+    serialize_block,
+    serialize_row,
 )
 
 _SAMPLE = """# Heading
@@ -40,14 +42,27 @@ def test_seed_doc_produces_one_element_per_top_level_block() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     root = _root(doc)
     tags = [c.tag for c in root.children]
-    assert tags == ["heading", "paragraph", "bulletList", "table", "paragraph"]
+    # Every blank line between blocks is its own element too (an empty
+    # paragraph, BlockKind.BLANK_LINE's element shape) - no newline is ever
+    # an implicit, "free" gap.
+    assert tags == [
+        "heading",
+        "paragraph",
+        "paragraph",
+        "paragraph",
+        "bulletList",
+        "paragraph",
+        "table",
+        "paragraph",
+        "paragraph",
+    ]
 
 
 def test_block_ids_are_positional_and_stable() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     root = _root(doc)
     ids = [dict(c.attributes).get(BLOCK_ID_ATTR) for c in root.children]
-    assert ids == ["b0", "b1", "b2", "b3", "b4"]
+    assert ids == ["b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8"]
 
 
 def test_reconstruct_body_round_trips_simple_body() -> None:
@@ -72,6 +87,63 @@ def test_reconstruct_body_round_trips_bold_italic_code_link() -> None:
     body = "A **bold** and *italic* and `code` and [a link](https://x.example) end.\n"
     doc = seed_doc_from_markdown(body)
     assert reconstruct_body(doc) == body
+
+
+def test_inline_code_stores_backticks_as_literal_text() -> None:
+    # The flanking backticks must be real characters in the stored XmlText,
+    # not stripped-then-resynthesized on serialize — matching the frontend's
+    # InlineCode mark (blocks.ts), which relies on that for caret placement.
+    # A pure string round-trip test wouldn't catch a regression back to the
+    # old "hidden syntax" shape (same output string either way), so this
+    # asserts the doc's own stored content directly.
+    doc = seed_doc_from_markdown("Some `code` here.\n")
+    para = _root(doc).children[0]
+    text_content = "".join(t for t, _ in para.children[0].diff())
+    assert text_content == "Some `code` here."
+
+
+def test_inline_code_with_interior_backtick_uses_longer_fence() -> None:
+    # CommonMark requires a longer fence when the content itself contains a
+    # backtick, e.g. content "a`b" needs a double-backtick fence.
+    body = "Code with a backtick: ``a`b`` end.\n"
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+    para = _root(doc).children[0]
+    text_content = "".join(t for t, _ in para.children[0].diff())
+    assert "``a`b``" in text_content
+
+
+def test_inline_code_mark_on_plain_text_without_backticks_gets_a_fresh_fence() -> None:
+    # Reachable via toggleCode/Mod-e on already-selected plain text (blocks.ts)
+    # - the "code" mark can land on a run with zero embedded backtick
+    # characters, unlike a run built from the backtick InputRule. Built via
+    # _build_live_paragraph since only a live editing session, not the
+    # forward markdown parser, can produce this shape.
+    doc = _build_live_paragraph("hello")
+    with doc.transaction():
+        _root(doc).children[0].children[0].format(0, 5, {"code": True})  # type: ignore[union-attr]
+    assert reconstruct_body(doc) == "`hello`\n"
+
+
+def test_inline_code_repairs_an_interior_backtick_from_a_live_edit() -> None:
+    # A live edit can land a new backtick inside an already-marked span
+    # (typing while the cursor sits between two already-marked characters
+    # carries the active marks over like any other character), breaking the
+    # stored text's own embedded fence - "`co`de`" naively reparses with the
+    # first "`" pair as the span ("co") and "de`" spilling out as plain text.
+    # Must repair to a longer fence instead of reparsing wrong or crashing.
+    doc = _build_live_paragraph("`co`de`")
+    with doc.transaction():
+        _root(doc).children[0].children[0].format(0, 7, {"code": True})  # type: ignore[union-attr]
+    once = reconstruct_body(doc)
+    reseeded = seed_doc_from_markdown(once)
+    reseeded_para = _root(reseeded).children[0]
+    assert reseeded_para.tag == "paragraph"
+    text_content = "".join(t for t, _ in reseeded_para.children[0].diff())
+    assert text_content == once.rstrip("\n")
+    # And the content must actually still read "co`de" - not "co" with
+    # "de`" silently dropped or spilled out as unmarked plain text.
+    assert "co`de" in once
 
 
 def test_reconstruct_body_round_trips_table() -> None:
@@ -120,8 +192,11 @@ def test_task_list_structure_and_checked_attribute() -> None:
     assert lst.tag == "taskList"
     items = list(lst.children)
     assert [i.tag for i in items] == ["taskItem", "taskItem"]
-    assert dict(items[0].attributes)["checked"] == "false"
-    assert dict(items[1].attributes)["checked"] == "true"
+    # Booleans, not the strings "true"/"false". A string-valued attribute is
+    # truthy in JavaScript even when it says "false", so an unchecked markdown
+    # box rendered as a *ticked* box in the Tiptap client.
+    assert dict(items[0].attributes)["checked"] is False
+    assert dict(items[1].attributes)["checked"] is True
     # The checkbox marker itself must not leak into the item's paragraph text.
     assert items[0].children[0].children[0].to_py() == "todo"
 
@@ -155,7 +230,9 @@ def test_task_list_nesting_and_inside_blockquote() -> None:
     nested = list(top_list.children[0].children)
     assert [c.tag for c in nested] == ["paragraph", "taskList"]
 
-    bq = root.children[1]
+    # root.children[1] is the blank-line block between the two top-level
+    # constructs - every blank line is its own block now.
+    bq = root.children[2]
     assert bq.tag == "blockquote"
     assert bq.children[0].tag == "taskList"
 
@@ -300,8 +377,8 @@ def test_escaping_does_not_corrupt_inline_code_content() -> None:
 
 def test_escaped_block_start_markers_round_trip_as_literal_text() -> None:
     # A leading "-"/"+"/">"/"1." in a paragraph's serialized text is only
-    # ambiguous as a *block*-start marker — _wrap_run's mark-delimiter
-    # escaping is position-independent and doesn't cover this ("*" is the
+    # ambiguous as a *block*-start marker — _escape_inline_text's mark-
+    # delimiter escaping is position-independent and doesn't cover this ("*" is the
     # one marker character that's already covered there, for the unrelated
     # emphasis reason). Without _escape_block_start_ambiguity, checkpointing
     # a touched paragraph beginning with one of these silently turns it into
@@ -334,11 +411,16 @@ def test_ordered_marker_escape_lands_on_the_delimiter_not_the_digits() -> None:
         doc = _build_live_paragraph(text)
         once = reconstruct_body(doc)
         reseeded = seed_doc_from_markdown(once)
-        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
-        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        children = list(reseeded.get(ROOT_XML_KEY, type=XmlFragment).children)
+        tags = [c.tag for c in children]
+        # Every newline is its own block boundary now (no soft breaks within
+        # one block) - the soft-break line becomes its own paragraph.
+        assert tags == ["paragraph", "paragraph"], (
+            f"expected two paragraphs for {text!r}, got tags={tags}"
+        )
         twice = reconstruct_body(reseeded)
         assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
-        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        content = "\n".join("".join(t for t, _ in c.children[0].diff()) for c in children)
         assert content == text, f"expected content {text!r} preserved exactly, got {content!r}"
 
 
@@ -362,7 +444,7 @@ def test_escaped_thematic_break_dash_run_stays_a_paragraph() -> None:
     # break — content-free — so reactivating it doesn't just change the
     # block type, it silently discards the paragraph's text entirely.
     # "***"/"_ _ _" thematic breaks need no dedicated case: every "*"/"_"
-    # is already escaped unconditionally by _wrap_run for the emphasis
+    # is already escaped unconditionally by _escape_inline_text for the emphasis
     # reason, which breaks the run regardless of position.
     for raw in ("\\---\n", "\\- - -\n"):
         doc = seed_doc_from_markdown(raw)
@@ -515,7 +597,7 @@ def _build_live_paragraph(text: str) -> Doc:
     already (correctly) parse it as a table, not a paragraph."""
     doc = Doc()
     root = doc.get(ROOT_XML_KEY, type=XmlFragment)
-    para = XmlElement("paragraph", {BLOCK_ID_ATTR: "b0", "_nl": "1"}, contents=[])
+    para = XmlElement("paragraph", {BLOCK_ID_ATTR: "b0"}, contents=[])
     with doc.transaction():
         root.children.append(para)
     with doc.transaction():
@@ -534,8 +616,12 @@ def test_paragraph_reactivates_as_table_without_escaping() -> None:
     once = reconstruct_body(doc)
     reseeded = seed_doc_from_markdown(once)
     tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
-    assert tags == ["paragraph"], (
-        f"expected the checkpointed text to stay a single paragraph, "
+    # Every newline is its own block boundary now, so the two lines split
+    # into two paragraphs - neither reactivates as a table (the dash run
+    # is escaped as a thematic break, which also blocks the delimiter-row
+    # read, coincidentally but correctly).
+    assert tags == ["paragraph", "paragraph"], (
+        f"expected two paragraphs, no table reactivation, "
         f"got tags={tags} for body={once!r}"
     )
 
@@ -550,7 +636,7 @@ def test_table_delimiter_row_escaping_is_stable() -> None:
             c.tag
             for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
         ]
-        assert tags == ["paragraph"]
+        assert tags == ["paragraph", "paragraph"]
 
 
 def test_paragraph_line_of_tildes_does_not_reactivate_as_a_fence() -> None:
@@ -565,18 +651,20 @@ def test_paragraph_line_of_tildes_does_not_reactivate_as_a_fence() -> None:
     twice = reconstruct_body(seed_doc_from_markdown(once))
     assert once == twice
     tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
-    assert tags == ["paragraph"]
+    # Every newline is its own block boundary now - three lines, three
+    # paragraphs, none of them reactivating as a fence.
+    assert tags == ["paragraph", "paragraph", "paragraph"]
 
 
 def test_paragraph_line_of_backticks_does_not_reactivate_as_a_fence() -> None:
     # Backtick is already in _escape_inline_text's char set, so this is
     # already protected as a side effect (confirmed, not assumed) — kept
     # as an explicit regression test alongside the tilde case rather than
-    # relying on that being obvious from reading _wrap_run alone.
+    # relying on that being obvious from reading _serialize_inline_text alone.
     doc = _build_live_paragraph("some text:\n```\nmore text")
     once = reconstruct_body(doc)
     tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
-    assert tags == ["paragraph"]
+    assert tags == ["paragraph", "paragraph", "paragraph"]
 
 
 def test_indented_block_markers_do_not_reactivate() -> None:
@@ -614,11 +702,15 @@ def test_indented_block_markers_do_not_reactivate() -> None:
         doc = _build_live_paragraph(text)
         once = reconstruct_body(doc)
         reseeded = seed_doc_from_markdown(once)
-        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
-        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        children = list(reseeded.get(ROOT_XML_KEY, type=XmlFragment).children)
+        tags = [c.tag for c in children]
+        # Every newline is its own block boundary now - each line the
+        # original text split into is its own paragraph.
+        expected_tags = ["paragraph"] * expected_content.count("\n") + ["paragraph"]
+        assert tags == expected_tags, f"expected {expected_tags} for {text!r}, got tags={tags}"
         twice = reconstruct_body(reseeded)
         assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
-        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        content = "\n".join("".join(t for t, _ in c.children[0].diff()) for c in children)
         assert content == expected_content, (
             f"expected the leading indentation trimmed for {text!r}, got {content!r}"
         )
@@ -642,11 +734,14 @@ def test_indented_first_line_does_not_reactivate_as_code_block() -> None:
         doc = _build_live_paragraph(text)
         once = reconstruct_body(doc)
         reseeded = seed_doc_from_markdown(once)
-        tags = [c.tag for c in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children]
-        assert tags == ["paragraph"], f"expected a single paragraph for {text!r}, got tags={tags}"
+        children = list(reseeded.get(ROOT_XML_KEY, type=XmlFragment).children)
+        tags = [c.tag for c in children]
+        assert tags == ["paragraph", "paragraph"], (
+            f"expected two paragraphs for {text!r}, got tags={tags}"
+        )
         twice = reconstruct_body(reseeded)
         assert once == twice, f"not stable from round 1 for {text!r}: {once!r} != {twice!r}"
-        content = "".join(t for t, _ in reseeded.get(ROOT_XML_KEY, type=XmlFragment).children[0].children[0].diff())
+        content = "\n".join("".join(t for t, _ in c.children[0].diff()) for c in children)
         assert content == expected_content, (
             f"expected the leading indentation trimmed for {text!r}, got {content!r}"
         )
@@ -664,7 +759,12 @@ def test_indented_continuation_line_stays_safe_without_escaping() -> None:
     once = reconstruct_body(doc)
     assert once == text + "\n"
     tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
-    assert tags == ["paragraph"]
+    # Every newline is its own block boundary now - the continuation line
+    # becomes its own paragraph. It stays safe without any backslash escape
+    # (there's nothing to escape - the ambiguity is 4+ leading columns of
+    # indentation, which _strip_indented_code_ambiguity_for_parse strips
+    # on reparse, same documented tradeoff as the marker-escape cases).
+    assert tags == ["paragraph", "paragraph"]
 
 
 def test_find_by_block_id() -> None:
@@ -763,7 +863,17 @@ def test_reconstruct_body_with_block_map_spans_match_serialized_text() -> None:
     doc = seed_doc_from_markdown(_SAMPLE)
     body, spans = reconstruct_body_with_block_map(doc)
     assert body == reconstruct_body(doc)
-    assert [s.block_id for s in spans] == ["b0", "b1", "b2", "b3", "b4"]
+    assert [s.block_id for s in spans] == [
+        "b0",
+        "b1",
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7",
+        "b8",
+    ]
     for s in spans:
         assert body[s.start : s.end]
     # Spans are in document order and non-overlapping, same invariant as
@@ -775,5 +885,161 @@ def test_reconstruct_body_with_block_map_spans_match_serialized_text() -> None:
 def test_reconstruct_body_with_block_map_finds_offset_within_touched_block() -> None:
     doc = seed_doc_from_markdown("First paragraph.\n\nSecond paragraph.\n")
     body, spans = reconstruct_body_with_block_map(doc)
-    second = next(s for s in spans if s.block_id == "b1")
+    # b1 is the blank-line block between the two paragraphs now.
+    second = next(s for s in spans if s.block_id == "b2")
     assert body[second.start : second.end] == "Second paragraph.\n"
+
+
+# --- nested-mark serialization ------------------------------------------- #
+
+
+def test_bold_text_with_nested_italic_word_round_trips_validly() -> None:
+    """Regression test (review): a run that's a strict subset of its
+    neighbor's marks (bold continues, italic starts and ends in the
+    middle) used to close and reopen the shared "**" at every run
+    boundary regardless of continuity, producing invalid, unbalanced
+    delimiter runs ("*****") instead of properly nested ones."""
+    body = "A **bold _and_ italic** word.\n"
+    doc = seed_doc_from_markdown(body)
+    out = reconstruct_body(doc)
+    assert "*****" not in out
+    assert out == "A **bold *and* italic** word.\n"
+    # Stable under a second round trip (idempotent, not compounding further
+    # the way the pre-fix bug did on repeated touches).
+    doc2 = seed_doc_from_markdown(out)
+    assert reconstruct_body(doc2) == out
+
+
+def test_italic_quoted_code_run_stays_stable_across_touches() -> None:
+    """The exact corpus repro from review (Features/Triggers and Events.md):
+    a code span inside italics, adjacent to quote characters, used to grow
+    an extra pair of asterisks on every touch instead of staying stable."""
+    body = 'a b *"x `c` y"*.\n'
+    doc = seed_doc_from_markdown(body)
+    out1 = reconstruct_body(doc)
+    assert out1 == body
+    doc2 = seed_doc_from_markdown(out1)
+    out2 = reconstruct_body(doc2)
+    assert out2 == out1
+
+
+def test_three_overlapping_marks_nest_properly() -> None:
+    """bold+strike+italic all overlapping in a staggered pattern — each
+    mark's delimiter must open/close at exactly its own boundary, properly
+    nested (inner marks close before outer ones), not per-run independent
+    wrapping."""
+    doc = seed_doc_from_markdown("plain\n")
+    root = _root(doc)
+    xt = root.children[0].children[0]
+    with doc.transaction():
+        xt.format(0, 5, {"bold": True})
+        xt.format(1, 4, {"bold": True, "strike": True})
+        xt.format(2, 3, {"bold": True, "strike": True, "italic": True})
+    out = reconstruct_body(doc)
+    # Re-parsing must reproduce byte-identical marks — the real invariant
+    # (valid, round-trippable markdown), not a hardcoded expected string.
+    doc2 = seed_doc_from_markdown(out)
+    assert reconstruct_body(doc2) == out
+
+
+def test_link_title_round_trips() -> None:
+    """Regression test (review): a link's title used to be dropped at
+    parse time (only href was ever captured), so it was already gone
+    before serialization ever ran — real data loss, not just a formatting
+    choice."""
+    body = 'A [t](http://example.com "Title") x.\n'
+    doc = seed_doc_from_markdown(body)
+    assert reconstruct_body(doc) == body
+
+
+def test_adjacent_links_with_different_hrefs_do_not_merge() -> None:
+    doc = seed_doc_from_markdown("plain\n")
+    root = _root(doc)
+    xt = root.children[0].children[0]
+    with doc.transaction():
+        xt.format(0, 2, {"link": {"href": "http://a.example"}})
+        xt.format(2, 5, {"link": {"href": "http://b.example"}})
+    out = reconstruct_body(doc)
+    assert out == "[pl](http://a.example)[ain](http://b.example)\n"
+
+
+def test_empty_code_block_serializes_instead_of_crashing() -> None:
+    # An empty code block has no text child at all, and indexing it raised
+    # IndexError out of pycrdt — a checkpoint that crashed and retried forever,
+    # so the page could never be saved again. Reached by inserting a code block
+    # and typing nothing.
+    doc = seed_doc_from_markdown("```python\nx = 1\n```\n")
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    block = root.children[0]
+    assert isinstance(block, XmlElement)
+    with doc.transaction():
+        while len(block.children):
+            del block.children[0]
+
+    assert serialize_block(block) == "```python\n```\n"
+    # And the whole-document path a checkpoint actually takes.
+    assert reconstruct_body(doc) == "```python\n```\n"
+
+
+def test_empty_table_row_serializes_instead_of_crashing() -> None:
+    doc = seed_doc_from_markdown("| a | b |\n| --- | --- |\n| 1 | 2 |\n")
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    table = root.children[0]
+    assert isinstance(table, XmlElement)
+    row = list(table.children)[-1]
+    assert isinstance(row, XmlElement)
+    with doc.transaction():
+        while len(row.children):
+            del row.children[0]
+
+    assert serialize_row(row) == ""
+    reconstruct_body(doc)  # must not raise
+
+
+def test_checkbox_toggled_in_the_editor_serializes_as_checked() -> None:
+    # What a Tiptap client writes through y-prosemirror is the ProseMirror
+    # attribute value — a real bool. The serializer compared it against the
+    # string "true", so `True == "true"` was False and every box checked in the
+    # editor serialized back to `- [ ]`: the checkbox looked saved and wasn't.
+    doc = seed_doc_from_markdown("- [ ] todo\n")
+    lst = _root(doc).children[0]
+    assert isinstance(lst, XmlElement)
+    with doc.transaction():
+        lst.children[0].attributes["checked"] = True  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert reconstruct_body(doc) == "- [x] todo\n"
+
+
+def test_checkbox_accepts_the_legacy_string_attribute() -> None:
+    # Snapshots written before the switch to booleans hold "true"/"false", and a
+    # node parsed from `data-checked` HTML can too. Both must still read
+    # correctly — and note "false" can't be handled by truthiness, since a
+    # non-empty string is truthy.
+    doc = seed_doc_from_markdown("- [ ] one\n- [ ] two\n")
+    lst = _root(doc).children[0]
+    assert isinstance(lst, XmlElement)
+    with doc.transaction():
+        lst.children[0].attributes["checked"] = "true"  # pyright: ignore[reportAttributeAccessIssue]
+        lst.children[1].attributes["checked"] = "false"  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert reconstruct_body(doc) == "- [x] one\n\n- [ ] two\n"
+
+
+def test_code_block_closing_fence_starts_its_own_line() -> None:
+    # The editor stores code text with no trailing newline, and the closing fence
+    # was appended directly to it ("daskjqwer```"). CommonMark doesn't read that
+    # as a fence, so the block stopped being a code block on the next round trip
+    # — visible in an exported page before this was fixed.
+    doc = seed_doc_from_markdown("```\ndaskjqwer\n```\n")
+    block = _root(doc).children[0]
+    assert isinstance(block, XmlElement)
+    with doc.transaction():
+        while len(block.children):
+            del block.children[0]
+        block.children.append(XmlText("daskjqwer"))  # pyright: ignore[reportArgumentType]
+
+    assert reconstruct_body(doc) == "```\ndaskjqwer\n```\n"
+    # And it survives a further round trip as a code block, rather than decaying
+    # into a paragraph of literal backticks.
+    again = seed_doc_from_markdown(reconstruct_body(doc))
+    assert _root(again).children[0].tag == "codeBlock"

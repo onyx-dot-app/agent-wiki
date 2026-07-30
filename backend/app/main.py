@@ -71,6 +71,7 @@ from app.tasks.queues import QueueFullError
 from app.triggers import reconcile as triggers_reconcile
 from app.triggers import repo as triggers_repo
 from app.utils.logging import setup_logging
+from app.wiki import coedit_channel
 from app.wiki.git import ensure_wiki_repo
 from app.wiki.seed import seed_if_empty
 from app.wiki.templates import seed_starter_templates_if_empty
@@ -207,10 +208,15 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # process owns the SSE stream — Postgres LISTEN/NOTIFY ferries events
     # (MCP doc/job updates, co-edit frames) between them.
     bus.start_listener()
+    # Deferred cross-process emit for co-edit's Yjs broadcast (see
+    # app/wiki/coedit_channel.py) — bus.emit() is a blocking NOTIFY that
+    # can't run inline on the event loop for a per-keystroke hot path.
+    coedit_channel.start_emit_drain()
 
     yield
 
     bus.stop_listener()
+    coedit_channel.stop_emit_drain()
 
 
 def create_app() -> FastAPI:

@@ -26,7 +26,8 @@ from app.db import comment_fts
 from app.db.models import Comment, User
 from app.db.session import execute_dml, session
 from app.models.comment import CommentAuthorKind, CommentScope, CommentStatus
-from app.wiki import comment_mentions
+from app.wiki import comment_anchor, comment_mentions
+from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
 
@@ -151,6 +152,32 @@ def create_thread(
         anchor_sha is None or start_offset is None or end_offset is None
     ):
         raise ValueError("inline comment requires anchor_sha + start/end offset")
+
+    if (
+        scope == CommentScope.INLINE.value
+        and anchor_sha is not None
+        and start_offset is not None
+        and end_offset is not None
+    ):
+        # The frontend's span is only an approximation (textOffsets.ts strips
+        # markdown syntax when computing it) — correct it against the real
+        # markdown source before it's ever persisted. Uncorrected, it drifts
+        # further from the true span with every future remap_range call
+        # (an exact character diff, no fuzzy matching of its own).
+        #
+        # Best-effort: a git read failure here (e.g. WIKI_DIR not set up) must
+        # never block comment creation over a correction that's a nicety, not
+        # a requirement — fall back to the frontend's own approximate span,
+        # same as if quoted_text simply weren't found in the body.
+        try:
+            page_body = wiki_git.read_file_opt(doc_path, anchor_sha)
+        except OSError:
+            log.warning("create_thread: could not read %s@%s to correct span", doc_path, anchor_sha)
+            page_body = None
+        if page_body is not None:
+            start_offset, end_offset = comment_anchor.resolve_exact_span(
+                page_body, start_offset, end_offset, quoted_text or ""
+            )
 
     cid = f"cmt_{uuid.uuid4().hex[:12]}"
     with session() as s:

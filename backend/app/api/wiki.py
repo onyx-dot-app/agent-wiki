@@ -65,6 +65,7 @@ from app.wiki import (
     acl,
     agent_activity,
     coedit,
+    coedit_live,
     diff as wiki_diff,
     doc_ids,
     drafts as wiki_drafts,
@@ -328,32 +329,41 @@ def get_document_by_path(
         )
 
     # Session-aware live read: when a co-edit session is open on this page, its
-    # Postgres buffer holds the freshest edits. The checkpoint that commits the
-    # buffer to git runs asynchronously, so HEAD lags — reading it would show
-    # stale content right after a save. Serve a quick, display-only 3-way merge
-    # of HEAD + the live buffer so a viewer sees both committed edits and
-    # in-session edits without waiting on the commit. Best-effort and
-    # non-authoritative (no LLM, nothing persisted): on a merge conflict, prefer
-    # the live buffer. This is a UI read; git stays the source of truth for
-    # committed pages.
+    # document holds edits the checkpoint hasn't committed yet. That commit runs
+    # asynchronously, so HEAD lags — reading it would show stale content right
+    # after a save.
+    # Serve a quick, display-only 3-way merge of HEAD + the live doc so a
+    # viewer sees both committed edits and in-session edits without waiting
+    # on the commit. Best-effort and non-authoritative (no LLM, nothing
+    # persisted): on a merge conflict, prefer the live doc. This is a UI
+    # read; git stays the source of truth for committed pages.
+    #
+    # Any process can serve this: the document is rebuilt from the durable
+    # (snapshot, update log) rather than read out of one worker's memory. A
+    # worker-resident version could only answer for the sessions it happened to
+    # hold and silently served committed HEAD for the rest, so under
+    # --workers 2 roughly half of these reads were stale.
     sess = coedit.get_active_session(rel)
-    if sess is not None:
-        body = sess.buffer_text
-        # Fast path: if HEAD hasn't moved since the session opened (the common
-        # case — live-rebase folds inbound agent commits into the buffer and
-        # advances base_sha), the buffer already reflects everything, so skip
-        # the merge subprocess. When HEAD has advanced past the session's base,
-        # reconcile the committed change with the buffer for display: a clean
-        # 3-way merge shows both; on a conflict — or a merge failure — serve
-        # committed HEAD, not the buffer. Preferring the buffer there would let
-        # a stale/lagging session (in the limit, a zombie with no participants
-        # left to reconcile it) hide the committed change from every viewer —
-        # the 2026-07-06 incident. The authoritative merge happens at checkpoint.
+    live_body = coedit_live.read_body(sess.id) if sess is not None else None
+    if sess is not None and live_body is not None:
+        body = live_body
+        # Fast path: if HEAD hasn't moved since the session opened (the
+        # common case — live-rebase folds inbound agent commits into the
+        # doc and advances base_sha), the doc already reflects
+        # everything, so skip the merge subprocess. When HEAD has
+        # advanced past the session's base, reconcile the committed
+        # change with the doc for display: a clean 3-way merge shows
+        # both; on a conflict — or a merge failure — serve committed
+        # HEAD, not the doc. Preferring the doc there would let a
+        # stale/lagging session (in the limit, a zombie with no
+        # participants left to reconcile it) hide the committed change
+        # from every viewer — the 2026-07-06 incident. The authoritative
+        # merge happens at checkpoint.
         if sess.base_sha is not None and sess.base_sha != head_sha:
             base = wiki_git.read_file_opt(rel, ref=sess.base_sha) or ""
             current = wiki_git.read_file_opt(rel) or ""
             try:
-                merge = wiki_git.merge_content(base, current, sess.buffer_text)
+                merge = wiki_git.merge_content(base, current, body)
                 body = merge.merged if merge.clean else current
             except RuntimeError:
                 log.warning(

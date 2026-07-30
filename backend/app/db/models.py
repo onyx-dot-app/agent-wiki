@@ -934,12 +934,13 @@ class AgentActivity(Base):
 # --------------------------------------------------------------------------- #
 #
 # One live session per page (path-keyed): multiple humans join the same
-# session and converge on a single server-authoritative buffer. A single-user
-# edit is just a 1-participant session, which is how the per-user draft will
-# eventually fold into this model. The session periodically checkpoints to git
-# through ``commit_and_fan_out`` — ``base_sha`` is the HEAD it last merged
-# against, the merge base for the checkpoint 3-way merge. This store is the
-# editing *buffer* only; git stays the source of truth for committed pages.
+# session and converge on a single shared Yjs document (a CRDT — merging is
+# structural, not compare-and-swap). A single-user edit is just a
+# 1-participant session, which is how the per-user draft will eventually
+# fold into this model. The session periodically checkpoints to git through
+# ``commit_and_fan_out`` — ``base_sha`` is the HEAD it last merged against,
+# the merge base for the checkpoint 3-way merge. This store is the editing
+# *buffer* only; git stays the source of truth for committed pages.
 
 
 class CoeditSession(Base):
@@ -950,19 +951,41 @@ class CoeditSession(Base):
     # ``app.wiki.filesystem.safe_rel_path``. At most one *active* session per
     # path (enforced by the partial unique index below).
     path: Mapped[str] = mapped_column(Text, nullable=False)
-    # Server-authoritative buffer text — the live document everyone is editing.
-    buffer_text: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    # Monotonic version, bumped on every applied edit. Clients tag each patch
-    # with the version it was based on; the server rebases a stale patch onto
-    # the current buffer before applying.
-    version: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
-    # The ``version`` at the last checkpoint — the buffer is "dirty" (has
-    # uncommitted edits) when ``version > checkpointed_version``. Lets the
-    # checkpoint worker skip clean sessions instead of re-committing them.
-    checkpointed_version: Mapped[int] = mapped_column(
+    # The Yjs doc's last-persisted binary state (``Doc.get_update()``/
+    # equivalent snapshot) at ``ydoc_snapshot_seq`` — set once at session
+    # creation (seeded from the page's HEAD, seq 0) and advanced by every
+    # checkpoint after that. With the log, this pair *is* the document: any
+    # process rebuilds a throwaway ``Doc`` from this snapshot plus every
+    # ``CoeditUpdate`` in ``(ydoc_snapshot_seq, ydoc_seq]`` — see
+    # ``app/wiki/coedit_live.py`` and ``app/wiki/coedit_checkpoint.py``.
+    ydoc_snapshot: Mapped[bytes | None] = mapped_column(LargeBinary)
+    # The ``ydoc_seq`` the current ``ydoc_snapshot`` bytes represent —
+    # updates with ``seq > ydoc_snapshot_seq`` are exactly the ones a
+    # checkpoint still needs to replay onto the snapshot to reach current
+    # state.
+    ydoc_snapshot_seq: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
-    # Git HEAD the buffer was last checkpointed against — the merge base for the
+    # The markdown ``ydoc_snapshot`` represents — the checkpoint diff base
+    # (``markdown_splice.checkpoint_body``'s ``base_body``), kept in lockstep
+    # with the snapshot everywhere it advances. Content-equal to what the
+    # snapshot reconstructs to, not byte-equal to whatever an author typed:
+    # the codec normalizes block terminators, so a round trip is stable but not
+    # necessarily identical to the input. Deliberately *not* re-derived from a
+    # git read at ``base_sha``: a live-rebase fold has no git commit of its own,
+    # so ``base_sha`` can't always resolve to the content the snapshot
+    # actually represents the way a real commit ref can.
+    ydoc_snapshot_body: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # Monotonic sequence, bumped on every applied Yjs update. Clients/late
+    # joiners use it to ask "updates since N" for catch-up.
+    ydoc_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    # The ``ydoc_seq`` at the last checkpoint — the doc is "dirty" (has
+    # uncommitted edits) when ``ydoc_seq > ydoc_checkpointed_seq``. Lets the
+    # checkpoint scan skip clean sessions instead of re-committing them.
+    ydoc_checkpointed_seq: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    # Git HEAD the doc was last checkpointed against — the merge base for the
     # checkpoint 3-way merge. Null until the session is seeded from a page's
     # HEAD (or, for a brand-new page, until the first checkpoint).
     base_sha: Mapped[str | None] = mapped_column(Text)
@@ -1014,44 +1037,56 @@ class CoeditParticipant(Base):
     __table_args__ = (Index("idx_coedit_participants_user", "user_id"),)
 
 
-class CoeditOp(Base):
-    """Append-only log of edit operations applied to a co-edit session.
+class CoeditUpdate(Base):
+    """Append-only log of Yjs updates applied to a co-edit session.
 
-    Passive record — convergence is snapshot + CAS on ``coedit_sessions``, so
-    this log is written alongside each applied op but nothing reads it on the
-    hot path. It enables late-joiner catch-up ("ops since version N"),
-    per-author within-session history, and is the substrate a future OT/CRDT
-    upgrade would build on. ``seq`` is the session ``version`` the op produced
-    (unique per session); ``base_version`` is the version it was applied onto.
-    ``op_payload`` is the wire op — a list of ``{from, to, insert}`` range
-    changes — kept as a generic envelope so it survives an engine change.
+    Passive record — convergence is the CRDT merge itself (structural, not
+    CAS), so this log is written alongside each applied update but nothing
+    reads it on the hot path. It enables late-joiner catch-up ("updates
+    since seq N") and per-author within-session history. ``seq`` is the
+    session ``ydoc_seq`` the update produced (unique per session).
+    ``update_payload`` is the raw Yjs update (``pycrdt``'s
+    ``create_update_message``/binary diff format), not a JSON envelope —
+    unlike the OT-era ``op_payload`` this replaces, a CRDT update has no
+    meaningful engine-agnostic shape to preserve.
     """
 
-    __tablename__ = "coedit_ops"
+    __tablename__ = "coedit_updates"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     session_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("coedit_sessions.id", ondelete="CASCADE"), nullable=False
     )
     seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    author_user_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    # Nullable: NULL means the server itself produced the update, not a
+    # person — a live-rebase fold of an out-of-band commit
+    # (app/wiki/coedit_rebase.py) is a real logged update with no human author.
+    #
+    # SET NULL, not CASCADE (which this inherited from the OT-era coedit_ops,
+    # where the column was NOT NULL so SET NULL wasn't expressible). These rows
+    # are document *content*, not attribution: deleting a user would have
+    # deleted their un-checkpointed updates out of the middle of the log, and a
+    # CRDT update can depend on items an earlier one created — so the loss isn't
+    # confined to that author's own edits, it can make everything after them
+    # unintegrable, while ydoc_seq stays advanced and the next checkpoint
+    # commits the incomplete result and prunes. Matches `comments`, which drops
+    # attribution the same way and keeps the text.
+    author_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
     )
-    base_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # Opaque per-connection id (one editor tab), distinct from author_user_id
-    # (a user with two tabs shares one user id). Lets a collaborative client
-    # tell its own echoed op from a peer's — confirm vs. rebase. Nullable:
-    # non-collab writers (or older clients) don't set it.
+    # (a user with two tabs shares one user id). Nullable: non-collab writers
+    # don't set it.
     client_id: Mapped[str | None] = mapped_column(Text)
-    op_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    update_payload: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
 
     __table_args__ = (
-        # One op per produced version, in order — also the lookup for
-        # "ops since version N" catch-up.
-        UniqueConstraint("session_id", "seq", name="idx_coedit_ops_session_seq"),
+        # One update per produced seq, in order — also the lookup for
+        # "updates since seq N" catch-up.
+        UniqueConstraint("session_id", "seq", name="idx_coedit_updates_session_seq"),
     )
 
 

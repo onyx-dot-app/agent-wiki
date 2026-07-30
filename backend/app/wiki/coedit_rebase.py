@@ -1,21 +1,27 @@
-"""Live-rebase: fold an inbound agent/ingest commit into an open co-edit session.
+"""Live-rebase — fold an out-of-band commit into an open co-edit session.
 
-When a page under a live session is committed to git out of band (an agent, an
-ingest job, or a classic ``PUT /file``), the session's buffer has drifted from
-that new HEAD. Rather than let it surface as a conflict at save time, we fold
-the new HEAD into the live buffer immediately and push the result to
-participants — the agent's edit just appears, exactly like a teammate's edit.
+An "out-of-band" commit is anything that lands on a page's git history
+while a session is open and isn't that session's own checkpoint — an agent
+edit, a connector ingest, another human's direct save. Without this, the
+session's live doc would silently diverge from git until its own next
+checkpoint's 3-way merge (``coedit_checkpoint.py``) reconciles it —
+correct, but the divergence is invisible to editors in the meantime and the
+merge is deferred to whenever the session happens to go idle.
 
-Merge cleanliness comes from *this* direction (buffer absorbs the agent's
-change), not from checkpoint frequency; once the buffer sits on top of the new
-HEAD, the eventual checkpoint has nothing to reconcile.
+The fold is an ordinary logged Yjs update, built by diffing the 3-way-merged
+text into a rebuilt ``Doc`` (``coedit_live.rebase_delta``) and broadcasting the
+resulting delta. Clients integrate it as normal traffic and rebase their own
+pending edits over it, keeping their carets.
 
-Overlap handling: a clean 3-way merge is folded in directly. A true line-level
-conflict is handed to the checkpoint engine's AI 3-way merge (enqueued now, not
-deferred to the periodic scan), which resolves it, commits, and syncs the
-merged result back into the buffer for the live participants to see and adjust.
+Not a re-seed: replacing the document with a fresh one seeded from the merged
+text mints a new CRDT lineage, so any update a client had in flight against the
+old lineage becomes unintegrable — exactly the divergence this is supposed to
+prevent. A delta commutes with concurrent keystrokes instead, which is also why
+nothing here needs a compare-and-swap.
 
-See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
+Pure domain logic: does not decide when to run (that's
+``app/tasks/coedit_rebase.py``). Any process can run it — the document comes
+from ``(ydoc_snapshot, coedit_updates)``, not from one worker's memory.
 """
 
 from __future__ import annotations
@@ -23,7 +29,9 @@ from __future__ import annotations
 import logging
 from enum import Enum
 
-from app.wiki import coedit, coedit_channel
+from pycrdt import create_update_message
+
+from app.wiki import coedit, coedit_live, coedit_channel
 from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
@@ -32,50 +40,60 @@ log = logging.getLogger(__name__)
 class RebaseOutcome(str, Enum):
     """Result of ``rebase_session``."""
 
-    SKIP = "skip"  # session gone, closed, or already based on head_sha
-    APPLIED = "applied"  # clean fold; buffer replaced, resync sent
-    NOOP = "noop"  # buffer already matched the merge; only base_sha advanced
-    CONFLICT = "conflict"  # overlap — caller enqueues a checkpoint to resolve
-    RACED = "raced"  # a human op landed mid-merge; skipped (checkpoint is backstop)
+    SKIP = "skip"  # session gone/closed, or already based on head_sha
+    APPLIED = "applied"  # clean fold, logged and broadcast as an ordinary update
+    NOOP = "noop"  # merge collapsed to what the document already had
+    CONFLICT = "conflict"  # overlap — caller falls back to the checkpoint engine's AI merge
 
 
 def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
-    """Fold the commit at ``head_sha`` into the session's live buffer.
+    """Fold the commit at ``head_sha`` into the session's document.
 
-    Pure domain logic: it does not enqueue anything, so this module stays free of
-    the tasks layer (the trigger + the on-conflict checkpoint enqueue live in
-    ``app/tasks/coedit_rebase.py``, which acts on a ``CONFLICT`` outcome).
+    Plain sync, and callable from any process: the document comes from
+    ``(ydoc_snapshot, coedit_updates)``, not from one worker's memory.
+
+    The fold is an ordinary logged, broadcast Yjs update. Because updates
+    commute, a concurrent keystroke needs no guarding — hence no
+    compare-and-swap, no snapshot swap, and no "raced, try again" outcome.
+    Clients receive it as normal traffic and rebase their own pending edits
+    over it, keeping their carets.
     """
     sess = coedit.get_session(session_id)
-    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value or sess.base_sha == head_sha:
+    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
         return RebaseOutcome.SKIP
-    # A stale task can carry a head_sha the session has already moved past: a
-    # concurrent checkpoint, or a later commit's rebase, may have advanced
-    # base_sha to a descendant of head_sha. Rebasing "onto" an ancestor would
-    # merge the buffer against older content and revert already-committed edits,
-    # so skip when head_sha is an ancestor of (already contained in) base_sha.
+    if sess.base_sha == head_sha:
+        return RebaseOutcome.SKIP
+    # A stale trigger can carry a head_sha the session has already moved past:
+    # a concurrent checkpoint, or a later commit's rebase, may have advanced
+    # base_sha to a descendant of head_sha. Merging against that older content
+    # would compute a diff that reverts already-committed edits, so skip when
+    # head_sha is already contained in base_sha.
     if sess.base_sha is not None and wiki_git.is_ancestor(head_sha, sess.base_sha):
         return RebaseOutcome.SKIP
 
     base_body = wiki_git.read_file_opt(sess.path, ref=sess.base_sha) if sess.base_sha else ""
     current_body = wiki_git.read_file_opt(sess.path, ref=head_sha)
-    mr = wiki_git.merge_content(base_body or "", current_body or "", sess.buffer_text)
-    if not mr.clean:
-        # Overlap: leave the buffer alone; the caller hands it to the checkpoint
-        # engine's AI-merge, which resolves + commits + syncs the buffer back.
+    base_body, current_body = base_body or "", current_body or ""
+    outcome = coedit_live.rebase_delta(session_id, base_body, current_body)
+    if outcome is None:
+        return RebaseOutcome.SKIP
+    update_bytes, _merged, clean = outcome
+    if not clean:
+        # Overlap: leave the document alone. The caller hands it to the
+        # checkpoint engine's AI merge, which resolves and commits.
         log.info("coedit live-rebase: conflict on %s", sess.path)
         return RebaseOutcome.CONFLICT
 
-    res = coedit.rebase_onto(
-        session_id,
-        base_version=sess.version,
-        merged_text=mr.merged,
-        new_base_sha=head_sha,
-        checkpointed=False,
-    )
-    if res is None:
-        return RebaseOutcome.RACED
-    if not res.changed:
+    if update_bytes is None:
+        # Nothing to fold in; only the merge base moves, so the next checkpoint
+        # diffs against the right commit.
+        coedit.set_base_sha(session_id, head_sha)
         return RebaseOutcome.NOOP
-    coedit_channel.broadcast_resync(session_id, res.session.version)
+
+    # author_user_id=None: the server produced this update, not a person.
+    seq = coedit.apply_update(session_id, update_bytes=update_bytes, author_user_id=None)
+    if seq is None:
+        return RebaseOutcome.SKIP  # session closed underneath us
+    coedit_channel.broadcast_yjs(session_id, create_update_message(update_bytes), seq)
+    coedit.set_base_sha(session_id, head_sha)
     return RebaseOutcome.APPLIED
