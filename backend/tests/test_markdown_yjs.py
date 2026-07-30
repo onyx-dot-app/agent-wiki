@@ -1023,3 +1023,23 @@ def test_checkbox_accepts_the_legacy_string_attribute() -> None:
         lst.children[1].attributes["checked"] = "false"  # pyright: ignore[reportAttributeAccessIssue]
 
     assert reconstruct_body(doc) == "- [x] one\n\n- [ ] two\n"
+
+
+def test_code_block_closing_fence_starts_its_own_line() -> None:
+    # The editor stores code text with no trailing newline, and the closing fence
+    # was appended directly to it ("daskjqwer```"). CommonMark doesn't read that
+    # as a fence, so the block stopped being a code block on the next round trip
+    # — visible in an exported page before this was fixed.
+    doc = seed_doc_from_markdown("```\ndaskjqwer\n```\n")
+    block = _root(doc).children[0]
+    assert isinstance(block, XmlElement)
+    with doc.transaction():
+        while len(block.children):
+            del block.children[0]
+        block.children.append(XmlText("daskjqwer"))  # pyright: ignore[reportArgumentType]
+
+    assert reconstruct_body(doc) == "```\ndaskjqwer\n```\n"
+    # And it survives a further round trip as a code block, rather than decaying
+    # into a paragraph of literal backticks.
+    again = seed_doc_from_markdown(reconstruct_body(doc))
+    assert _root(again).children[0].tag == "codeBlock"

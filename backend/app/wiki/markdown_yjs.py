@@ -837,6 +837,13 @@ def _serialize_code_block(node: XmlElement) -> str:
     fence = "```"
     while fence in content:
         fence += "`"
+    # The closing fence has to start its own line, and the editor stores code
+    # text without a trailing newline — nobody types a blank last line — so
+    # without this the fence glued itself to the final line ("daskjqwer```"),
+    # which CommonMark doesn't read as a fence at all: the block silently stopped
+    # being a code block on the next round trip. Seen in an exported page.
+    if content and not content.endswith("\n"):
+        content += "\n"
     return f"{fence}{language}\n{content}{fence}\n"
 
 
