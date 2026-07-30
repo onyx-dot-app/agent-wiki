@@ -29,8 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import queue
 import time
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -95,8 +95,8 @@ def _require_active(session_id: int, user: User, action: str) -> coedit.SessionR
     return sess
 
 
-def _handle_op(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
-    """All handlers below enqueue onto ``outbox`` (the connection's own
+def _handle_op(conn: coedit_channel.Connection, session_id: int, user: User, raw: dict[str, Any]) -> None:
+    """All handlers below enqueue via ``conn.post`` (the connection's own
     ``coedit_channel`` queue) rather than calling ``websocket.send_json``
     directly. Found the hard way (a real test failure, not a hypothetical):
     ``_send_loop`` is *already* draining this queue and writing to the same
@@ -105,7 +105,7 @@ def _handle_op(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, u
     the frame writes, and there's no ordering guarantee between a direct
     reply and a same-op broadcast echo landing first. Routing everything
     through the one queue makes ``_send_loop`` the sole writer, and
-    enqueueing the reply *before* triggering the broadcast (see the ``op``
+    posting the reply *before* triggering the broadcast (see the ``op``
     case) makes the ordering deterministic: a sender always sees their own
     ``op_result`` before its broadcast echo, not racing it.
     """
@@ -120,20 +120,20 @@ def _handle_op(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, u
             client_id=msg.client_id,
         )
     except _WsActionError as e:
-        outbox.put_nowait(OpResultFrame(request_id=msg.request_id, ok=False, error=e.error).model_dump(by_alias=True))
+        conn.post(OpResultFrame(request_id=msg.request_id, ok=False, error=e.error).model_dump(by_alias=True))
         return
     except ValueError:
-        outbox.put_nowait(
+        conn.post(
             OpResultFrame(request_id=msg.request_id, ok=False, error="invalid_op").model_dump(by_alias=True)
         )
         return
     if out is None:
-        outbox.put_nowait(
+        conn.post(
             OpResultFrame(request_id=msg.request_id, ok=False, error="stale_version").model_dump(by_alias=True)
         )
         return
     coedit.touch(session_id, user.id, edited=True)
-    outbox.put_nowait(
+    conn.post(
         OpResultFrame(request_id=msg.request_id, ok=True, version=out.version).model_dump(by_alias=True)
     )
     # caret_seq rides the frame so peers render the author's caret at the
@@ -171,27 +171,27 @@ def _handle_cursor(session_id: int, user: User, raw: dict[str, Any]) -> None:
     )
 
 
-def _handle_checkpoint(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
+def _handle_checkpoint(conn: coedit_channel.Connection, session_id: int, user: User, raw: dict[str, Any]) -> None:
     msg = CheckpointMessage.model_validate(raw)
     try:
         _require_active(session_id, user, "write")
     except _WsActionError as e:
-        outbox.put_nowait(
+        conn.post(
             CheckpointResultFrame(
                 request_id=msg.request_id, ok=False, error=e.error
             ).model_dump(by_alias=True)
         )
         return
     checkpoint_coedit_session(session_id)
-    outbox.put_nowait(CheckpointResultFrame(request_id=msg.request_id, ok=True).model_dump(by_alias=True))
+    conn.post(CheckpointResultFrame(request_id=msg.request_id, ok=True).model_dump(by_alias=True))
 
 
-def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User, raw: dict[str, Any]) -> None:
+def _handle_get_ops(conn: coedit_channel.Connection, session_id: int, user: User, raw: dict[str, Any]) -> None:
     msg = GetOpsMessage.model_validate(raw)
     try:
         sess = _require_active(session_id, user, "read")
     except _WsActionError as e:
-        outbox.put_nowait(
+        conn.post(
             OpsResultFrame(
                 request_id=msg.request_id, ok=False, error=e.error, current_head_version=0, ops=[]
             ).model_dump(by_alias=True)
@@ -200,7 +200,7 @@ def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: i
     # Head version + ops read as one consistent snapshot (see
     # ops_since_with_head), so a concurrent op can't desync them.
     result = coedit.ops_since_with_head(session_id, msg.since_version)
-    outbox.put_nowait(
+    conn.post(
         OpsResultFrame(
             request_id=msg.request_id,
             ok=True,
@@ -220,7 +220,7 @@ def _handle_get_ops(outbox: queue.Queue[coedit_channel.QueueItem], session_id: i
     )
 
 
-async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[coedit_channel.QueueItem], session_id: int, user: User) -> None:
+async def _recv_loop(websocket: WebSocket, conn: coedit_channel.Connection, session_id: int, user: User) -> None:
     while True:
         raw = await websocket.receive_json()
         msg_type = raw.get("type")
@@ -232,62 +232,62 @@ async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[coedit_channel.Qu
             # automatically; a sync call made *from inside* an `async def`
             # route (this one, since it's a WebSocket route) does not.
             if msg_type == "op":
-                await asyncio.to_thread(_handle_op, outbox, session_id, user, raw)
+                await asyncio.to_thread(_handle_op, conn, session_id, user, raw)
             elif msg_type == "cursor":
                 await asyncio.to_thread(_handle_cursor, session_id, user, raw)
             elif msg_type == "checkpoint":
-                await asyncio.to_thread(_handle_checkpoint, outbox, session_id, user, raw)
+                await asyncio.to_thread(_handle_checkpoint, conn, session_id, user, raw)
             elif msg_type == "get_ops":
-                await asyncio.to_thread(_handle_get_ops, outbox, session_id, user, raw)
+                await asyncio.to_thread(_handle_get_ops, conn, session_id, user, raw)
             else:
                 log.warning("coedit ws: unknown message type %r", msg_type)
         except ValidationError:
             log.warning("coedit ws: malformed %r message", msg_type)
 
 
-# How often _send_loop's blocking drain call returns to check for
-# cancellation. Short on purpose: asyncio.to_thread cancellation only
-# unblocks the *awaiting* coroutine, not the underlying OS thread still
-# parked in queue.Queue.get(timeout=...) — found the hard way, in
-# production, not just in theory. Every disconnect (a WS closes, we
-# reconnect) cancels this task; with a long timeout, the orphaned thread
-# lingers for up to that long, still holding a slot in the shared default
-# thread pool every asyncio.to_thread call in the process draws from. Under
-# frequent reconnects, orphaned threads accumulate faster than they drain,
-# eventually exhausting the pool — at which point *every* asyncio.to_thread
-# call across the whole backend (new connects, every op/cursor/checkpoint
-# message, for every session) queues for a free worker. That reads as "the
-# whole app froze," and can plausibly cause more disconnects itself (a
-# starved event loop can miss uvicorn's own ping/pong window and get
-# closed as unresponsive) — a self-reinforcing spiral. Bounding the poll to
-# ~1s bounds any orphaned thread's worst case to ~1s instead of 15.
-_SEND_LOOP_POLL_SECONDS = 1.0
+# The send loop waits on this event rather than parking a thread in a blocking
+# queue read. A frame's publisher calls ``Connection.notify`` (see
+# ``coedit_channel``) from whatever thread it is on, which schedules the set
+# onto this loop — so no thread is held on a connection's behalf and there is
+# no per-connection ceiling on how many sockets a process can serve. It also
+# makes teardown ordinary asyncio: cancelling the send task interrupts an
+# ``Event.wait`` immediately, where a thread parked in ``queue.Queue.get`` had
+# no cancellation hook and needed a sentinel pushed into its own queue to come
+# back.
+def _make_notifier(loop: asyncio.AbstractEventLoop, ready: asyncio.Event) -> Callable[[], None]:
+    def notify() -> None:
+        try:
+            loop.call_soon_threadsafe(ready.set)
+        except RuntimeError:
+            # The loop is closing (process shutting down). The connection is
+            # going away with it, so an undelivered frame is moot.
+            pass
+
+    return notify
 
 
 async def _send_loop(
-    websocket: WebSocket, conn: coedit_channel.Connection, session_id: int, user_id: str
+    websocket: WebSocket, conn: coedit_channel.Connection, ready: asyncio.Event, session_id: int, user_id: str
 ) -> None:
     last_heartbeat = time.monotonic()
     while True:
-        frame = await asyncio.to_thread(coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS)
-        if frame is coedit_channel.CLOSE_SIGNAL:
-            # ws()'s teardown path pushed this via coedit_channel.wake() right
-            # before cancelling this task — reachable here (not just via
-            # cancellation) because there's a real race between the two: this
-            # drain call may already have picked up the signal as an ordinary
-            # queue item before the asyncio-level cancellation is delivered.
-            # Either path ends the loop; this one just does it without
-            # waiting on a CancelledError that might arrive after the value
-            # already did.
-            return
-        now = time.monotonic()
-        if now - last_heartbeat >= _HEARTBEAT_SECONDS:
-            last_heartbeat = now
+        remaining = _HEARTBEAT_SECONDS - (time.monotonic() - last_heartbeat)
+        if remaining > 0:
+            try:
+                await asyncio.wait_for(ready.wait(), remaining)
+            except asyncio.TimeoutError:
+                pass
+        # Cleared *before* draining, so a frame published mid-drain re-sets it
+        # and the next pass picks that frame up. Clearing after could drop the
+        # wakeup for a frame already sitting in the queue.
+        ready.clear()
+        if time.monotonic() - last_heartbeat >= _HEARTBEAT_SECONDS:
+            last_heartbeat = time.monotonic()
             alive = await asyncio.to_thread(coedit.touch, session_id, user_id)
             if not alive:
                 return
             await websocket.send_json({"type": "ping"})
-        if frame is not None:
+        while (frame := coedit_channel.drain(conn.queue, 0)) is not None:
             await websocket.send_json(frame)
 
 
@@ -331,7 +331,10 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     conn: coedit_channel.Connection | None = None
     try:
         await websocket.accept()
-        conn = coedit_channel.connect(sess.id)
+        ready = asyncio.Event()
+        conn = coedit_channel.connect(
+            sess.id, _make_notifier(asyncio.get_running_loop(), ready)
+        )
         participants = await asyncio.to_thread(_participants_out, sess.id)
         await websocket.send_json(
             JoinedFrame(
@@ -343,20 +346,11 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
             ).model_dump(by_alias=True)
         )
 
-        recv_task = asyncio.create_task(_recv_loop(websocket, conn.queue, sess.id, user))
-        send_task = asyncio.create_task(_send_loop(websocket, conn, sess.id, user.id))
+        recv_task = asyncio.create_task(_recv_loop(websocket, conn, sess.id, user))
+        send_task = asyncio.create_task(_send_loop(websocket, conn, ready, sess.id, user.id))
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED
         )
-        # Wake a still-blocked drain() *before* cancelling it: cancelling
-        # send_task only stops the asyncio Task watching the thread, not the
-        # already-dispatched OS thread itself — queue.Queue.get(timeout=...)
-        # has no cancellation hook, so without this it just keeps blocking,
-        # doing nothing, until its own timeout expires (see
-        # coedit_channel.wake's docstring). Pushing CLOSE_SIGNAL is what
-        # actually unblocks that thread immediately, same as a real frame
-        # arriving would.
-        coedit_channel.wake(conn.id)
         for t in pending:
             t.cancel()
         for t in done:
