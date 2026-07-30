@@ -12,14 +12,8 @@
  *
  * On `enabled` it opens the session's WebSocket for `path` and exposes
  * presence (`participants`/`typing`/`peers`) and autosave (`saveStatus`).
- * Teardown (flush → checkpoint → close, in that order — closing before the
- * final ops and checkpoint have landed would let the server's last-leave
- * forced commit race ahead of them) happens entirely inside the hook's own
- * effect cleanup — driven by `enabled`/`path` changing or the component
- * unmounting, never by the caller invoking a function. There's no explicit
- * "leave" call: closing the connection *is* the leave signal, handled
- * server-side (see `app/api/coedit.py`'s module docstring) — this doesn't
- * depend on the client successfully transmitting anything during teardown.
+ * Teardown flushes, checkpoints, then closes inside the hook's effect cleanup.
+ * Shared presence expires from server heartbeats, not a client leave message.
  * The *document* is owned by the editor via `@codemirror/collab` (see
  * `Coeditor`), not here — the hook just hands the editor what it needs to
  * run collab (`session` = id/clientId/start version+doc), forwards inbound
@@ -529,14 +523,8 @@ export function useCoeditSession(opts: {
 
     return () => {
       cancelled = true;
-      // Teardown must run flush → checkpoint → close, in that strict order.
-      // The server force-commits and closes the session when the last
-      // participant is gone, and closing the connection counts as "gone" —
-      // so closing before the final ops and checkpoint have landed lets that
-      // forced commit race ahead of them: it commits a buffer missing the
-      // tail, closes the session, and the late ops bounce off a closed
-      // session (silent loss). Closing last means the forced commit only
-      // ever sees a clean, fully-flushed buffer.
+      // Flush and checkpoint before closing so this tab's tail reaches the
+      // shared buffer even if the connection closes during teardown.
       const sid = sessionId.current;
       // The editor never unregisters its flush (see Coeditor's cleanup) so
       // it's still here even when the child unmounted first; clear it as we
@@ -549,15 +537,13 @@ export function useCoeditSession(opts: {
         try {
           await flush?.();
         } catch {
-          // Best-effort: the tail couldn't be delivered (offline, or a peer's
-          // concurrent edit mid-teardown). Still checkpoint — committing what
-          // the server has beats leaving it all to the forced commit.
+          // Checkpoint whatever reached the server if the final flush failed.
         }
         if (canWrite) {
           try {
             await checkpointSession(sid);
           } catch {
-            // The server-side close-triggered forced commit is the backstop.
+            // Heartbeat expiry and the periodic checkpoint are the backstop.
           }
         }
         closeSession(sid);

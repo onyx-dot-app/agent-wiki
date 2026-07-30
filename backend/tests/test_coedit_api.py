@@ -14,12 +14,9 @@ from contextlib import contextmanager
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
 from starlette.testclient import WebSocketDenialResponse
 
 from app.auth import users as users_repo
-from app.db.models import CoeditConnection
-from app.db.session import session as db_session
 from app.main import create_app
 from app.tasks.queues import coedit_queue
 from app.wiki import acl, coedit, git
@@ -40,10 +37,7 @@ def _seed_page(body: str = "# Setup\n\nhello\n") -> str:
 
 @contextmanager
 def _ws(client, path: str = _PATH):
-    """Open the coedit WS and yield `(ws, joined_frame)` once the handshake
-    completes. Closing the `with` block closes the connection — the WS
-    equivalent of the old `POST /leave` (see app/api/coedit.py: the server's
-    disconnect handler is the leave signal, not a client message)."""
+    """Open the co-edit socket and yield it after the join handshake."""
     with client.websocket_connect(f"/api/coedit/ws?path={path}") as ws:
         joined = ws.receive_json()
         assert joined["type"] == "joined"
@@ -101,18 +95,6 @@ def _wait_for(predicate, timeout: float = 15.0) -> None:
         time.sleep(0.02)
 
 
-def _connection_count(session_id: int) -> int:
-    with db_session() as s:
-        return int(
-            s.scalar(
-                select(func.count())
-                .select_from(CoeditConnection)
-                .where(CoeditConnection.session_id == session_id)
-            )
-            or 0
-        )
-
-
 def test_connect_requires_auth(client):
     with pytest.raises(WebSocketDenialResponse) as exc_info:
         with client.websocket_connect(f"/api/coedit/ws?path={_PATH}"):
@@ -156,9 +138,7 @@ def test_one_of_users_two_connections_closing_keeps_session_active(client):
             sid = first_join["session_id"]
             with _ws(client) as (_second_ws, second_join):
                 assert second_join["session_id"] == sid
-                assert _connection_count(sid) == 2
 
-            _wait_for(lambda: _connection_count(sid) == 1)
             assert [p.user_id for p in coedit.list_participants(sid)] == [uid]
             assert coedit.get_active_session(_PATH) is not None
             assert _apply_op(
@@ -231,47 +211,17 @@ def test_op_stamps_last_edited_at(client):
         assert me and me[0].last_edited_at is not None
 
 
-def test_disconnect_removes_participant(client):
+def test_disconnect_defers_participant_cleanup_to_heartbeat_expiry(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page()
 
-    # immediate_mode: if teardown takes the cancellation path, the leave is
-    # enqueued — inline mode runs it here instead of on a worker.
-    with coedit_queue.immediate_mode():
-        with _ws(client) as (_ws_conn, joined):
-            sid = joined["session_id"]
-            assert len(coedit.list_participants(sid)) == 1
+    with _ws(client) as (_ws_conn, joined):
+        sid = joined["session_id"]
+        assert len(coedit.list_participants(sid)) == 1
 
-        _wait_for(lambda: coedit.list_participants(sid) == [])
-    assert coedit.list_participants(sid) == []
-
-
-def test_disconnect_of_last_participant_checkpoints(client):
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    login_fastapi(client, uid)
-    _seed_page("hello world")
-
-    with coedit_queue.immediate_mode():
-        with _ws(client) as (ws, joined):
-            sid = joined["session_id"]
-            _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
-        # The disconnect handler enqueues the checkpoint; immediate_mode runs
-        # it inline wherever the handler executes. Wait *inside* the block:
-        # once the flag drops, a late enqueue would go to the real queue.
-        _wait_for(
-            lambda: git.read_file(_PATH) == "hi world"
-            and coedit.get_active_session(_PATH) is None
-        )
-
-    session_after = coedit.get_active_session(_PATH)
-    assert git.read_file(_PATH) == "hi world", (
-        "checkpoint never landed: "
-        f"session={'still open' if session_after else 'closed'}, "
-        f"participants={coedit.list_participants(sid)}"
-    )
-    assert session_after is None
-    assert sid is not None
+    assert [p.user_id for p in coedit.list_participants(sid)] == [uid]
+    assert coedit.get_active_session(_PATH) is not None
 
 
 def test_checkpoint_message_commits_buffer(client):
@@ -290,10 +240,7 @@ def test_checkpoint_message_commits_buffer(client):
                 "ok": True,
                 "error": None,
             }
-            # An explicit checkpoint doesn't close a session with an active
-            # participant — must assert this before the connection closes;
-            # disconnecting drops the last participant too, which (with an
-            # already-clean buffer) triggers its own close.
+            # An explicit checkpoint keeps a session with live presence open.
             assert coedit.get_active_session(_PATH) is not None
 
     assert git.read_file(_PATH) == "hi world"

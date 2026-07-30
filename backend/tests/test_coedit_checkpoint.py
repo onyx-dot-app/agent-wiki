@@ -7,10 +7,10 @@ from __future__ import annotations
 import os
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import text, update
 
 from app.auth import users as users_repo
-from app.db.models import DocumentTemplate
+from app.db.models import CoeditParticipant, DocumentTemplate
 from app.db.session import session as db_session
 from app.db.session import try_advisory_xact_lock
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
@@ -201,7 +201,6 @@ def test_task_keeps_session_open_when_participants_remain(repo):
 
 
 def test_scan_checkpoints_due_sessions(repo, monkeypatch):
-    # Force the scan's idle threshold to zero so a just-edited session is due.
     monkeypatch.setattr(coedit_checkpoint_task, "_IDLE_SECONDS", 0)
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed_page("hello world")
@@ -209,6 +208,29 @@ def test_scan_checkpoints_due_sessions(repo, monkeypatch):
     coedit.join(sess.id, uid)
     coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
     coedit.leave(sess.id, uid)
+
+    with coedit_queue.immediate_mode():
+        coedit_checkpoint_task.scan_and_checkpoint()
+
+    assert wiki_git.read_file(_PATH) == "hi world"
+    assert coedit.get_active_session(_PATH) is None
+
+
+def test_scan_expires_last_participant_and_checkpoints(repo):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+    with db_session() as db:
+        db.execute(
+            update(CoeditParticipant)
+            .where(
+                CoeditParticipant.session_id == sess.id,
+                CoeditParticipant.user_id == uid,
+            )
+            .values(last_seen_at="2000-01-01T00:00:00+00:00")
+        )
 
     with coedit_queue.immediate_mode():
         coedit_checkpoint_task.scan_and_checkpoint()

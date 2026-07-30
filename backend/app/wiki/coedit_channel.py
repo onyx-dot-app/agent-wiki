@@ -11,8 +11,8 @@ One thread-safe ``queue.Queue`` per connection, mirroring the MCP pubsub's
 sync ``_queues`` / ``drain_blocking`` path — this module has no opinion on
 how a connection drains its queue (``app/api/coedit.py``'s WS send loop
 calls ``drain`` in a thread). Frames are plain JSON-serializable dicts.
-Delivery queues are in-process and ephemeral; the process-shared connection
-leases, sessions, and participant roster live in ``app/wiki/coedit.py``.
+Delivery queues are in-process and ephemeral. Durable sessions and the shared
+participant heartbeat live in ``app/wiki/coedit.py``.
 
 See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 """
@@ -66,13 +66,9 @@ _conns_by_session: dict[int, set[str]] = {}  # coedit_session_id -> {conn_id}
 _lock = threading.Lock()
 
 
-def connect(
-    coedit_session_id: int,
-    *,
-    connection_id: str | None = None,
-) -> Connection:
-    """Register a local delivery queue for a process-shared connection id."""
-    conn_id = connection_id or uuid.uuid4().hex
+def connect(coedit_session_id: int) -> Connection:
+    """Register a local delivery queue for a WebSocket."""
+    conn_id = uuid.uuid4().hex
     q: queue.Queue[QueueItem] = queue.Queue()
     with _lock:
         _queues[conn_id] = q

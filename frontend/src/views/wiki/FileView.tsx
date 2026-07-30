@@ -422,9 +422,8 @@ export function FileView({ path }: FileViewProps) {
   // presence plus real-time updates, and editing is just a capability inside
   // it (`canWrite`, ops write-gated server-side). Left whenever a version
   // diff is showing (including the current version's). See
-  // `useCoeditSession`'s `enabled` doc. No explicit Save. Teardown
-  // (checkpoint + leave) fires from the hook itself on that
-  // transition/unmount, not from a button here.
+  // `useCoeditSession`'s `enabled` doc. No explicit Save. The hook handles
+  // checkpoint and socket close on transition or unmount.
   const coedit = useCoeditSession({
     path,
     enabled: !viewingVersion,

@@ -40,10 +40,9 @@ log = logging.getLogger(__name__)
 # The scan is minute-granular, so both fire "within a minute of" the threshold.
 _IDLE_SECONDS = 300
 _MAX_INTERVAL_SECONDS = 900
-# WebSocket heartbeats refresh their shared lease every 15s. Four missed
-# heartbeats is enough grace for a busy event loop while still recovering a
-# hard-killed worker within the next minute-granular scan.
-_CONNECTION_STALE_SECONDS = 60
+# Four missed 15-second heartbeats distinguish a departed participant from
+# ordinary event-loop lag.
+_PARTICIPANT_STALE_SECONDS = 60
 
 
 @coedit_queue.task()
@@ -62,15 +61,15 @@ def checkpoint_coedit_session(session_id: int) -> None:
 @coedit_queue.periodic_task(crontab(minute="*"))
 def scan_and_checkpoint() -> None:
     """Enqueue a checkpoint for every dirty session that's idle or overdue,
-    expire abandoned WebSocket leases, and purge closed viewer-only sessions."""
-    expired = coedit.expire_stale_connections(stale_seconds=_CONNECTION_STALE_SECONDS)
+    expire stale participants, and purge closed viewer-only sessions."""
+    expired = coedit.expire_stale_participants(stale_seconds=_PARTICIPANT_STALE_SECONDS)
     for session_id in expired.changed_session_ids:
         coedit_channel.broadcast_presence(session_id)
     for session_id in expired.empty_session_ids:
         checkpoint_coedit_session(session_id)
     if expired.changed_session_ids:
         log.info(
-            "coedit connection scan: expired participants in %d session(s)",
+            "coedit presence scan: expired participants in %d session(s)",
             len(expired.changed_session_ids),
         )
     due = coedit.sessions_due_for_checkpoint(

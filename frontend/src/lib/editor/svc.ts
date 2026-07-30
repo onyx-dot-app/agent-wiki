@@ -169,10 +169,8 @@ export function connectSession(
           const error = msg.error as string | null | undefined;
           p.reject(errorFor(error));
           if (error === "no_active_session") {
-            // The transport can still be healthy after the server-side
-            // session has closed. Force a real socket close so the hook's
-            // existing reconnect path rejoins by page path and replays its
-            // locally held document onto the fresh session.
+            // Reconnect by page path so the hook replays its local document
+            // onto a fresh server session.
             ws.close();
           }
         }
