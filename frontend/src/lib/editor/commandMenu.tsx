@@ -178,15 +178,27 @@ const CommandList = forwardRef<CommandListHandle, SuggestionProps<CommandItem>>(
     return (
       <div className="max-h-[320px] w-[220px] overflow-y-auto rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-1 shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)]">
         {items.map((item, i) => (
-          <LineItemButton
+          // The wrapper carries the keyboard-selection highlight rather than
+          // relying on LineItemButton's own "selected" state, which is a hover-
+          // weight tint — too quiet for the thing Enter is about to apply. A
+          // solid fill and nothing else, as Notion's menu does it.
+          <div
             key={item.title}
-            title={item.title}
-            icon={item.icon}
-            sizePreset="main-ui"
-            variant="section"
-            state={i === selected ? "selected" : "empty"}
-            onClick={() => select(i)}
-          />
+            className={
+              i === selected
+                ? "rounded-(--radius-06) bg-(--background-tint-03)"
+                : undefined
+            }
+          >
+            <LineItemButton
+              title={item.title}
+              icon={item.icon}
+              sizePreset="main-ui"
+              variant="section"
+              state={i === selected ? "selected" : "empty"}
+              onClick={() => select(i)}
+            />
+          </div>
         ))}
       </div>
     );
