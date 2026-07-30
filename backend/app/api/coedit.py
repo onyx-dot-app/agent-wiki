@@ -68,12 +68,34 @@ log = logging.getLogger(__name__)
 # Idle silence before the send loop touches presence liveness + pings the
 # client, so proxies don't consider the connection idle.
 _HEARTBEAT_SECONDS = 15.0
-# How stale a read check may be on the *outbound* path. The heartbeat alone left
-# a revoked reader receiving peers' edits for up to a full heartbeat; checking
-# per frame instead would put two DB reads on the highest-volume path in the
-# process, for every connection. Rate-limited, and only while frames are
-# actually flowing, so an idle connection costs nothing and a busy one costs one
-# check a second.
+# How stale a read check may be on the *outbound* path.
+#
+# The heartbeat alone left a revoked reader receiving peers' edits for up to a
+# full 15s. This bounds it to a second, and only while frames are actually
+# flowing: the timer is always expired after any quiet period, so the first frame
+# following a lull is checked immediately. The residual is therefore narrow —
+# during *sustained* traffic, a revoked reader can receive up to a second of
+# further updates.
+#
+# Deliberately not per-frame. One check is ~4-5 queries (the session row, the
+# owner, the user's groups, the grant lookup, sometimes the managed-path probe),
+# and outbound frames scale as editors x updates, so per-frame checking would put
+# that on the highest-volume path in the process — the same amplification that
+# caused the incident this rework exists to fix.
+#
+# Closing the window properly means push-based invalidation: publish on an ACL
+# change and drop the affected sockets at once, no polling. That needs a hook in
+# every ACL mutation (`grant`, `revoke`, `set_owner`, `transfer_owner`,
+# `delete_all_for_path`, the page lifecycle hooks, and group membership in
+# `app/auth/groups.py`), a new dependency from those modules to the realtime bus,
+# and `Connection` to carry its user — worth doing, and tracked, but a
+# half-applied version is worse than this one: miss a single hook and the code
+# claims immediacy while silently still polling.
+#
+# Worth sizing the exposure honestly, too: a revoked reader already holds the
+# entire document in their own replica from before the revocation, and no
+# server-side polling interval claws that back. What this bounds is how much
+# *subsequent* editing they observe.
 _READ_RECHECK_SECONDS = 1.0
 
 
