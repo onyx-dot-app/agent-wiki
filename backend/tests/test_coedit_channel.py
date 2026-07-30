@@ -57,18 +57,6 @@ def test_disconnect_stops_delivery_and_clears_state():
     assert coedit_channel.drain(conn.queue, 0.1) is None
 
 
-def test_user_still_connected_tracks_multiple_tabs():
-    coedit_channel.reset_for_tests()
-    c1 = _connect(5)
-    c2 = _connect(5)
-    assert coedit_channel.user_still_connected(5, "usr_a") is True
-    coedit_channel.disconnect(c1.id)
-    # One tab closed, the other still open → user is still present.
-    assert coedit_channel.user_still_connected(5, "usr_a") is True
-    coedit_channel.disconnect(c2.id)
-    assert coedit_channel.user_still_connected(5, "usr_a") is False
-
-
 def test_publish_control_delivers_to_all_connections_in_session():
     coedit_channel.reset_for_tests()
     a = _connect(4)

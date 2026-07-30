@@ -292,7 +292,6 @@ def test_join_rejects_session_closed_during_connect(users):
     assert coedit.list_participants(s.id) == []
 
 
-def test_mark_checkpointed(users):
 def test_advance_checkpoint(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
@@ -431,29 +430,11 @@ def test_close_if_clean_closes_a_clean_session(users):
 
 
 def test_close_if_clean_skips_session_with_participant(users):
-    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    s = coedit.open_session(_PATH, base_sha=None)
     assert coedit.join(s.id, "usr_a") is True
     assert coedit.close_if_clean(s.id) is False
     active = coedit.get_active_session(_PATH)
     assert active is not None and active.id == s.id
-
-
-def test_close_abandoned_sessions_closes_only_clean_empty_ones(users):
-    # Empty and clean — the state nothing else reclaims, so the sweep closes it.
-    abandoned = coedit.open_session("abandoned.md", base_sha=None, initial_buffer="hi")
-    # Occupied — presence holds it open.
-    occupied = coedit.open_session("occupied.md", base_sha=None, initial_buffer="hi")
-    assert coedit.join(occupied.id, "usr_a") is True
-    # Empty but dirty — the checkpoint scan owns it; closing would seal the buffer.
-    dirty = coedit.open_session("dirty.md", base_sha=None, initial_buffer="hi")
-    coedit.apply_op(dirty.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
-
-    assert coedit.close_abandoned_sessions() == [abandoned.id]
-    assert coedit.get_active_session("abandoned.md") is None
-    assert coedit.get_active_session("occupied.md") is not None
-    assert coedit.get_active_session("dirty.md") is not None
-    # Idempotent: nothing left to close.
-    assert coedit.close_abandoned_sessions() == []
 
 
 def test_close_if_clean_skips_a_dirty_session(users):
@@ -513,3 +494,23 @@ def test_purge_viewer_sessions_deletes_only_closed_never_edited(users):
     assert coedit.get_session(active.id) is not None
     # Idempotent: nothing left to purge.
     assert coedit.purge_viewer_sessions() == 0
+
+
+def test_close_abandoned_sessions_closes_only_clean_empty_ones(users):
+    # Ported from the OT era: "clean" is now ydoc_seq == ydoc_checkpointed_seq.
+    # This is the sweep that keeps the invariant "an active session has
+    # participants" self-healing — a session emptied by any route other than the
+    # expiry scan is invisible to that path, and being clean the checkpoint scan
+    # skips it too, so without this it stays active forever holding the
+    # active-path unique index.
+    abandoned = coedit.open_session("abandoned.md", base_sha=None)
+    occupied = coedit.open_session("occupied.md", base_sha=None)
+    assert coedit.join(occupied.id, "usr_a") is True
+    dirty = coedit.open_session("dirty.md", base_sha=None)
+    coedit.apply_update(dirty.id, update_bytes=b"u", author_user_id="usr_a")
+
+    assert coedit.close_abandoned_sessions() == [abandoned.id]
+    assert coedit.get_active_session("abandoned.md") is None
+    assert coedit.get_active_session("occupied.md") is not None  # presence holds it open
+    assert coedit.get_active_session("dirty.md") is not None  # the checkpoint scan owns it
+    assert coedit.close_abandoned_sessions() == []  # idempotent
