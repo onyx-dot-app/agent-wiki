@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, type RefObject } from "react";
 
-import type { CoeditorHandle } from "@/lib/editor/components";
+import type { CoeditorHandle } from "@/lib/editor/types";
 
 /**
  * Doc scrollbar at the viewport's right edge for the panel's anchored mode,

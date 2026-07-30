@@ -1,176 +1,236 @@
 "use client";
 
-/** React hook that owns a page's live-session lifecycle + presence.
+/** React hook that owns a page's live-session lifecycle + presence —
+ * Yjs-native replacement for `lib/editor/hooks.ts`'s `useCoeditSession`.
+ * Return shape mirrors that hook's contract as closely as sensible (see
+ * `UseCoeditSession` below) so `FileView.tsx`'s surrounding logic
+ * (autosave indicator, presence bar, template-picking, connecting/error
+ * UI) needs re-wiring, not a rewrite.
  *
- * The "co-edit session" is the page's *live session*: everyone viewing the
- * page joins it (presence + real-time updates); editing is a capability
- * inside it (`canWrite`), and presence labels a participant "editing" when
- * their caret is rendered in the content, "viewing" otherwise — the label is
- * derived from `peers`, so it can never disagree with the carets on screen.
- * Nothing is persisted: carets appear from live cursor/op frames and go away
- * on a clear (editor blur / hidden tab) or when the peer leaves.
+ * Most of the old hook's internals don't carry over — Yjs's own CRDT sync
+ * (`Collaboration`) and Awareness protocol (`presenceExtension`'s
+ * `yCursorPlugin`) already do what that hook hand-rolled: op application,
+ * caret-epoch tracking, cursor throttling, buffer mirroring. This hook's
+ * job shrinks to connection lifecycle, deriving React-observable presence
+ * state from Awareness (which is a plain event emitter, not React state),
+ * and autosave.
  *
- * On `enabled` it opens the session's WebSocket for `path` and exposes
- * presence (`participants`/`typing`/`peers`) and autosave (`saveStatus`).
- * Teardown flushes, checkpoints, then closes inside the hook's effect cleanup.
- * Shared presence expires from server heartbeats, not a client leave message.
- * The *document* is owned by the editor via `@codemirror/collab` (see
- * `Coeditor`), not here — the hook just hands the editor what it needs to
- * run collab (`session` = id/clientId/start version+doc), forwards inbound
- * `op`/`resync` frames to it (`onServerFrame`), and keeps a read-only
- * `buffer` mirror for non-editor UI (the template gallery).
+ * On `enabled` it opens the session's WebSocket for `path`, binding a
+ * `Y.Doc`/`Awareness` pair this hook owns for the connection's lifetime —
+ * pass them to `<TiptapEditor doc={coedit.doc} awareness={coedit.awareness}
+ * .../>`. Teardown (checkpoint, then close, in that order — closing before
+ * a final edit's checkpoint has landed would let the server's last-leave
+ * forced commit race ahead of it) happens entirely inside the hook's own
+ * effect cleanup.
  *
- * Autosave: every `reportDoc` (called by the editor on each doc change) arms
- * an idle timer (checkpoint `AUTOSAVE_IDLE_MS` after the last edit) and, if
- * not already running, a hard-cap timer (`AUTOSAVE_MAX_INTERVAL_MS`) so a
- * continuously-typing user still checkpoints periodically. There's no
- * explicit Save.
- *
- * If the join handshake itself fails, `session` stays null forever and
- * `joinError` is set — the editor has no read-only fallback to fall back to
- * now, so the caller must show `joinError` and offer `retryJoin` rather than
- * leaving the UI stuck on a permanent "Connecting…".
- *
- * Offsets are UTF-16 (JS-native), matching the server — see `svc.ts`.
+ * If the join handshake itself fails, `active` stays false forever and
+ * `joinError` is set — the caller must show it and offer `retryJoin`.
  */
+import type { Editor } from "@tiptap/core";
+import {
+  relativePositionToAbsolutePosition,
+  ySyncPluginKey,
+} from "@tiptap/y-tiptap";
 import { useCallback, useEffect, useRef, useState } from "react";
-
-import type {
-  CoeditFrame,
-  CoeditParticipant,
-  CoeditPeer,
-  UseCoeditSession,
-  CoeditSessionHandle,
-} from "@/lib/editor/types";
+import { Awareness } from "y-protocols/awareness";
+import * as Y from "yjs";
+import { ApiError } from "@/lib/api";
 import {
   checkpointSession,
   closeSession,
   connectSession,
-  sendCursor,
+  type CoeditParticipant,
 } from "@/lib/editor/svc";
-import {
-  AUTOSAVE_IDLE_MS,
-  AUTOSAVE_MAX_INTERVAL_MS,
-  CURSOR_THROTTLE_MS,
-  STREAM_RECONNECT_MS,
-  TYPING_EXPIRY_MS,
-  TYPING_IDLE_MS,
-} from "@/lib/editor/constants";
 
-/** Generate a fresh per-connection collab clientId (UUID v4).
- * Used to filter out our own op echoes from the broadcast stream. */
+/** Ms of doc-change silence before an autosave checkpoint fires. The
+ * server's own periodic scan (`app/tasks/coedit_checkpoint.py`) is a much
+ * coarser backstop (idle 300s / overdue 900s) — this is what makes the
+ * "Saved" indicator feel immediate rather than waiting on that. */
+const AUTOSAVE_IDLE_MS = 2000;
+/** Hard cap: force a checkpoint at least this often even under continuous
+ * typing. */
+const AUTOSAVE_MAX_INTERVAL_MS = 30000;
+/** Ms of no local awareness change before a peer's local "typing" state
+ * clears. */
+const TYPING_IDLE_MS = 1500;
+/** Ms to wait before re-opening a dropped connection. */
+const STREAM_RECONNECT_MS = 3000;
+
+export interface CoeditPeer {
+  user_id: string;
+  user_display: string;
+  /** ProseMirror document positions (not markdown character offsets) —
+   * pass directly to `CoeditorHandle.scrollToOffset`. `null` when the
+   * peer's cursor can't currently be resolved (e.g. it points at content
+   * this client hasn't received yet, or is mid-reconnect). */
+  anchor: number | null;
+  head: number | null;
+}
+
+export interface UseCoeditSession {
+  /** True once the join handshake completes. */
+  active: boolean;
+  /** Bump count for `doc`/`awareness`'s identity — pass as
+   * `<TiptapEditor key={coedit.connectionId}>`. Required, not cosmetic:
+   * Tiptap's `useEditor` defaults to building the editor once and never
+   * rebuilding it from new `doc`/`awareness` props (confirmed against the
+   * installed `@tiptap/react` — `deps = []` unless the caller opts in), so
+   * without a `key` forcing a full remount, a reconnect's fresh `Y.Doc`
+   * would never actually reach the editor. Bumps on every fresh
+   * doc/awareness pair — a reconnect lands back on the *same* session_id
+   * (the session outlives any one socket), so that id alone can't be used as
+   * the key the way the old hook's `session.id` was. */
+  connectionId: number;
+  /** This connection's Yjs doc — pass to `<TiptapEditor doc={...}>`. A
+   * fresh instance every time `connectionId` bumps. */
+  doc: Y.Doc;
+  /** This connection's Awareness — pass to `<TiptapEditor awareness={...}>`. */
+  awareness: Awareness;
+  /** Whether the user may edit this page (`can_write` from the join
+   * response). False joins as a pure viewer: presence + live updates flow
+   * as usual, but the server drops any content/awareness change from this
+   * connection. */
+  canWrite: boolean;
+  /** Plain-text mirror of the live doc (`editor.getText()`), for non-editor
+   * UI that needs to reason about content as a string (the template
+   * gallery's "is this page still blank" check) — empty until the editor
+   * mounts (`onEditorReady`), not just until the session joins. */
+  buffer: string;
+  /** All current session participants (including self). */
+  participants: CoeditParticipant[];
+  /** user_ids of peers currently typing (excludes self). */
+  typing: string[];
+  /** Peers' live cursors (excludes self), for presence UI. */
+  peers: CoeditPeer[];
+  /** Set when the join handshake itself fails (network error, 4xx/5xx,
+   * expired auth) — `active` stays false forever unless the caller shows
+   * this and offers `retryJoin`. A drop *after* a successful join doesn't
+   * set this (the session is already usable; the reconnect loop heals it). */
+  joinError: string | null;
+  /** False when `joinError` is a real, distinguishable reason retrying
+   * won't fix (today: a page the live-editor codec can't encode) — the
+   * caller should hide/disable `retryJoin` and say so instead of offering
+   * a Retry that can never succeed. True (the default) for every other
+   * failure: a network error, expired auth, a plain dropped connection —
+   * all worth retrying. */
+  joinErrorRetryable: boolean;
+  /** Clears `joinError` and re-runs the join handshake. */
+  retryJoin: () => void;
+  /** Autosave state, for a "Saving…/Saved/Couldn't save" indicator. */
+  saveStatus: "saved" | "saving" | "error";
+  /** Wire the underlying Tiptap `Editor` instance once it mounts — needed
+   * to resolve peer cursor positions and to drive `setDoc`. Pass directly
+   * as `<TiptapEditor onEditorReady={coedit.onEditorReady}>`. */
+  onEditorReady: (editor: Editor) => void;
+  /** Replace the whole document with plain text, split into paragraphs on
+   * blank lines — used by template-picking. A deliberate simplification:
+   * there's no client-side markdown parser wired for this editor's schema
+   * (parsing markdown happens once, server-side, at session open — see
+   * `app/wiki/markdown_yjs.py`), so a template's headings/lists/tables
+   * apply as plain paragraphs rather than their real structure. Applies as
+   * a normal local edit (propagates via the live doc like any other
+   * change), matching the old hook's `setDoc` semantics. */
+  setDoc: (text: string) => void;
+}
+
 function newClientId(): string {
   return crypto.randomUUID();
 }
 
-/** Manage the full lifecycle of a page's live session: connect, presence,
- * and save. Disable with `enabled: false` to close the connection. */
+/** Peer cursor positions, resolved against the *current* doc via the sync
+ * binding's relative-position mapping — same mechanism `yCursorPlugin`
+ * itself uses internally to render carets (see `@tiptap/y-tiptap`), reused
+ * here for presence UI outside the editor (click-an-avatar-to-scroll). */
+function derivePeers(editor: Editor, awareness: Awareness): CoeditPeer[] {
+  const ystate = ySyncPluginKey.getState(editor.state);
+  if (!ystate) return [];
+  const peers: CoeditPeer[] = [];
+  awareness.getStates().forEach((state, clientId) => {
+    if (clientId === awareness.clientID) return; // never render self as a peer
+    const user = (
+      state as { user?: { id?: string; name?: string } } | undefined
+    )?.user;
+    const cursor = (
+      state as { cursor?: { anchor: unknown; head: unknown } } | undefined
+    )?.cursor;
+    if (!user?.id) return;
+    let anchor: number | null = null;
+    let head: number | null = null;
+    if (cursor) {
+      anchor = relativePositionToAbsolutePosition(
+        ystate.doc,
+        ystate.type,
+        Y.createRelativePositionFromJSON(cursor.anchor),
+        ystate.binding.mapping,
+      );
+      head = relativePositionToAbsolutePosition(
+        ystate.doc,
+        ystate.type,
+        Y.createRelativePositionFromJSON(cursor.head),
+        ystate.binding.mapping,
+      );
+    }
+    peers.push({
+      user_id: user.id,
+      user_display: user.name ?? "Anonymous",
+      anchor,
+      head,
+    });
+  });
+  return peers;
+}
+
+function deriveTyping(awareness: Awareness): string[] {
+  const typing: string[] = [];
+  awareness.getStates().forEach((state, clientId) => {
+    if (clientId === awareness.clientID) return;
+    const user = (state as { user?: { id?: string } } | undefined)?.user;
+    const isTyping = (state as { typing?: boolean } | undefined)?.typing;
+    if (user?.id && isTyping) typing.push(user.id);
+  });
+  return typing;
+}
+
 export function useCoeditSession(opts: {
   path: string;
   enabled: boolean;
-  committedBody: string;
   myUserId: string | null;
-  /** Whether the user may edit this page (`can_write` from the file read).
-   * False joins the live session as a pure viewer: presence + real-time
-   * updates flow as usual, but every write call (ops come from the read-only
-   * editor anyway, cursor pings, checkpoints) is suppressed — the server
-   * would reject them. Defaults to true. */
-  canWrite?: boolean;
+  myUserDisplay: string | null;
   onEnd?: () => void;
 }): UseCoeditSession {
-  const {
-    path,
-    enabled,
-    committedBody,
-    myUserId,
-    canWrite = true,
-    onEnd,
-  } = opts;
+  const { path, enabled, myUserId, myUserDisplay, onEnd } = opts;
 
+  // The Yjs doc/awareness pair lives for the connection's lifetime — a fresh
+  // pair on every (re)connect, so the sync handshake repopulates it from the
+  // server's durable state. The cost is that anything typed while
+  // disconnected is dropped rather than merged on reconnect; keeping the doc
+  // across reconnects would fix that and is now possible (the server never
+  // changes document identity), but it isn't what this port does.
+  const [doc, setDocInstance] = useState(() => new Y.Doc());
+  const [awareness, setAwareness] = useState(() => new Awareness(doc));
+  const [connectionId, setConnectionId] = useState(0);
+  const [canWrite, setCanWrite] = useState(true);
   const [buffer, setBuffer] = useState("");
   const [participants, setParticipants] = useState<CoeditParticipant[]>([]);
   const [typing, setTyping] = useState<string[]>([]);
   const [peers, setPeers] = useState<CoeditPeer[]>([]);
   const [active, setActive] = useState(false);
-  const [session, setSession] = useState<CoeditSessionHandle | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
-  // Bumped by `retryJoin` to force the join effect to re-run even when
-  // `enabled`/`path` haven't changed.
+  const [joinErrorRetryable, setJoinErrorRetryable] = useState(true);
   const [retryToken, setRetryToken] = useState(0);
   const retryJoin = useCallback(() => {
     setJoinError(null);
+    setJoinErrorRetryable(true);
     setRetryToken((t) => t + 1);
   }, []);
   const [saveStatus, setSaveStatus] =
     useState<UseCoeditSession["saveStatus"]>("saved");
 
-  // Autosave timers: idle (reset on every edit) + a hard cap that fires
-  // regardless, so continuous typing still checkpoints periodically.
+  const sessionId = useRef<number | null>(null);
+  const editorRef = useRef<Editor | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxIntervalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const sessionId = useRef<number | null>(null);
-  const clientId = useRef<string>("");
-  // Editor-registered hooks: inbound frame handler + pending-op flush.
-  const serverFrame = useRef<((frame: CoeditFrame) => void) | null>(null);
-  const flushFn = useRef<(() => Promise<void>) | null>(null);
-  const setDocFn = useRef<((text: string) => void) | null>(null);
-  const catchUpFn = useRef<(() => void) | null>(null);
-  // Ref mirror of `buffer` (the editor doc) for non-render reads.
-  const bufferRef = useRef("");
-  // Local doc carried across a forced reconnect that landed on a *different*
-  // session than we had before (ours closed while we were disconnected —
-  // last participant left, checkpointed, closed): the edits exist only in
-  // this tab, so they're re-applied onto the fresh session instead of being
-  // silently replaced by its checkpointed buffer. Path-tagged so it can
-  // never leak onto another page.
-  const recoverDoc = useRef<{ path: string; doc: string } | null>(null);
-  // Outbound cursor/typing throttle state.
-  const cursorThrottle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingCursor = useRef<{
-    anchor: number;
-    head: number;
-    typing: boolean;
-    seq: number;
-  } | null>(null);
-  const lastCursor = useRef<{ anchor: number; head: number } | null>(null);
-  const typingIdle = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Client-local frame counter stamped onto peer entries (CoeditPeer.seq) so
-  // the editor can tell fresh cursor frames from re-sent array entries.
-  const frameSeq = useRef(0);
-  // Roster mirror for synchronous display-name lookups (the op branch in
-  // `onFrame` needs the author's display to restore their caret). Synced on
-  // join and on presence frames — the only points membership changes.
-  const participantsRef = useRef<CoeditParticipant[]>([]);
-  // Our caret epoch: stamped fresh on every place/clear transition and
-  // echoed on movement pings and ops, so peers can drop reordered stale
-  // frames. Wall-clock based (monotonicized) — stays ordered across
-  // reconnects and tabs without any server-side state.
-  const caretEpoch = useRef(0);
-  const caretPlaced = useRef(false);
-  // Latest caret epoch seen per peer — frames from older epochs are dropped.
-  const peerCaretSeq = useRef<Map<string, number>>(new Map());
-  // Inbound: per-peer expiry timers so a silent "typing" peer clears.
-  const typingTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
-    new Map(),
-  );
-
-  const onServerFrame = useCallback(
-    (handler: ((frame: CoeditFrame) => void) | null) => {
-      serverFrame.current = handler;
-    },
-    [],
-  );
-  const registerFlush = useCallback((fn: (() => Promise<void>) | null) => {
-    flushFn.current = fn;
-  }, []);
-  const registerSetDoc = useCallback((fn: ((text: string) => void) | null) => {
-    setDocFn.current = fn;
-  }, []);
-  const registerCatchUp = useCallback((fn: (() => void) | null) => {
-    catchUpFn.current = fn;
-  }, []);
-  const setDoc = useCallback((text: string) => setDocFn.current?.(text), []);
+  const typingIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearAutosaveTimers = useCallback(() => {
     if (idleTimer.current) {
@@ -183,13 +243,11 @@ export function useCoeditSession(opts: {
     }
   }, []);
 
-  // Flush + checkpoint without leaving the session — the autosave action.
   const checkpoint = useCallback(async () => {
     const sid = sessionId.current;
     if (sid === null || !canWrite) return;
     setSaveStatus("saving");
     try {
-      await flushFn.current?.();
       await checkpointSession(sid);
       setSaveStatus("saved");
     } catch {
@@ -213,263 +271,83 @@ export function useCoeditSession(opts: {
     }
   }, [runAutoCheckpoint]);
 
-  const reportDoc = useCallback(
-    (doc: string) => {
-      bufferRef.current = doc;
-      setBuffer(doc);
-      armAutosave();
-    },
-    [armAutosave],
-  );
+  const recomputePresence = useCallback(() => {
+    setTyping(deriveTyping(awareness));
+    const editor = editorRef.current;
+    if (editor) setPeers(derivePeers(editor, awareness));
+  }, [awareness]);
 
-  const reportSelection = useCallback(
-    (anchor: number, head: number, isEdit: boolean) => {
-      // Cursor broadcasts are writes (the endpoint is write-gated); a pure
-      // viewer's caret stays local.
-      if (sessionId.current === null || !canWrite) return;
-      // Reporting a position places the caret — a transition (first placement
-      // or a refocus after a clear) opens a new epoch.
-      if (!caretPlaced.current) {
-        caretEpoch.current = Math.max(Date.now(), caretEpoch.current + 1);
-        caretPlaced.current = true;
-      }
-      lastCursor.current = { anchor, head };
-      // A caret move (isEdit=false) must not clobber the "typing…" a recent edit
-      // set — browsers fire `select` right after every `input`, so onSelect
-      // lands one keystroke behind onChange. Derive typing from the idle timer.
-      const isTyping = isEdit || typingIdle.current !== null;
-      pendingCursor.current = {
-        anchor,
-        head,
-        typing: isTyping,
-        seq: caretEpoch.current,
-      };
-      const send = () => {
-        const c = pendingCursor.current;
-        pendingCursor.current = null;
-        if (c && sessionId.current !== null) {
-          sendCursor(sessionId.current, c.anchor, c.head, c.typing, c.seq);
-        }
-      };
-      if (!cursorThrottle.current) {
-        send();
-        cursorThrottle.current = setTimeout(() => {
-          cursorThrottle.current = null;
-          if (pendingCursor.current) send();
-        }, CURSOR_THROTTLE_MS);
-      }
-      if (isEdit) {
-        if (typingIdle.current) clearTimeout(typingIdle.current);
-        typingIdle.current = setTimeout(() => {
-          typingIdle.current = null;
-          const lc = lastCursor.current;
-          if (sessionId.current !== null && lc) {
-            sendCursor(
-              sessionId.current,
-              lc.anchor,
-              lc.head,
-              false,
-              caretEpoch.current,
-            );
-          }
+  const onEditorReady = useCallback(
+    (editor: Editor) => {
+      editorRef.current = editor;
+      recomputePresence();
+      setBuffer(editor.getText());
+      editor.on("update", () => {
+        setBuffer(editor.getText());
+        armAutosave();
+        awareness.setLocalStateField("typing", true);
+        if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
+        typingIdleTimer.current = setTimeout(() => {
+          awareness.setLocalStateField("typing", false);
         }, TYPING_IDLE_MS);
-      }
+      });
     },
-    [canWrite],
+    [awareness, armAutosave, recomputePresence],
   );
 
-  const reportCaretCleared = useCallback(() => {
-    if (sessionId.current === null || !canWrite) return;
-    // Clearing a placed caret opens a new epoch, so any still-in-flight
-    // place/op frame from the old epoch is dropped by peers.
-    if (caretPlaced.current) {
-      caretEpoch.current = Math.max(Date.now(), caretEpoch.current + 1);
-      caretPlaced.current = false;
-    }
-    // Drop any queued position first — a throttled send landing after the
-    // clear would resurrect the caret.
-    pendingCursor.current = null;
-    lastCursor.current = null;
-    if (typingIdle.current) {
-      clearTimeout(typingIdle.current);
-      typingIdle.current = null;
-    }
-    sendCursor(sessionId.current, null, null, false, caretEpoch.current);
-  }, [canWrite]);
+  const setDoc = useCallback((text: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const paragraphs = text.split(/\n{2,}/).filter((p) => p.trim() !== "");
+    editor.commands.setContent(
+      paragraphs.length > 0
+        ? paragraphs.map((p) => ({
+            type: "paragraph",
+            content: [{ type: "text", text: p }],
+          }))
+        : [{ type: "paragraph" }],
+    );
+  }, []);
 
-  const getCaretSeq = useCallback(
-    () => (caretPlaced.current ? caretEpoch.current : null),
-    [],
-  );
-
-  const onFrame = useCallback(
-    (frame: CoeditFrame) => {
-      if (frame.type === "presence") {
-        participantsRef.current = frame.participants;
-        setParticipants(frame.participants);
-        const ids = new Set(frame.participants.map((p) => p.user_id));
-        setPeers((prev) => prev.filter((p) => ids.has(p.user_id)));
-        setTyping((prev) => prev.filter((u) => ids.has(u)));
-        // Prune departed users from the per-peer epoch guard.
-        for (const uid of peerCaretSeq.current.keys()) {
-          if (!ids.has(uid)) peerCaretSeq.current.delete(uid);
-        }
-        return;
-      }
-      if (frame.type === "cursor") {
-        if (myUserId !== null && frame.user_id === myUserId) return;
-        const uid = frame.user_id;
-        // Drop frames from an older caret epoch — a place broadcast that was
-        // reordered behind a newer clear (or vice versa) must not apply.
-        if (frame.seq !== null) {
-          const known = peerCaretSeq.current.get(uid) ?? 0;
-          if (frame.seq < known) return;
-          peerCaretSeq.current.set(uid, frame.seq);
-        }
-        const anchor = frame.anchor;
-        const head = frame.head;
-        if (anchor === null || head === null) {
-          // The peer cleared their caret (editor blur / hidden tab).
-          setPeers((prev) => prev.filter((p) => p.user_id !== uid));
-        } else {
-          frameSeq.current += 1;
-          setPeers((prev) => [
-            ...prev.filter((p) => p.user_id !== uid),
-            {
-              user_id: uid,
-              user_display: frame.user_display,
-              anchor,
-              head,
-              seq: frameSeq.current,
-            },
-          ]);
-        }
-        const existing = typingTimers.current.get(uid);
-        if (existing) clearTimeout(existing);
-        typingTimers.current.delete(uid);
-        if (frame.typing) {
-          setTyping((prev) => (prev.includes(uid) ? prev : [...prev, uid]));
-          typingTimers.current.set(
-            uid,
-            setTimeout(() => {
-              typingTimers.current.delete(uid);
-              setTyping((prev) => prev.filter((u) => u !== uid));
-            }, TYPING_EXPIRY_MS),
-          );
-        } else {
-          setTyping((prev) => prev.filter((u) => u !== uid));
-        }
-        return;
-      }
-      // An op carrying a caret epoch asserts caret placement, and the op
-      // itself says where: the end of its last change, in post-edit
-      // coordinates. Rendering the author's caret from it is what flips their
-      // label too (the label IS the rendered caret), so a lost cursor frame
-      // can't leave an active editor unlabeled. Gated on the epoch like
-      // cursor frames — a stale op must not resurrect a cleared caret — and
-      // skipped when the op makes no caret assertion (caret_seq null, e.g. a
-      // teardown flush after blur).
-      if (
-        frame.type === "op" &&
-        frame.author !== null &&
-        frame.caret_seq !== null &&
-        frame.caret_seq >= (peerCaretSeq.current.get(frame.author) ?? 0)
-      ) {
-        const author = frame.author;
-        peerCaretSeq.current.set(author, frame.caret_seq);
-        const display =
-          myUserId !== null && author === myUserId
-            ? undefined // never render self as a peer
-            : participantsRef.current.find((p) => p.user_id === author)
-                ?.user_display;
-        if (display !== undefined && frame.changes.length > 0) {
-          let delta = 0;
-          let caret = 0;
-          for (const c of frame.changes) {
-            caret = c.from + delta + c.insert.length;
-            delta += c.insert.length - (c.to - c.from);
-          }
-          frameSeq.current += 1;
-          setPeers((prev) => [
-            ...prev.filter((p) => p.user_id !== author),
-            {
-              user_id: author,
-              user_display: display,
-              anchor: caret,
-              head: caret,
-              seq: frameSeq.current,
-            },
-          ]);
-        }
-      }
-      // op / resync → the editor's collab layer applies + rebases.
-      serverFrame.current?.(frame);
-    },
-    [myUserId],
-  );
-
-  // Tears down the *local* session state (timers, presence, handles) and
-  // fires `onEnd` — the one and only "session is over" signal. The network
-  // side (flush, checkpoint, close) is NOT done here: the join effect's
-  // cleanup below — the only caller — sequences those explicitly, because
-  // their order matters (see the comment there).
-  const stop = useCallback(() => {
-    clearAutosaveTimers();
-    if (cursorThrottle.current) {
-      clearTimeout(cursorThrottle.current);
-      cursorThrottle.current = null;
-    }
-    if (typingIdle.current) {
-      clearTimeout(typingIdle.current);
-      typingIdle.current = null;
-    }
-    for (const t of typingTimers.current.values()) clearTimeout(t);
-    typingTimers.current.clear();
-    pendingCursor.current = null;
-    lastCursor.current = null;
-    caretPlaced.current = false;
-    peerCaretSeq.current.clear();
-    setTyping([]);
-    setPeers([]);
-    sessionId.current = null;
-    setActive(false);
-    setSession(null);
-    onEnd?.();
-  }, [clearAutosaveTimers, onEnd]);
-
-  // Connect while enabled (the caller passes `!viewingVersion` — i.e.
-  // whenever the live/current doc is showing, not an old commit); close on
-  // disable/path-change/unmount. `retryToken` lets `retryJoin` force a
-  // re-run without `enabled`/`path` changing.
+  // Connect while enabled; close on disable/path-change/unmount.
+  // `retryToken` lets `retryJoin` force a re-run without `enabled`/`path`
+  // changing.
   useEffect(() => {
     if (!enabled) return;
-    clientId.current = newClientId();
     let cancelled = false;
-    // Mirror shows the committed body until the connection resolves.
-    bufferRef.current = committedBody;
-    setBuffer(committedBody);
     setJoinError(null);
 
     void (async () => {
-      // Connect (and reconnect on a drop) in a loop — the server never
-      // pushes again on a dead connection, and without this loop the client
-      // would only heal on a full page reload. Each attempt re-resolves the
-      // session by *path* (get-or-create server-side), so there's no "the
-      // session I had went stale" error to special-case; a reconnect either
-      // adopts the same still-open session or transparently gets a fresh one
-      // (see the session-id-changed branch below for that latter case).
-      let firstConnect = true;
       while (!cancelled) {
+        // Fresh doc/awareness every iteration, including the first — never
+        // reuse the outer `doc`/`awareness` state: this effect re-runs on
+        // every path change (deps: [enabled, path, retryToken]), and since
+        // `doc`/`awareness` state isn't reset by React on that re-run, a
+        // "first connect reuses the existing state" shortcut here would
+        // hand the *previous* path's populated doc to this path's brand
+        // new session — syncing its content in and risking it getting
+        // checkpointed under the wrong page.
+        const freshDoc = new Y.Doc();
+        const freshAwareness = new Awareness(freshDoc);
+        setDocInstance(freshDoc);
+        setAwareness(freshAwareness);
+        editorRef.current = null;
+        setBuffer("");
+        setConnectionId((n) => n + 1);
+
         let snap;
         try {
-          snap = await connectSession(path, (frame) => {
-            if (!cancelled) onFrame(frame);
+          snap = await connectSession(path, freshDoc, freshAwareness, (p) => {
+            if (!cancelled) setParticipants(p);
           });
         } catch (e) {
-          // The join handshake itself failed — there's no session to fall
-          // back to (no more read-only mode), so this must be surfaced
-          // rather than left as a silent, permanent "Connecting…".
           if (!cancelled) {
+            // A 422 is svc.ts's join_error frame — a real, distinguishable
+            // reason retrying won't fix (e.g. a codec-unsupported page),
+            // unlike every other failure here (network error, expired
+            // auth, a plain dropped connection), which really is worth
+            // retrying.
+            setJoinErrorRetryable(!(e instanceof ApiError && e.status === 422));
             setJoinError(
               e instanceof Error
                 ? e.message
@@ -483,39 +361,34 @@ export function useCoeditSession(opts: {
           return;
         }
 
-        // A reconnect that landed on a *different* session than before means
-        // ours closed while we were disconnected (last participant left,
-        // checkpointed, closed) — there's no live target left to flush our
-        // pending edits onto, so stash the local doc for the recovery effect
-        // below instead of losing it to the fresh session's checkpointed
-        // buffer.
-        if (
-          sessionId.current !== null &&
-          sessionId.current !== snap.session_id
-        ) {
-          recoverDoc.current = { path, doc: bufferRef.current };
-        }
-
         sessionId.current = snap.session_id;
-        bufferRef.current = snap.buffer;
-        setBuffer(snap.buffer);
-        participantsRef.current = snap.participants;
+        setCanWrite(snap.can_write);
         setParticipants(snap.participants);
-        caretPlaced.current = false;
-        setSession({
-          id: snap.session_id,
-          clientId: clientId.current,
-          startVersion: snap.version,
-          startDoc: snap.buffer,
-        });
         setActive(true);
-        if (!firstConnect) catchUpFn.current?.();
-        firstConnect = false;
+        if (myUserId)
+          freshAwareness.setLocalStateField("user", {
+            id: myUserId,
+            name: myUserDisplay ?? "Anonymous",
+          });
+        // Not the outer recomputePresence: this whole while loop runs
+        // inside one long-lived effect invocation (the effect's own deps,
+        // [enabled, path, retryToken], don't include `awareness`), so
+        // across reconnects within a single run, recomputePresence's
+        // useCallback closure stays pinned to whichever `awareness` state
+        // value existed when the effect body started — reading it here
+        // would derive presence from a stale, already-disconnected
+        // Awareness instance after setAwareness(freshAwareness) above.
+        // Closing over freshAwareness directly sidesteps the staleness
+        // instead of chasing it.
+        const recomputeForThisAwareness = () => {
+          setTyping(deriveTyping(freshAwareness));
+          const editor = editorRef.current;
+          if (editor) setPeers(derivePeers(editor, freshAwareness));
+        };
+        freshAwareness.on("change", recomputeForThisAwareness);
 
-        // Waits here for the connection's whole lifetime — resolves once it
-        // ends, for any reason (network drop, server close, or our own
-        // teardown's `closeSession` below).
         const { expected } = await snap.closed;
+        freshAwareness.off("change", recomputeForThisAwareness);
         if (cancelled || expected) return;
         await new Promise((r) => setTimeout(r, STREAM_RECONNECT_MS));
       }
@@ -523,27 +396,21 @@ export function useCoeditSession(opts: {
 
     return () => {
       cancelled = true;
-      // Flush and checkpoint before closing so this tab's tail reaches the
-      // shared buffer even if the connection closes during teardown.
+      clearAutosaveTimers();
+      if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
+      setActive(false);
+      setPeers([]);
+      setTyping([]);
       const sid = sessionId.current;
-      // The editor never unregisters its flush (see Coeditor's cleanup) so
-      // it's still here even when the child unmounted first; clear it as we
-      // take ownership of the final call.
-      const flush = flushFn.current;
-      flushFn.current = null;
-      stop();
+      sessionId.current = null;
+      onEnd?.();
       if (sid === null) return;
       void (async () => {
-        try {
-          await flush?.();
-        } catch {
-          // Checkpoint whatever reached the server if the final flush failed.
-        }
         if (canWrite) {
           try {
             await checkpointSession(sid);
           } catch {
-            // Heartbeat expiry and the periodic checkpoint are the backstop.
+            // The server-side close-triggered forced commit is the backstop.
           }
         }
         closeSession(sid);
@@ -552,79 +419,21 @@ export function useCoeditSession(opts: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, path, retryToken]);
 
-  // Re-apply a doc carried across a forced reconnect (see the connect loop's
-  // session-id-changed branch above): once the fresh session's editor has
-  // mounted (child effects run before this one, so `setDoc` is registered),
-  // replace the buffer with the saved local doc as a normal local edit — it
-  // lands as an op on the new session instead of being lost to the
-  // checkpointed version.
-  useEffect(() => {
-    if (session === null || recoverDoc.current === null) return;
-    const saved = recoverDoc.current;
-    recoverDoc.current = null;
-    if (saved.path === path && saved.doc !== session.startDoc) {
-      setDoc(saved.doc);
-    }
-  }, [session, path, setDoc]);
-
-  // Best-effort checkpoint when the tab is backgrounded/closed. Covers the
-  // gap between the last edit and the idle-autosave timer firing. A hidden
-  // tab also clears our caret: the user isn't positioned to edit anymore,
-  // and CM blur doesn't fire reliably on tab switches.
-  //
-  // The WS connection itself stays open while merely backgrounded (browsers
-  // don't tear down a WebSocket on visibility change, only on actual
-  // navigation/close/sleep), so a checkpoint message here reliably reaches
-  // the server. `pagehide` (the tab actually closing) is the one case with
-  // no delivery guarantee: a `send()` racing an abrupt unload can be lost.
-  // The server's own disconnect-triggered forced checkpoint (see
-  // `app/api/coedit.py`) is the backstop for exactly that case, and it
-  // doesn't depend on the client transmitting anything at all.
-  useEffect(() => {
-    if (!active) return;
-    const checkpointNow = () => {
-      const sid = sessionId.current;
-      if (sid === null || !canWrite) return;
-      void checkpointSession(sid).catch(() => {});
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        checkpointNow();
-        reportCaretCleared();
-      } else {
-        // Coming back to the tab: pull anything missed while backgrounded —
-        // a slept machine's connection may be dead or healing, and the user
-        // must not resume on a stale doc (the reconnect loop is the other
-        // half).
-        catchUpFn.current?.();
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("pagehide", checkpointNow);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("pagehide", checkpointNow);
-    };
-  }, [active, canWrite, reportCaretCleared]);
-
   return {
     active,
+    connectionId,
+    doc,
+    awareness,
+    canWrite,
     buffer,
     participants,
     typing,
     peers,
-    session,
     joinError,
+    joinErrorRetryable,
     retryJoin,
     saveStatus,
-    onServerFrame,
-    reportDoc,
-    registerFlush,
-    registerSetDoc,
-    registerCatchUp,
+    onEditorReady,
     setDoc,
-    reportSelection,
-    reportCaretCleared,
-    getCaretSeq,
   };
 }

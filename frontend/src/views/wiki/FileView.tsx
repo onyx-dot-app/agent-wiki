@@ -45,7 +45,7 @@ import { CommentsPanel } from "@/components/wiki/CommentsPanel";
 import { EditorEdgeScrollbar } from "@/components/wiki/EditorEdgeScrollbar";
 import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
-import type { AnchoredHighlightTarget } from "@/lib/editor/highlights";
+import type { AnchoredHighlightTarget } from "@/lib/editor/types";
 import { SWR_KEYS } from "@/lib/swr-keys";
 import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
@@ -65,14 +65,12 @@ import { apiFetch } from "@/lib/api";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
 import { createComment, listComments } from "@/lib/comments";
-import type {
-  CommentDraft,
-  CommentHighlightTarget,
-} from "@/lib/editor/comments";
+import type { CommentDraft, CommentHighlightTarget } from "@/lib/editor/types";
 import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
-import { Coeditor, type CoeditorHandle } from "@/lib/editor/components";
+import { CoeditPresenceBar, TiptapEditor } from "@/lib/editor/components";
 import { useCoeditSession } from "@/lib/editor/hooks";
+import type { CoeditorHandle } from "@/lib/editor/types";
 import {
   useAgentsBarHost,
   useHeaderActionsHost,
@@ -130,12 +128,13 @@ interface DocTitleProps {
 }
 
 /** Renders the page title (inline-editable when `onRename` is given) and a
- * divider below it. Capped at the same `max-w-[768px]` and centered the same
- * way as the editor column below it, so the title and the doc text share one
- * left margin instead of drifting apart. */
+ * divider below it. Capped at the same `--app-container-sm-md` (Opal's
+ * `sizes.css`) and centered the same way as the editor column below it, so
+ * the title and the doc text share one left margin instead of drifting
+ * apart. */
 export function DocTitle({ path, onRename }: DocTitleProps) {
   return (
-    <div className="rail-inset mx-auto flex w-full max-w-[768px] flex-col gap-6 pb-6">
+    <div className="rail-inset mx-auto flex w-full max-w-(--app-container-sm-md) flex-col gap-6 pb-6">
       <Content
         icon={SvgDocFile}
         sizePreset="headline"
@@ -420,16 +419,17 @@ export function FileView({ path }: FileViewProps) {
 
   // The page's live session: everyone viewing the live editor joins it for
   // presence plus real-time updates, and editing is just a capability inside
-  // it (`canWrite`, ops write-gated server-side). Left whenever a version
-  // diff is showing (including the current version's). See
-  // `useCoeditSession`'s `enabled` doc. No explicit Save. The hook handles
-  // checkpoint and socket close on transition or unmount.
+  // it (`coedit.canWrite`, from the join's own ACL check — content/awareness
+  // writes from a viewer are dropped server-side regardless). Left whenever
+  // a version diff is showing (including the current version's). See
+  // `useCoeditSession`'s `enabled` doc. No explicit Save, and no explicit
+  // leave: the hook closes the socket, which is itself the leave signal, and
+  // the server enqueues the checkpoint from its own teardown.
   const coedit = useCoeditSession({
     path,
     enabled: !viewingVersion,
-    committedBody: body,
     myUserId: user?.id ?? null,
-    canWrite,
+    myUserDisplay: user?.name ?? user?.email ?? null,
     onEnd: () => {
       void refreshComments();
       void refreshDraftState();
@@ -440,7 +440,7 @@ export function FileView({ path }: FileViewProps) {
   // closed and something to anchor. Drives both the overlay and the
   // .rail-reserved content reservation.
   const railActive =
-    !!coedit.session &&
+    coedit.active &&
     !viewingVersion &&
     panelTab === null &&
     !isMobile &&
@@ -450,7 +450,7 @@ export function FileView({ path }: FileViewProps) {
   // viewport edge (EditorEdgeScrollbar) and the native one hides, so tab
   // switches never toggle the native bar's width inside the scroller.
   const panelScrollDocked =
-    !!coedit.session && !viewingVersion && !isMobile && panelTab !== null;
+    coedit.active && !viewingVersion && !isMobile && panelTab !== null;
 
   // A caret inside a commented span focuses its thread in the panel (the
   // panel's activeId effect scrolls the card into view), without the doc
@@ -476,7 +476,9 @@ export function FileView({ path }: FileViewProps) {
         root.start_offset === null
       )
         return;
-      coeditorRef.current?.scrollToOffset(root.start_offset);
+      const handle = coeditorRef.current;
+      if (handle)
+        handle.scrollToOffset(handle.textOffsetToPos(root.start_offset));
     },
     [commentThreads, viewingVersion],
   );
@@ -484,10 +486,10 @@ export function FileView({ path }: FileViewProps) {
   // Deep-link: `?comment=<id>` opens the panel, selects that thread, and
   // scrolls to its anchored span — the shareable-link counterpart to
   // click-to-focus. Runs once per id (focusedCommentRef), and only once the
-  // thread is loaded and the editor has mounted (`coedit.session`).
+  // thread is loaded and the editor has mounted (`coedit.active`).
   useEffect(() => {
     const target = searchParams?.get("comment");
-    if (!target || loading || viewingVersion || !coedit.session) return;
+    if (!target || loading || viewingVersion || !coedit.active) return;
     if (focusedCommentRef.current === target) return;
     const root = commentThreads.find((t) => t.root.id === target)?.root;
     if (!root) return; // not loaded yet, or not a thread on this page
@@ -500,18 +502,20 @@ export function FileView({ path }: FileViewProps) {
       root.start_offset === null
     )
       return; // selected, but no live span to scroll to
-    coeditorRef.current?.scrollToOffset(root.start_offset);
+    const handle = coeditorRef.current;
+    if (handle)
+      handle.scrollToOffset(handle.textOffsetToPos(root.start_offset));
   }, [
     searchParams,
     commentThreads,
     loading,
     viewingVersion,
-    coedit.session,
+    coedit.active,
     openComments,
   ]);
 
   // Selecting text in the editor offers a floating "Comment" affordance
-  // anchored above the selection — fed by the Coeditor's selection reporting
+  // anchored above the selection — fed by TiptapEditor's onSelectionForComment
   // instead of a DOM `mouseup`/`selectionchange` handler.
   // The margin rail's mutation runner mirrors the panel's success gate;
   // failures surface as toasts since the rail has no error slot.
@@ -577,15 +581,52 @@ export function FileView({ path }: FileViewProps) {
   const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(
     null,
   );
-  const [appliedTemplateBody, setAppliedTemplateBody] = useState<string | null>(
-    null,
-  );
   const [appliedTemplateId, setAppliedTemplateId] = useState<string | null>(
     null,
   );
   const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(
     null,
   );
+  // Whether the doc still matches the template as applied — set on a
+  // successful pick, cleared the moment a real edit is detected. Can't
+  // compare `coedit.buffer` (plain rendered text) against the raw template
+  // markdown directly: they're never equal even right after applying (a
+  // heading's `#`, a bullet's `-`, etc. don't survive getText()). Tracked
+  // instead against `coedit.connectionId`: applying a template commits it
+  // through the server (see onPickTemplate) so the already-correct backend
+  // codec parses it, which folds into the live room via the normal
+  // live-rebase path and reconnects this session — `connectionId` bumps
+  // once that lands. `templateSettleTimer` below gives the post-reconnect
+  // sync handshake a moment to finish delivering that content before we
+  // start treating buffer changes as user edits (otherwise the sync
+  // catching up looks identical to a keystroke).
+  const [templateUnmodified, setTemplateUnmodified] = useState(false);
+  const templateArmGenerationRef = useRef<number | null>(null);
+  const templateBaselineRef = useRef<{
+    generation: number;
+    buffer: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const armAt = templateArmGenerationRef.current;
+    if (armAt === null || coedit.connectionId < armAt) return;
+    templateArmGenerationRef.current = null;
+    const generation = coedit.connectionId;
+    const t = setTimeout(() => {
+      templateBaselineRef.current = { generation, buffer: coedit.buffer };
+    }, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coedit.connectionId]);
+
+  useEffect(() => {
+    const baseline = templateBaselineRef.current;
+    if (!baseline || baseline.generation !== coedit.connectionId) return;
+    if (coedit.buffer !== baseline.buffer) {
+      setTemplateUnmodified(false);
+      templateBaselineRef.current = null;
+    }
+  }, [coedit.buffer, coedit.connectionId]);
   const loadLatest = useCallback(() => {
     setLoading(true);
     setError(null);
@@ -843,9 +884,20 @@ export function FileView({ path }: FileViewProps) {
     setError(null);
     try {
       const full = await getTemplate(template.id);
-      coedit.setDoc(full.body);
-      setAppliedTemplateBody(full.body);
+      // Commit the raw markdown through the normal write path (same one
+      // restoreVersion uses above) instead of inserting it into the editor
+      // as plain text: only the backend codec parses markdown into real
+      // structure (headings, lists, checkboxes, ...), and this commit folds
+      // into the live session via the existing live-rebase path, which
+      // reseeds the room's doc from the properly parsed result and
+      // reconnects this session to it.
+      await apiFetch("/wiki/file", {
+        method: "PUT",
+        body: JSON.stringify({ path, body: full.body, base_sha: headSha }),
+      });
       setAppliedTemplateId(template.id);
+      setTemplateUnmodified(true);
+      templateArmGenerationRef.current = coedit.connectionId + 1;
       await setDraftTemplate(path, template.id);
       await refreshDraftState();
     } catch (e) {
@@ -857,8 +909,10 @@ export function FileView({ path }: FileViewProps) {
 
   async function onPickBlank() {
     coedit.setDoc("");
-    setAppliedTemplateBody(null);
     setAppliedTemplateId(null);
+    setTemplateUnmodified(false);
+    templateArmGenerationRef.current = null;
+    templateBaselineRef.current = null;
     setError(null);
     try {
       await setDraftTemplate(path, null);
@@ -1238,7 +1292,7 @@ export function FileView({ path }: FileViewProps) {
               at the far-right edge; the text is capped + centered. */}
             {viewingVersion && diffData ? (
               <div className="flex min-h-0 flex-1 justify-center">
-                <div className="flex min-h-0 w-full max-w-[768px] min-w-0 flex-1 overflow-hidden">
+                <div className="flex min-h-0 w-full max-w-(--app-container-sm-md) min-w-0 flex-1 overflow-hidden">
                   <DiffView data={diffData!} />
                 </div>
               </div>
@@ -1259,7 +1313,7 @@ export function FileView({ path }: FileViewProps) {
                 }`}
               >
                 <div
-                  className={`rail-inset mx-auto flex w-full max-w-[768px] min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
+                  className={`rail-inset mx-auto flex w-full max-w-(--app-container-sm-md) min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
                     isMobile ? "px-3" : ""
                   }`}
                 >
@@ -1274,7 +1328,7 @@ export function FileView({ path }: FileViewProps) {
                     // still verbatim equal to the template the user just
                     // applied (so they can keep swapping templates).
                     //
-                    // Gated on `coedit.session` too, not just the buffer
+                    // Gated on `coedit.active` too, not just the buffer
                     // text: `coedit.buffer` starts as `""` before the coedit
                     // session has actually resolved (a separate async
                     // handshake from the file fetch that drives `loading`
@@ -1282,14 +1336,14 @@ export function FileView({ path }: FileViewProps) {
                     // flash the template picker for the gap between the file
                     // fetch resolving and the session catching up — reusing
                     // the exact "has the session resolved" signal the editor
-                    // fallback below already keys off (`coedit.session` vs.
+                    // fallback below already keys off (`coedit.active` vs.
                     // `coedit.joinError` vs. "Connecting…").
                     const isBlank =
-                      coedit.session !== null && coedit.buffer.trim() === "";
+                      coedit.active && coedit.buffer.trim() === "";
                     const matchesApplied =
-                      coedit.session !== null &&
-                      appliedTemplateBody !== null &&
-                      coedit.buffer === appliedTemplateBody;
+                      coedit.active &&
+                      appliedTemplateId !== null &&
+                      templateUnmodified;
                     const showGallery =
                       (isBlank || matchesApplied) &&
                       templates !== null &&
@@ -1307,22 +1361,17 @@ export function FileView({ path }: FileViewProps) {
                     );
                   })()}
                 </div>
-                {coedit.session ? (
+                {coedit.active ? (
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                    <Coeditor
-                      key={coedit.session.id}
+                    <TiptapEditor
+                      key={coedit.connectionId}
                       ref={coeditorRef}
-                      session={coedit.session}
-                      peers={coedit.peers}
-                      onSelectionChange={coedit.reportSelection}
-                      onCaretCleared={coedit.reportCaretCleared}
-                      getCaretSeq={coedit.getCaretSeq}
-                      onServerFrame={coedit.onServerFrame}
-                      reportDoc={coedit.reportDoc}
-                      registerFlush={coedit.registerFlush}
-                      registerSetDoc={coedit.registerSetDoc}
-                      registerCatchUp={coedit.registerCatchUp}
-                      readOnly={!canWrite}
+                      doc={coedit.doc}
+                      awareness={coedit.awareness}
+                      userId={user?.id}
+                      userDisplay={user?.name ?? user?.email}
+                      onEditorReady={coedit.onEditorReady}
+                      readOnly={!coedit.canWrite}
                       commentHighlights={commentHighlights}
                       activeCommentIds={activeCommentIds}
                       onCommentCaret={handleCommentCaret}
@@ -1336,14 +1385,22 @@ export function FileView({ path }: FileViewProps) {
                 ) : coedit.joinError ? (
                   // The join handshake itself failed and there is no read-only
                   // fallback to fall back to, so this has to be an actionable
-                  // dead end, not a permanent "Connecting…".
+                  // dead end, not a permanent "Connecting…" — except when
+                  // joinErrorRetryable is false (a page the live-editor codec
+                  // can't encode): retrying can never succeed there (the input
+                  // is deterministic), so a Retry button would just be a dead
+                  // end of its own.
                   <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-[13px] text-(--text-03)">
                     <span>
-                      Couldn't connect to the live session: {coedit.joinError}
+                      {coedit.joinErrorRetryable
+                        ? `Couldn't connect to the live session: ${coedit.joinError}`
+                        : coedit.joinError}
                     </span>
-                    <Button size="sm" onClick={coedit.retryJoin}>
-                      Retry
-                    </Button>
+                    {coedit.joinErrorRetryable && (
+                      <Button size="sm" onClick={coedit.retryJoin}>
+                        Retry
+                      </Button>
+                    )}
                   </div>
                 ) : (
                   // Joining the session. The editor mounts once we have its
