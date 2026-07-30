@@ -33,6 +33,8 @@ import logging
 from pycrdt import Doc, YMessageType, create_sync_message, handle_sync_message, read_message
 
 from app.wiki import coedit
+from app.wiki.git import merge_content
+from app.wiki.markdown_splice import apply_markdown_diff, restamp_block_ids
 from app.wiki.markdown_yjs import reconstruct_body
 
 log = logging.getLogger(__name__)
@@ -134,9 +136,6 @@ def rebase_delta(
     swap, and no reseed. A reseed would mint a fresh CRDT lineage, which is
     precisely what leaves concurrent edits unintegrable.
     """
-    from app.wiki.git import merge_content  # noqa: PLC0415
-    from app.wiki.markdown_splice import apply_markdown_diff  # noqa: PLC0415
-
     try:
         doc, _seq = _load(session_id)
     except SessionGone:
@@ -148,7 +147,15 @@ def rebase_delta(
     if mr.merged == ours:
         return None, mr.merged, True
     before = doc.get_state()
-    apply_markdown_diff(doc, mr.merged)
+    if not apply_markdown_diff(doc, ours, mr.merged):
+        # The document's children don't correspond 1:1 to a fresh parse of
+        # their own body, so there's no safe block pairing to splice along
+        # (see `apply_markdown_diff`). Reported as unclean so the caller hands
+        # it to the checkpoint engine, which has a reseed fallback for exactly
+        # this — reseeding here would discard the lineage that live clients are
+        # still generating updates against.
+        return None, mr.merged, False
+    restamp_block_ids(doc, mr.merged)
     return doc.get_update(before), mr.merged, True
 
 

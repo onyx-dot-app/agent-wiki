@@ -487,7 +487,7 @@ def test_apply_markdown_diff_preserves_lineage_of_untouched_blocks() -> None:
     # an incompatible lineage, the identical trap this whole fix exists to
     # avoid elsewhere. Derives other_doc from doc's own snapshot bytes
     # instead, matching how production always reconstructs "the same" doc
-    # — see coedit_checkpoint.py's _rebuild_doc / coedit_room.reseed.
+    # — see coedit_checkpoint.py's _rebuild_doc and coedit_live._load.
     snapshot = doc.get_update()
 
     new_body = "one\n\nTWO\n\nthree\n"

@@ -1,36 +1,28 @@
 """Checkpoint engine (app/wiki/coedit_checkpoint.py) — reconstructs a
 session's doc from its persisted (``ydoc_snapshot``, ``coedit_updates``)
 state and commits it to git via the merge gateway, with last-editor author +
-co-author trailers. DB + real git (the ``tmp_repo`` fixture) — deliberately
-never touches an in-process ``coedit_room`` for the checkpoint itself (the
-whole point of the rearchitecture: a throwaway ``Doc`` rebuilt here is
-byte-identical to what a live room would have produced, for the same
-sequence of edits — see that module's docstring).
+co-author trailers. DB + real git (the ``tmp_repo`` fixture).
 
+There is no server-side replica of a session's document, so a checkpoint
+rebuilds a throwaway ``Doc`` from the durable log and any process can run one.
 ``checkpoint_session``/``checkpoint_coedit_session_task``/
-``scan_coedit_checkpoints`` are all plain sync now (no asyncio) — the point
-of the rearchitecture is that checkpointing no longer needs a specific
-process's event loop at all, so these tests call them directly, no
-``asyncio.run`` wrapper needed (unlike this file's own earlier version, or
-the still-async WS-route-adjacent tests elsewhere).
+``scan_coedit_checkpoints`` are correspondingly plain sync — no event loop, no
+``asyncio.run`` wrapper.
 
-``_edit`` logs the *full* post-edit ``Doc`` state (``room.doc.get_update()``,
-not a synthetic placeholder) as the update payload — unlike the old
-in-process design, the checkpoint engine now actually replays logged updates
-through ``pycrdt`` (``coedit_checkpoint._rebuild_doc``), so they have to be
-real, applicable Yjs updates. CRDT merges are idempotent (confirmed directly
-in ``test_markdown_splice.py``'s own concurrent-update test), so a
-"redundant" full-state payload converges to the same result a true
-incremental diff would — correctness doesn't depend on the update being
-minimal, only replayable.
+``_client`` stands in for a browser: a ``Doc`` the *test* holds, seeded the way
+a first connection seeds one, whose edits reach the server as logged Yjs
+updates via ``_edit``. They have to be real, applicable updates, since the
+engine replays them through ``pycrdt``
+(``coedit_checkpoint._rebuild_doc``). Each is a delta (``get_update(before)``),
+which is what a client actually sends — a whole-state payload would converge
+too (CRDT updates are idempotent) but would hide a broken delta.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 
 import pytest
-from pycrdt import XmlElement, XmlFragment, XmlText
+from pycrdt import Doc, XmlElement, XmlFragment, XmlText, handle_sync_message
 from sqlalchemy import text
 
 from app.auth import users as users_repo
@@ -39,7 +31,7 @@ from app.db.session import session as db_session
 from app.db.session import try_advisory_xact_lock
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
 from app.tasks.queues import coedit_queue
-from app.wiki import coedit, coedit_checkpoint, coedit_room, drafts, markdown_yjs
+from app.wiki import coedit, coedit_checkpoint, coedit_live, drafts, markdown_yjs
 from app.wiki import git as wiki_git
 from app.wiki.markdown_yjs import ROOT_XML_KEY
 from app.models.wiki import PathMove
@@ -65,46 +57,47 @@ def _root(doc):
     return doc.get(ROOT_XML_KEY, type=XmlFragment)
 
 
-def _room(sess, body: str) -> coedit_room.Room:
-    """Build a room the way ``app/api/coedit.py:ws`` does for a session's
-    first connection — including the initial snapshot
-    (``coedit.set_initial_snapshot``), which the checkpoint engine now
-    requires (a session with no snapshot yet has nothing to rebuild a doc
-    from — see ``coedit_checkpoint.checkpoint_session``'s guard)."""
+def _client(sess, body: str) -> Doc:
+    """A client's document, seeded the way ``app/api/coedit.py:ws`` seeds a
+    session's first connection — including the initial snapshot
+    (``coedit.set_initial_snapshot``), without which a checkpoint has nothing
+    to rebuild from (see ``coedit_checkpoint.checkpoint_session``'s guard).
+
+    The ``Doc`` stays with the test, not the server: the test edits it and
+    ships the deltas, exactly as a browser would."""
     doc = markdown_yjs.seed_doc_from_markdown(body)
-    room = coedit_room.create_room(sess.id, sess.path, doc, body, sess.base_sha)
-    coedit.set_initial_snapshot(sess.id, room.doc.get_update(), body)
-    return room
+    coedit.set_initial_snapshot(sess.id, doc.get_update(), body)
+    return doc
 
 
-def _edit(sess, room, uid: str, prefix: str) -> None:
-    """Prepend ``prefix`` to the doc's first paragraph and log a matching,
-    *real* Yjs update (the full post-edit doc state — see module
-    docstring) — mirrors what the WS route does on a real edit (apply to
-    the Doc, log the update), split into two explicit steps since these
-    tests drive the Doc directly rather than through pycrdt's wire
+def _edit(sess, client: Doc, uid: str, prefix: str) -> None:
+    """Prepend ``prefix`` to the client's first paragraph and log the delta —
+    the two steps the WS route performs on a real edit (integrate into the doc,
+    log the update), driven directly here rather than through pycrdt's wire
     protocol."""
-    root = _root(room.doc)
-    with room.doc.transaction():
+    before = client.get_state()
+    root = _root(client)
+    with client.transaction():
         root.children[0].children[0].insert(0, prefix)
-    coedit.apply_update(sess.id, update_bytes=room.doc.get_update(), author_user_id=uid)
+    coedit.apply_update(sess.id, update_bytes=client.get_update(before), author_user_id=uid)
 
 
-def _new_page(sess, uid: str, text_: str) -> coedit_room.Room:
+def _new_page(sess, uid: str, text_: str) -> Doc:
     """For a session with no base content (base_sha=None, page doesn't exist
-    yet): the room's doc starts with zero blocks, so there's no existing
+    yet): the document starts with zero blocks, so there's no existing
     paragraph to prepend into — a whole new block has to be constructed
     directly, same pattern as
     test_markdown_splice.py's new-top-level-block test."""
-    room = _room(sess, "")
-    root = _root(room.doc)
+    client = _client(sess, "")
+    before = client.get_state()
+    root = _root(client)
     para = XmlElement("paragraph", {"_blockId": "new0"}, contents=[])
-    with room.doc.transaction():
+    with client.transaction():
         root.children.append(para)
-    with room.doc.transaction():
+    with client.transaction():
         para.children.append(XmlText(text_))
-    coedit.apply_update(sess.id, update_bytes=room.doc.get_update(), author_user_id=uid)
-    return room
+    coedit.apply_update(sess.id, update_bytes=client.get_update(before), author_user_id=uid)
+    return client
 
 
 def test_checkpoint_commits_and_attributes_last_editor(repo):
@@ -112,8 +105,8 @@ def test_checkpoint_commits_and_attributes_last_editor(repo):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "EDITED ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "EDITED ")
 
     outcome = coedit_checkpoint.checkpoint_session(sess.id)
 
@@ -131,17 +124,12 @@ def test_checkpoint_commits_and_attributes_last_editor(repo):
 
 
 def test_checkpoint_folds_in_late_update_landing_during_its_own_commit(repo, monkeypatch):
-    """Regression test (review): a coedit_updates row logged *during*
-    checkpoint_session's own commit_and_fan_out call — after _rebuild_doc
-    already replayed up to some seq, but before advance_checkpoint would
-    persist past it — must not be silently discarded. A prior fix attempt
-    skipped the room reseed in this scenario, which didn't help: the
-    checkpoint engine never touches the room at all, so the loss was
-    already final by the time that reseed decision even ran. The real fix
-    has to be in checkpoint_session itself, and the only assertion that
-    can actually see this class of bug is against committed git content,
-    not room.doc (see review's own critique of the room-level assertion
-    below)."""
+    """A coedit_updates row logged *during* checkpoint_session's own
+    commit_and_fan_out call — after _rebuild_doc already replayed up to some
+    seq, but before advance_checkpoint would persist past it — must not be
+    silently discarded. The fix is in checkpoint_session itself (its fold-in
+    retry loop), and the assertion that sees this class of bug is against
+    committed git content."""
     uid_a = users_repo.create(email="alice@x.com", password="hunter2-x", name="Alice")
     uid_b = users_repo.create(email="bob@x.com", password="hunter2-x", name="Bob")
     body = "Block A original.\n\nBlock B original.\n"
@@ -149,8 +137,8 @@ def test_checkpoint_folds_in_late_update_landing_during_its_own_commit(repo, mon
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid_a)
     coedit.join(sess.id, uid_b)
-    room = _room(sess, body)
-    _edit(sess, room, uid_a, "ALICE: ")
+    client = _client(sess, body)
+    _edit(sess, client, uid_a, "ALICE: ")
 
     from app.wiki import utils as wiki_utils
 
@@ -164,11 +152,12 @@ def test_checkpoint_folds_in_late_update_landing_during_its_own_commit(repo, mon
             # Bob's edit lands on a *different* block, durably logged,
             # while checkpoint_session's own first commit_and_fan_out call
             # is still "in flight" from its own perspective.
-            root = _root(room.doc)
-            with room.doc.transaction():
+            before = client.get_state()
+            root = _root(client)
+            with client.transaction():
                 root.children[2].children[0].insert(0, "BOB: ")
             coedit.apply_update(
-                sess.id, update_bytes=room.doc.get_update(), author_user_id=uid_b
+                sess.id, update_bytes=client.get_update(before), author_user_id=uid_b
             )
         return result
 
@@ -188,91 +177,86 @@ def test_checkpoint_folds_in_late_update_landing_during_its_own_commit(repo, mon
     assert st.ydoc_checkpointed_seq == st.ydoc_seq, "session must be fully clean, not just partially"
 
 
-def test_checkpoint_reseeds_room_and_syncs_merged_result(repo):
-    # When the checkpoint's 3-way merge folds in a concurrent agent commit,
-    # any live room holding this session must be reconciled (reseeded) —
-    # otherwise a later checkpoint from that room would rebuild from a doc
-    # that never saw the agent's edit and silently drop it. Reconciliation
-    # is the cross-process notify step (app/tasks/coedit_checkpoint.py); call
-    # it directly here rather than going through the realtime bus, matching
-    # how coedit_rebase's own tests exercise `rebase_session` directly.
+def test_diverged_checkpoint_reaches_the_editors(repo):
+    # When the checkpoint's 3-way merge folds in a concurrent agent commit, the
+    # committed result differs from what the editors have on screen. They have
+    # to receive it: the snapshot alone would only reach them on a reconnect,
+    # and the next checkpoint would rebuild from a document that never saw the
+    # agent's edit. It's broadcast as an ordinary Yjs update (the splice
+    # preserves lineage, so a delta is expressible), which is also what lets a
+    # client rebase its own pending edits over it.
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    doc = "one\ntwo\nthree\nfour\nfive\n"
-    sha = _seed_page(doc)
+    body = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed_page(body)
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, doc)
+    client = _client(sess, body)
     # Human edits inside the (single, soft-break-joined) paragraph; agent
     # commits a distant, non-overlapping change out of band, against the
     # original HEAD, unaware of the human's in-session edit.
-    _edit(sess, room, uid, "EDIT-")
+    _edit(sess, client, uid, "EDIT-")
     wiki_git.commit_file(_PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>")
-
-    outcome = coedit_checkpoint.checkpoint_session(sess.id)
-    assert outcome is not None
-    # _reconcile_room directly, not _try_local_reconcile's run_on_main_loop
-    # wrapper — that needs a bound main loop (app/main.py's lifespan, which
-    # tests don't run) to actually execute the scheduled coroutine rather
-    # than just prove it was scheduled; matches how test_coedit_rebase.py
-    # drives rebase_session directly rather than through _try_local for the
-    # same reason.
-    asyncio.run(coedit_checkpoint_task._reconcile_room(outcome.session_id, outcome.diverged))
+    sent: list[bytes] = []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            coedit_checkpoint.coedit_channel,
+            "broadcast_yjs",
+            lambda session_id, payload, seq=None: sent.append(payload),
+        )
+        outcome = coedit_checkpoint.checkpoint_session(sess.id)
 
     merged = "EDIT-one\ntwo\nthree\nfour\nFIVE\n"
+    assert outcome is not None and outcome.diverged is True
     assert wiki_git.read_file(_PATH) == merged
     st = coedit.get_active_session(_PATH)
     assert st is not None
     assert st.ydoc_checkpointed_seq == st.ydoc_seq  # clean
-    live_room = coedit_room.get_room(sess.id)
-    assert live_room is not None
-    assert live_room.base_body == merged  # room reconciled to the merged result
 
-    # A second checkpoint is a clean no-op — the agent's edit is retained,
-    # not dropped by re-committing a stale doc.
+    # One broadcast, and applying it to the client converges it on the merged
+    # result — a resync frame is no longer needed for this.
+    assert len(sent) == 1
+    handle_sync_message(sent[0][1:], client)
+    assert markdown_yjs.reconstruct_body(client) == merged
+
+    # And the durable state agrees, so a client that missed the broadcast gets
+    # the same thing from its next handshake.
+    assert coedit_live.read_body(sess.id) == merged
+
+    # A second checkpoint is a clean no-op — the agent's edit is retained, not
+    # dropped by re-committing a stale document.
     assert coedit_checkpoint.checkpoint_session(sess.id) is None
     assert wiki_git.read_file(_PATH) == merged
 
 
-def test_reconcile_room_skips_reseed_when_late_update_exists(repo):
-    # Regression test (review): a keystroke logged during the checkpoint's
-    # git-commit-plus-merge window (after checkpoint_session captured its
-    # replay point, before _reconcile_room runs) used to be silently lost
-    # on a diverged checkpoint — apply_markdown_diff's lineage preservation
-    # only covers blocks it *doesn't* touch; the block the merge actually
-    # rewrote gets a brand-new element, so reseeding the live room onto
-    # the persisted (post-merge) snapshot replaces that room's own element
-    # for the same block, and the late update's reference to the old one
-    # becomes a silent structural no-op. Reconciling must skip the reseed
-    # entirely whenever any such late update exists — the room's own doc
-    # already has it correctly (checkpointing never touches a live room).
+def test_late_update_after_a_diverged_checkpoint_is_not_pruned(repo):
+    # A keystroke logged during the checkpoint's git-commit-plus-merge window,
+    # past the engine's fold-in bound: advance_checkpoint prunes only up to the
+    # seq the checkpoint actually captured, so the row survives and the session
+    # is left dirty for the next checkpoint to pick up rather than sealed clean
+    # with the edit stranded.
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    doc = "one\ntwo\nthree\nfour\nfive\n"
-    sha = _seed_page(doc)
+    body = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed_page(body)
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, doc)
-    _edit(sess, room, uid, "EDIT-")
+    client = _client(sess, body)
+    _edit(sess, client, uid, "EDIT-")
     wiki_git.commit_file(_PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>")
 
     outcome = coedit_checkpoint.checkpoint_session(sess.id)
     assert outcome is not None
     assert outcome.diverged is True
+    checkpointed = coedit.get_active_session(sess.path)
+    assert checkpointed is not None
 
-    # The race: a keystroke lands on the room's own doc *after* the
-    # checkpoint captured its replay point, logged as a real update (same
-    # as the WS route: apply to the Doc, then log it).
-    _edit(sess, room, uid, "LATE-")
-    before_reconcile = markdown_yjs.reconstruct_body(room.doc)
-    assert before_reconcile.startswith("LATE-EDIT-")
+    _edit(sess, client, uid, "LATE-")
 
-    asyncio.run(coedit_checkpoint_task._reconcile_room(outcome.session_id, outcome.diverged))
-
-    # Not reseeded: the room's own doc, including the late edit, survives
-    # byte-for-byte untouched (a reseed would have replaced it with the
-    # merged git result instead, silently discarding "LATE-").
-    live_room = coedit_room.get_room(sess.id)
-    assert live_room is room
-    assert markdown_yjs.reconstruct_body(room.doc) == before_reconcile
+    st = coedit.get_active_session(_PATH)
+    assert st is not None
+    assert st.ydoc_seq > st.ydoc_checkpointed_seq  # dirty again → will be re-checkpointed
+    # The row itself is still in the log, above the checkpoint watermark.
+    late = coedit.updates_since(sess.id, checkpointed.ydoc_checkpointed_seq)
+    assert [u.seq for u in late.updates] == [st.ydoc_seq]
 
 
 def test_checkpoint_survives_a_racing_close(repo, monkeypatch):
@@ -285,8 +269,8 @@ def test_checkpoint_survives_a_racing_close(repo, monkeypatch):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "EDITED ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "EDITED ")
 
     monkeypatch.setattr(coedit, "advance_checkpoint", lambda *a, **k: None)
     outcome = coedit_checkpoint.checkpoint_session(sess.id)
@@ -300,8 +284,8 @@ def test_checkpoint_is_noop_when_clean(repo):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "EDITED ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "EDITED ")
     assert coedit_checkpoint.checkpoint_session(sess.id) is not None
     # Nothing new since the last checkpoint → no second commit.
     assert coedit_checkpoint.checkpoint_session(sess.id) is None
@@ -322,8 +306,8 @@ def test_checkpoint_clears_template_draft_when_body_diverges(repo):
     )
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, tmpl_body)
-    _edit(sess, room, uid, "Mine: ")
+    client = _client(sess, tmpl_body)
+    _edit(sess, client, uid, "Mine: ")
 
     coedit_checkpoint.checkpoint_session(sess.id)
 
@@ -335,8 +319,8 @@ def test_task_checkpoints_then_closes_when_empty(repo):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "EDITED ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "EDITED ")
     coedit.leave(sess.id, uid)  # last participant gone
 
     # checkpoint_coedit_session_task is @coedit_queue.task()-decorated —
@@ -356,8 +340,8 @@ def test_task_keeps_session_open_when_participants_remain(repo):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "EDITED ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "EDITED ")
 
     with coedit_queue.immediate_mode():
         coedit_checkpoint_task.checkpoint_coedit_session_task(sess.id)
@@ -375,8 +359,8 @@ def test_scan_checkpoints_due_sessions(repo, monkeypatch):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "EDITED ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "EDITED ")
     coedit.leave(sess.id, uid)
 
     with coedit_queue.immediate_mode():
@@ -386,27 +370,18 @@ def test_scan_checkpoints_due_sessions(repo, monkeypatch):
     assert coedit.get_active_session(_PATH) is None
 
 
-def test_scan_checkpoints_sessions_without_a_local_room(repo, monkeypatch):
-    # The whole point of the rearchitecture: a dirty session whose room (if
-    # any) lives in a different process is still this scan's to checkpoint
-    # — it rebuilds its own throwaway Doc from (snapshot, updates), never
-    # touching any process's live room. No _room() call here at all: this
-    # session never had one anywhere, only a snapshot (set at "connect"
-    # time, per _room's docstring — simulated directly here since there's
-    # no room to build).
+def test_scan_checkpoints_a_session_no_process_holds(repo, monkeypatch):
+    # A dirty session whose editors are all connected to some other process —
+    # or gone entirely — is still this scan's to checkpoint. Nothing about the
+    # work is process-local: the throwaway Doc comes from (snapshot, updates).
+    # The client Doc here is dropped immediately after logging its edit, which
+    # is the state a departed editor leaves behind.
     monkeypatch.setattr(coedit_checkpoint_task, "_IDLE_SECONDS", 0)
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    doc = markdown_yjs.seed_doc_from_markdown("hello world")
-    room = coedit_room.create_room(sess.id, sess.path, doc, "hello world", sha)
-    coedit.set_initial_snapshot(sess.id, room.doc.get_update(), "hello world")
-    root = _root(room.doc)
-    with room.doc.transaction():
-        root.children[0].children[0].insert(0, "EDITED ")
-    coedit.apply_update(sess.id, update_bytes=room.doc.get_update(), author_user_id=uid)
-    coedit_room.close_room(sess.id)  # this process no longer holds a room for it either
+    _edit(sess, _client(sess, "hello world"), uid, "EDITED ")
 
     with coedit_queue.immediate_mode():
         coedit_checkpoint_task.scan_coedit_checkpoints()
@@ -414,7 +389,7 @@ def test_scan_checkpoints_sessions_without_a_local_room(repo, monkeypatch):
     assert wiki_git.read_file(_PATH) == "EDITED hello world\n"
     st = coedit.get_active_session(_PATH)
     assert st is not None
-    assert st.ydoc_seq == st.ydoc_checkpointed_seq  # clean — checkpointed with no local room
+    assert st.ydoc_seq == st.ydoc_checkpointed_seq  # clean
 
 
 def test_commit_message_credits_other_participants_as_coauthors(repo):
@@ -431,9 +406,9 @@ def test_commit_message_credits_other_participants_as_coauthors(repo):
 
 def test_checkpoint_skips_closed_dirty_session(repo):
     # A closed session with un-checkpointed edits must NOT be re-committed —
-    # it would clobber newer HEAD with stale content (the 2026-07-06
-    # incident). No room needed: the closed+dirty check short-circuits
-    # before this engine ever tries to rebuild a doc.
+    # it would clobber newer HEAD with stale content. No snapshot needed: the
+    # closed+dirty check short-circuits before the engine tries to rebuild a
+    # doc.
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
@@ -460,8 +435,8 @@ def test_duplicate_checkpoints_commit_once(repo):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "EDITED ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "EDITED ")
     coedit.leave(sess.id, uid)  # last participant gone → eligible to close
 
     before = len(wiki_git.history(_PATH))
@@ -551,8 +526,8 @@ def test_checkpoint_commits_to_new_path_after_move(repo):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "HOWDY ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "HOWDY ")
 
     new_path = "guides/install.md"
     wiki_git.move_path(_PATH, new_path, "rename")
@@ -570,8 +545,8 @@ def test_checkpoint_closes_session_when_path_gone(repo):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "STALE ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "STALE ")
 
     # The page moves away but the session is NOT re-keyed (the pre-fix bug,
     # or a raw-git rename that bypassed the lifecycle hook). The editor
@@ -610,8 +585,8 @@ def test_checkpoint_skips_but_keeps_session_with_participants(repo):
     sha = _seed_page("hello world")
     sess = coedit.open_session(_PATH, base_sha=sha)
     coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "LIVE ")
+    client = _client(sess, "hello world")
+    _edit(sess, client, uid, "LIVE ")
 
     # Path vanishes mid-session while someone is still editing (e.g. a move
     # whose re-key hasn't landed yet): skip, don't close — the scan retries.
@@ -659,9 +634,8 @@ def test_on_path_moved_origin_wins_over_young_dirty_destination(repo):
     superseded = coedit.get_session(young.id)
     assert superseded is not None
     assert superseded.status == coedit.SessionStatus.CLOSED.value
-    # The caller (app/wiki/notify.py) needs this id to evict any in-memory
-    # room the superseded session had — coedit.py itself can't (no pycrdt
-    # import; see on_path_moved's own docstring).
+    # Returned so a caller can act on the superseded session (nothing in-memory
+    # to evict any more — see on_path_moved's own docstring).
     assert superseded_ids == [young.id]
 
 

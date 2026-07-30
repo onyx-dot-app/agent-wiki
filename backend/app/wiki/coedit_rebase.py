@@ -8,22 +8,20 @@ checkpoint's 3-way merge (``coedit_checkpoint.py``) reconciles it —
 correct, but the divergence is invisible to editors in the meantime and the
 merge is deferred to whenever the session happens to go idle.
 
-Re-seed + full resync, not incremental CRDT translation: the room's ``Doc``
-is dropped and reconstructed fresh from the 3-way-merged text
-as an ordinary logged Yjs update, so connected clients receive it as normal
-(``ResyncFrame``) rather than receive the fold-in as an incremental Yjs
-update. A true CRDT-native translator would need to turn the merge's text
-diff back into structural Yjs ops — the same block-level diffing machinery
-``markdown_splice.checkpoint_body`` already does, just run in reverse — for
-an event this infrequent (a concurrent external edit landing mid-session).
-Simpler and just as correct; costs connected clients one resync round-trip.
+The fold is an ordinary logged Yjs update, built by diffing the 3-way-merged
+text into a rebuilt ``Doc`` (``coedit_live.rebase_delta``) and broadcasting the
+resulting delta. Clients integrate it as normal traffic and rebase their own
+pending edits over it, keeping their carets.
 
-Pure domain logic: does not decide when to run or how to reach the right
-process (the trigger + the cross-process fan-out live in
-``app/tasks/coedit_rebase.py``). Can only ever run in the process that
-holds the session's room — a ``pycrdt.Doc`` is thread-affine (see
-``app/wiki/coedit_live.py``) — so there is no "not this process's session"
-here means: not "no session", just "not this process's session to rebase".
+Not a re-seed: replacing the document with a fresh one seeded from the merged
+text mints a new CRDT lineage, so any update a client had in flight against the
+old lineage becomes unintegrable — exactly the divergence this is supposed to
+prevent. A delta commutes with concurrent keystrokes instead, which is also why
+nothing here needs a compare-and-swap.
+
+Pure domain logic: does not decide when to run (that's
+``app/tasks/coedit_rebase.py``). Any process can run it — the document comes
+from ``(ydoc_snapshot, coedit_updates)``, not from one worker's memory.
 """
 
 from __future__ import annotations
@@ -68,13 +66,17 @@ def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         return RebaseOutcome.SKIP
     if sess.base_sha == head_sha:
         return RebaseOutcome.SKIP
+    # A stale trigger can carry a head_sha the session has already moved past:
+    # a concurrent checkpoint, or a later commit's rebase, may have advanced
+    # base_sha to a descendant of head_sha. Merging against that older content
+    # would compute a diff that reverts already-committed edits, so skip when
+    # head_sha is already contained in base_sha.
+    if sess.base_sha is not None and wiki_git.is_ancestor(head_sha, sess.base_sha):
+        return RebaseOutcome.SKIP
 
-    def _bodies() -> tuple[str, str]:
-        base = wiki_git.read_file_opt(sess.path, ref=sess.base_sha) if sess.base_sha else ""
-        current = wiki_git.read_file_opt(sess.path, ref=head_sha)
-        return base or "", current or ""
-
-    base_body, current_body = _bodies()
+    base_body = wiki_git.read_file_opt(sess.path, ref=sess.base_sha) if sess.base_sha else ""
+    current_body = wiki_git.read_file_opt(sess.path, ref=head_sha)
+    base_body, current_body = base_body or "", current_body or ""
     outcome = coedit_live.rebase_delta(session_id, base_body, current_body)
     if outcome is None:
         return RebaseOutcome.SKIP
@@ -91,9 +93,8 @@ def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         coedit.set_base_sha(session_id, head_sha)
         return RebaseOutcome.NOOP
 
-    seq = coedit.apply_update(
-        session_id, update_bytes=update_bytes, author_user_id=coedit.SYSTEM_AUTHOR_ID
-    )
+    # author_user_id=None: the server produced this update, not a person.
+    seq = coedit.apply_update(session_id, update_bytes=update_bytes, author_user_id=None)
     if seq is None:
         return RebaseOutcome.SKIP  # session closed underneath us
     coedit_channel.broadcast_yjs(session_id, create_update_message(update_bytes), seq)

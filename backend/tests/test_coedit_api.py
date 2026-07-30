@@ -6,7 +6,7 @@ test_coedit_channel.py; here we exercise the WS route itself.
 Rewritten for the Yjs binary protocol (app/api/coedit.py's own module
 docstring) — document content and cursor/awareness both travel as raw
 pycrdt sync/awareness bytes over WS binary frames; only `joined`/`presence`/
-`checkpoint`/`checkpoint_result`/`resync` remain JSON text frames. The old
+`checkpoint`/`checkpoint_result` remain JSON text frames. The old
 OT-era protocol this file used to test (`op`/`get_ops`/`cursor` JSON
 messages, `base_version`/`version` fields, `stale_version`/`invalid_op`
 error codes) no longer exists: CRDT merges never reject a "stale" update
@@ -18,7 +18,6 @@ separate `get_ops` message.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from contextlib import contextmanager
@@ -41,7 +40,7 @@ from starlette.testclient import WebSocketDenialResponse
 from app.auth import users as users_repo
 from app.main import create_app
 from app.tasks.queues import coedit_queue
-from app.wiki import acl, coedit, coedit_room, git
+from app.wiki import acl, coedit, git
 from app.wiki.markdown_yjs import ROOT_XML_KEY, reconstruct_body
 
 from tests._auth import login_fastapi
@@ -95,20 +94,15 @@ def _ws(client, path: str = _PATH):
     then its own SYNC_STEP1 query synchronously, before the recv/send task
     loops (and so any broadcast this connection could see) ever start.
 
-    Also (re)binds ``coedit_room``'s main loop to this connection's own
-    portal: unlike the real app (whose lifespan binds it once, see
-    app/main.py), ``TestClient`` spins up a fresh, independent event loop
-    for *every* ``websocket_connect``/HTTP call (confirmed directly in
-    starlette's own testclient.py — neither the WS portal nor a plain
-    ``client.get`` call ever share one), so nothing ever binds it here on
-    its own. Without this, any live-buffer read (``GET /wiki/file`` ->
-    ``coedit_room.read_body_sync``) while this connection is open raises
-    "main loop not bound yet". Rebinding to the still-open WS connection's
-    own loop lets a subsequent ``client.get`` (on its own, different loop)
-    schedule the read onto it via the normal cross-thread path.
+    Nothing needs binding to this connection's event loop. ``TestClient``
+    spins up a fresh, independent loop for every
+    ``websocket_connect``/HTTP call, which used to matter: a live-buffer read
+    had to be scheduled onto whichever loop held the session's room. A read
+    now goes straight to the durable log from whatever thread asks
+    (``coedit_live.read_body``), so a plain ``client.get`` on its own loop
+    works while this connection is open.
     """
     with client.websocket_connect(f"/api/coedit/ws?path={path}") as ws:
-        coedit_room.bind_main_loop(ws.portal.call(asyncio.get_running_loop))
         joined = ws.receive_json()
         assert joined["type"] == "joined"
         ws.receive_bytes()  # the server's own SYNC_STEP1 query — nothing to reply with
@@ -286,19 +280,26 @@ def test_op_stamps_last_edited_at(client):
         assert me and me[0].last_edited_at is not None
 
 
-def test_disconnect_removes_participant(client):
+def test_disconnect_leaves_presence_to_expire(client):
+    # Presence is a lease, not a registration: no process deletes a participant
+    # row for its own sockets, so a disconnect leaves the row in place and the
+    # periodic scan's heartbeat expiry is what removes it. That's what makes
+    # presence correct across workers — a process can only ever see its own
+    # sockets, so "delete on disconnect" would have to guess about everyone
+    # else's.
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)
     _seed_page()
 
-    # immediate_mode: if teardown takes the cancellation path, the leave is
-    # enqueued — inline mode runs it here instead of on a worker.
     with coedit_queue.immediate_mode():
         with _ws(client) as (_ws_conn, joined, _doc):
             sid = joined["session_id"]
             assert len(coedit.list_participants(sid)) == 1
 
-        _wait_for(lambda: coedit.list_participants(sid) == [])
+        # Still there right after the socket closes.
+        assert len(coedit.list_participants(sid)) == 1
+        # Expiring the lease is what clears it.
+        coedit.expire_stale_participants(stale_seconds=0)
     assert coedit.list_participants(sid) == []
 
 
@@ -315,19 +316,20 @@ def test_disconnect_of_last_participant_checkpoints(client):
         # The disconnect handler enqueues the checkpoint; immediate_mode runs
         # it inline wherever the handler executes. Wait *inside* the block:
         # once the flag drops, a late enqueue would go to the real queue.
-        _wait_for(
-            lambda: git.read_file(_PATH) == "EDITED hello world\n"
-            and coedit.get_active_session(_PATH) is None
-        )
+        _wait_for(lambda: git.read_file(_PATH) == "EDITED hello world\n")
 
-    session_after = coedit.get_active_session(_PATH)
     assert git.read_file(_PATH) == "EDITED hello world\n", (
         "checkpoint never landed: "
-        f"session={'still open' if session_after else 'closed'}, "
         f"participants={coedit.list_participants(sid)}"
     )
-    assert session_after is None
-    assert sid is not None
+    # The session stays open: its participant row's lease hasn't lapsed yet, so
+    # as far as any process can tell someone is still editing. The periodic scan
+    # closes it once the heartbeat expires.
+    assert coedit.get_active_session(_PATH) is not None
+    with coedit_queue.immediate_mode():
+        coedit.expire_stale_participants(stale_seconds=0)
+        coedit.close_if_clean(sid)
+    assert coedit.get_active_session(_PATH) is None
 
 
 def test_checkpoint_message_commits_buffer(client):
@@ -342,7 +344,12 @@ def test_checkpoint_message_commits_buffer(client):
             _wait_for(lambda: _ydoc_seq_at_least(sid, 1))
             ws.send_json({"type": "checkpoint", "request_id": "c"})
             result = _recv_typed_json(ws, "checkpoint_result")
-            assert result == {"type": "checkpoint_result", "request_id": "c", "ok": True}
+            assert result == {
+                "type": "checkpoint_result",
+                "request_id": "c",
+                "ok": True,
+                "error": None,
+            }
             # An explicit checkpoint doesn't close a session with an active
             # participant — must assert this before the connection closes;
             # disconnecting drops the last participant too, which (with an
@@ -377,7 +384,10 @@ def test_checkpoint_requires_write(client):
         with _ws(client) as (ws, _joined2, _doc):
             ws.send_json({"type": "checkpoint", "request_id": "c"})
             result = _recv_typed_json(ws, "checkpoint_result")
-            assert result == {"type": "checkpoint_result", "request_id": "c", "ok": False}
+            assert result["type"] == "checkpoint_result"
+            assert result["request_id"] == "c"
+            assert result["ok"] is False
+            assert result["error"]  # a reason the client can surface
 
 
 def _login_and_join(client, email="ada@x.com"):
@@ -594,7 +604,7 @@ def test_file_read_serves_live_buffer_during_session(client):
     sha = _seed_page("hello world")
     with _ws(client) as (ws, _joined, doc):
         _send_content(ws, _edit_bytes(doc, "LIVE "))
-        # coedit_room.read_body_sync is a full reconstruct_body reserialize
+        # coedit_live.read_body is a full reconstruct_body reserialize
         # (markdown_yjs.serialize_block always terminates a block with one
         # newline), so the live buffer ends in "\n" even though the
         # committed seed doesn't.

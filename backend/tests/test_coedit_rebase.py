@@ -1,28 +1,32 @@
-"""Live-rebase: folding an inbound agent commit into an open co-edit session
-(app/wiki/coedit_rebase.py), plus the trigger + cross-process fan-out
-(app/tasks/coedit_rebase.py). DB + real git (tmp_repo) + an in-process room
-(coedit_room) — rebase_session only ever acts on a session whose room lives
-in this process (see coedit_room.py).
+"""Live-rebase: folding an out-of-band commit into an open co-edit session
+(app/wiki/coedit_rebase.py), plus the trigger (app/tasks/coedit_rebase.py).
+DB + real git (tmp_repo).
 
-``rebase_session`` is ``async`` — it touches a live room's ``Doc`` directly
-(unlike ``checkpoint_session``, which no longer does at all; see
-test_coedit_checkpoint.py's module docstring) and must stay on this
-process's own thread to do so — driven here via ``asyncio.run``.
+No rooms, and none of the guards a room needed. The fold is an ordinary logged
+Yjs update built from ``(ydoc_snapshot, coedit_updates)``, so:
+
+* any process can do it — there is no "not my session, skip" case, and
+  ``rebase_session`` is plain sync rather than async;
+* the update commutes with concurrent keystrokes, so there is no ``RACED``
+  outcome, no generation check and no ``expected_seq`` compare-and-swap;
+* clients receive the fold as normal traffic instead of a resync.
+
+What's left to assert is narrower and more behavioural: the merged text lands in
+the session, it's *logged* (so a peer that missed the broadcast still converges,
+and a later checkpoint replays it), ``base_sha`` advances, and an overlap defers
+to the checkpoint engine.
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
-from pycrdt import XmlFragment
+from pycrdt import Doc, XmlFragment
 
 from app.auth import users as users_repo
-from app.models.wiki import ChangeKind
 from app.tasks import coedit_rebase as coedit_rebase_task
-from app.wiki import coedit, coedit_checkpoint, coedit_rebase, coedit_room
+from app.tasks.queues import coedit_queue
+from app.wiki import coedit, coedit_live, coedit_rebase
 from app.wiki import git as wiki_git
 from app.wiki.markdown_yjs import ROOT_XML_KEY, reconstruct_body, seed_doc_from_markdown
-from app.wiki.utils import commit_and_fan_out
 
 _PATH = "guides/setup.md"
 
@@ -37,37 +41,41 @@ def repo(tmp_repo):
 
 
 def _root(doc):
-    # No return-type annotation — see test_coedit_checkpoint.py's _root for
-    # why (matches the established test_markdown_splice.py precedent).
+    # No return-type annotation — see test_coedit_checkpoint.py's _root.
     return doc.get(ROOT_XML_KEY, type=XmlFragment)
 
 
-def _room(sess, body: str) -> coedit_room.Room:
-    # Includes the initial snapshot (coedit.set_initial_snapshot) even
-    # though rebase_session itself never reads it — only the checkpoint
-    # engine does, but this file's helpers are shared with the one test
-    # here that falls through to a real checkpoint
-    # (test_checkpoint_commit_does_not_self_trigger_rebase), which needs
-    # it; harmless overhead for the rebase-only tests. See
-    # test_coedit_checkpoint.py's _room for the same pattern.
-    doc = seed_doc_from_markdown(body)
-    room = coedit_room.create_room(sess.id, sess.path, doc, body, sess.base_sha)
-    coedit.set_initial_snapshot(sess.id, room.doc.get_update(), body)
-    return room
+def _session(body: str, base_sha: str) -> int:
+    """An active session with the initial snapshot every rebuild starts from."""
+    sess = coedit.open_session(_PATH, base_sha=base_sha)
+    coedit.set_initial_snapshot(sess.id, seed_doc_from_markdown(body).get_update(), body)
+    return sess.id
 
 
-def _edit(sess, room, uid: str, prefix: str) -> None:
-    """Logs the full post-edit Doc state as the update payload, not a
-    placeholder — real, applicable Yjs bytes, since a real checkpoint
-    (see above) now replays them. See test_coedit_checkpoint.py's _edit."""
-    root = _root(room.doc)
-    with room.doc.transaction():
-        root.children[0].children[0].insert(0, prefix)
-    coedit.apply_update(sess.id, update_bytes=room.doc.get_update(), author_user_id=uid)
+def _edit(session_id: int, uid: str, prefix: str) -> None:
+    """Type ``prefix`` at the head of the first block, the way a client would:
+    rebuild from the log, mutate, log the delta. Deliberately a *delta*
+    (``get_update(before)``), not the whole doc state — that's what a client
+    sends, and replaying whole-state payloads would hide a broken delta."""
+    doc, _seq = _rebuild(session_id)
+    before = doc.get_state()
+    with doc.transaction():
+        _root(doc).children[0].children[0].insert(0, prefix)
+    coedit.apply_update(session_id, update_bytes=doc.get_update(before), author_user_id=uid)
 
 
-def _run(coro):
-    return asyncio.run(coro)
+def _rebuild(session_id: int):
+    """The document as any process would reconstruct it: snapshot + every
+    logged update. Mirrors coedit_live._load, which can't hand a Doc back
+    across a thread boundary (PyO3 unsendable), so tests rebuild their own."""
+    sess = coedit.get_session_for_checkpoint(session_id)
+    assert sess is not None and sess.ydoc_snapshot is not None
+    doc = Doc()
+    doc.apply_update(sess.ydoc_snapshot)
+    since = coedit.updates_since(session_id, sess.ydoc_snapshot_seq)
+    for u in since.updates:
+        doc.apply_update(u.update_payload)
+    return doc, since.head_seq
 
 
 # --- rebase_session (engine) ----------------------------------------------- #
@@ -75,372 +83,273 @@ def _run(coro):
 
 def test_rebase_folds_clean_agent_commit(repo):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    doc = "one\ntwo\nthree\nfour\nfive\n"
-    sha = _seed(doc)
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    room = _room(sess, doc)
-    # Human edits inside the live doc; an agent commits a distant
-    # (non-overlapping) change out of band.
-    _edit(sess, room, uid, "EDIT-")
+    body = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed(body)
+    sid = _session(body, sha)
+    coedit.join(sid, uid)
+    # A human edits the first line; an agent commits a distant, non-overlapping
+    # change out of band.
+    _edit(sid, uid, "EDIT-")
     new_sha = wiki_git.commit_file(
         _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
     )
 
-    outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
-    assert outcome == coedit_rebase.RebaseOutcome.APPLIED
+    assert coedit_rebase.rebase_session(sid, new_sha) == coedit_rebase.RebaseOutcome.APPLIED
 
-    st = coedit.get_session(sess.id)
-    assert st is not None
-    # Both edits now live in the doc, which sits on top of the agent's HEAD.
-    live = coedit_room.get_room(sess.id)
-    assert live is not None
-    assert reconstruct_body(live.doc) == "EDIT-one\ntwo\nthree\nfour\nFIVE\n"
-    assert live.base_sha == new_sha
-    assert st.base_sha == new_sha
+    # Both edits are in the document, and it sits on the agent's HEAD.
+    doc, head_seq = _rebuild(sid)
+    assert reconstruct_body(doc) == "EDIT-one\ntwo\nthree\nfour\nFIVE\n"
+    st = coedit.get_session(sid)
+    assert st is not None and st.base_sha == new_sha
+    # Logged as an update, not applied out of band: seq 1 is the human's edit,
+    # seq 2 the fold. That's what lets a peer who missed the broadcast catch up
+    # via get_updates_since, and a later checkpoint replay it.
+    assert head_seq == 2
     assert st.ydoc_seq == 2
 
 
-def test_rebase_skips_when_no_local_room(repo):
-    # A session with no room in this process — the state the periodic
-    # process-locality guard exists for (see coedit_room.py). SKIP for this
-    # reason takes priority over every other check.
-    sha = _seed("x\n")
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    outcome = _run(coedit_rebase.rebase_session(sess.id, "some-other-sha"))
-    assert outcome == coedit_rebase.RebaseOutcome.SKIP
+def test_fold_is_logged_with_no_human_author(repo):
+    # The fold has no author — attributing it to whoever last typed would
+    # credit them with an agent's edit, and coedit_updates.author_user_id is
+    # nullable precisely for this.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    body = "one\ntwo\nthree\n"
+    sha = _seed(body)
+    sid = _session(body, sha)
+    _edit(sid, uid, "EDIT-")
+    new_sha = wiki_git.commit_file(
+        _PATH, "one\ntwo\nTHREE\n", "agent edit", author="Agent <a@x.com>"
+    )
+
+    coedit_rebase.rebase_session(sid, new_sha)
+
+    authors = [u.author_user_id for u in coedit.updates_since(sid, 0).updates]
+    assert authors == [uid, None]
+    # A checkpoint still gets attributed to the human, not to nobody.
+    assert coedit.last_update_author(sid) == uid
 
 
 def test_rebase_skips_when_already_based_on_head(repo):
     sha = _seed("x\n")
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    _room(sess, "x\n")
-    assert _run(coedit_rebase.rebase_session(sess.id, sha)) == coedit_rebase.RebaseOutcome.SKIP
+    sid = _session("x\n", sha)
+    assert coedit_rebase.rebase_session(sid, sha) == coedit_rebase.RebaseOutcome.SKIP
+
+
+def test_rebase_skips_a_closed_session(repo):
+    sha = _seed("one\ntwo\n")
+    sid = _session("one\ntwo\n", sha)
+    coedit.close_session(sid)
+    new_sha = wiki_git.commit_file(_PATH, "one\nTWO\n", "agent", author="A <a@x.com>")
+    assert coedit_rebase.rebase_session(sid, new_sha) == coedit_rebase.RebaseOutcome.SKIP
 
 
 def test_rebase_skips_stale_ancestor_head(repo):
-    # A stale trigger carrying an older head_sha than the session's (already
-    # advanced) base_sha must not "rebase backwards" and revert committed
-    # edits.
+    # A stale trigger can carry an older head_sha than the session's (already
+    # advanced) base_sha. Merging against that older content would diff
+    # backwards and revert committed edits, so it must be skipped.
     old_sha = _seed("one\ntwo\n")
-    sess = coedit.open_session(_PATH, base_sha=old_sha)
-    room = _room(sess, "one\ntwo\n")
+    sid = _session("one\ntwo\n", old_sha)
     # base_sha advances to a descendant (e.g. a checkpoint committed ONE).
     new_sha = wiki_git.commit_file(_PATH, "ONE\ntwo\n", "checkpoint", author="A <a@x.com>")
-    snapshot = seed_doc_from_markdown("ONE\ntwo\n").get_update()
-    coedit_room.reseed(room, snapshot, "ONE\ntwo\n", new_sha)
-    coedit.rebase_onto(
-        sess.id,
-        new_base_sha=new_sha,
-        snapshot=snapshot,
-        body="ONE\ntwo\n",
-        expected_seq=0,
-        checkpointed=True,
-    )
+    coedit.set_base_sha(sid, new_sha)
 
-    # The late trigger still carries old_sha (an ancestor of the current base_sha).
-    outcome = _run(coedit_rebase.rebase_session(sess.id, old_sha))
+    outcome = coedit_rebase.rebase_session(sid, old_sha)
+
     assert outcome == coedit_rebase.RebaseOutcome.SKIP
-    # Doc untouched — the human's committed "ONE" edit is not reverted.
-    st = coedit.get_session(sess.id)
+    st = coedit.get_session(sid)
     assert st is not None and st.base_sha == new_sha
-    assert reconstruct_body(room.doc) == "ONE\ntwo\n"
+    assert st.ydoc_seq == 0  # nothing logged — the document was never touched
 
 
-def _seed_conflict(uid) -> tuple[int, str]:
-    # Human and agent both edit the first line → overlap. Returns (session_id, agent_sha).
-    doc = "one\ntwo\n"
-    sha = _seed(doc)
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    room = _room(sess, doc)
-    _edit(sess, room, uid, "ONE-")
+def _seed_conflict(uid: str) -> tuple[int, str]:
+    """Human and agent both rewrite the first line → overlap.
+    Returns (session_id, agent_sha)."""
+    body = "one\ntwo\n"
+    sha = _seed(body)
+    sid = _session(body, sha)
+    coedit.join(sid, uid)
+    _edit(sid, uid, "ONE-")
     new_sha = wiki_git.commit_file(_PATH, "XXX\ntwo\n", "agent edit", author="Agent <a@x.com>")
-    return sess.id, new_sha
+    return sid, new_sha
 
 
-def test_rebase_session_reports_conflict_and_leaves_doc(repo):
+def test_rebase_reports_conflict_and_leaves_the_document_alone(repo):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sid, new_sha = _seed_conflict(uid)
-    outcome = _run(coedit_rebase.rebase_session(sid, new_sha))
+
+    outcome = coedit_rebase.rebase_session(sid, new_sha)
+
     assert outcome == coedit_rebase.RebaseOutcome.CONFLICT
-    # Overlap is deferred to the checkpoint — the doc is left as the human had it.
-    live = coedit_room.get_room(sid)
-    assert live is not None
-    assert reconstruct_body(live.doc) == "ONE-one\ntwo\n"
+    # Untouched — the checkpoint engine's AI merge resolves this, not us, so
+    # neither the document nor the merge base may move here.
+    doc, _seq = _rebuild(sid)
+    assert reconstruct_body(doc) == "ONE-one\ntwo\n"
+    st = coedit.get_session(sid)
+    assert st is not None and st.base_sha != new_sha
 
 
-def test_rebase_raced_session_is_skipped(repo, monkeypatch):
-    # A concurrent close makes rebase_onto's conditional UPDATE miss; skip
-    # (the checkpoint scan is the backstop for a genuinely stuck session).
-    monkeypatch.setattr(coedit, "rebase_onto", lambda *a, **k: None)
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    sha = _seed("a\nb\n")
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    _room(sess, "a\nb\n")
-    new_sha = wiki_git.commit_file(_PATH, "a\nB\n", "agent edit", author="Agent <a@x.com>")
-    outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
-    assert outcome == coedit_rebase.RebaseOutcome.RACED
-
-
-def test_rebase_passes_expected_seq_from_observed_ydoc_seq(repo, monkeypatch):
-    # rebase_onto's CAS is only as good as what rebase_session passes it —
-    # this pins that expected_seq is sess.ydoc_seq, as observed by
-    # _load_sess. NOT actually read "in the same synchronous stretch as
-    # room_body" (an earlier version of this comment claimed that — wrong,
-    # caught in review: _load_sess's own `await asyncio.to_thread(...)`
-    # means it's read strictly *before* room_body, a real gap a concurrent
-    # edit can land in). That makes expected_seq a coarse, best-effort
-    # DB-level check, not the actual safety guarantee — see
-    # test_rebase_skips_reseed_when_generation_changes_mid_flight below
-    # for the real gate (room.generation) and why expected_seq alone isn't
-    # enough on its own.
-    # Non-overlapping edits (matching test_rebase_folds_clean_agent_commit)
-    # so the 3-way merge is clean and actually reaches rebase_onto — an
-    # overlapping edit hits the CONFLICT branch first, before rebase_onto
-    # is ever called, and this test is specifically about what
-    # rebase_session passes rebase_onto.
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    doc_body = "one\ntwo\nthree\nfour\nfive\n"
-    sha = _seed(doc_body)
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    room = _room(sess, doc_body)
-    _edit(sess, room, uid, "EDIT-")  # bumps ydoc_seq to 1
-    new_sha = wiki_git.commit_file(
-        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
-    )
-
-    captured: dict[str, object] = {}
-
-    def fake_rebase_onto(session_id, **kwargs):
-        captured.update(kwargs)
-        return None
-
-    monkeypatch.setattr(coedit, "rebase_onto", fake_rebase_onto)
-    outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
-    assert outcome == coedit_rebase.RebaseOutcome.RACED
-    assert captured["expected_seq"] == 1
-
-
-def test_rebase_skips_reseed_when_generation_changes_mid_flight(repo, monkeypatch):
-    # Regression test (review): the actual unsafe direction of the CAS gap
-    # — _apply_yjs_frame mutates room.doc synchronously but logs to the DB
-    # as a separate, later-awaited step, so an edit can land on room.doc
-    # without ydoc_seq having moved yet by the time rebase_onto's own
-    # DB-level CAS runs. That CAS alone would pass in this exact scenario
-    # (nothing bumped ydoc_seq), and reseeding would silently wipe the
-    # edit — confirmed in review, with a repro. room.generation (bumped
-    # synchronously with every room.doc content mutation, independent of
-    # the DB) is the real gate; this simulates the edit landing during the
-    # merge's own await window, without touching room.doc directly (would
-    # violate its thread-affinity — this callback runs via
-    # asyncio.to_thread, not the event loop) — just the plain-int counter
-    # that tracks it, same effect for this test's purposes.
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    doc_body = "one\ntwo\nthree\nfour\nfive\n"
-    sha = _seed(doc_body)
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    room = _room(sess, doc_body)
-    new_sha = wiki_git.commit_file(
-        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
-    )
-
-    real_merge_content = wiki_git.merge_content
-
-    def racing_merge_content(*args, **kwargs):
-        room.generation += 1
-        return real_merge_content(*args, **kwargs)
-
-    monkeypatch.setattr(wiki_git, "merge_content", racing_merge_content)
-
-    outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
-    assert outcome == coedit_rebase.RebaseOutcome.RACED
-
-    # room.doc was never reseeded — still exactly what it was before the
-    # rebase attempt (the merge result never got applied to it).
-    live_room = coedit_room.get_room(sess.id)
-    assert live_room is room
-    assert reconstruct_body(room.doc) == doc_body
-
-
-def test_rebase_noop_when_merge_matches_live_doc(repo):
-    # The external commit, once merged, produces exactly what the doc
-    # already had (e.g. it's a no-op relative to the live edit) — base_sha
-    # still advances, but nothing is reseeded/resynced.
+def test_rebase_noop_advances_base_without_logging_an_update(repo):
+    # The commit, once merged, is exactly what the document already said. Only
+    # the merge base moves, so the next checkpoint diffs against the right
+    # commit.
     #
-    # The agent's commit must be a genuinely different commit from the
-    # session's own base_sha — committing byte-identical content is a
-    # no-op to git.commit_file (nothing staged to commit), so it returns
-    # the *existing* HEAD sha instead of a new one, collapsing new_sha to
-    # base_sha and tripping the "already based on this head" skip path
-    # before ever reaching the merge/NOOP logic this test is about. Here
-    # the human and the agent make the *same* edit independently — the
-    # agent's commit is new, but the merge result equals what the live
-    # doc already converged to on its own.
+    # The agent's commit has to be a genuinely new one: committing
+    # byte-identical content is a no-op to git.commit_file, which then returns
+    # the existing HEAD sha, collapsing new_sha to base_sha and tripping the
+    # already-based-on-head skip before the merge runs at all. So the human and
+    # the agent make the *same* edit independently.
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     sha = _seed("same\n")
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    room = _room(sess, "same\n")
-    _edit(sess, room, uid, "AGENT-")
-    new_sha = wiki_git.commit_file(_PATH, "AGENT-same\n", "no-op agent commit", author="A <a@x.com>")
-    outcome = _run(coedit_rebase.rebase_session(sess.id, new_sha))
-    assert outcome == coedit_rebase.RebaseOutcome.NOOP
-    st = coedit.get_session(sess.id)
-    assert st is not None and st.base_sha == new_sha
-
-
-# --- trigger + cross-process fan-out (app/tasks/coedit_rebase.py) ---------- #
-
-
-def test_conflict_falls_back_to_checkpoint_engine(repo, monkeypatch):
-    # The trigger (not the engine) hands a CONFLICT off to the checkpoint
-    # task — enqueued (via asyncio.to_thread, since the task itself is a
-    # plain sync call now) rather than run inline, stubbed here so the test
-    # verifies the hand-off, not a real LLM call (that's the checkpoint
-    # engine's own concern).
-    calls: list[int] = []
-
-    def fake_checkpoint(session_id: int) -> None:
-        calls.append(session_id)
-
-    monkeypatch.setattr(coedit_rebase_task, "checkpoint_coedit_session_task", fake_checkpoint)
-    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    sid, new_sha = _seed_conflict(uid)
-
-    _run(coedit_rebase_task._rebase_and_maybe_checkpoint(sid, new_sha))
-
-    assert calls == [sid]
-
-
-def test_applied_rebase_does_not_fall_back_to_checkpoint(repo, monkeypatch):
-    calls: list[int] = []
-    monkeypatch.setattr(
-        coedit_rebase_task, "checkpoint_coedit_session_task", lambda sid: calls.append(sid)
+    sid = _session("same\n", sha)
+    coedit.join(sid, uid)
+    _edit(sid, uid, "AGENT-")
+    new_sha = wiki_git.commit_file(
+        _PATH, "AGENT-same\n", "same edit, committed", author="A <a@x.com>"
     )
+
+    outcome = coedit_rebase.rebase_session(sid, new_sha)
+
+    assert outcome == coedit_rebase.RebaseOutcome.NOOP
+    st = coedit.get_session(sid)
+    assert st is not None
+    assert st.base_sha == new_sha
+    assert st.ydoc_seq == 1  # the human's edit only; the fold logged nothing
+
+
+def test_fold_survives_a_concurrent_edit(repo, monkeypatch):
+    # The property the delta buys us, and the reason the old CAS/generation
+    # guards are gone: an edit that lands after the merge has read the document
+    # is not lost, because both are just updates on the same log.
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    # Same non-overlapping-edit shape already proven clean in
-    # test_rebase_folds_clean_agent_commit (human edits the first line,
-    # agent edits a distant, unrelated line) — just driven through the
-    # task layer's _rebase_and_maybe_checkpoint instead of the engine
-    # directly, to check the fallback wiring specifically.
-    doc = "one\ntwo\nthree\nfour\nfive\n"
-    sha = _seed(doc)
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    room = _room(sess, doc)
-    _edit(sess, room, uid, "EDIT-")
+    body = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed(body)
+    sid = _session(body, sha)
+    coedit.join(sid, uid)
     new_sha = wiki_git.commit_file(
         _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
     )
 
-    _run(coedit_rebase_task._rebase_and_maybe_checkpoint(sess.id, new_sha))
+    real_merge_content = coedit_live.merge_content
 
-    assert calls == []  # clean merge — no checkpoint fallback needed
+    def racing_merge_content(*args, **kwargs):
+        # A keystroke landing after the fold has read the document and before it
+        # logs its delta — the exact interleaving that used to force a RACED
+        # skip. Patched on coedit_live, which binds the name at import.
+        _edit(sid, uid, "LATE-")
+        return real_merge_content(*args, **kwargs)
+
+    monkeypatch.setattr(coedit_live, "merge_content", racing_merge_content)
+    outcome = coedit_rebase.rebase_session(sid, new_sha)
+
+    assert outcome == coedit_rebase.RebaseOutcome.APPLIED
+    # Neither edit lost: the late keystroke and the agent's line are both there.
+    updates = coedit.updates_since(sid, 0).updates
+    assert [u.author_user_id for u in updates] == [uid, None]  # keystroke, then fold
+    doc, _seq = _rebuild(sid)
+    assert reconstruct_body(doc) == "LATE-one\ntwo\nthree\nfour\nFIVE\n"
+    st = coedit.get_session(sid)
+    assert st is not None and st.base_sha == new_sha
 
 
-def test_try_local_schedules_when_room_present(repo, monkeypatch):
-    scheduled: list[tuple[int, str]] = []
-
-    def fake_run_on_main_loop(coro) -> None:
-        scheduled.append(coro)
-        coro.close()  # never actually run — just proving it was scheduled
-
-    monkeypatch.setattr(coedit_room, "run_on_main_loop", fake_run_on_main_loop)
-    sha = _seed("x\n")
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    _room(sess, "x\n")
-
-    coedit_rebase_task._try_local(sess.id, "new-sha")
-    assert len(scheduled) == 1
+# --- the trigger (app/tasks/coedit_rebase.py) ------------------------------ #
 
 
-def test_try_local_noop_without_a_room(repo, monkeypatch):
-    scheduled: list[object] = []
-    monkeypatch.setattr(coedit_room, "run_on_main_loop", lambda coro: scheduled.append(coro))
-    sha = _seed("x\n")
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    # No room created for this session in this process.
-    coedit_rebase_task._try_local(sess.id, "new-sha")
-    assert scheduled == []
+def test_on_wiki_commit_enqueues_for_an_active_session(repo, monkeypatch):
+    body = "one\ntwo\n"
+    sha = _seed(body)
+    sid = _session(body, sha)
+    new_sha = wiki_git.commit_file(_PATH, "one\nTWO\n", "agent", author="A <a@x.com>")
+    calls: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        coedit_rebase_task,
+        "rebase_coedit_session",
+        lambda session_id, head_sha: calls.append((session_id, head_sha)),
+    )
+
+    coedit_rebase_task.on_wiki_commit(_PATH, new_sha)
+
+    assert calls == [(sid, new_sha)]
 
 
 def test_on_wiki_commit_skips_when_no_active_session(repo, monkeypatch):
-    calls: list[object] = []
-    monkeypatch.setattr(coedit_rebase_task, "_try_local", lambda *a: calls.append(a))
-    coedit_rebase_task.on_wiki_commit(_PATH, "some-sha")
+    calls: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        coedit_rebase_task,
+        "rebase_coedit_session",
+        lambda session_id, head_sha: calls.append((session_id, head_sha)),
+    )
+    coedit_rebase_task.on_wiki_commit(_PATH, _seed("x\n"))
     assert calls == []
 
 
-def test_on_wiki_commit_skips_own_checkpoint_commit(repo, monkeypatch):
-    # base_sha already equals sha — the session's own checkpoint commit
-    # landing as the after_doc_write callback that fired this. Must not
-    # trigger a rebase against itself.
-    calls: list[object] = []
-    monkeypatch.setattr(coedit_rebase_task, "_try_local", lambda *a: calls.append(a))
+def test_on_wiki_commit_skips_the_sessions_own_checkpoint_commit(repo, monkeypatch):
+    # base_sha already equals sha — the session's own checkpoint commit landing
+    # as the after_doc_write callback that fired this. Must not fold a session's
+    # own save back into itself.
     sha = _seed("x\n")
-    coedit.open_session(_PATH, base_sha=sha)
+    _session("x\n", sha)
+    calls: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        coedit_rebase_task,
+        "rebase_coedit_session",
+        lambda session_id, head_sha: calls.append((session_id, head_sha)),
+    )
     coedit_rebase_task.on_wiki_commit(_PATH, sha)
     assert calls == []
 
 
-def test_agent_commit_through_gateway_triggers_live_rebase(repo, monkeypatch):
-    # End-to-end wiring: a commit through commit_and_fan_out -> after_doc_write
-    # -> on_wiki_commit fans out over the bus and tries locally; since this
-    # process holds the session's room, the rebase runs as a callback
-    # scheduled onto (in this test) the loop the whole thing executes on.
+def test_conflict_falls_back_to_the_checkpoint_engine(repo, monkeypatch):
+    # The task, not the engine, hands a CONFLICT to the checkpoint engine —
+    # enqueued rather than run inline so a long LLM merge doesn't hold this
+    # task's co-edit queue slot. Stubbed, so this checks the hand-off, not the
+    # merge (that's the checkpoint engine's own tests).
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    doc = "one\ntwo\nthree\nfour\nfive\n"
-    sha = _seed(doc)
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    room = _room(sess, doc)
-    _edit(sess, room, uid, "EDIT-")
+    sid, new_sha = _seed_conflict(uid)
+    enqueued: list[int] = []
+    monkeypatch.setattr(
+        coedit_rebase_task, "checkpoint_coedit_session_task", enqueued.append
+    )
 
-    async def run():
-        monkeypatch.setattr(coedit_room, "_main_loop", asyncio.get_running_loop())
-        result = commit_and_fan_out(
-            _PATH,
-            "one\ntwo\nthree\nfour\nFIVE\n",
-            "agent edit",
-            change_kind=ChangeKind.EDIT,
-            base_body=doc,
-            skip_acl=True,
-            record_activity=False,
-        )
-        assert result is not None
-        # The rebase is scheduled as a fire-and-forget callback on this same
-        # loop (run_coroutine_threadsafe) — poll briefly for it to land
-        # rather than assume it's synchronous.
-        for _ in range(50):
-            live = coedit_room.get_room(sess.id)
-            if live is not None and live.base_sha == result.sha:
-                return result
-            await asyncio.sleep(0.02)
-        return result
+    with coedit_queue.immediate_mode():
+        coedit_rebase_task.rebase_coedit_session(sid, new_sha)
 
-    result = asyncio.run(run())
-    live = coedit_room.get_room(sess.id)
-    assert live is not None
-    assert live.base_sha == result.sha
-    assert reconstruct_body(live.doc) == "EDIT-one\ntwo\nthree\nfour\nFIVE\n"
+    assert enqueued == [sid]
 
 
-def test_checkpoint_commit_does_not_self_trigger_rebase(repo, monkeypatch):
-    calls: list[tuple] = []
-    monkeypatch.setattr(coedit_rebase_task, "on_wiki_commit", lambda *a, **k: calls.append(a))
+def test_applied_rebase_does_not_fall_back_to_the_checkpoint_engine(repo, monkeypatch):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
-    sha = _seed("hello world")
-    sess = coedit.open_session(_PATH, base_sha=sha)
-    coedit.join(sess.id, uid)
-    room = _room(sess, "hello world")
-    _edit(sess, room, uid, "hi ")
+    body = "one\ntwo\nthree\nfour\nfive\n"
+    sha = _seed(body)
+    sid = _session(body, sha)
+    coedit.join(sid, uid)
+    _edit(sid, uid, "EDIT-")
+    new_sha = wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
+    enqueued: list[int] = []
+    monkeypatch.setattr(
+        coedit_rebase_task, "checkpoint_coedit_session_task", enqueued.append
+    )
 
-    coedit_checkpoint.checkpoint_session(sess.id)  # sync now — no _run wrapper needed
+    with coedit_queue.immediate_mode():
+        coedit_rebase_task.rebase_coedit_session(sid, new_sha)
 
-    # The checkpoint's commit passes trigger_coedit_rebase=False — its own
-    # commit must not be folded back into the session as an inbound rebase.
-    assert calls == []
+    assert enqueued == []  # clean merge — no fallback needed
+
+
+def test_live_read_reflects_a_folded_commit(repo):
+    # What a page read returns while a session is open. Any process can serve
+    # it now, so this is also the check that the fold is durable rather than
+    # resident in whichever worker did it.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    body = "one\ntwo\nthree\n"
+    sha = _seed(body)
+    sid = _session(body, sha)
+    _edit(sid, uid, "EDIT-")
+    new_sha = wiki_git.commit_file(
+        _PATH, "one\ntwo\nTHREE\n", "agent edit", author="Agent <a@x.com>"
+    )
+
+    coedit_rebase.rebase_session(sid, new_sha)
+
+    assert coedit_live.read_body(sid) == "EDIT-one\ntwo\nTHREE\n"

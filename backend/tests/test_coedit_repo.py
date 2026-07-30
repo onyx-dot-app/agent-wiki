@@ -8,7 +8,6 @@ imports ``pycrdt`` (see its own docstring), so these tests don't need a real
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import pytest
@@ -134,96 +133,41 @@ def test_last_update_author_returns_most_recent(users):
     assert coedit.last_update_author(s.id) == "usr_b"
 
 
-def test_rebase_onto_bumps_seq_and_clears_updates(users):
+def test_set_base_sha_advances_the_merge_base(users):
+    # All a live-rebase records now: the fold itself is an ordinary logged
+    # update, so nothing here swaps a snapshot, prunes the log or bumps a
+    # watermark — the CAS, the lock and the snapshot swap the OT-era
+    # ``rebase_onto`` needed all went with it.
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
-    res = coedit.rebase_onto(
-        s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=1, checkpointed=False
-    )
-    assert res is not None
-    assert res.ydoc_seq == 2
-    assert res.base_sha == "sha2"
-    assert res.ydoc_checkpointed_seq == 0  # checkpointed=False leaves the watermark alone
-    assert coedit.updates_since(s.id, 0).updates == []
-    # The snapshot moves with the rebase, to the new ydoc_seq — otherwise a
-    # later checkpoint would rebuild from a stale snapshot plus the
-    # now-empty update log and drop everything since the last advance.
-    row = coedit.get_session_for_checkpoint(s.id)
-    assert row is not None
-    assert row.ydoc_snapshot == b"snap"
-    assert row.ydoc_snapshot_seq == 2
+
+    assert coedit.set_base_sha(s.id, "sha2") is True
+
+    fetched = coedit.get_active_session(_PATH)
+    assert fetched is not None
+    assert fetched.base_sha == "sha2"
+    assert fetched.ydoc_seq == 1  # untouched
+    assert fetched.ydoc_checkpointed_seq == 0  # still dirty
+    assert [u.seq for u in coedit.updates_since(s.id, 0).updates] == [1]  # log intact
 
 
-def test_rebase_onto_checkpointed_advances_watermark(users):
+def test_set_base_sha_closed_session_returns_false(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
-    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
-    res = coedit.rebase_onto(
-        s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=1, checkpointed=True
-    )
-    assert res is not None
-    assert res.ydoc_checkpointed_seq == res.ydoc_seq
-    assert res.last_checkpoint_at is not None
-
-
-def test_rebase_onto_closed_session_returns_none(users):
-    s = coedit.open_session(_PATH, base_sha=None)
     coedit.close_session(s.id)
-    assert (
-        coedit.rebase_onto(
-            s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=0, checkpointed=False
-        )
-        is None
-    )
+    assert coedit.set_base_sha(s.id, "sha2") is False
 
 
-def test_rebase_onto_seq_mismatch_returns_none(users):
-    # A concurrent edit bumped ydoc_seq past what the caller observed when it
-    # built snapshot/body — same CAS-miss shape as a closed session: the
-    # rebase must no-op rather than clobber that edit's log row/content (the
-    # bug this test guards: main's OT-era rebase had a base_version CAS for
-    # exactly this race, lost in the CRDT rewrite until restored).
-    s = coedit.open_session(_PATH, base_sha="sha1")
-    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
-    assert (
-        coedit.rebase_onto(
-            s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=0, checkpointed=False
-        )
-        is None
-    )
-    # Nothing observable changed: the concurrent edit's row/watermark survive.
-    fetched = coedit.get_active_session(_PATH)
-    assert fetched is not None
-    assert fetched.base_sha == "sha1"
-    assert fetched.ydoc_seq == 1
-    assert len(coedit.updates_since(s.id, 0).updates) == 1
+def test_has_snapshot_reflects_the_initial_seed(users):
+    # The WS connect path branches on this to decide whether it still owes the
+    # session a snapshot; SessionRow deliberately doesn't carry the blob.
+    s = coedit.open_session(_PATH, base_sha=None)
+    assert coedit.has_snapshot(s.id) is False
+    coedit.set_initial_snapshot(s.id, b"snap", "body")
+    assert coedit.has_snapshot(s.id) is True
 
 
-def test_rebase_onto_returns_none_when_checkpoint_lock_busy(users, monkeypatch):
-    # Regression test (review): rebase_onto used to write directly, with
-    # no checkpoint_lock at all — a concurrent rebase_onto/checkpoint could
-    # land its own delete-all-then-advance between a reader's two separate
-    # reads (get_session_for_checkpoint then updates_since), yielding a
-    # stale snapshot paired with an already-pruned update log. Taking the
-    # lock closes that; this pins the "can't get it" half specifically —
-    # a busy lock must make the whole call a no-op (same as a CAS miss),
-    # never proceed unprotected.
-    @contextmanager
-    def fake_busy_lock(session_id: int, *, timeout_ms: int | None = None):
-        yield False
-
-    monkeypatch.setattr(coedit, "checkpoint_lock", fake_busy_lock)
-    s = coedit.open_session(_PATH, base_sha="sha1")
-    assert (
-        coedit.rebase_onto(
-            s.id, new_base_sha="sha2", snapshot=b"snap", body="body", expected_seq=0, checkpointed=False
-        )
-        is None
-    )
-    # Nothing changed — the whole write was skipped, not partially applied.
-    fetched = coedit.get_active_session(_PATH)
-    assert fetched is not None
-    assert fetched.base_sha == "sha1"
-    assert fetched.ydoc_seq == 0
+def test_has_snapshot_of_a_missing_session_is_false(users):
+    assert coedit.has_snapshot(999999) is False
 
 
 def test_participants_join_touch_leave(users):
@@ -325,11 +269,9 @@ def test_advance_checkpoint_never_regresses(users):
 
 
 def test_advance_checkpoint_prunes_only_up_to_seq(users):
-    # A later update (one that landed after this checkpoint's own read of
-    # the log) must survive pruning — exactly the bug the old
-    # rebase_onto(checkpointed=True)'s unconditional delete had: pruning and
-    # the snapshot watermark have to move in lockstep, never past what was
-    # actually captured.
+    # A later update (one that landed after this checkpoint's own read of the
+    # log) must survive pruning: pruning and the snapshot watermark have to
+    # move in lockstep, never past what was actually captured.
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")  # seq 1
     coedit.advance_checkpoint(s.id, seq=1, snapshot=b"snap1", body="body", base_sha="sha2")

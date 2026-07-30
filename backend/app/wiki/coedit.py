@@ -320,7 +320,7 @@ class UpdateRow(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     seq: int
-    author_user_id: str
+    author_user_id: str | None  # None for a server-produced update
     client_id: str | None
     update_payload: bytes
     created_at: str
@@ -336,11 +336,37 @@ class UpdatesSince(BaseModel):
     updates: list[UpdateRow]
 
 
+def has_snapshot(session_id: int) -> bool:
+    """Whether the session has its initial snapshot, i.e. is rebuildable.
+
+    A boolean rather than a ``SessionRow`` field: the snapshot is a
+    potentially large blob, and every caller of this only needs to know
+    whether seeding one is still owed (see ``SessionRow``'s own docstring).
+    """
+    with session() as s:
+        return (
+            s.scalars(
+                select(CoeditSession.id).where(
+                    CoeditSession.id == session_id,
+                    CoeditSession.ydoc_snapshot.is_not(None),
+                )
+            ).first()
+            is not None
+        )
+
+
 def apply_update(
-    session_id: int, *, update_bytes: bytes, author_user_id: str, client_id: str | None = None
+    session_id: int,
+    *,
+    update_bytes: bytes,
+    author_user_id: str | None,
+    client_id: str | None = None,
 ) -> int | None:
     """Durably log an already-applied Yjs update, returning its assigned
     seq (or ``None`` if the session isn't active).
+
+    ``author_user_id=None`` marks a server-produced update — a live-rebase
+    fold of an out-of-band commit has no human author.
 
     Unlike the OT-era ``apply_op``, there's no version-conflict rejection:
     CRDT merges are commutative, and the merge itself already happened at
@@ -532,13 +558,17 @@ def sessions_due_for_checkpoint(
 
 
 def last_update_author(session_id: int) -> str | None:
-    """The user who applied the most recent update (highest seq), or None if
-    the session has no logged updates yet. Used to attribute a checkpoint
-    commit."""
+    """The user who applied the most recent human update (highest seq), or None
+    if the session has no such update yet. Used to attribute a checkpoint
+    commit — so server-produced updates (NULL author: a live-rebase fold) are
+    skipped rather than costing the commit its attribution."""
     with session() as s:
         return s.scalars(
             select(CoeditUpdate.author_user_id)
-            .where(CoeditUpdate.session_id == session_id)
+            .where(
+                CoeditUpdate.session_id == session_id,
+                CoeditUpdate.author_user_id.is_not(None),
+            )
             .order_by(CoeditUpdate.seq.desc())
             .limit(1)
         ).first()

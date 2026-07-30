@@ -29,13 +29,13 @@ from __future__ import annotations
 
 import logging
 
-from pycrdt import Doc
+from pycrdt import Doc, create_update_message
 from pydantic import BaseModel, ConfigDict
 
 from app.auth import User, set_current_user
 from app.auth import users as users_repo
 from app.models.wiki import ChangeKind
-from app.wiki import coedit, filesystem
+from app.wiki import coedit, coedit_channel, filesystem
 from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
 from app.wiki import markdown_splice, markdown_yjs
@@ -364,14 +364,19 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         # discarding that lineage for a fresh seed_doc_from_markdown parse
         # — any edit logged *up to* replayed_seq is already folded into
         # this doc by the loop above; only a concurrent edit logged beyond
-        # the fold-in bound (still live, still landing on the *room's* doc
-        # the whole time — checkpointing never touches it) is generated
+        # the fold-in bound (still live, still landing in the log the whole
+        # time — checkpointing never blocks editing) is generated
         # against this doc's lineage without being reflected in it yet,
         # and a fresh, unrelated lineage couldn't integrate it later
         # either way (confirmed in review — silent, total loss, not an
         # error) — preserving lineage here is strictly better regardless.
         # See apply_markdown_diff's own docstring.
         diverged = result.new_body != body
+        # The state connected clients are on, captured before the finalizing
+        # mutations below, so a divergence can be handed to them as a plain
+        # delta (see the broadcast after advance_checkpoint).
+        pre_finalize = doc.get_state()
+        reseeded = False
         if diverged:
             if not markdown_splice.apply_markdown_diff(doc, body, result.new_body):
                 # doc's children don't correspond 1:1 to a fresh parse of
@@ -382,6 +387,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 # behavior rather than risk misapplying the diff (no worse
                 # than before this fix for this rarer, compounding case).
                 doc = markdown_yjs.seed_doc_from_markdown(result.new_body)
+                reseeded = True
             else:
                 markdown_splice.restamp_block_ids(doc, result.new_body)
         else:
@@ -392,6 +398,26 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             session_id, seq=replayed_seq, snapshot=snapshot, body=result.new_body, base_sha=result.sha
         )
         wiki_drafts.clear_if_diverged(path, result.new_body)
+        if diverged:
+            if reseeded:
+                # A fresh lineage shares no history with what clients hold, so
+                # there is no delta to send: they converge on their next
+                # reconnect handshake, against the snapshot just written.
+                log.warning(
+                    "coedit checkpoint: session %s reseeded on divergence; connected "
+                    "clients stay on pre-merge content until they reconnect",
+                    session_id,
+                )
+            else:
+                # Durable state first (above), then tell the editors. Sent as an
+                # ordinary update — the same lineage they're on, so they
+                # integrate it and rebase their own pending edits over it. seq
+                # is None because this isn't a logged row: the snapshot carries
+                # it durably, and logging it would leave ydoc_seq ahead of the
+                # watermark, marking the session dirty again immediately.
+                coedit_channel.broadcast_yjs(
+                    session_id, create_update_message(doc.get_update(pre_finalize))
+                )
         return CheckpointOutcome(
             session_id=session_id,
             sha=result.sha,

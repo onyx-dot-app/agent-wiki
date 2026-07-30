@@ -343,18 +343,23 @@ async def _send_loop(
 
 def _seed_snapshot_sync(session_id: int, path: str, base_sha: str | None) -> bool:
     """Give a brand-new session its initial snapshot; True if the page is
-    representable.
+    representable (or already has one).
 
     Runs entirely in one thread hop, and that is deliberate: the ``Doc`` built
     here is a PyO3 unsendable type, so it is created, read (``get_update``) and
     dropped without ever leaving this call. Nothing keeps it — the snapshot
-    bytes plus the update log are the document from here on.
+    bytes plus the update log are the document from here on. The
+    already-seeded check belongs in here for the same reason: it keeps the
+    common case (every connection after the first) to one hop and skips the
+    git read.
 
     ``set_initial_snapshot`` is conditional on ``ydoc_snapshot IS NULL``, so
     two processes connecting at once race harmlessly: the loser's snapshot is
     discarded and both then rebuild from the winner's, which is the same
     lineage either way.
     """
+    if coedit.has_snapshot(session_id):
+        return True
     body = git.read_file_opt(path, base_sha or "HEAD") or ""
     try:
         doc = seed_doc_from_markdown(body)
@@ -373,8 +378,6 @@ async def _ensure_snapshot(
     to undo the ``coedit.join`` that ``_connect_sync`` already did, or the
     caller lingers as a participant whose heartbeat nothing refreshes.
     """
-    if sess.ydoc_snapshot is not None:
-        return True
     try:
         ok = await asyncio.to_thread(
             _seed_snapshot_sync, sess.id, sess.path, sess.base_sha
@@ -405,6 +408,7 @@ async def _ensure_snapshot(
     return True
 
 
+@router.websocket("/ws")
 async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_ws)) -> None:
     """``path`` is a query param (``?path=...``), not a URL segment — this
     app owns both ends of the connection URL, so there's no need for
@@ -412,19 +416,16 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
 
     Joining is opening the page — presence + the live document — so
     connecting requires only read; see the module docstring for the write
-    gate. This process's existing room (if it holds one) is adopted as-is.
-    Otherwise — a second worker process, a restart, a rolling deploy, or
-    truly the session's first-ever connection anywhere — the room is
-    rebuilt from durable state: rehydrated from
-    ``(ydoc_snapshot, coedit_updates)`` (the same replay
-    ``coedit_checkpoint.py``'s engine does) if the session already has a
-    snapshot, or seeded fresh from the page's git HEAD only for a session
-    that has never had one. Seeding from git unconditionally here used to
-    silently diverge two processes' rooms onto incompatible CRDT lineages
-    the moment more than one worker (the deployed default) or a restart was
-    involved — confirmed in review: an update logged against one lineage
-    is integrated by neither the other worker's room nor a later
-    checkpoint replaying onto the persisted snapshot.
+    gate.
+
+    Nothing process-local is set up here. The document is whatever
+    ``(ydoc_snapshot, coedit_updates)`` replays to, so every connection —
+    first or thousandth, this worker or another — answers from the same
+    durable state. Only a session that has never been connected to anywhere
+    gets seeded from the page's git HEAD (``_ensure_snapshot``); seeding on
+    each connect would mint a fresh CRDT lineage per worker, and an update
+    logged against one lineage integrates into neither the other's nor a
+    later checkpoint's replay.
     """
     sess, can_write = await asyncio.to_thread(_connect_sync, path, user)
     if not await _ensure_snapshot(sess, user, websocket):

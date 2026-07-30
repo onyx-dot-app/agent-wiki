@@ -103,11 +103,14 @@ def upgrade() -> None:
                 nullable=False,
             ),
             sa.Column("seq", sa.BigInteger(), nullable=False),
+            # Nullable — a server-produced update (a live-rebase fold) has no
+            # human author. The OT-era coedit_ops column it replaces was NOT
+            # NULL because every op came from a client.
             sa.Column(
                 "author_user_id",
                 sa.Text(),
                 sa.ForeignKey("users.id", ondelete="CASCADE"),
-                nullable=False,
+                nullable=True,
             ),
             sa.Column("client_id", sa.Text(), nullable=True),
             sa.Column("update_payload", sa.LargeBinary(), nullable=False),
@@ -120,6 +123,13 @@ def upgrade() -> None:
                 ),
             ),
             sa.UniqueConstraint("session_id", "seq", name="idx_coedit_updates_session_seq"),
+        )
+    else:
+        # Already present — either from 0001_initial's create_all, or from an
+        # earlier run of this migration when the column was still NOT NULL.
+        # Idempotent in the first case.
+        op.alter_column(
+            "coedit_updates", "author_user_id", existing_type=sa.Text(), nullable=True
         )
 
 

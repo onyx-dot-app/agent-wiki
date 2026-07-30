@@ -1059,8 +1059,11 @@ class CoeditUpdate(Base):
         BigInteger, ForeignKey("coedit_sessions.id", ondelete="CASCADE"), nullable=False
     )
     seq: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    author_user_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    # Nullable: NULL means the server itself produced the update, not a
+    # person — a live-rebase fold of an out-of-band commit
+    # (app/wiki/coedit_rebase.py) is a real logged update with no human author.
+    author_user_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="CASCADE")
     )
     # Opaque per-connection id (one editor tab), distinct from author_user_id
     # (a user with two tabs shares one user id). Nullable: non-collab writers

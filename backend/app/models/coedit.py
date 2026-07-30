@@ -91,5 +91,3 @@ class PresenceFrame(BaseModel):
     type: str = "presence"
     session_id: int
     participants: list[ParticipantOut]
-
-
