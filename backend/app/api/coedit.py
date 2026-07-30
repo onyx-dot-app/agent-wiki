@@ -17,12 +17,12 @@ and that is one of the reasons not to hold one.
 A "co-edit session" is the page's *live session*: everyone viewing the page
 joins it (read-gated — presence + the live document), and writing (applying
 sync/awareness updates that change content, checkpointing) is a capability
-inside it, gated once at connect time via ``can_write`` and closed over for
-the connection's lifetime — a known, carried-forward limitation (a
-mid-session ACL change doesn't take effect until reconnect), not solved
-here. Presence labels editors vs viewers client-side from Awareness state —
-a rendered caret IS the "editing" state; the server stores nothing for it
-beyond relaying it.
+inside it. The ``can_write`` in the join frame is advisory — what the client
+uses to render itself read-only — while enforcement is re-resolved per message
+(``_authorize``), so revoking access takes effect on the sender's next frame
+rather than their next reconnect. Presence labels editors vs viewers
+client-side from Awareness state — a rendered caret IS the "editing" state; the
+server stores nothing for it beyond relaying it.
 
 No client-sent "leave" message: the server's disconnect handler (``finally``
 below) is the sole leave signal, firing on any connection loss — explicit
@@ -109,6 +109,31 @@ def _connect_sync(path: str, user: User) -> tuple[coedit.SessionRow, bool]:
     return sess, can_write
 
 
+def _authorize(session_id: int, user: User, action: str) -> str | None:
+    """Re-resolve ``action`` for one message; returns the session's current path,
+    or ``None`` if the message must be dropped.
+
+    Per message, not per connection. A capability resolved once at connect and
+    closed over for the socket's lifetime lets a revoked editor keep applying
+    updates — and keep committing them — until they happen to reconnect, which
+    could be hours. `main` enforced it per message (its `_require_active`), so
+    this is parity, not new strictness.
+
+    Re-reading the session is part of the check, not overhead: it picks up a
+    session closed underneath us, and a mid-session page move (`on_path_moved`
+    re-keys the row), so the ACL is evaluated against the path the page lives at
+    *now* rather than the one it had at connect.
+
+    Called from ``asyncio.to_thread`` like every other blocking call here.
+    """
+    sess = coedit.get_session(session_id)
+    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
+        return None
+    if not acl.can(user.id, user.is_admin, action, sess.path):
+        return None
+    return sess.path
+
+
 def _sync_update_frame(update: bytes) -> bytes:
     """Wrap raw update bytes as a y-protocol SYNC_UPDATE message.
 
@@ -122,11 +147,14 @@ def _sync_update_frame(update: bytes) -> bytes:
 def _apply_yjs_frame(
     conn: coedit_channel.Connection,
     session_id: int,
-    can_write: bool,
+    user: User,
     raw: bytes,
 ) -> bytes | None:
     """Validate, then hand back the update bytes to durably log; ``None`` when
-    nothing content-changing happened.
+    nothing content-changing happened or the sender isn't allowed to send it.
+
+    Permission is resolved here, per frame (``_authorize``), never from a value
+    captured at connect.
 
     There is no resident ``Doc`` to mutate here. A client update is checked for
     integrability against a scratch doc (~2 µs) and then appended to the log,
@@ -147,11 +175,15 @@ def _apply_yjs_frame(
             return None
         sync_type = inner[0]
         is_content = sync_type in (YSyncMessageType.SYNC_STEP2, YSyncMessageType.SYNC_UPDATE)
-        if is_content and not can_write:
+        if is_content and _authorize(session_id, user, "write") is None:
             return None
         if not is_content:
-            # SYNC_STEP1: reply with whatever this client is missing, computed
-            # from a doc built for this call and dropped with it.
+            # SYNC_STEP1 answers with document content, so it needs read — which
+            # can be revoked mid-session just like write.
+            if _authorize(session_id, user, "read") is None:
+                return None
+            # Reply with whatever this client is missing, computed from a doc
+            # built for this call and dropped with it.
             try:
                 reply = coedit_live.sync_reply(session_id, raw)
             except coedit_live.SessionGone:
@@ -171,8 +203,8 @@ def _apply_yjs_frame(
             return None
         return update
     if msg_type == YMessageType.AWARENESS:
-        if not can_write:
-            return None  # a read-only viewer has no caret to show
+        if _authorize(session_id, user, "write") is None:
+            return None  # a viewer — or a just-revoked editor — has no caret to show
         # Relayed as opaque bytes. The server holds no Awareness: nothing reads
         # its states, and a late joiner receives no awareness backlog either
         # way, so there is nothing for a resident copy to serve.
@@ -186,7 +218,6 @@ async def _recv_loop(
     conn: coedit_channel.Connection,
     session_id: int,
     user: User,
-    can_write: bool,
 ) -> None:
     while True:
         # Low-level receive() (not receive_bytes()/receive_json()) so one
@@ -200,7 +231,7 @@ async def _recv_loop(
         data = msg.get("bytes")
         if data is not None:
             update_bytes = await asyncio.to_thread(
-                _apply_yjs_frame, conn, session_id, can_write, data
+                _apply_yjs_frame, conn, session_id, user, data
             )
             if update_bytes is not None:
                 # Log *before* relaying, so the broadcast can carry the seq the
@@ -235,6 +266,8 @@ async def _recv_loop(
             # A client that saw a gap in the relay stream asks for what it
             # missed. Room-less this is the whole recovery path for a dropped
             # relay — without it a client stays diverged until it reconnects.
+            if await asyncio.to_thread(_authorize, session_id, user, "read") is None:
+                continue
             missed = await asyncio.to_thread(coedit.updates_since, session_id, since.since_seq)
             for u in missed.updates:
                 conn.post(
@@ -250,7 +283,7 @@ async def _recv_loop(
             checkpoint_msg = CheckpointMessage.model_validate(parsed)
         except ValidationError:
             continue
-        if not can_write:
+        if await asyncio.to_thread(_authorize, session_id, user, "write") is None:
             conn.post(
                 CheckpointResultFrame(
                     request_id=checkpoint_msg.request_id, ok=False, error="forbidden"
@@ -442,9 +475,7 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
             await asyncio.to_thread(coedit_live.initial_sync_message, sess.id)
         )
 
-        recv_task = asyncio.create_task(
-            _recv_loop(websocket, conn, sess.id, user, can_write)
-        )
+        recv_task = asyncio.create_task(_recv_loop(websocket, conn, sess.id, user))
         send_task = asyncio.create_task(_send_loop(websocket, conn, ready, sess.id, user.id))
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED

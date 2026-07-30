@@ -131,6 +131,28 @@ def upgrade() -> None:
             "coedit_updates", "author_user_id", existing_type=sa.Text(), nullable=True
         )
 
+    # Retire any session that predates this schema, and zero its watermarks.
+    #
+    # Its live content was `buffer_text` plus the `coedit_ops` log, both dropped
+    # above: an OT range-op log can't be converted into a Yjs update log (the
+    # CRDT lineage it would need doesn't exist), so an edit that hadn't reached
+    # git is gone. That loss is accepted — pre-production, one clean cut. What
+    # is *not* acceptable is leaving the row ACTIVE with its old counters:
+    # `ydoc_seq`/`ydoc_checkpointed_seq` carry the renamed OT values, so the row
+    # reads as permanently dirty against an empty update log. The periodic scan
+    # would re-enqueue a checkpoint for it every minute forever — skipped on the
+    # no-snapshot guard until someone opens the page, and then committing on
+    # every pass, since `set_initial_snapshot` stamps `ydoc_snapshot_seq = 0`
+    # and never lowers `ydoc_seq` to match. Closing the row ends that: the
+    # closed+dirty guard in `checkpoint_session` refuses to commit it, and
+    # opening the page mints a fresh session seeded from git HEAD.
+    op.execute(
+        sa.text(
+            "UPDATE coedit_sessions SET status = 'closed', ydoc_seq = 0,"
+            " ydoc_checkpointed_seq = 0 WHERE status = 'active'"
+        )
+    )
+
 
 def downgrade() -> None:
     inspector = sa.inspect(op.get_bind())

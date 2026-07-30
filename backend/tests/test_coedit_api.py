@@ -540,23 +540,21 @@ def test_op_requires_write(client):
             assert after and after[0].last_edited_at is None
 
 
-def test_write_permission_revoked_mid_session_does_not_gate_open_connection_but_blocks_reconnect(client):
-    # can_write is resolved once at connect time (_connect_sync) and closed
-    # over for the connection's whole lifetime (app/api/coedit.py's own
-    # module docstring calls this out as a known, accepted limitation — a
-    # mid-session ACL change takes effect on the *next reconnect*, not the
-    # next message). So a revoke doesn't retroactively gate an update sent
-    # later on the same, already-open connection — but connecting fresh
-    # afterward re-resolves can_write and does see it.
+def test_write_permission_revoked_mid_session_blocks_the_next_frame(client):
+    # Enforcement is re-resolved per message (_authorize), not captured at
+    # connect: a revoked editor must stop being able to write on their *next
+    # frame*, not on their next reconnect. Treating the connect-time capability
+    # as the gate let a revoked editor keep applying updates — and keep
+    # committing them, since a checkpoint is a real git write — for as long as
+    # they left the tab open.
     owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     editor = users_repo.create(email="editor@x.com", password="hunter2-x", name="Editor")
     _seed_page("hello world")
     acl.set_owner(_PATH, owner)
     # A separate, never-revoked read grant: "write" implies "read" (see
-    # acl.effective) only while the write grant is active — revoking it
-    # alone would otherwise leave editor with zero permissions at all,
-    # failing the reconnect's own require_can("read", ...) gate (403)
-    # before ever reaching the can_write resolution this test is about.
+    # acl.effective) only while the write grant is active — revoking it alone
+    # would otherwise leave editor with no permissions at all, so the frame
+    # would be dropped for lacking *read*, which isn't what this test is about.
     acl.grant(
         resource_kind="page",
         resource_path=_PATH,
@@ -576,23 +574,64 @@ def test_write_permission_revoked_mid_session_does_not_gate_open_connection_but_
 
     login_fastapi(client, editor)
     with _ws(client) as (ws, joined, doc):
+        sid = joined["session_id"]
+        assert joined["can_write"] is True
         _send_content(ws, _edit_bytes(doc, "EDITED "))
-        _wait_for(lambda: _ydoc_seq_at_least(joined["session_id"], 1))
-        acl.revoke(entry_id)
-        _send_content(ws, _edit_bytes(doc, "MORE "))
-        _wait_for(lambda: _ydoc_seq_at_least(joined["session_id"], 2))
-        after = coedit.get_session(joined["session_id"])
-        assert after is not None and after.ydoc_seq == 2  # still applied — same open connection
+        _wait_for(lambda: _ydoc_seq_at_least(sid, 1))
+        before = coedit.get_session(sid)
+        assert before is not None and before.ydoc_seq == 1
 
-    # A fresh connection re-resolves can_write against the now-revoked ACL.
-    with _ws(client) as (ws2, joined2, doc2):
+        acl.revoke(entry_id)
+
+        # Same open socket, no reconnect: the update must be dropped, so the
+        # durable sequence doesn't move.
+        _send_content(ws, _edit_bytes(doc, "MORE "))
+        time.sleep(0.3)
+        after = coedit.get_session(sid)
+        assert after is not None
+        assert after.ydoc_seq == before.ydoc_seq
+
+        # And a save on that same socket is refused, with a reason.
+        ws.send_json({"type": "checkpoint", "request_id": "c"})
+        result = _recv_typed_json(ws, "checkpoint_result")
+        assert result["ok"] is False
+        assert result["error"] == "forbidden"
+
+    # A fresh connection also reports the revocation up front, so the client
+    # can render itself read-only.
+    with _ws(client) as (_ws2, joined2, _doc2):
         assert joined2["can_write"] is False
-        before = coedit.get_session(joined2["session_id"])
-        _send_content(ws2, _edit_bytes(doc2, "BLOCKED "))
-        time.sleep(0.2)
-        after2 = coedit.get_session(joined2["session_id"])
-        assert before is not None and after2 is not None
-        assert after2.ydoc_seq == before.ydoc_seq  # dropped, unlike on the stale connection
+
+
+def test_read_permission_revoked_mid_session_stops_serving_content(client):
+    # Read is re-resolved per message too. A revoked reader asking for content
+    # (a sync query, or catch-up after a gap) gets nothing — before this was
+    # per-message, revoking read left an open socket happily streaming the page.
+    owner = users_repo.create(email="owner2@x.com", password="hunter2-x", name="Owner")
+    reader = users_repo.create(email="reader@x.com", password="hunter2-x", name="Reader")
+    _seed_page("hello world")
+    acl.set_owner(_PATH, owner)
+    entry_id = acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=reader,
+        permission="read",
+        granted_by_user_id=owner,
+    )
+
+    login_fastapi(client, reader)
+    with _ws(client) as (ws, joined, _doc):
+        acl.revoke(entry_id)
+        # A sync query would otherwise be answered with the document.
+        ws.send_bytes(create_sync_message(Doc()))
+        ws.send_json({"type": "get_updates_since", "since_seq": 0})
+        time.sleep(0.3)
+        # Nothing but the heartbeat may come back; specifically no content.
+        ws.send_json({"type": "checkpoint", "request_id": "c"})
+        result = _recv_typed_json(ws, "checkpoint_result", max_frames=20)
+        assert result["ok"] is False  # read gone → write certainly gone
+        assert joined["can_write"] is False
 
 
 def test_file_read_serves_live_buffer_during_session(client):
