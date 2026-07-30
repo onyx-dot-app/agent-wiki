@@ -55,6 +55,22 @@ const AUTOSAVE_MAX_INTERVAL_MS = 30000;
 const TYPING_IDLE_MS = 1500;
 /** Ms to wait before re-opening a dropped connection. */
 const STREAM_RECONNECT_MS = 3000;
+/** Spacing and cap for retrying a failed save.
+ *
+ * Every failure mode except "forbidden" is transient: the save had no live
+ * socket because the connection was reconnecting, or the socket closed with the
+ * request in flight. Without a retry, one unlucky autosave — 2s after you stop
+ * typing, which is exactly when a reconnect is likely to be in progress — left
+ * "Couldn't save" on screen until the user happened to type again and pause,
+ * because `runAutoCheckpoint` clears the timers before calling and nothing
+ * re-arms them.
+ *
+ * Capped rather than infinite because it isn't the durability mechanism: every
+ * keystroke is already in `coedit_updates` before a checkpoint runs, and the
+ * server's own idle scan commits the session regardless. 10 × 3s comfortably
+ * outlasts a reconnect; past that the indicator should stay honest. */
+const SAVE_RETRY_MS = 3000;
+const SAVE_RETRY_LIMIT = 10;
 
 export interface CoeditPeer {
   user_id: string;
@@ -232,6 +248,8 @@ export function useCoeditSession(opts: {
   const [saveStatus, setSaveStatus] =
     useState<UseCoeditSession["saveStatus"]>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const saveRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRetries = useRef(0);
 
   const sessionId = useRef<number | null>(null);
   // The connection this hook currently owns — svc.ts's per-socket handle.
@@ -254,6 +272,10 @@ export function useCoeditSession(opts: {
       clearTimeout(maxIntervalTimer.current);
       maxIntervalTimer.current = null;
     }
+    if (saveRetryTimer.current) {
+      clearTimeout(saveRetryTimer.current);
+      saveRetryTimer.current = null;
+    }
   }, []);
 
   const checkpoint = useCallback(async () => {
@@ -262,6 +284,7 @@ export function useCoeditSession(opts: {
     setSaveStatus("saving");
     try {
       await checkpointSession(cid);
+      saveRetries.current = 0;
       setSaveError(null);
       setSaveStatus("saved");
     } catch (e) {
@@ -272,8 +295,25 @@ export function useCoeditSession(opts: {
       console.warn("[coedit] save failed", e);
       setSaveError(reason);
       setSaveStatus("error");
+      // A permission failure is the only terminal one — retrying it just
+      // repeats the refusal. Everything else means "no socket right now", which
+      // the reconnect loop is already fixing.
+      const terminal = reason.toLowerCase().includes("forbidden");
+      if (!terminal && saveRetries.current < SAVE_RETRY_LIMIT) {
+        saveRetries.current += 1;
+        if (saveRetryTimer.current) clearTimeout(saveRetryTimer.current);
+        saveRetryTimer.current = setTimeout(() => {
+          saveRetryTimer.current = null;
+          void checkpointRef.current?.();
+        }, SAVE_RETRY_MS);
+      }
     }
   }, [canWrite]);
+
+  // The retry reaches `checkpoint` through a ref so the timer always runs the
+  // current closure rather than the one captured when the failure happened.
+  const checkpointRef = useRef(checkpoint);
+  checkpointRef.current = checkpoint;
 
   const runAutoCheckpoint = useCallback(() => {
     clearAutosaveTimers();
