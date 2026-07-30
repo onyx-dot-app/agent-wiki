@@ -36,6 +36,7 @@ from app.wiki import git as wiki_git
 
 log = logging.getLogger(__name__)
 
+
 class RebaseOutcome(str, Enum):
     """Result of ``rebase_session``."""
 

@@ -41,11 +41,10 @@ Queues:
   session belongs to a particular process. ``checkpoint_coedit_session_task``
   (``app/tasks/coedit_checkpoint.py``) is therefore a plain task any worker can
   dequeue for any session — a periodic scan enqueues one per dirty session,
-  explicit save and last-participant-leave enqueue directly. This queue also
-  still carries ``leave_coedit_session``, the durable fallback the WS route
-  enqueues when its own connection-teardown task is cancelled before it can
-  record a leave itself (server shutdown, a torn-down test connection) — a
-  plain Redis send nothing can cancel. See ``app/tasks/coedit_leave.py``.
+  explicit save and a connection's own teardown enqueue directly. A teardown
+  enqueue has to survive its task being cancelled (server shutdown), so that
+  path sends inline rather than through a thread — see ``app/api/coedit.py``'s
+  ``finally``.
 
 Wiki Auto Management splits by **latency tier** — whether anyone is waiting on
 the result (see the "Queues and Workers" design doc):

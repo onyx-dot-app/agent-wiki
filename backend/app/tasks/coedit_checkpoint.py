@@ -7,8 +7,8 @@ Nothing in that is process-local, so checkpointing is an ordinary
 
 Three triggers, all of which just enqueue: a periodic scan (crontab, this
 queue) finds every dirty session process-wide and enqueues one checkpoint task
-each; explicit save and last-participant-leave (``app/api/coedit.py``,
-``app/tasks/coedit_leave.py``) enqueue directly.
+each; an explicit save and a connection's own teardown enqueue directly (both in
+``app/api/coedit.py``).
 
 Telling the editors about the result is the engine's own job — it broadcasts a
 Yjs update when the merge changed content — so nothing here fans out.
@@ -45,6 +45,7 @@ _MAX_INTERVAL_SECONDS = 900
 # Four missed 15-second heartbeats distinguish a departed participant from
 # ordinary event-loop lag.
 _PARTICIPANT_STALE_SECONDS = 60
+
 
 @coedit_queue.task()
 def checkpoint_coedit_session_task(session_id: int, *, request_id: str | None = None) -> None:

@@ -5,19 +5,14 @@ session/participant bookkeeping in ``app/wiki/coedit.py``, the document rebuilt
 on demand in ``app/wiki/coedit_live.py``, and the broadcast layer in
 ``app/wiki/coedit_channel.py``.
 
-``async`` here covers connection lifecycle (accept, the recv/send loops,
-task orchestration) plus — deliberately, unlike every other WebSocket route
-in this backend — the Yjs sync/awareness message handling itself. See
-CLAUDE.md's "WebSocket routes" rule before adding another route like this
-one; this one departs from it on purpose for pycrdt calls specifically:
-``Doc``/``Awareness`` are PyO3 "unsendable" Rust types (thread-affine), so
-unlike a normal blocking call, they must run inline on this task's own
-thread (the event loop), never via ``asyncio.to_thread``'s shared worker
-pool. It's also a good fit regardless:
-in-memory CRDT math is fast, not the kind of blocking call that rule exists
-to keep off the loop. Every DB/git call (participant tracking, permission
-checks, the checkpoint's git commit) still goes through
-``asyncio.to_thread`` as usual.
+``async`` here covers connection lifecycle only — accept, the recv/send loops,
+task orchestration — per CLAUDE.md's "WebSocket routes" rule. Everything else,
+including every ``pycrdt`` call, goes through ``asyncio.to_thread``: a ``Doc``
+is thread-affine (PyO3 "unsendable"), but since none is kept between calls, the
+thread it is built on only has to be the one that uses it, which
+``coedit_live``'s self-contained functions guarantee. Holding a resident ``Doc``
+would have forced the opposite — pycrdt work pinned to the loop's own thread —
+and that is one of the reasons not to hold one.
 
 A "co-edit session" is the page's *live session*: everyone viewing the page
 joins it (read-gated — presence + the live document), and writing (applying
@@ -273,28 +268,15 @@ async def _recv_loop(
         )
 
 
-# How often _send_loop's blocking drain call returns to check for
-# cancellation. Short on purpose: asyncio.to_thread cancellation only
-# unblocks the *awaiting* coroutine, not the underlying OS thread still
-# parked in queue.Queue.get(timeout=...) — found the hard way, in
-# production, not just in theory. Every disconnect (a WS closes, we
-# reconnect) cancels this task; with a long timeout, the orphaned thread
-# lingers for up to that long, still holding a slot in the shared default
-# thread pool every asyncio.to_thread call in the process draws from. Under
-# frequent reconnects, orphaned threads accumulate faster than they drain,
-# eventually exhausting the pool — at which point *every* asyncio.to_thread
-# call across the whole backend (new connects, every message, every
-# checkpoint) queues for a free worker. That reads as "the whole app
-# froze," and can plausibly cause more disconnects itself (a starved event
-# loop can miss uvicorn's own ping/pong window and get closed as
-# unresponsive) — a self-reinforcing spiral. Bounding the poll to ~1s
-# bounds any orphaned thread's worst case to ~1s instead of 15.
-# The send loop waits on this event rather than parking a thread in a blocking
-# queue read. A publisher calls ``Connection.notify`` (see ``coedit_channel``)
-# from whatever thread it is on, which schedules the set onto this loop — so no
-# thread is held on a connection's behalf and there is no per-connection ceiling
-# on how many sockets a process can serve. It also makes teardown ordinary
-# asyncio: cancelling the send task interrupts an ``Event.wait`` immediately.
+# The send loop waits on an asyncio.Event rather than parking a thread in a
+# blocking queue read. A publisher calls ``Connection.notify`` (see
+# ``coedit_channel``) from whatever thread it is on, which schedules the set
+# onto this loop — so no thread is held on a connection's behalf and there is no
+# per-connection ceiling on how many sockets a process can serve. It also makes
+# teardown ordinary asyncio: cancelling the send task interrupts an
+# ``Event.wait`` immediately, where a thread parked in ``queue.Queue.get`` would
+# have lingered holding a pool slot (an exhausted pool stalls every
+# ``asyncio.to_thread`` call in the process — a real production failure).
 def _make_notifier(loop: asyncio.AbstractEventLoop, ready: asyncio.Event) -> Callable[[], None]:
     def notify() -> None:
         try:
@@ -338,6 +320,7 @@ async def _send_loop(
                 await websocket.send_bytes(item.payload)
             else:
                 await websocket.send_json(item)
+
 
 def _seed_snapshot_sync(session_id: int, path: str, base_sha: str | None) -> bool:
     """Give a brand-new session its initial snapshot; True if the page is

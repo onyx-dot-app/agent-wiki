@@ -1,13 +1,13 @@
 """Wire shapes for the co-editing live channel — one ``WebSocket`` per
 session (``app/api/coedit.py``).
 
-The document itself travels as raw Yjs sync/awareness protocol bytes (WS
-binary frames, handled directly against ``pycrdt`` — see
-relayed as opaque bytes), never as JSON. These models are only the
-small set of JSON control messages (WS text frames) that ride alongside:
-explicit checkpoint requests and the connection handshake. Kept separate
-from the ORM rows in ``app/wiki/coedit.py`` (the DB shape) and the in-memory
-frames in ``app/wiki/coedit_channel.py`` (the pub/sub wire shape).
+The document itself travels as raw Yjs sync/awareness protocol bytes over WS
+binary frames — validated against ``pycrdt`` and relayed as opaque bytes, never
+as JSON. These models are only the small set of JSON control messages (WS text
+frames) riding alongside: the connection handshake, explicit checkpoint
+requests, and catch-up after a dropped relay. Kept separate from the ORM rows in
+``app/wiki/coedit.py`` (the DB shape) and the in-memory frames in
+``app/wiki/coedit_channel.py`` (the pub/sub wire shape).
 """
 
 from __future__ import annotations
