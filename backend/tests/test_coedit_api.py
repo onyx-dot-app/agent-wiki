@@ -224,6 +224,27 @@ def test_disconnect_defers_participant_cleanup_to_heartbeat_expiry(client):
     assert coedit.get_active_session(_PATH) is not None
 
 
+def test_disconnect_commits_buffer(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("hello world")
+
+    with coedit_queue.immediate_mode():
+        with _ws(client) as (ws, joined):
+            sid = joined["session_id"]
+            _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
+        # The disconnect enqueues the checkpoint; immediate_mode runs it inline
+        # wherever the handler executes. Wait *inside* the block: once the flag
+        # drops, a late enqueue would go to the real queue.
+        _wait_for(lambda: git.read_file(_PATH) == "hi world")
+
+    assert git.read_file(_PATH) == "hi world"
+    # The commit doesn't touch presence, so the session stays open until the
+    # heartbeat expires.
+    assert coedit.get_active_session(_PATH) is not None
+    assert [p.user_id for p in coedit.list_participants(sid)] == [uid]
+
+
 def test_checkpoint_message_commits_buffer(client):
     uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
     login_fastapi(client, uid)

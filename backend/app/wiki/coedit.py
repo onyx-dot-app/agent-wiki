@@ -672,6 +672,37 @@ def close_if_clean(session_id: int) -> bool:
         return closed is not None
 
 
+def close_abandoned_sessions() -> list[int]:
+    """Close every clean active session that has no participants. Returns their ids.
+
+    ``close_if_clean`` only runs for a session the caller already has in hand —
+    the one whose last participant just expired. A session that empties by any
+    other route (a participant row removed directly, an FK cascade, a leave
+    recorded by an older build) is invisible to that path, and being clean it is
+    also skipped by ``sessions_due_for_checkpoint``, so it stays ``active``
+    forever: it holds the active-path unique index, so page moves are refused
+    (``blocking_active_session_path``), and every new viewer adopts its buffer
+    instead of reading HEAD. This is the self-healing sweep for that state —
+    same predicate as ``close_if_clean``, applied set-wise rather than to one id.
+    """
+    with session() as s:
+        return list(
+            s.scalars(
+                update(CoeditSession)
+                .where(
+                    CoeditSession.status == SessionStatus.ACTIVE.value,
+                    CoeditSession.version == CoeditSession.checkpointed_version,
+                    ~select(CoeditParticipant.session_id)
+                    .where(CoeditParticipant.session_id == CoeditSession.id)
+                    .exists(),
+                )
+                .values(status=SessionStatus.CLOSED.value, updated_at=_iso(_now()))
+                .returning(CoeditSession.id)
+                .execution_options(synchronize_session=False)
+            ).all()
+        )
+
+
 def purge_viewer_sessions(limit: int = 500) -> int:
     """Delete closed sessions that never received an edit op. Returns the count.
 

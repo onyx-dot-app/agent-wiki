@@ -21,7 +21,8 @@ vs viewers client-side from the live caret frames — a rendered caret IS the
 "editing" state; the server stores nothing for it.
 
 Participants leave after their shared heartbeat expires. A disconnect never
-deletes shared presence based on one process's local socket registry.
+deletes shared presence based on one process's local socket registry — it
+only commits the buffer, which needs no liveness information.
 """
 
 from __future__ import annotations
@@ -367,4 +368,17 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     finally:
         if conn is not None:
             coedit_channel.disconnect(conn.id)
+        # Commit this connection's tail now instead of waiting for the presence
+        # scan to expire the heartbeat. Needs no liveness information: the
+        # checkpoint no-ops on a clean session, and ``close_if_clean``'s
+        # participant predicate keeps a session with live connections open, so
+        # this is safe to run on every disconnect. Best-effort — a failed
+        # enqueue (e.g. a full queue) must not break teardown; the periodic
+        # scan is the backstop.
+        try:
+            checkpoint_coedit_session(sess.id)
+        except Exception:
+            log.exception(
+                "coedit: checkpoint enqueue failed on disconnect for session %s", sess.id
+            )
         log.info("coedit ws closed session=%s user=%s", sess.id, user.id)

@@ -61,7 +61,8 @@ def checkpoint_coedit_session(session_id: int) -> None:
 @coedit_queue.periodic_task(crontab(minute="*"))
 def scan_and_checkpoint() -> None:
     """Enqueue a checkpoint for every dirty session that's idle or overdue,
-    expire stale participants, and purge closed viewer-only sessions."""
+    expire stale participants, close abandoned sessions, and purge closed
+    viewer-only sessions."""
     expired = coedit.expire_stale_participants(stale_seconds=_PARTICIPANT_STALE_SECONDS)
     for session_id in expired.changed_session_ids:
         coedit_channel.broadcast_presence(session_id)
@@ -79,6 +80,9 @@ def scan_and_checkpoint() -> None:
         checkpoint_coedit_session(sess.id)
     if due:
         log.info("coedit checkpoint scan: enqueued %d session(s)", len(due))
+    abandoned = coedit.close_abandoned_sessions()
+    if abandoned:
+        log.info("coedit presence scan: closed %d abandoned session(s)", len(abandoned))
     purged = coedit.purge_viewer_sessions()
     if purged:
         log.info("coedit checkpoint scan: purged %d viewer-only session(s)", purged)

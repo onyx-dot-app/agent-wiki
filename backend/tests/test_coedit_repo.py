@@ -293,6 +293,24 @@ def test_close_if_clean_skips_session_with_participant(users):
     assert active is not None and active.id == s.id
 
 
+def test_close_abandoned_sessions_closes_only_clean_empty_ones(users):
+    # Empty and clean — the state nothing else reclaims, so the sweep closes it.
+    abandoned = coedit.open_session("abandoned.md", base_sha=None, initial_buffer="hi")
+    # Occupied — presence holds it open.
+    occupied = coedit.open_session("occupied.md", base_sha=None, initial_buffer="hi")
+    assert coedit.join(occupied.id, "usr_a") is True
+    # Empty but dirty — the checkpoint scan owns it; closing would seal the buffer.
+    dirty = coedit.open_session("dirty.md", base_sha=None, initial_buffer="hi")
+    coedit.apply_op(dirty.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+
+    assert coedit.close_abandoned_sessions() == [abandoned.id]
+    assert coedit.get_active_session("abandoned.md") is None
+    assert coedit.get_active_session("occupied.md") is not None
+    assert coedit.get_active_session("dirty.md") is not None
+    # Idempotent: nothing left to close.
+    assert coedit.close_abandoned_sessions() == []
+
+
 def test_close_if_clean_skips_a_dirty_session(users):
     # A late op after the checkpoint (version > checkpointed_version) must not be
     # sealed in a closed session — close_if_clean leaves it active for the scan.
