@@ -372,11 +372,25 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         # scan to expire the heartbeat. Needs no liveness information: the
         # checkpoint no-ops on a clean session, and ``close_if_clean``'s
         # participant predicate keeps a session with live connections open, so
-        # this is safe to run on every disconnect. Best-effort — a failed
-        # enqueue (e.g. a full queue) must not break teardown; the periodic
-        # scan is the backstop.
+        # this is safe to run on every disconnect.
+        #
+        # The enqueue is a blocking Redis write and this body runs on the event
+        # loop every other socket on this worker shares, so it's offloaded. It
+        # must also survive this task being cancelled (server shutdown), and a
+        # cancelled ``await`` isn't enough — the executor item it submitted can
+        # be discarded before any pool worker picks it up — so that path
+        # enqueues inline, where blocking the loop is moot anyway. Best-effort
+        # either way; the periodic scan is the backstop.
         try:
-            checkpoint_coedit_session(sess.id)
+            await asyncio.to_thread(checkpoint_coedit_session, sess.id)
+        except asyncio.CancelledError:
+            try:
+                checkpoint_coedit_session(sess.id)
+            except Exception:
+                log.exception(
+                    "coedit: queued-checkpoint fallback failed for session %s", sess.id
+                )
+            raise
         except Exception:
             log.exception(
                 "coedit: checkpoint enqueue failed on disconnect for session %s", sess.id
