@@ -159,13 +159,15 @@ body {
   overflow: clip;
 }
 
-/* The editor hides its scroll chrome per the mocks. The scroll-position
-   tick rail is the intended indicator surface. */
-.cm-scroller {
+/* The editor hides its scroll chrome per the mocks; EditorEdgeScrollbar's tick
+   rail is the intended indicator surface. `.editor-prose` is the editor's own
+   scroll container (css/editor.css) — the CodeMirror `.cm-scroller` this
+   replaces. */
+.editor-prose {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-.cm-scroller::-webkit-scrollbar {
+.editor-prose::-webkit-scrollbar {
   display: none;
 }
 
@@ -408,10 +410,16 @@ body {
    scrollbar hugs the window edge, and every centered doc block (title,
    banners, editor text) reserves the 360px lane inside its own box, so
    content can never slide under the floating cards. Scoped to the same
-   container query that shows the lane. The extra .cm-scroller hop outranks
-   the runtime-injected CodeMirror theme rule. */
+   container query that shows the lane.
+
+   `.editor-prose .ProseMirror` is the editor's capped, centered text (see
+   css/editor.css) — the equivalent of the CodeMirror `.cm-content` this
+   replaces. Miss it and only the title and banners shift when a comment
+   opens, while the doc text stays centered on the full width: the two fall
+   visibly out of alignment, which is what happened when the editor moved to
+   Tiptap and this rule kept pointing at CodeMirror's DOM. */
 @container (min-width: 920px) {
-  .rail-reserved .cm-scroller .cm-content,
+  .rail-reserved .editor-prose .ProseMirror,
   .rail-reserved .rail-inset {
     max-width: calc(768px + 360px);
     padding-right: 360px;
@@ -421,10 +429,10 @@ body {
 /* Anchored comments panel: the editor's native scrollbar would sit at the
    doc/panel boundary, so it hides in favor of the panel's viewport-edge
    scrollbar (EditorEdgeScrollbar). */
-.panel-anchored .cm-scroller {
+.panel-anchored .editor-prose {
   scrollbar-width: none;
 }
-.panel-anchored .cm-scroller::-webkit-scrollbar {
+.panel-anchored .editor-prose::-webkit-scrollbar {
   display: none;
 }
 
