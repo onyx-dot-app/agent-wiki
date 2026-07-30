@@ -173,13 +173,28 @@ def _checkpoint_locked(session_id: int) -> str | None:
             new_base_sha=result.sha,
             checkpointed=True,
         )
-        if res is None:
-            # A human op raced in during the commit, so the buffer moved past
-            # what we committed. Leave base_sha / checkpointed_version untouched:
-            # the session stays dirty and the next checkpoint does a proper 3-way
-            # merge (base=old, current=HEAD, incoming=newer buffer) that preserves
-            # the folded-in agent edit. Advancing base_sha to result.sha here
-            # would make that next merge base==current and drop the agent's edit.
+        if res is None and result.new_body == sess.buffer_text:
+            # A human op raced in during the commit — the buffer moved past what
+            # we committed, so the write-back CAS missed. Nothing foreign was
+            # folded in, so the commit *is* the buffer at ``sess.version``, and
+            # recording that is simply true: the session stays dirty for the ops
+            # that landed after it, and the next checkpoint merges from the sha we
+            # just wrote.
+            #
+            # Skipping this is what made a busy session never converge. Typing
+            # through a commit is the ordinary case, not an edge case, so the
+            # watermark would stay behind forever: ``last_checkpoint_at`` never
+            # advanced, leaving the session permanently overdue for the periodic
+            # scan, and ``base_sha`` stayed pinned so every later checkpoint
+            # 3-way merged a moving buffer against an ever-older base — which
+            # duplicates and drops text.
+            coedit.mark_checkpointed(session_id, base_sha=result.sha, version=sess.version)
+        elif res is None:
+            # Same race, but the commit-time merge folded in a concurrent
+            # agent/ingest commit that never reached the buffer. Leave base_sha
+            # where it is so the next checkpoint merges base=old, current=HEAD,
+            # incoming=newer buffer and keeps that edit; advancing it would make
+            # base == current and drop it.
             log.info(
                 "coedit checkpoint: concurrent op during commit of %s; reconciling next checkpoint",
                 path,
