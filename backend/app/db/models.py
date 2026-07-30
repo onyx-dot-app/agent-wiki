@@ -1061,8 +1061,18 @@ class CoeditUpdate(Base):
     # Nullable: NULL means the server itself produced the update, not a
     # person — a live-rebase fold of an out-of-band commit
     # (app/wiki/coedit_rebase.py) is a real logged update with no human author.
+    #
+    # SET NULL, not CASCADE (which this inherited from the OT-era coedit_ops,
+    # where the column was NOT NULL so SET NULL wasn't expressible). These rows
+    # are document *content*, not attribution: deleting a user would have
+    # deleted their un-checkpointed updates out of the middle of the log, and a
+    # CRDT update can depend on items an earlier one created — so the loss isn't
+    # confined to that author's own edits, it can make everything after them
+    # unintegrable, while ydoc_seq stays advanced and the next checkpoint
+    # commits the incomplete result and prunes. Matches `comments`, which drops
+    # attribution the same way and keeps the text.
     author_user_id: Mapped[str | None] = mapped_column(
-        Text, ForeignKey("users.id", ondelete="CASCADE")
+        Text, ForeignKey("users.id", ondelete="SET NULL")
     )
     # Opaque per-connection id (one editor tab), distinct from author_user_id
     # (a user with two tabs shares one user id). Nullable: non-collab writers

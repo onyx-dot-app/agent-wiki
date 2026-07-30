@@ -14,6 +14,7 @@ import pytest
 
 from sqlalchemy import text, update
 
+from app.auth import users as users_repo
 from app.db.models import CoeditParticipant, CoeditSession
 from app.db.session import session as db_session
 from app.wiki import coedit
@@ -499,3 +500,24 @@ def test_snapshot_seq_and_checkpoint_watermark_stay_equal(users):
     # And a live-rebase's base_sha move touches neither.
     coedit.set_base_sha(s.id, "sha3")
     assert_equal("after a live-rebase base move")
+
+
+def test_deleting_an_author_keeps_their_updates(users):
+    # These rows are document content, not attribution. The FK used to CASCADE
+    # (inherited from the OT-era coedit_ops, whose column was NOT NULL), so
+    # deleting a user removed their un-checkpointed updates out of the middle of
+    # a session's log — and a CRDT update can depend on items an earlier one
+    # created, so the damage isn't limited to that author's own edits while
+    # ydoc_seq stays advanced. SET NULL keeps the content and drops the name.
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.apply_update(s.id, update_bytes=b"from-a", author_user_id="usr_a")
+    coedit.apply_update(s.id, update_bytes=b"from-b", author_user_id="usr_b")
+
+    users_repo.delete("usr_a")
+
+    remaining = coedit.updates_since(s.id, 0).updates
+    assert [u.update_payload for u in remaining] == [b"from-a", b"from-b"]
+    assert [u.author_user_id for u in remaining] == [None, "usr_b"]
+    # The watermark still describes a log that is actually all there.
+    fetched = coedit.get_active_session(_PATH)
+    assert fetched is not None and fetched.ydoc_seq == 2

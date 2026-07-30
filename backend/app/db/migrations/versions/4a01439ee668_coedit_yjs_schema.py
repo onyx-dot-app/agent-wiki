@@ -104,11 +104,14 @@ def upgrade() -> None:
             sa.Column("seq", sa.BigInteger(), nullable=False),
             # Nullable — a server-produced update (a live-rebase fold) has no
             # human author. The OT-era coedit_ops column it replaces was NOT
-            # NULL because every op came from a client.
+            # NULL because every op came from a client, which is also why it
+            # could only CASCADE. SET NULL here: these rows are document
+            # content, and deleting a user must not delete updates out of the
+            # middle of a session's log (see models.py for what that breaks).
             sa.Column(
                 "author_user_id",
                 sa.Text(),
-                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                sa.ForeignKey("users.id", ondelete="SET NULL"),
                 nullable=True,
             ),
             sa.Column("client_id", sa.Text(), nullable=True),
@@ -125,10 +128,23 @@ def upgrade() -> None:
         )
     else:
         # Already present — either from 0001_initial's create_all, or from an
-        # earlier run of this migration when the column was still NOT NULL.
-        # Idempotent in the first case.
+        # earlier run of this migration when the column was still NOT NULL and
+        # its FK still cascaded. Idempotent in the first case.
         op.alter_column(
             "coedit_updates", "author_user_id", existing_type=sa.Text(), nullable=True
+        )
+        fks = {fk["name"] for fk in inspector.get_foreign_keys("coedit_updates")}
+        if "coedit_updates_author_user_id_fkey" in fks:
+            op.drop_constraint(
+                "coedit_updates_author_user_id_fkey", "coedit_updates", type_="foreignkey"
+            )
+        op.create_foreign_key(
+            "coedit_updates_author_user_id_fkey",
+            "coedit_updates",
+            "users",
+            ["author_user_id"],
+            ["id"],
+            ondelete="SET NULL",
         )
 
     # Retire any session that predates this schema, and zero its watermarks.

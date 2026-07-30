@@ -68,6 +68,13 @@ log = logging.getLogger(__name__)
 # Idle silence before the send loop touches presence liveness + pings the
 # client, so proxies don't consider the connection idle.
 _HEARTBEAT_SECONDS = 15.0
+# How stale a read check may be on the *outbound* path. The heartbeat alone left
+# a revoked reader receiving peers' edits for up to a full heartbeat; checking
+# per frame instead would put two DB reads on the highest-volume path in the
+# process, for every connection. Rate-limited, and only while frames are
+# actually flowing, so an idle connection costs nothing and a busy one costs one
+# check a second.
+_READ_RECHECK_SECONDS = 1.0
 
 
 def _participants_out(session_id: int) -> list[ParticipantOut]:
@@ -373,6 +380,7 @@ async def _send_loop(
     user: User,
 ) -> None:
     last_heartbeat = time.monotonic()
+    last_read_check = time.monotonic()
     while True:
         remaining = _HEARTBEAT_SECONDS - (time.monotonic() - last_heartbeat)
         if remaining > 0:
@@ -385,17 +393,27 @@ async def _send_loop(
         ready.clear()
         if time.monotonic() - last_heartbeat >= _HEARTBEAT_SECONDS:
             last_heartbeat = time.monotonic()
+            last_read_check = time.monotonic()  # _heartbeat re-checks read too
             if not await asyncio.to_thread(_heartbeat, session_id, user):
                 # Either the participant row expired (this socket is no longer
                 # part of the session) or read access is gone. Close either way
                 # and let the client reconnect, where the join gate decides.
                 return
             await websocket.send_json({"type": "ping"})
-        while (item := coedit_channel.drain(conn.queue, 0)) is not None:
-            if isinstance(item, coedit_channel.YjsBytes):
-                await websocket.send_bytes(item.payload)
+        pending = coedit_channel.drain(conn.queue, 0)
+        if pending is not None and time.monotonic() - last_read_check >= _READ_RECHECK_SECONDS:
+            # There is content to push and the read check is stale. Re-resolve
+            # before sending, not after: the point is to not hand a revoked
+            # reader the next edit.
+            last_read_check = time.monotonic()
+            if not await asyncio.to_thread(_authorize, session_id, user, "read"):
+                return
+        while pending is not None:
+            if isinstance(pending, coedit_channel.YjsBytes):
+                await websocket.send_bytes(pending.payload)
             else:
-                await websocket.send_json(item)
+                await websocket.send_json(pending)
+            pending = coedit_channel.drain(conn.queue, 0)
 
 
 def _seed_snapshot_sync(session_id: int, path: str, base_sha: str | None) -> bool:
