@@ -16,12 +16,24 @@
  * directly) — flagged as follow-up work, not solved here. This backs
  * comment anchoring and peer-cursor/deep-link scroll-to; a
  * wrong-by-a-few-characters *display* position is the accepted cost of
- * shipping the live editor now rather than blocking on this. The one place
- * that can't tolerate drift — the span persisted when a comment is
- * created — is corrected server-side against the real markdown source
- * before it's ever stored (`app/wiki/comments.py:create_thread`, via
- * `comment_anchor.resolve_exact_span`), so this offset only has to get the
- * *creation-time request* in the right neighborhood, not exactly right.
+ * shipping the live editor now rather than blocking on this.
+ *
+ * The span persisted when a comment is created is corrected server-side
+ * against the real markdown source (`app/wiki/comments.py:create_thread`, via
+ * `comment_anchor.resolve_exact_span`), which locates the selection by its
+ * quoted text — so this mapper only has to get the creation-time request into
+ * the right neighborhood.
+ *
+ * That correction has a gap worth knowing about, because it is the one case
+ * where a *wrong span gets stored*: the quote we send is plain text, so a
+ * selection containing inline formatting ("hello world" over a source
+ * `hello **world**`) matches nothing in the body, and `resolve_exact_span`
+ * falls back to this mapper's own estimate. Selections without formatting
+ * inside them are corrected exactly; selections across a bold/italic/code run
+ * are not. Closing it needs either a markdown serializer here (mirroring
+ * `app/wiki/markdown_yjs.py`, which is also what a precise offset mapper
+ * needs) or delimiter-insensitive matching in `comment_anchor.py`. Neither is
+ * attempted here.
  */
 import type { Editor } from "@tiptap/core";
 

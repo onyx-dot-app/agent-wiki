@@ -42,6 +42,9 @@ export interface CoeditSession {
  * the reconnect loop awaits for the connection's whole lifetime. */
 export interface CoeditConnection extends CoeditSession {
   closed: Promise<{ code: number; expected: boolean }>;
+  /** Handle for `closeSession`/`checkpointSession` — identifies this socket,
+   * not the session, so a reconnect can't be mistaken for it. */
+  connectionId: number;
 }
 
 interface PendingCheckpoint {
@@ -55,9 +58,20 @@ interface TrackedSocket {
   markExpectedClose: () => void;
 }
 
-// sessionId -> its live WebSocket + in-flight checkpoint correlation. One
-// entry per `connectSession` call, removed on close.
+// connectionId -> its live WebSocket + in-flight checkpoint correlation. One
+// entry per `connectSession` call, removed when that call's own socket closes.
+//
+// Keyed on the connection, NOT the session: a session outlives any single
+// socket (the server keeps one active session per page), so a reconnect joins
+// the *same* session_id while the previous socket may still be closing. Keyed
+// by session id, the replacement overwrote the old entry, the old socket's
+// onclose then deleted the replacement's, and `closeSession`/
+// `checkpointSession` resolved to whichever socket happened to be registered —
+// so a teardown could close a freshly-established connection, and mark it an
+// *expected* close, which tells the reconnect loop to give up. Silently dead
+// editor. A per-connection key removes the ambiguity instead of racing it.
 const sockets = new Map<number, TrackedSocket>();
+let nextConnectionId = 1;
 
 /** Open the live session for `path`, binding `doc`/`awareness` to it for
  * the connection's lifetime: local changes to either are sent out as
@@ -79,6 +93,7 @@ export function connectSession(
   onPresence: (participants: CoeditParticipant[]) => void,
 ): Promise<CoeditConnection> {
   return new Promise((resolve, reject) => {
+    const connectionId = nextConnectionId++;
     const ws = new WebSocket(
       apiSocketUrl(`/coedit/ws?path=${encodeURIComponent(path)}`),
     );
@@ -154,7 +169,7 @@ export function connectSession(
         case "joined": {
           joined = true;
           sessionId = msg.session_id as number;
-          sockets.set(sessionId, {
+          sockets.set(connectionId, {
             ws,
             pendingCheckpoints,
             markExpectedClose: () => {
@@ -167,6 +182,7 @@ export function connectSession(
             can_write: msg.can_write as boolean,
             participants: msg.participants as CoeditParticipant[],
             closed,
+            connectionId,
           });
           return;
         }
@@ -201,7 +217,7 @@ export function connectSession(
 
     ws.onclose = (event) => {
       unbind();
-      if (sessionId !== null) sockets.delete(sessionId);
+      sockets.delete(connectionId);
       for (const p of pendingCheckpoints.values()) {
         p.reject(new ApiError(0, "connection closed"));
       }
@@ -229,20 +245,21 @@ export function connectSession(
   });
 }
 
-/** Close the session's connection. A no-op if already closed/never
- * connected. Resolves `closed` with `expected: true`, so the caller's
- * reconnect loop knows not to reconnect. */
-export function closeSession(sessionId: number): void {
-  const entry = sockets.get(sessionId);
+/** Close one connection, by its `connectionId`. A no-op if already closed or
+ * never joined. Resolves that connection's `closed` with `expected: true`, so
+ * its own reconnect loop knows not to reconnect — which is why this must never
+ * be able to land on a different, live socket. */
+export function closeSession(connectionId: number): void {
+  const entry = sockets.get(connectionId);
   if (!entry) return;
   entry.markExpectedClose();
   entry.ws.close();
 }
 
-/** Commit the session's live doc to git. Resolves once the server has
- * committed (or determined there was nothing to commit). */
-export function checkpointSession(sessionId: number): Promise<void> {
-  const entry = sockets.get(sessionId);
+/** Commit the live doc to git, over one specific connection. Resolves once the
+ * server has committed (or determined there was nothing to commit). */
+export function checkpointSession(connectionId: number): Promise<void> {
+  const entry = sockets.get(connectionId);
   if (!entry || entry.ws.readyState !== WebSocket.OPEN) {
     return new Promise<void>((_resolve, reject) => {
       setTimeout(() => reject(new ApiError(0, "not connected")), 0);

@@ -227,6 +227,12 @@ export function useCoeditSession(opts: {
     useState<UseCoeditSession["saveStatus"]>("saved");
 
   const sessionId = useRef<number | null>(null);
+  // The connection this hook currently owns — svc.ts's per-socket handle.
+  // Distinct from sessionId, which is stable across reconnects: save/close must
+  // act on *this* socket, never on whichever one happens to hold the session
+  // now. Also distinct from the `connectionId` state above, which is a remount
+  // counter for the doc/awareness pair.
+  const ownedConnection = useRef<number | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxIntervalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -244,11 +250,11 @@ export function useCoeditSession(opts: {
   }, []);
 
   const checkpoint = useCallback(async () => {
-    const sid = sessionId.current;
-    if (sid === null || !canWrite) return;
+    const cid = ownedConnection.current;
+    if (cid === null || !canWrite) return;
     setSaveStatus("saving");
     try {
-      await checkpointSession(sid);
+      await checkpointSession(cid);
       setSaveStatus("saved");
     } catch {
       setSaveStatus("error");
@@ -357,11 +363,12 @@ export function useCoeditSession(opts: {
           return;
         }
         if (cancelled) {
-          closeSession(snap.session_id);
+          closeSession(snap.connectionId);
           return;
         }
 
         sessionId.current = snap.session_id;
+        ownedConnection.current = snap.connectionId;
         setCanWrite(snap.can_write);
         setParticipants(snap.participants);
         setActive(true);
@@ -388,6 +395,8 @@ export function useCoeditSession(opts: {
         freshAwareness.on("change", recomputeForThisAwareness);
 
         const { expected } = await snap.closed;
+        if (ownedConnection.current === snap.connectionId)
+          ownedConnection.current = null;
         freshAwareness.off("change", recomputeForThisAwareness);
         if (cancelled || expected) return;
         await new Promise((r) => setTimeout(r, STREAM_RECONNECT_MS));
@@ -401,19 +410,24 @@ export function useCoeditSession(opts: {
       setActive(false);
       setPeers([]);
       setTyping([]);
-      const sid = sessionId.current;
+      // Captured now, and acted on below *by this handle*: the effect body for
+      // the next path/retry starts before this async teardown finishes, and it
+      // joins the same session id. Closing "the session" at that point would
+      // close the new socket instead of this one.
+      const cid = ownedConnection.current;
       sessionId.current = null;
+      ownedConnection.current = null;
       onEnd?.();
-      if (sid === null) return;
+      if (cid === null) return;
       void (async () => {
         if (canWrite) {
           try {
-            await checkpointSession(sid);
+            await checkpointSession(cid);
           } catch {
             // The server-side close-triggered forced commit is the backstop.
           }
         }
-        closeSession(sid);
+        closeSession(cid);
       })();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
