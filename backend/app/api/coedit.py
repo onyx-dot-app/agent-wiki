@@ -135,12 +135,14 @@ def _handle_op(conn: coedit_channel.Connection, session_id: int, user: User, raw
         # Out of bounds for the current buffer, which means the sender's
         # document has diverged from the server's — worth a log line, since the
         # client sees only an error code and this is the shape a desync takes.
+        # Offsets and insert *lengths* only: the insert itself is page content,
+        # which has no business in production logs.
         log.warning(
             "coedit: invalid op on session %s from user %s (base_version=%s, changes=%s)",
             session_id,
             user.id,
             msg.base_version,
-            [c.model_dump(by_alias=True) for c in msg.changes],
+            [{"from": c.from_, "to": c.to, "insert_len": len(c.insert)} for c in msg.changes],
         )
         conn.post(
             OpResultFrame(request_id=msg.request_id, ok=False, error="invalid_op").model_dump(by_alias=True)
