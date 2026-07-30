@@ -1,0 +1,297 @@
+/* Tiptap/ProseMirror styling for the live wiki editor
+   (frontend/src/lib/editor/). Every selector here targets ProseMirror's own
+   rendered output directly — Tiptap doesn't let us hand a className to each
+   node without a custom NodeView per construct, so this is real CSS against
+   the DOM ProseMirror actually produces, not Tailwind utilities on our own
+   JSX. Opal tokens throughout, same as the rest of the app.
+
+   .editor-prose is the scroll wrapper TiptapEditor renders
+   (frontend/src/lib/editor/components.tsx) — every other selector below is
+   scoped under it. */
+
+.editor-prose {
+  /* ProseMirror has no built-in "scroller" the way CodeMirror 6's
+     view.scrollDOM is; editor.view.dom is just the contenteditable itself.
+     This element is what CoeditorHandle's scroll/geometry methods read and
+     write against. */
+  height: 100%;
+  overflow-y: auto;
+  /* Reserves room for a peer's caret name-label, which renders 1.15em
+     *above* its cursor line — with none, a caret on the doc's very first
+     line gets its label clipped by overflow-y-auto (confirmed directly:
+     computed styles were all correct, opacity 1, right colors — it was
+     purely clipped out of the scrollable box). */
+  padding-top: 1.2em;
+  /* Base prose font, matching DocTitle/the rest of the app's content type
+     ramp. */
+  color: var(--text-04);
+  font-family: var(--font-hanken-grotesk), ui-sans-serif;
+  font-size: 1rem;
+  line-height: 1.5rem;
+  font-weight: 450;
+}
+
+.editor-prose .ProseMirror {
+  outline: none;
+  min-height: 200px;
+  /* Cap + center the editable text within the full-width scroll wrapper
+     (which must stay full-width so the scrollbar sits flush at the far
+     edge) — matching DocTitle/the banners' width (--app-container-sm-md,
+     Opal's sizes.css) so the title, banners, and doc text all share one
+     column. The old CM6 editor capped this internally via its own theme;
+     ProseMirror has no equivalent, hence doing it here. */
+  margin-left: auto;
+  margin-right: auto;
+  max-width: var(--app-container-sm-md);
+}
+
+/* Headings — same size scale as the old CM6 WYSIWYG decorations. */
+.editor-prose h1 {
+  font-size: 2em;
+  font-weight: bold;
+  margin-top: 0.5em;
+  color: var(--text-05);
+}
+.editor-prose h2 {
+  font-size: 1.6em;
+  font-weight: bold;
+  margin-top: 0.5em;
+  color: var(--text-05);
+}
+.editor-prose h3 {
+  font-size: 1.375em;
+  font-weight: bold;
+  margin-top: 0.4em;
+  color: var(--text-05);
+}
+.editor-prose h4 {
+  font-size: 1.25em;
+  font-weight: bold;
+  margin-top: 0.4em;
+  color: var(--text-05);
+}
+.editor-prose h5 {
+  font-size: 1.125em;
+  font-weight: bold;
+  margin-top: 0.3em;
+  color: var(--text-05);
+}
+.editor-prose h6 {
+  font-size: 1.125em;
+  font-weight: bold;
+  margin-top: 0.3em;
+  opacity: 0.85;
+  color: var(--text-05);
+}
+
+/* Marks. */
+.editor-prose strong {
+  font-weight: bold;
+}
+.editor-prose em {
+  font-style: italic;
+}
+/* Code surfaces. These were `background: black`, which made the text
+   unreadable rather than merely dark: nothing set a foreground colour, so code
+   inherited the prose `--text-04` and rendered near-black on black — visible
+   only while selected. A tint keeps the normal text colour legible, and the
+   colour is an Opal token per CLAUDE.md rather than a literal. */
+.editor-prose code {
+  font-family: var(--font-dm-mono), ui-monospace;
+  background: var(--background-tint-02);
+  color: var(--text-04);
+  border-radius: var(--radius-04);
+  padding: 0.1em 0.3em;
+}
+.editor-prose pre {
+  font-family: var(--font-dm-mono), ui-monospace;
+  /* Notion's treatment: a plain tinted panel, no border — the fill alone is
+     what separates it from prose, including when it's empty. */
+  background: var(--background-tint-02);
+  color: var(--text-04);
+  border-radius: var(--radius-08);
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+}
+.editor-prose pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+/* Blockquote. */
+.editor-prose blockquote {
+  border-left: 3px solid var(--border-02);
+  padding-left: 0.75rem;
+  color: var(--text-03);
+}
+
+/* Lists. */
+.editor-prose ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+}
+.editor-prose ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+}
+.editor-prose ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+.editor-prose ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.editor-prose ul[data-type="taskList"] input {
+  /* Native control, deliberately: `accent-color` keeps the design system's
+     near-black tick box and the browser draws a correct checkmark, where
+     `appearance: none` would mean hand-rolling the tick.
+     Sized explicitly because the platform default doesn't track the prose font
+     — it renders noticeably larger than the line it sits on, which is what made
+     it read as a heavy black slab rather than a checkbox. `flex: none` stops the
+     flex row from stretching it. */
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  margin-top: 0.25em;
+  accent-color: var(--background-tint-inverted-00);
+  cursor: pointer;
+}
+
+/* A completed item reads as completed, the way Notion's to-dos do — otherwise
+   the only difference between done and not-done is a 16px box. Purely visual:
+   keyed on the `data-checked` attribute the codec already round-trips, and it
+   changes no content. */
+.editor-prose ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: var(--text-02);
+  text-decoration: line-through;
+}
+
+/* Links — accent is near-black warm grey, not a hue, per the design
+   system. */
+.editor-prose a {
+  color: var(--background-tint-inverted-00);
+  text-decoration: underline;
+}
+
+/* Horizontal rule. */
+.editor-prose hr {
+  border-top: 1px solid var(--border-02);
+  margin: 1rem 0;
+}
+
+/* thematic_break renders as its own div (see lib/editor/blocks.ts — it
+   replaces the default `hr` node so its Yjs tag name matches the backend),
+   styled like one. Rendered data-type is dash-separated (see blocks.ts's
+   createOpaqueBlock) — Tailwind's arbitrary-value brackets used to treat
+   `_` as an escaped space, which broke the build when this used the raw
+   underscore node name directly; plain CSS has no such gotcha, kept
+   dash-separated anyway for one canonical spelling between the two. */
+.editor-prose [data-type="thematic-break"] {
+  border-top: 1px solid var(--border-02);
+  margin: 1rem 0;
+}
+
+/* Opaque verbatim blocks (raw HTML / unclassified) and table rows — all
+   render their source text as-is, monospace, matching codeBlock's
+   treatment; a table row's data-type is "tableRow"/"tableSeparator", set
+   directly from the node name (see blocks.ts) — no underscore, so no
+   dash-conversion applies there. */
+.editor-prose [data-type="html-block"] {
+  font-family: var(--font-dm-mono), ui-monospace;
+  white-space: pre-wrap;
+  color: var(--text-03);
+}
+.editor-prose [data-type="other"] {
+  font-family: var(--font-dm-mono), ui-monospace;
+  white-space: pre-wrap;
+  color: var(--text-03);
+}
+.editor-prose [data-type="table"] {
+  margin: 0.5rem 0;
+  border-radius: var(--radius-08);
+  border: 1px solid var(--border-02);
+  overflow: hidden;
+}
+.editor-prose [data-type="tableRow"] {
+  font-family: var(--font-dm-mono), ui-monospace;
+  white-space: pre-wrap;
+  padding: 0.25rem 0.5rem;
+}
+.editor-prose [data-type="tableSeparator"] {
+  font-family: var(--font-dm-mono), ui-monospace;
+  white-space: pre-wrap;
+  padding: 0.25rem 0.5rem;
+  color: var(--text-02);
+  background: var(--background-tint-01);
+}
+.editor-prose [data-type="tableRow"] + [data-type="tableRow"] {
+  border-top: 1px solid var(--border-02);
+}
+
+/* Placeholder (@tiptap/extensions' Placeholder), keyed on `.is-editor-empty`
+   rather than `.is-empty`. Both land on the same decoration — the empty
+   textblock holding the cursor — but per the installed extension's source
+   only `.is-editor-empty` is conditional on `editor.isEmpty`, i.e. the whole
+   document being blank.
+   `.is-empty` alone matches any empty block, so pressing Enter part-way down a
+   written page put "Start typing, or pick a template above…" in the middle of
+   it: wrong twice over, since there is nothing to start and a template can't be
+   applied to a page that already has content. No `:first-child` needed — the
+   decoration targets the empty node itself, not a shared wrapper. */
+.editor-prose .is-editor-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-02);
+  float: left;
+  pointer-events: none;
+  height: 0;
+}
+
+/* Comment/source highlights — same idle/active two-tier treatment as the
+   CM6 version: idle threads at 30% amber (20% reads as unhighlighted on
+   real content), hovered/selected at Highlight/Active (60%). Sources sit
+   on most lines of an ingested page, so idle spans get the subtler
+   background-tint-02, only the hovered/caret-focused source jumps to
+   Highlight/Active. */
+.editor-prose .tt-comment-highlight {
+  background: var(--neon-amber-a30);
+}
+.editor-prose .tt-comment-highlight-active {
+  background: var(--highlight-active);
+}
+.editor-prose .tt-source-highlight {
+  background: var(--background-tint-02);
+}
+.editor-prose .tt-source-highlight-active {
+  background: var(--highlight-active);
+}
+
+/* Peer caret — @tiptap/y-tiptap's yCursorPlugin renders
+   .ProseMirror-yjs-cursor (a <span>, per-user border-color set inline)
+   wrapping a name-label <div> (per-user background-color set inline).
+   Base geometry/typography here, same visual shape as the old CM6
+   .cm-coedit-caret/.cm-coedit-caret-label: a thin colored bar with a
+   small name tag above it. */
+.editor-prose .ProseMirror-yjs-cursor {
+  position: relative;
+  margin-left: -1px;
+  margin-right: -1px;
+  border-left: 2px solid;
+  border-left-style: solid;
+}
+.editor-prose .ProseMirror-yjs-cursor div {
+  position: absolute;
+  top: -1.15em;
+  left: -1px;
+  white-space: nowrap;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: var(--text-inverted-05);
+}
+.editor-prose .ProseMirror-yjs-selection {
+  opacity: 0.3;
+}

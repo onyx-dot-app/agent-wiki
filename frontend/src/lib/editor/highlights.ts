@@ -1,96 +1,152 @@
-/** Anchored highlight fields: `[from, to)` offset ranges decorated into the
- * doc, held in editor state so local edits map them onto the text they were
- * anchored to. Comments and source attribution are the two instantiations,
- * differing only in mark classes. */
-import type { Range } from "@codemirror/state";
-import { StateEffect, StateField } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
-
-export interface AnchoredHighlightTarget {
-  /** Owner id (comment thread root or source dedupe key), matched against
-   * the active-id effect. Several targets may share one id. */
-  id: string;
-  startOffset: number;
-  endOffset: number;
-}
+/** Anchored highlight plugins: `[startOffset, endOffset)` ranges decorated
+ * into the doc, held in ProseMirror plugin state so edits remap them onto
+ * the text they were anchored to. Comments and source attribution are the
+ * two instantiations, differing only in mark classes — port of
+ * `lib/editor/highlights.ts`'s CodeMirror `StateField`/`StateEffect` version
+ * to ProseMirror's plugin-state/transaction-meta equivalent (there's no
+ * `StateEffect` here; `tr.setMeta(key, value)` / `tr.getMeta(key)` is the
+ * out-of-band channel, and a `DecorationSet` remaps itself through edits via
+ * `.map(tr.mapping, tr.doc)` instead of hand-mapping each offset). */
+import { Extension, type Editor } from "@tiptap/core";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import type { AnchoredHighlightTarget } from "@/lib/editor/types";
 
 interface HighlightClasses {
   idle: string;
   active: string;
 }
 
+interface HighlightMeta {
+  targets: AnchoredHighlightTarget[];
+  activeIds: string[];
+}
+
+interface HighlightPluginState extends HighlightMeta {
+  deco: DecorationSet;
+}
+
 function buildDecorations(
   targets: AnchoredHighlightTarget[],
   activeIds: string[],
   classes: HighlightClasses,
-  docLen: number,
+  doc: Parameters<typeof DecorationSet.create>[0],
 ): DecorationSet {
-  const ranges: Range<Decoration>[] = [];
+  const docSize = doc.content.size;
+  const decorations: Decoration[] = [];
   for (const t of targets) {
-    const from = Math.max(0, Math.min(t.startOffset, docLen));
-    const to = Math.max(from, Math.min(t.endOffset, docLen));
+    const from = Math.max(0, Math.min(t.startOffset, docSize));
+    const to = Math.max(from, Math.min(t.endOffset, docSize));
     if (from === to) continue;
-    ranges.push(
-      Decoration.mark({
+    decorations.push(
+      Decoration.inline(from, to, {
         class: activeIds.includes(t.id) ? classes.active : classes.idle,
-      }).range(from, to),
+      }),
     );
   }
-  return Decoration.set(ranges, true);
+  return DecorationSet.create(doc, decorations);
 }
 
-/** Build a highlight field plus its two effects. Doc changes map the held
- * offsets through the edit so a highlight stays on the text it was anchored
- * to. Fresh server offsets and active ids only arrive via the effects. */
-export function anchoredHighlightField(classes: HighlightClasses) {
-  const setTargets = StateEffect.define<AnchoredHighlightTarget[]>();
-  const setActive = StateEffect.define<string[]>();
-  const field = StateField.define<{
-    targets: AnchoredHighlightTarget[];
-    activeIds: string[];
-    deco: DecorationSet;
-  }>({
-    create: () => ({ targets: [], activeIds: [], deco: Decoration.none }),
-    update(value, tr) {
-      let targets = value.targets;
-      let activeIds = value.activeIds;
-      if (tr.docChanged) {
-        // Boundary-typed text stays outside the range (start maps after an
-        // insertion at the start, end maps before one at the end).
-        targets = targets.map((t) => ({
-          ...t,
-          startOffset: tr.changes.mapPos(t.startOffset, 1),
-          endOffset: tr.changes.mapPos(t.endOffset, -1),
-        }));
-      }
-      for (const e of tr.effects) {
-        if (e.is(setTargets)) targets = e.value;
-        if (e.is(setActive)) activeIds = e.value;
-      }
-      if (targets === value.targets && activeIds === value.activeIds)
-        return value;
-      return {
-        targets,
-        activeIds,
-        deco: buildDecorations(
-          targets,
-          activeIds,
-          classes,
-          tr.state.doc.length,
-        ),
-      };
+/** A highlight plugin's exported handle: the plugin itself (register via
+ * `addProseMirrorPlugins`) plus typed helpers for pushing new data in from
+ * React and reading the current target list back out. */
+export interface HighlightPlugin {
+  key: PluginKey<HighlightPluginState>;
+  plugin: Plugin<HighlightPluginState>;
+  setTargets: (editor: Editor, targets: AnchoredHighlightTarget[]) => void;
+  setActiveIds: (editor: Editor, ids: string[]) => void;
+  targets: (editor: Editor) => AnchoredHighlightTarget[];
+}
+
+export function anchoredHighlightPlugin(
+  name: string,
+  classes: HighlightClasses,
+): HighlightPlugin {
+  const key = new PluginKey<HighlightPluginState>(name);
+
+  const plugin = new Plugin<HighlightPluginState>({
+    key,
+    state: {
+      init: () => ({ targets: [], activeIds: [], deco: DecorationSet.empty }),
+      apply(tr, value, _oldState, newState) {
+        let { targets, activeIds } = value;
+        let deco = value.deco;
+        if (tr.docChanged) {
+          deco = deco.map(tr.mapping, tr.doc);
+          // Boundary-typed text stays outside the range — mirrors the CM6
+          // version's mapPos(assoc) bias (start maps after an insertion at
+          // the start, end maps before one at the end). DecorationSet.map
+          // doesn't expose per-boundary assoc, so the plain offsets are
+          // remapped the same way for the *next* full rebuild (a fresh
+          // setTargets/setActiveIds call), keeping the two representations
+          // (targets list vs. live decorations) from drifting apart.
+          targets = targets.map((t) => ({
+            ...t,
+            startOffset: tr.mapping.map(t.startOffset, 1),
+            endOffset: tr.mapping.map(t.endOffset, -1),
+          }));
+        }
+        const meta = tr.getMeta(key) as Partial<HighlightMeta> | undefined;
+        if (meta) {
+          if (meta.targets) targets = meta.targets;
+          if (meta.activeIds) activeIds = meta.activeIds;
+          deco = buildDecorations(targets, activeIds, classes, newState.doc);
+        }
+        if (
+          targets === value.targets &&
+          activeIds === value.activeIds &&
+          deco === value.deco
+        ) {
+          return value;
+        }
+        return { targets, activeIds, deco };
+      },
     },
-    provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
+    props: {
+      decorations: (state) => key.getState(state)?.deco ?? DecorationSet.empty,
+    },
   });
-  return { field, setTargets, setActive };
+
+  return {
+    key,
+    plugin,
+    setTargets(editor, targets) {
+      editor.view.dispatch(
+        editor.view.state.tr.setMeta(key, {
+          targets,
+        } satisfies Partial<HighlightMeta>),
+      );
+    },
+    setActiveIds(editor, ids) {
+      editor.view.dispatch(
+        editor.view.state.tr.setMeta(key, {
+          activeIds: ids,
+        } satisfies Partial<HighlightMeta>),
+      );
+    },
+    targets(editor) {
+      return key.getState(editor.state)?.targets ?? [];
+    },
+  };
 }
 
-export const commentHighlights = anchoredHighlightField({
-  idle: "cm-comment-highlight",
-  active: "cm-comment-highlight-active",
+export const commentHighlights = anchoredHighlightPlugin("commentHighlights", {
+  idle: "tt-comment-highlight",
+  active: "tt-comment-highlight-active",
 });
 
-export const sourceHighlights = anchoredHighlightField({
-  idle: "cm-source-highlight",
-  active: "cm-source-highlight-active",
+export const sourceHighlights = anchoredHighlightPlugin("sourceHighlights", {
+  idle: "tt-source-highlight",
+  active: "tt-source-highlight-active",
+});
+
+/** Registers both highlight plugins on the editor. One Tiptap `Extension`
+ * for both, not two, since neither has any config of its own worth
+ * splitting over — `addProseMirrorPlugins` just returns the raw `Plugin`s
+ * built above. */
+export const AnchoredHighlights = Extension.create({
+  name: "anchoredHighlights",
+  addProseMirrorPlugins() {
+    return [commentHighlights.plugin, sourceHighlights.plugin];
+  },
 });

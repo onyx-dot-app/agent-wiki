@@ -29,7 +29,8 @@ import { fetchFileHistory } from "@/lib/wiki/svc";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
 import type { CommitInfo } from "@/lib/wiki/types";
 import { parseCommitAuthor, updateWarnLevel } from "@/lib/wiki/utils";
-import type { CoeditParticipant, CoeditPeer } from "@/lib/editor/types";
+import type { CoeditPeer } from "@/lib/editor/hooks";
+import type { CoeditParticipant } from "@/lib/editor/svc";
 import type { DocumentActivity } from "@/types";
 
 // Identity hues cycled per user. Semantic hues stay reserved: red/green/
