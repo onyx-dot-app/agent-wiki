@@ -71,7 +71,7 @@ from app.tasks.queues import QueueFullError
 from app.triggers import reconcile as triggers_reconcile
 from app.triggers import repo as triggers_repo
 from app.utils.logging import setup_logging
-from app.wiki import coedit_channel, coedit_room
+from app.wiki import coedit_channel
 from app.wiki.git import ensure_wiki_repo
 from app.wiki.seed import seed_if_empty
 from app.wiki.templates import seed_starter_templates_if_empty
@@ -212,17 +212,6 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     # app/wiki/coedit_channel.py) — bus.emit() is a blocking NOTIFY that
     # can't run inline on the event loop for a per-keystroke hot path.
     coedit_channel.start_emit_drain()
-    # Co-edit live documents (pycrdt.Doc) live only in this process's memory
-    # (app/wiki/coedit_room.py) — bind this loop so a realtime-bus handler
-    # firing on its own listener thread (live-rebase's cross-process
-    # fan-out, or a checkpoint landing elsewhere that needs this process's
-    # own room reconciled — see app/tasks/coedit_checkpoint.py) can schedule
-    # Doc-touching work back onto it. Checkpointing itself is a coedit_queue
-    # task now (any worker can act on any session, see that module's
-    # docstring), so unlike the OT era this process doesn't run its own
-    # periodic checkpoint scan — that's the queue consumer's job
-    # (app/tasks/run_worker.py), same as every other periodic task.
-    coedit_room.bind_main_loop(asyncio.get_running_loop())
 
     yield
 

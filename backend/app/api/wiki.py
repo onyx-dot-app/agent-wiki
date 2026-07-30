@@ -65,7 +65,7 @@ from app.wiki import (
     acl,
     agent_activity,
     coedit,
-    coedit_room,
+    coedit_live,
     diff as wiki_diff,
     doc_ids,
     drafts as wiki_drafts,
@@ -338,47 +338,41 @@ def get_document_by_path(
     # persisted): on a merge conflict, prefer the live doc. This is a UI
     # read; git stays the source of truth for committed pages.
     #
-    # A session whose room lives on a *different* replica can't be read from
-    # here at all (the doc only exists as that process's in-memory pycrdt.Doc
-    # — see app/wiki/coedit_room.py) — falls back to serving committed HEAD,
-    # same as the no-session case. In a multi-replica deployment this means
-    # the live-preview freshness this block exists for isn't guaranteed on
-    # every replica; the authoritative merge at checkpoint is unaffected.
+    # Any process can serve this: the document is rebuilt from the durable
+    # (snapshot, update log) rather than read out of one worker's memory. The
+    # resident-room version could only answer for sessions its own worker
+    # happened to hold and silently served committed HEAD for the rest, so
+    # under --workers 2 roughly half of these reads were stale.
     sess = coedit.get_active_session(rel)
-    room = coedit_room.get_room(sess.id) if sess is not None else None
-    if sess is not None and room is not None:
-        try:
-            body = coedit_room.read_body_sync(room)
-        except TimeoutError:
-            log.warning("coedit read: live body read timed out for %s; serving HEAD", rel)
-            body = wiki_git.read_file_opt(rel) or ""
-        else:
-            # Fast path: if HEAD hasn't moved since the session opened (the
-            # common case — live-rebase folds inbound agent commits into the
-            # doc and advances base_sha), the doc already reflects
-            # everything, so skip the merge subprocess. When HEAD has
-            # advanced past the session's base, reconcile the committed
-            # change with the doc for display: a clean 3-way merge shows
-            # both; on a conflict — or a merge failure — serve committed
-            # HEAD, not the doc. Preferring the doc there would let a
-            # stale/lagging session (in the limit, a zombie with no
-            # participants left to reconcile it) hide the committed change
-            # from every viewer — the 2026-07-06 incident. The authoritative
-            # merge happens at checkpoint.
-            if sess.base_sha is not None and sess.base_sha != head_sha:
-                base = wiki_git.read_file_opt(rel, ref=sess.base_sha) or ""
-                current = wiki_git.read_file_opt(rel) or ""
-                try:
-                    merge = wiki_git.merge_content(base, current, body)
-                    body = merge.merged if merge.clean else current
-                except RuntimeError:
-                    log.warning(
-                        "coedit read: merge_content failed for %s (base_sha=%s); serving HEAD",
-                        rel,
-                        sess.base_sha,
-                        exc_info=True,
-                    )
-                    body = current
+    live_body = coedit_live.read_body(sess.id) if sess is not None else None
+    if sess is not None and live_body is not None:
+        body = live_body
+        # Fast path: if HEAD hasn't moved since the session opened (the
+        # common case — live-rebase folds inbound agent commits into the
+        # doc and advances base_sha), the doc already reflects
+        # everything, so skip the merge subprocess. When HEAD has
+        # advanced past the session's base, reconcile the committed
+        # change with the doc for display: a clean 3-way merge shows
+        # both; on a conflict — or a merge failure — serve committed
+        # HEAD, not the doc. Preferring the doc there would let a
+        # stale/lagging session (in the limit, a zombie with no
+        # participants left to reconcile it) hide the committed change
+        # from every viewer — the 2026-07-06 incident. The authoritative
+        # merge happens at checkpoint.
+        if sess.base_sha is not None and sess.base_sha != head_sha:
+            base = wiki_git.read_file_opt(rel, ref=sess.base_sha) or ""
+            current = wiki_git.read_file_opt(rel) or ""
+            try:
+                merge = wiki_git.merge_content(base, current, body)
+                body = merge.merged if merge.clean else current
+            except RuntimeError:
+                log.warning(
+                    "coedit read: merge_content failed for %s (base_sha=%s); serving HEAD",
+                    rel,
+                    sess.base_sha,
+                    exc_info=True,
+                )
+                body = current
     else:
         abs_path = filesystem.absolute(rel)
         if abs_path.is_file():

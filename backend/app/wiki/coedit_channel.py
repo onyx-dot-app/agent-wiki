@@ -44,7 +44,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from app.realtime import bus
-from app.wiki import coedit, coedit_room
+from app.wiki import coedit
 
 log = logging.getLogger(__name__)
 
@@ -331,11 +331,6 @@ def _handle_remote_yjs(payload: dict[str, Any]) -> None:
     if n == 1:
         raw = base64.b64decode(payload["chunk"])
         _deliver_local_bytes(session_id, raw, payload.get("seq"))
-        # Also converge this process's own local room, if it holds one —
-        # see coedit_room.apply_remote_frame_if_local's own docstring for
-        # why _deliver_local_bytes alone (local WS *connections* only)
-        # isn't enough.
-        coedit_room.apply_remote_frame_if_local(session_id, raw)
         return
     group = payload["group"]
     full_b64: str | None = None
@@ -354,7 +349,6 @@ def _handle_remote_yjs(payload: dict[str, Any]) -> None:
     if full_b64 is not None:
         raw = base64.b64decode(full_b64)
         _deliver_local_bytes(session_id, raw, payload.get("seq"))
-        coedit_room.apply_remote_frame_if_local(session_id, raw)
 
 
 bus.register(_YJS_BUS_KIND, _handle_remote_yjs)
