@@ -5,12 +5,13 @@ trailers. DB + real git (the ``tmp_repo`` fixture).
 from __future__ import annotations
 
 import os
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text, update
 
 from app.auth import users as users_repo
-from app.db.models import CoeditParticipant, DocumentTemplate
+from app.db.models import CoeditParticipant, CoeditSession, DocumentTemplate
 from app.db.session import session as db_session
 from app.db.session import try_advisory_xact_lock
 from app.tasks import coedit_checkpoint as coedit_checkpoint_task
@@ -109,6 +110,94 @@ def test_checkpoint_raced_fallback_leaves_session_dirty(repo, monkeypatch):
     assert st is not None
     assert st.base_sha == sha  # NOT advanced past the buffer's ancestor
     assert st.version > st.checkpointed_version  # still dirty → next checkpoint reconciles
+
+
+def _racing_rebase(monkeypatch, author_user_id: str, change: coedit.Change):
+    """Land ``change`` between the commit and its write-back, so the CAS misses.
+
+    Typing through a checkpoint is the ordinary case — the commit takes long
+    enough (a git write, sometimes an LLM merge) that a keystroke lands inside
+    it — so this is the common path, not a rare interleaving.
+    """
+    real_rebase = coedit.rebase_onto
+
+    def racing(session_id, **kwargs):
+        coedit.apply_op(
+            session_id,
+            base_version=kwargs["base_version"],
+            changes=[change],
+            author_user_id=author_user_id,
+        )
+        return real_rebase(session_id, **kwargs)
+
+    monkeypatch.setattr(coedit, "rebase_onto", racing)
+    return real_rebase
+
+
+def test_raced_checkpoint_advances_watermark_and_converges(repo, monkeypatch):
+    # A raced write-back with nothing foreign folded in: the commit *is* the
+    # buffer at the version we read, so the watermark records it. The session
+    # stays dirty for the keystroke that raced in, and the next checkpoint
+    # converges on it — merging from the sha just written rather than an
+    # ever-older base, which is what duplicated and dropped text.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+
+    real_rebase = _racing_rebase(monkeypatch, uid, _ch(8, 8, "!"))
+    assert coedit_checkpoint.checkpoint_session(sess.id) is not None
+    monkeypatch.setattr(coedit, "rebase_onto", real_rebase)
+
+    st = coedit.get_active_session(_PATH)
+    assert st is not None
+    assert wiki_git.read_file(_PATH) == "hi world"
+    assert st.base_sha == wiki_git.head_sha_for_path(_PATH)
+    assert st.checkpointed_version == 1
+    assert st.last_checkpoint_at is not None
+    assert st.version == 2  # the raced keystroke is still uncommitted
+
+    assert coedit_checkpoint.checkpoint_session(sess.id) is not None
+    assert wiki_git.read_file(_PATH) == "hi world!"
+    st = coedit.get_active_session(_PATH)
+    assert st is not None and st.version == st.checkpointed_version
+
+
+def test_raced_checkpoint_stops_reenqueueing_every_scan(repo, monkeypatch):
+    # The scan's overdue arm measures from last_checkpoint_at, so a raced
+    # checkpoint that recorded nothing left the session overdue forever: every
+    # scan re-enqueued it, and each attempt committed again.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    sha = _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=sha, initial_buffer="hello world")
+    coedit.join(sess.id, uid)
+    coedit.apply_op(sess.id, base_version=0, changes=[_ch(0, 5, "hi")], author_user_id=uid)
+    # Age it past the overdue threshold; never-checkpointed sessions measure from
+    # created_at.
+    aged = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    with db_session() as s:
+        s.execute(update(CoeditSession).where(CoeditSession.id == sess.id).values(created_at=aged))
+
+    def due() -> list[int]:
+        return [
+            d.id
+            for d in coedit.sessions_due_for_checkpoint(
+                idle_seconds=3600, max_interval_seconds=60
+            )
+        ]
+
+    assert due() == [sess.id]
+
+    real_rebase = _racing_rebase(monkeypatch, uid, _ch(8, 8, "!"))
+    coedit_checkpoint.checkpoint_session(sess.id)
+    monkeypatch.setattr(coedit, "rebase_onto", real_rebase)
+
+    # Still dirty from the raced keystroke, but no longer overdue — the next
+    # commit waits for the interval instead of firing on every scan.
+    st = coedit.get_active_session(_PATH)
+    assert st is not None and st.version > st.checkpointed_version
+    assert due() == []
 
 
 def test_checkpoint_is_noop_when_clean(repo):
