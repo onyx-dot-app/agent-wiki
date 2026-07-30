@@ -32,24 +32,10 @@ log = logging.getLogger(__name__)
 
 _BUS_KIND = "coedit_rebase"
 
-# Bound on retrying a RACED rebase (a concurrent local edit landed in the
-# narrow window rebase_session guards against) before giving up on folding
-# it in live this round. The race is momentary by nature — one keystroke,
-# not a sustained condition — so a handful of immediate retries clears it
-# in practice; the checkpoint scan is still the eventual backstop for
-# folding in the same external change if every attempt raced (caught in
-# review: previously RACED was a dead end, never retried at all, so the
-# live view could stay un-rebased indefinitely even though this backstop
-# existed).
-_RACED_RETRY_ATTEMPTS = 3
-
-
 async def _rebase_and_maybe_checkpoint(session_id: int, head_sha: str) -> None:
+    # No retry loop: folding a commit in is a logged update that commutes with
+    # concurrent keystrokes, so there is no race to lose and nothing to retry.
     outcome = await rebase_session(session_id, head_sha)
-    for _ in range(_RACED_RETRY_ATTEMPTS):
-        if outcome != RebaseOutcome.RACED:
-            break
-        outcome = await rebase_session(session_id, head_sha)
     if outcome == RebaseOutcome.CONFLICT:
         # Overlap the plain 3-way merge couldn't resolve — enqueue the
         # checkpoint task instead of running the engine inline: it does

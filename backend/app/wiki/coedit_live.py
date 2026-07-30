@@ -115,33 +115,48 @@ def read_body(session_id: int) -> str | None:
     return reconstruct_body(doc)
 
 
-def state_and_diff(session_id: int, new_body: str) -> tuple[bytes, int] | None:
-    """Produce the update that moves the session's document to ``new_body``.
+def rebase_delta(
+    session_id: int, base_body: str, current_body: str
+) -> tuple[bytes | None, str, bool] | None:
+    """Fold an out-of-band commit into the session as an ordinary Yjs update.
 
-    Used by live-rebase: an out-of-band commit becomes an ordinary logged and
-    broadcast delta, which commutes with concurrent appends, rather than a
-    wholesale reseed that severs CRDT lineage. Returns ``(update_bytes, seq)``
-    where ``seq`` is what the document was current as of when the diff was
-    taken; ``None`` when the body already matches.
+    Returns ``(update_bytes, merged_body, clean)``; ``update_bytes`` is ``None``
+    when the merge collapsed to what the document already had, and ``clean`` is
+    ``False`` when the three-way merge overlapped (the caller hands those to the
+    checkpoint engine's AI merge instead). ``None`` means the session is gone.
+
+    One rebuild does the whole job — read the body, merge, apply the diff, emit
+    the delta — because the ``Doc`` cannot leave this thread, and doing it in two
+    calls would rebuild twice for no benefit.
+
+    The delta is the point: an update commutes with whatever else clients are
+    appending, so folding a commit in needs no compare-and-swap, no snapshot
+    swap, and no reseed. A reseed would mint a fresh CRDT lineage, which is
+    precisely what leaves concurrent edits unintegrable.
     """
+    from app.wiki.git import merge_content  # noqa: PLC0415
     from app.wiki.markdown_splice import apply_markdown_diff  # noqa: PLC0415
 
     try:
-        doc, seq = _load(session_id)
+        doc, _seq = _load(session_id)
     except SessionGone:
         return None
+    ours = reconstruct_body(doc)
+    mr = merge_content(base_body, current_body, ours)
+    if not mr.clean:
+        return None, mr.merged, False
+    if mr.merged == ours:
+        return None, mr.merged, True
     before = doc.get_state()
-    if reconstruct_body(doc) == new_body:
-        return None
-    apply_markdown_diff(doc, new_body)
-    return doc.get_update(before), seq
+    apply_markdown_diff(doc, mr.merged)
+    return doc.get_update(before), mr.merged, True
 
 
 __all__ = [
     "SessionGone",
     "initial_sync_message",
     "read_body",
-    "state_and_diff",
+    "rebase_delta",
     "sync_reply",
     "validate_update",
     "YMessageType",

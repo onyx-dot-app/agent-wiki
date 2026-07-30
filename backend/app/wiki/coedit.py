@@ -36,7 +36,6 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, or_, select, update
@@ -406,131 +405,28 @@ def updates_since(session_id: int, after_seq: int) -> UpdatesSince:
             ],
         )
 
+def set_base_sha(session_id: int, base_sha: str) -> bool:
+    """Point an active session's merge base at ``base_sha``. True if it moved.
 
-def rebase_onto(
-    session_id: int,
-    *,
-    new_base_sha: str,
-    snapshot: bytes,
-    body: str,
-    expected_seq: int,
-    checkpointed: bool,
-) -> SessionRow | None:
-    """Record that the session's document was rebased onto ``new_base_sha``
-    — either a live-rebase re-seed (an out-of-band agent/ingest commit
-    folded in by fully re-seeding the in-process room from the 3-way-merged
-    text and pushing a full resync, see ``coedit_rebase.py``) or the merged
-    result a checkpoint just committed.
-
-    Bumps ``ydoc_seq`` by one (the rebase itself counts as a seq-advancing
-    event) and, since a rebase replaces the document wholesale rather than
-    applying an incremental delta, clears ``coedit_updates`` for this
-    session — the pre-rebase log no longer corresponds to anything a
-    reconnecting client could meaningfully replay onto the post-rebase doc,
-    so catch-up must start clean from the new seq rather than attempt to
-    replay through the discontinuity.
-
-    ``expected_seq`` is a CAS: the ``ydoc_seq`` the caller observed when it
-    read the doc it built ``snapshot``/``body`` from (``room_body`` in
-    ``coedit_rebase.py``). The merge/snapshot-build happens across several
-    ``await``s, during which the event loop is free to run ``_recv_loop``
-    for a genuine local edit — that edit lands in ``coedit_updates`` *and*
-    bumps ``ydoc_seq`` before this call ever runs. Rebasing unconditionally
-    in that window would delete that edit's log row and reseed the room to
-    a snapshot that never saw it either — silently erased, no fallback (a
-    real bug, caught in review; the OT-era ``rebase``'s own
-    ``base_version`` CAS existed for exactly this). Conditioning the update
-    on ``ydoc_seq == expected_seq`` makes the whole operation a no-op
-    (returns ``None``, same as a closed session) when a concurrent edit
-    landed — the caller skips this rebase and leaves the room's own edit
-    intact; the fold-in the skipped rebase would have applied still
-    reaches the page via the checkpoint engine's own merge.
-
-    ``snapshot``/``body`` — a throwaway ``Doc`` seeded from the rebased
-    text, its ``get_update()`` bytes and the text itself — must move in
-    lockstep with that clear: ``ydoc_snapshot``/``ydoc_snapshot_seq``/
-    ``ydoc_snapshot_body`` advance to the new ``ydoc_seq`` in the same
-    update. Skipping the snapshot advance was a real bug (caught in
-    review): the checkpoint engine never touches this room's live ``Doc``,
-    only ``(ydoc_snapshot, coedit_updates)`` (see ``coedit_checkpoint.py``)
-    — with the log cleared but the snapshot left pointing at its
-    pre-rebase seq, a later checkpoint would rebuild from that stale
-    snapshot plus an empty log, silently dropping every edit made since
-    the snapshot was last advanced. ``body`` specifically (not a git read
-    at ``new_base_sha``) matters here because a live-rebase's merged text
-    has no corresponding git commit at all — the merge only ever happens
-    in memory, so ``new_base_sha`` (the out-of-band commit that triggered
-    the rebase) does *not* decode to ``body`` on its own; a caller that
-    passes the wrong ``body`` here corrupts every future checkpoint's diff
-    base for this session (also caught in review).
-
-    Takes ``checkpoint_lock`` for the same reason ``checkpoint_session``
-    and the WS route's rehydrate path do: every other reader/writer of
-    ``(ydoc_snapshot, ydoc_snapshot_seq, coedit_updates)`` takes it so
-    those three fields are always read/written as one consistent unit —
-    without this function also taking it, a rehydrating reader's own two
-    separate reads (``get_session_for_checkpoint`` then ``updates_since``)
-    could still land with this call's delete-all-then-advance in between
-    them, reading a pre-rebase snapshot alongside a post-rebase (already-
-    pruned) update log — stale *and* on the wrong lineage (confirmed in
-    review, with a repro). Returns ``None`` (same as a CAS miss) if the
-    lock can't be acquired within its own timeout, rather than blocking a
-    live-rebase indefinitely on it — the caller
-    (``coedit_rebase.rebase_session``) already treats a ``None`` return as
-    ``RACED`` and (as of this fix) retries.
+    All that survives of the old ``rebase_onto``. Folding an out-of-band commit
+    into a session is now an ordinary logged Yjs update (see
+    ``coedit_live.rebase_delta``), which commutes with whatever clients are
+    appending — so there is no snapshot to swap, no log to delete, and no
+    ``expected_seq`` compare-and-swap to lose. The only durable consequence left
+    is which commit the next checkpoint diffs against.
     """
-    now = _iso(_now())
-    with checkpoint_lock(session_id, timeout_ms=_REBASE_LOCK_TIMEOUT_MS) as acquired:
-        if not acquired:
-            return None
-        return _rebase_onto_locked(
-            session_id,
-            new_base_sha=new_base_sha,
-            snapshot=snapshot,
-            body=body,
-            expected_seq=expected_seq,
-            checkpointed=checkpointed,
-            now=now,
-        )
-
-
-def _rebase_onto_locked(
-    session_id: int,
-    *,
-    new_base_sha: str,
-    snapshot: bytes,
-    body: str,
-    expected_seq: int,
-    checkpointed: bool,
-    now: str,
-) -> SessionRow | None:
     with session() as s:
-        values: dict[str, Any] = {
-            "base_sha": new_base_sha,
-            "updated_at": now,
-            "ydoc_seq": CoeditSession.ydoc_seq + 1,
-        }
-        row = s.scalars(
+        moved = s.scalars(
             update(CoeditSession)
             .where(
                 CoeditSession.id == session_id,
                 CoeditSession.status == SessionStatus.ACTIVE.value,
-                CoeditSession.ydoc_seq == expected_seq,
             )
-            .values(**values)
-            .returning(CoeditSession)
+            .values(base_sha=base_sha, updated_at=_iso(_now()))
+            .returning(CoeditSession.id)
             .execution_options(synchronize_session=False)
         ).one_or_none()
-        if row is None:
-            return None
-        row.ydoc_snapshot = snapshot
-        row.ydoc_snapshot_seq = row.ydoc_seq
-        row.ydoc_snapshot_body = body
-        if checkpointed:
-            row.ydoc_checkpointed_seq = row.ydoc_seq
-            row.last_checkpoint_at = now
-        s.execute(delete(CoeditUpdate).where(CoeditUpdate.session_id == session_id))
-        return _session_row(row)
+        return moved is not None
 
 
 def advance_checkpoint(

@@ -32,136 +32,74 @@ import asyncio
 import logging
 from enum import Enum
 
-from app.models.coedit import ResyncFrame
-from app.wiki import coedit, coedit_channel, coedit_room
+from pycrdt import create_update_message
+
+from app.wiki import coedit, coedit_live, coedit_channel
 from app.wiki import git as wiki_git
-from app.wiki import markdown_yjs
 
 log = logging.getLogger(__name__)
-
 
 class RebaseOutcome(str, Enum):
     """Result of ``rebase_session``."""
 
-    SKIP = "skip"  # no room here, session gone/closed, or already based on head_sha
-    APPLIED = "applied"  # clean fold; doc re-seeded, resync sent
-    NOOP = "noop"  # merge collapsed to what the doc already had; only base_sha advanced
+    SKIP = "skip"  # session gone/closed, or already based on head_sha
+    APPLIED = "applied"  # clean fold, logged and broadcast as an ordinary update
+    NOOP = "noop"  # merge collapsed to what the document already had
     CONFLICT = "conflict"  # overlap — caller falls back to the checkpoint engine's AI merge
-    RACED = "raced"  # session went inactive between the merge and recording it
 
 
 async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
-    """Fold the commit at ``head_sha`` into the session's live doc, if this
-    process holds its room."""
-    room = coedit_room.get_room(session_id)
-    if room is None:
+    """Fold the commit at ``head_sha`` into the session's document.
+
+    Any process can do this: the document is rebuilt from
+    ``(ydoc_snapshot, coedit_updates)`` rather than read out of one worker's
+    memory, so there is no "not my room, skip" case left.
+
+    The fold is an ordinary logged, broadcast Yjs update. Because updates
+    commute, a concurrent keystroke needs no guarding — which is why the
+    ``RACED`` outcome, the generation check, the snapshot swap and the
+    ``expected_seq`` compare-and-swap are all gone. Clients receive it as
+    normal traffic and rebase their own pending edits over it, instead of being
+    told to reconnect and losing their caret.
+    """
+    sess = await asyncio.to_thread(coedit.get_session, session_id)
+    if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
+        return RebaseOutcome.SKIP
+    if sess.base_sha == head_sha:
         return RebaseOutcome.SKIP
 
-    def _load_sess() -> coedit.SessionRow | None:
-        sess = coedit.get_session(session_id)
-        if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
-            return None
-        if sess.base_sha == head_sha:
-            return None
-        # A stale trigger can carry a head_sha the session has already moved
-        # past: a concurrent checkpoint, or a later commit's rebase, may
-        # have advanced base_sha to a descendant of head_sha. Rebasing
-        # "onto" an ancestor would merge the doc against older content and
-        # revert already-committed edits, so skip when head_sha is already
-        # contained in base_sha — this also covers the session's own
-        # checkpoint commit landing as the after_doc_write callback that
-        # triggered this rebase in the first place.
-        if sess.base_sha is not None and wiki_git.is_ancestor(head_sha, sess.base_sha):
-            return None
-        return sess
+    def _bodies() -> tuple[str, str]:
+        base = wiki_git.read_file_opt(sess.path, ref=sess.base_sha) if sess.base_sha else ""
+        current = wiki_git.read_file_opt(sess.path, ref=head_sha)
+        return base or "", current or ""
 
-    sess = await asyncio.to_thread(_load_sess)
-    if sess is None:
+    base_body, current_body = await asyncio.to_thread(_bodies)
+    outcome = await asyncio.to_thread(
+        coedit_live.rebase_delta, session_id, base_body, current_body
+    )
+    if outcome is None:
         return RebaseOutcome.SKIP
-
-    # room_body and expected_generation, together — a Doc read plus
-    # Room.generation's own snapshot, both inline on this task's own
-    # thread (the event loop), no `await` between them, so both reflect
-    # the exact same instant of room.doc. This, not sess.ydoc_seq (already
-    # stale by this point — read inside _load_sess's own to_thread call,
-    # strictly *before* this line runs, so a concurrent edit landing in
-    # that gap is reflected in room_body but not in sess.ydoc_seq; caught
-    # in review), is the real baseline: see Room.generation's own
-    # docstring for why ydoc_seq can't serve this role at all — a local
-    # edit mutates room.doc synchronously but its DB log write is a
-    # separate, awaited step, so ydoc_seq can lag room.doc by a real
-    # window regardless of when it's read.
-    room_body = markdown_yjs.reconstruct_body(room.doc)
-    expected_generation = room.generation
-
-    def _merge() -> wiki_git.MergeResult:
-        base_body = wiki_git.read_file_opt(sess.path, ref=sess.base_sha) if sess.base_sha else ""
-        current_body = wiki_git.read_file_opt(sess.path, ref=head_sha)
-        return wiki_git.merge_content(base_body or "", current_body or "", room_body)
-
-    mr = await asyncio.to_thread(_merge)
-    if not mr.clean:
-        # Overlap: leave the doc alone; the caller hands it to the
-        # checkpoint engine's AI-merge, which resolves + commits + re-seeds
-        # the room from the result.
+    update_bytes, _merged, clean = outcome
+    if not clean:
+        # Overlap: leave the document alone. The caller hands it to the
+        # checkpoint engine's AI merge, which resolves and commits.
         log.info("coedit live-rebase: conflict on %s", sess.path)
         return RebaseOutcome.CONFLICT
 
-    def _snapshot_for(merged: str) -> bytes:
-        # A throwaway Doc, seeded and immediately discarded after reading its
-        # bytes — never touched again, so building it off-loop is safe (same
-        # as coedit_checkpoint.py's own snapshot-on-diverge case).
-        return markdown_yjs.seed_doc_from_markdown(merged).get_update()
-
-    snapshot = await asyncio.to_thread(_snapshot_for, mr.merged)
-
-    # The real gate, checked *before* rebase_onto's DB write (not after —
-    # a prior version of this check ran post-write, so a raced edit still
-    # got its update row silently deleted and the snapshot silently
-    # advanced past it before anything noticed; confirmed in review, with
-    # a repro: every edit in the session was discarded from then on, with
-    # no recovery path, since rebase_onto's own delete-all-then-advance
-    # had already committed by the time the check ran). Aborting here
-    # keeps the DB write and the room reseed all-or-nothing: nothing is
-    # persisted at all for this attempt once a concurrent edit is
-    # detected, so there's nothing to reconcile afterward — the next
-    # trigger (or the bounded retry in app/tasks/coedit_rebase.py) just
-    # tries again from scratch with the now-current state.
-    #
-    # This narrows the race to the (materially smaller) gap between this
-    # check and rebase_onto's own DB transaction actually landing — an
-    # edit whose Doc mutation bumps room.generation *after* this check but
-    # whose DB log write completes before rebase_onto's transaction commits
-    # is still caught by rebase_onto's own expected_seq CAS (ydoc_seq will
-    # have moved). The one residual case neither guard can close: a Doc
-    # mutation that lands in that same narrow window whose DB write is
-    # *still in flight* when rebase_onto's transaction commits — bounded by
-    # how long asyncio.to_thread + one DB round-trip takes, milliseconds in
-    # practice. Not claiming that's eliminated, only that it's now the
-    # narrowest of the three points this function used to be exposed at.
-    if room.generation != expected_generation:
-        return RebaseOutcome.RACED
-
-    res = await asyncio.to_thread(
-        coedit.rebase_onto,
-        session_id,
-        new_base_sha=head_sha,
-        snapshot=snapshot,
-        body=mr.merged,
-        expected_seq=sess.ydoc_seq,
-        checkpointed=False,
-    )
-    if res is None:
-        return RebaseOutcome.RACED
-    if mr.merged == room_body:
+    if update_bytes is None:
+        # Nothing to fold in; only the merge base moves, so the next checkpoint
+        # diffs against the right commit.
+        await asyncio.to_thread(coedit.set_base_sha, session_id, head_sha)
         return RebaseOutcome.NOOP
 
-    # Reseed from this same snapshot, not an independent
-    # seed_doc_from_markdown(mr.merged) call inside reseed() — two separate
-    # seedings of "the same" text produce incompatible CRDT lineages (see
-    # coedit_room.reseed), which would silently break a later checkpoint's
-    # replay against the ydoc_snapshot just persisted above (caught in
-    # review).
-    coedit_room.reseed(room, snapshot, mr.merged, head_sha)
-    coedit_channel.publish_control(session_id, ResyncFrame(session_id=session_id).model_dump())
+    seq = await asyncio.to_thread(
+        coedit.apply_update,
+        session_id,
+        update_bytes=update_bytes,
+        author_user_id=coedit.SYSTEM_AUTHOR_ID,
+    )
+    if seq is None:
+        return RebaseOutcome.SKIP  # session closed underneath us
+    coedit_channel.broadcast_yjs(session_id, create_update_message(update_bytes), seq)
+    await asyncio.to_thread(coedit.set_base_sha, session_id, head_sha)
     return RebaseOutcome.APPLIED
