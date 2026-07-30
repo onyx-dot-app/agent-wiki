@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 import uuid
 
 from pydantic import BaseModel
@@ -11,7 +10,7 @@ from sqlalchemy import delete as sqla_delete
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import defer
 
-from app.db.models import CoeditSession, Image
+from app.db.models import CoeditSession, Image, WikiDocId
 from app.wiki.coedit import SessionStatus
 from app.db.session import execute_dml, session
 
@@ -34,6 +33,7 @@ class ImageSweepRow(BaseModel):
     id: str
     created_at: str
     unreferenced_since: str | None
+    anchor_doc_id: str
 
 
 def serving_url(image_id: str) -> str:
@@ -115,15 +115,21 @@ def get(image_id: str) -> StoredImageData | None:
 def list_for_sweep() -> list[ImageSweepRow]:
     with session() as s:
         rows = s.execute(
-            select(Image.id, Image.created_at, Image.unreferenced_since)
+            select(
+                Image.id,
+                Image.created_at,
+                Image.unreferenced_since,
+                Image.anchor_doc_id,
+            )
         ).all()
         return [
             ImageSweepRow(
                 id=image_id,
                 created_at=created_at,
                 unreferenced_since=unreferenced_since,
+                anchor_doc_id=anchor_doc_id,
             )
-            for image_id, created_at, unreferenced_since in rows
+            for image_id, created_at, unreferenced_since, anchor_doc_id in rows
         ]
 
 
@@ -145,30 +151,33 @@ def totals() -> tuple[int, int]:
         return int(count), int(total_bytes)
 
 
-def delete_if_unreferenced_by_drafts(image_id: str, url: str) -> bool:
-    """Delete the image unless a live co-edit buffer references ``url``, in
-    one transaction (URL-boundary matched, same class as the tree scan).
+def delete_if_anchor_idle(image_id: str) -> bool:
+    """Delete the image unless its anchor page has a live co-edit session, in
+    one transaction.
 
-    A buffer write that lands after this transaction commits produces a
-    draft referencing an already-deleted URL. That end state is reachable
-    with no race at all (a draft can paste any dead URL at any moment), so
-    no synchronization boundary can prevent it and none is pretended here.
-    What this transaction does guarantee: the check and the delete are
-    atomic, so no reference visible at delete time is ever lost. The
-    git-side scan is the caller's job (it holds the commit lock across this
-    call). Returns True only when a row was deleted.
+    Anchor-scoped rather than buffer-scoped: a Yjs buffer holds no
+    server-readable text, so an open session is the only signal that a draft
+    may reference the image. A session that opens after this transaction
+    commits produces a draft referencing an already-deleted URL, an end state
+    reachable with no race at all (a draft can paste any dead URL at any
+    moment), so no boundary is pretended here. What the transaction does
+    guarantee: the check and the delete are atomic, so no session visible at
+    delete time is ever lost. The git-side scan is the caller's job (it holds
+    the commit lock across this call). Returns True only when a row was deleted.
     """
-    boundary = re.escape(url) + "([^A-Za-z0-9._~%/-]|$)"
     with session() as s:
-        referenced = s.scalar(
+        being_edited = s.scalar(
             select(func.count())
-            .select_from(CoeditSession)
+            .select_from(Image)
+            .join(WikiDocId, WikiDocId.id == Image.anchor_doc_id)
+            .join(CoeditSession, CoeditSession.path == WikiDocId.path)
             .where(
+                Image.id == image_id,
+                WikiDocId.deleted_at.is_(None),
                 CoeditSession.status == SessionStatus.ACTIVE.value,
-                CoeditSession.buffer_text.regexp_match(boundary),
             )
         )
-        if referenced:
+        if being_edited:
             return False
         stmt = (
             sqla_delete(Image)

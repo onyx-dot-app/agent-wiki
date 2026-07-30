@@ -93,16 +93,13 @@ def test_never_referenced_image_is_flagged_after_grace_then_deleted_after_retent
     assert image_store.stat(image_id) is None
 
 
-def test_delete_proceeds_when_draft_holds_only_a_suffixed_url(tmp_repo) -> None:
-    # The delete-time draft guard is URL-boundary matched too: a draft whose
-    # only mention extends the URL path must not keep the orphan alive.
-    path = "guides/draft-suffix.md"
-    image_id = _put_image(path)
+def test_session_on_another_page_does_not_keep_image_live(tmp_repo) -> None:
+    # Draft protection is anchor-scoped, so one open session elsewhere must not
+    # keep every orphan in the wiki alive.
+    image_id = _put_image("guides/anchored.md")
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
     _set_unreferenced_since(image_id, _timestamp_ago(timedelta(days=31)))
-    coedit.open_session(
-        path, base_sha=None, initial_buffer=f"see /api/wiki/images/{image_id}.png"
-    )
+    coedit.open_session("guides/elsewhere.md", base_sha=None, initial_buffer="unrelated")
 
     _run_sweep()
 
@@ -186,15 +183,13 @@ def test_committed_page_reference_keeps_image_live(tmp_repo) -> None:
     assert row.unreferenced_since is None
 
 
-def test_active_draft_buffer_reference_keeps_image_live(tmp_repo) -> None:
+def test_open_session_on_the_anchor_page_keeps_image_live(tmp_repo) -> None:
+    # A live buffer is a Yjs document with no server-readable text, so the open
+    # session on the anchor page is what protects an image only a draft cites.
     path = "drafts/live.md"
     image_id = _put_image(path)
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
-    coedit.open_session(
-        path,
-        base_sha=None,
-        initial_buffer=f"draft keeps ![x](/api/wiki/images/{image_id}) live",
-    )
+    coedit.open_session(path, base_sha=None, initial_buffer="")
 
     _run_sweep()
 

@@ -6,7 +6,6 @@ storage bounded without touching the wiki commit path.
 from __future__ import annotations
 
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 
 from app.metrics import (
@@ -17,7 +16,7 @@ from app.metrics import (
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
 from app.tasks.trash_purge import TRASH_RETENTION_DAYS
-from app.wiki import coedit, git as wiki_git, image_store
+from app.wiki import coedit, doc_ids, git as wiki_git, image_store
 
 log = logging.getLogger(__name__)
 
@@ -40,23 +39,29 @@ def _parse(ts: str | None) -> datetime | None:
         return None
 
 
-def _referenced(url_by_id: dict[str, str]) -> set[str]:
-    """Ids whose serving URL appears in the working tree or a live edit buffer.
+def _editing_doc_ids() -> set[str]:
+    """Doc ids of pages with a live co-edit session."""
+    paths = coedit.active_session_paths()
+    return set(doc_ids.ids_for_paths(list(paths)).values()) if paths else set()
 
-    URL-bounded on both surfaces so a longer URL sharing this one's prefix
-    (a hex tail, a suffix like .png, a deeper segment) never counts.
+
+def _referenced(
+    rows: list[image_store.ImageSweepRow], url_by_id: dict[str, str]
+) -> set[str]:
+    """Ids whose serving URL is in the working tree, or whose anchor page is
+    being edited.
+
+    The tree scan is URL-bounded so a longer URL sharing this one's prefix
+    never counts. Drafts are covered by the anchor instead of by their text: a
+    live buffer is a Yjs document with no server-readable text, so an open
+    session on the anchor page is the only signal that a draft may reference it.
     """
     matched_urls = wiki_git.grep_working_tree_url_bounded(list(url_by_id.values()))
-    draft_blob = "\n".join(coedit.active_buffer_texts())
+    editing = _editing_doc_ids()
     return {
-        image_id
-        for image_id, url in url_by_id.items()
-        if url in matched_urls
-        or (
-            draft_blob
-            and re.search(re.escape(url) + r"([^A-Za-z0-9._~%/-]|$)", draft_blob)
-            is not None
-        )
+        row.id
+        for row in rows
+        if url_by_id[row.id] in matched_urls or row.anchor_doc_id in editing
     }
 
 
@@ -78,7 +83,7 @@ def sweep_wiki_images() -> None:
             return
 
         url_by_id = {c.id: image_store.serving_url(c.id) for c in candidates}
-        referenced_ids = _referenced(url_by_id)
+        referenced_ids = _referenced(candidates, url_by_id)
 
         now = datetime.now(timezone.utc)
         # 0 disables deletion, matching the trash-purge retention contract.
@@ -111,14 +116,12 @@ def sweep_wiki_images() -> None:
                 try:
                     with wiki_git.commit_lock():
                         if candidate.id in _referenced(
-                            {candidate.id: url_by_id[candidate.id]}
+                            [candidate], {candidate.id: url_by_id[candidate.id]}
                         ):
                             image_store.set_unreferenced_since(candidate.id, None)
                             cleared += 1
                             continue
-                        if image_store.delete_if_unreferenced_by_drafts(
-                            candidate.id, url_by_id[candidate.id]
-                        ):
+                        if image_store.delete_if_anchor_idle(candidate.id):
                             deleted += 1
                 except Exception:
                     log.exception("image sweep: delete failed for %s", candidate.id)

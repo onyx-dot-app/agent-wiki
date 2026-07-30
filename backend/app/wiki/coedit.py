@@ -171,12 +171,16 @@ def blocking_active_session_path(dest: str) -> str | None:
         )
 
 
-def active_buffer_texts() -> list[str]:
-    """Editing-buffer text of every active co-edit session (uncommitted drafts)."""
+def active_session_paths() -> set[str]:
+    """Paths with a live co-edit session, whose uncommitted draft no tree scan sees.
+
+    Keyed on the path rather than the buffer so it holds once buffers become
+    Yjs documents, which carry no server-readable text.
+    """
     with session() as s:
-        return list(
+        return set(
             s.scalars(
-                select(CoeditSession.buffer_text).where(
+                select(CoeditSession.path).where(
                     CoeditSession.status == SessionStatus.ACTIVE.value
                 )
             )
