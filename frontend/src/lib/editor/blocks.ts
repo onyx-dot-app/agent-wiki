@@ -658,6 +658,60 @@ const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((\S+)\)$/;
 
 export const MarkdownLink = Extension.create({
   name: "markdownLink",
+
+  /** Cmd/Ctrl-click opens a link while editing.
+   *
+   * `openOnClick` stays false, so a plain click still just places the caret —
+   * you have to be able to click into link text to fix a typo in it. Tiptap's
+   * own click handler can't express "only with a modifier", and its
+   * `"whenNotEditable"` option is a red herring here: it is coerced to `true`
+   * before reaching the handler, which then bails on `!view.editable` anyway.
+   *
+   * Read-only viewers need nothing from this. `editable: false` means the
+   * editor DOM isn't contenteditable, so anchors get native browser
+   * behaviour — that path was never broken. */
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          handleClick(view, _pos, event) {
+            if (event.button !== 0 || !(event.metaKey || event.ctrlKey)) {
+              return false;
+            }
+            const target = event.target as HTMLElement | null;
+            const anchor = target?.closest?.("a") ?? null;
+            if (!anchor || !view.dom.contains(anchor)) return false;
+            const href = anchor.getAttribute("href");
+            if (!href) return false;
+            window.open(href, "_blank", "noopener,noreferrer");
+            return true;
+          },
+        },
+      }),
+    ];
+  },
+
+  /** Mod-k strips the link from the selection (or from the link under the
+   * caret), which is the missing half of authoring: typing `[text](url)`
+   * creates one, and nothing could undo or retarget it afterwards. Removing it
+   * leaves the text, so retyping the markdown is how you change a URL.
+   *
+   * Returns false when there's no link involved, so the shortcut falls through
+   * to the browser instead of silently swallowing Cmd-K. */
+  addKeyboardShortcuts() {
+    return {
+      "Mod-k": () => {
+        if (!this.editor.isActive("link")) return false;
+        return this.editor
+          .chain()
+          .focus()
+          .extendMarkRange("link")
+          .unsetMark("link")
+          .run();
+      },
+    };
+  },
+
   addInputRules() {
     return [
       new InputRule({
