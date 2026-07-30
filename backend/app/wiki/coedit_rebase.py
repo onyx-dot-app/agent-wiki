@@ -48,18 +48,14 @@ class RebaseOutcome(str, Enum):
 def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
     """Fold the commit at ``head_sha`` into the session's document.
 
-    Plain sync: nothing here is bound to an event loop any more, because
-    nothing is bound to a process. Any worker can do this: the document is
-    rebuilt from
-    ``(ydoc_snapshot, coedit_updates)`` rather than read out of one worker's
-    memory, so there is no "not my room, skip" case left.
+    Plain sync, and callable from any process: the document comes from
+    ``(ydoc_snapshot, coedit_updates)``, not from one worker's memory.
 
     The fold is an ordinary logged, broadcast Yjs update. Because updates
-    commute, a concurrent keystroke needs no guarding — which is why the
-    ``RACED`` outcome, the generation check, the snapshot swap and the
-    ``expected_seq`` compare-and-swap are all gone. Clients receive it as
-    normal traffic and rebase their own pending edits over it, instead of being
-    told to reconnect and losing their caret.
+    commute, a concurrent keystroke needs no guarding — hence no
+    compare-and-swap, no snapshot swap, and no "raced, try again" outcome.
+    Clients receive it as normal traffic and rebase their own pending edits
+    over it, keeping their carets.
     """
     sess = coedit.get_session(session_id)
     if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:

@@ -1,28 +1,17 @@
 """Trigger + cross-process fan-out for co-edit checkpointing.
 
-The engine (``app/wiki/coedit_checkpoint.py``) commits a session's live Yjs
-doc to git by rebuilding a throwaway ``Doc`` from its persisted (snapshot,
-updates) — it never touches any process's live room, so unlike the OT era
-*and* unlike this module's own earlier in-process-only design, checkpointing
-now runs as a genuine ``coedit_queue`` task: any worker can dequeue and act
-on any session, regardless of which process (if any) currently holds its
-live room live.
+The engine (``app/wiki/coedit_checkpoint.py``) commits a session's document to
+git by rebuilding a throwaway ``Doc`` from its persisted (snapshot, updates).
+Nothing in that is process-local, so checkpointing is an ordinary
+``coedit_queue`` task: any worker can dequeue and act on any session.
 
-Three triggers, all just enqueue: a periodic scan (crontab, this queue)
-finds every dirty session process-wide and enqueues one checkpoint task
+Three triggers, all of which just enqueue: a periodic scan (crontab, this
+queue) finds every dirty session process-wide and enqueues one checkpoint task
 each; explicit save and last-participant-leave (``app/api/coedit.py``,
-``app/tasks/coedit_leave.py``) enqueue directly, no longer blocking on an
-in-process await.
+``app/tasks/coedit_leave.py``) enqueue directly.
 
-A checkpoint's result still has to reach any process holding the session's
-room live, so it can reconcile its bookkeeping (or reseed, if the committed
-content diverged from what the room held — an out-of-band merge folded in
-concurrently). Fanned out over the realtime bus exactly like
-``coedit_rebase.py``'s own cross-process notify: "which process, if any,
-holds this session's room" is the identical resolution problem in both
-cases, so this reuses the same shape (``bus.register``/``bus.emit`` +
-the durable ``(ydoc_snapshot, coedit_updates)`` pair, so any worker can act on
-the bus doesn't echo to the sender).
+Telling the editors about the result is the engine's own job — it broadcasts a
+Yjs update when the merge changed content — so nothing here fans out.
 """
 
 from __future__ import annotations
@@ -59,8 +48,8 @@ _PARTICIPANT_STALE_SECONDS = 60
 
 @coedit_queue.task()
 def checkpoint_coedit_session_task(session_id: int, *, request_id: str | None = None) -> None:
-    """Checkpoint one session, notify any live room of the result, then
-    close it if everyone has since left and it's now clean.
+    """Checkpoint one session, then close it if everyone has since left and it
+    is now clean.
 
     ``request_id`` set only for an explicit-save request: acknowledged via
     a broadcast ``CheckpointResultFrame`` (the requesting connection's
@@ -92,10 +81,8 @@ def checkpoint_coedit_session_task(session_id: int, *, request_id: str | None = 
 @coedit_queue.periodic_task(crontab())
 def scan_coedit_checkpoints() -> None:
     """One pass of the periodic scan — expire stale participant heartbeats,
-    enqueue a checkpoint task for every dirty session process-wide (not just
-    this process's own local rooms — a worker can now act on any session
-    regardless of where its room, if any, lives), close sessions nothing is
-    connected to, and purge closed never-edited sessions.
+    enqueue a checkpoint task for every dirty session process-wide, close
+    sessions nothing is connected to, and purge closed never-edited sessions.
 
     Presence is a lease: no process ever deletes a participant from its own
     view of its own sockets, so expiring a lapsed heartbeat here is the only

@@ -8,16 +8,15 @@ the same 3-way + AI merge. Durability is the update log + snapshot in
 Postgres, so a checkpoint is about visibility (making the committed page
 fresh for readers/search/agents) and bounding merge size — not data safety.
 
-Rebuilds its own throwaway ``Doc`` rather than sharing one — the
-whole point of rebuilding from (snapshot, updates) instead. That's what lets
-this run as a plain ``coedit_queue`` task (``app/tasks/coedit_checkpoint.py``)
-dispatched to any worker, not just the one process (if any) holding the
-session's room live: a live room is thread-affine (PyO3-unsendable
-``Doc`` (see ``coedit_live.py``), so sharing one across threads,
-on a worker's own thread, would be exactly the cross-thread violation this
-rearchitecture exists to remove. A room that *is* live somewhere still needs
-telling once a checkpoint lands elsewhere — see
-``app/tasks/coedit_checkpoint.py``'s notify step.
+The ``Doc`` is built here and dropped here. That's what lets this run as a
+plain ``coedit_queue`` task (``app/tasks/coedit_checkpoint.py``) dispatched to
+any worker: a ``Doc`` is thread-affine (PyO3-unsendable — see
+``coedit_live.py``), so one shared across threads couldn't be touched from a
+worker's thread at all.
+
+When the merge changes content beyond what the editors have on screen, they
+are sent the difference as an ordinary Yjs update — see the broadcast at the
+end of ``checkpoint_session``.
 
 Attribution: the commit author is the last editor (so git blame credits
 whoever last touched the doc); the other session participants are added as
@@ -82,18 +81,16 @@ def _commit_message(session_id: int, *, primary_author_id: str | None) -> str:
 
 def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTracker, int]:
     """Rebuild a throwaway ``Doc`` from ``sess.ydoc_snapshot`` plus every
-    update logged since — never touches any process's live room.
+    update logged since.
 
     ``base_body`` — the pre-replay text ``markdown_splice.checkpoint_body``
     diffs against — comes from ``sess.ydoc_snapshot_body``, kept in lockstep
-    with ``ydoc_snapshot`` by every writer (``set_initial_snapshot``,
-    ``advance_checkpoint``, ``rebase_onto`` — see ``app/wiki/coedit.py``),
-    *not* re-derived from a git read at ``base_sha``: a live-rebase fold-in
-    has no corresponding git commit at all (the merge lands only in
-    memory), so ``base_sha`` can't always resolve to the content the
-    snapshot actually represents the way a real commit ref can (confirmed
-    in review — a git-read approach silently corrupted the diff base after
-    a mid-session rebase).
+    with ``ydoc_snapshot`` by every writer (``set_initial_snapshot`` and
+    ``advance_checkpoint`` — see ``app/wiki/coedit.py``), *not* re-derived from
+    a git read at ``base_sha``: a live-rebase fold has no corresponding git
+    commit of its own, so ``base_sha`` can't always resolve to the content the
+    snapshot actually represents the way a real commit ref can (a git-read
+    approach silently corrupted the diff base after a mid-session rebase).
 
     The ``TouchedTracker`` is created right after the doc is seeded, before
     replay, so every replayed update is observed by the tracker exactly as
@@ -118,15 +115,13 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
         try:
             doc.apply_update(u.update_payload)
         except Exception:
-            # An undecodable payload (corrupt row, or bytes from an
-            # incompatible lineage that somehow made it into the log)
-            # used to propagate straight out of checkpoint_session,
-            # raising -> retrying -> exceeding retries -> the task getting
-            # dropped, leaving the session ACTIVE and dirty indefinitely
-            # while the room kept right on accepting edits nobody could
-            # ever checkpoint (confirmed in review). Skip-and-log instead:
-            # one bad row can't strand the rest of the session's history,
-            # which is far more valuable than one row's own content.
+            # An undecodable payload (a corrupt row, or bytes from an
+            # incompatible lineage that somehow reached the log) must not
+            # propagate: raising here would retry, exhaust retries, drop the
+            # task, and leave the session ACTIVE and dirty indefinitely while
+            # editing carried on producing updates nobody could ever
+            # checkpoint. One bad row can't strand the rest of the session's
+            # history, which is worth far more than that row's content.
             log.exception(
                 "coedit checkpoint: session %s seq %d update failed to apply; skipping",
                 sess.id,
@@ -137,26 +132,18 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
 
 
 class CheckpointOutcome(BaseModel):
-    """What a successful checkpoint produced — enough for the caller
-    (``app/tasks/coedit_checkpoint.py``) to notify any process holding this
-    session's room live, without this module knowing anything about the
-    realtime bus (same domain/fan-out split as ``coedit_rebase.py`` vs.
-    ``app/tasks/coedit_rebase.py``). ``sha`` is the checkpoint's own commit —
-    also the session's new ``base_sha`` from here on, same value serving
-    both purposes. Deliberately carries no ``snapshot`` bytes: a room being
-    reconciled must reseed from the exact bytes just persisted as
-    ``ydoc_snapshot``, never from an independent ``seed_doc_from_markdown(body)``
-    call of its own, since two separate seedings of "the same" text produce
-    incompatible CRDT lineages — so the
-    reconciling room re-reads ``ydoc_snapshot`` fresh from the DB instead
-    (already durably there by the time this notify fires; also sidesteps
-    carrying a whole page's snapshot bytes through the cross-process
-    notify's payload, which Postgres NOTIFY caps at 8000 bytes — see
-    ``app/realtime/bus.py``). ``diverged`` is True when the committed
-    result differs from what this session's own doc held (an out-of-band
-    merge folded in content this room's doc never had) — the one case a
-    room actually needs reseeding; otherwise its own doc already reflects
-    exactly what got committed, since checkpointing never touches it."""
+    """What a successful checkpoint produced, for the caller
+    (``app/tasks/coedit_checkpoint.py``) to act on.
+
+    ``sha`` is the checkpoint's own commit — also the session's new
+    ``base_sha`` from here on, one value serving both purposes. ``diverged``
+    is True when the committed result differs from what the session's document
+    held, i.e. the merge folded in content from an out-of-band commit; the
+    editors have already been sent that difference as a Yjs update by the time
+    this is returned. Carries no snapshot bytes: they are durably in
+    ``ydoc_snapshot`` for anyone who needs them, and a whole page's worth
+    wouldn't fit the realtime bus's 8000-byte payload cap anyway (see
+    ``app/realtime/bus.py``)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -172,9 +159,9 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
     Pure sync — no asyncio, no Doc access outside the throwaway one this
     function builds and discards. No-op when the session is gone, clean
     (``ydoc_seq == ydoc_checkpointed_seq``), has no snapshot yet (a session
-    whose very first connection hasn't finished creating its room —
-    momentary, see ``coedit.set_initial_snapshot``), or the merge collapses
-    to the current HEAD.
+    whose very first connection hasn't finished seeding one — momentary, see
+    ``coedit.set_initial_snapshot``), or the merge collapses to the current
+    HEAD.
     """
     with coedit.checkpoint_lock(session_id) as acquired:
         if not acquired:
@@ -299,9 +286,8 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                     ai_merge=True,
                     skip_acl=True,
                     record_activity=False,
-                    # This is the session's own commit — don't fold it back into
-                    # the session as an inbound rebase (the notify step below
-                    # already reconciles any live room directly).
+                    # This is the session's own commit — don't fold it back
+                    # into the session as an inbound rebase.
                     trigger_coedit_rebase=False,
                 )
 

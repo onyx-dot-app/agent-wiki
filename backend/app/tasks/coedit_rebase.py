@@ -4,13 +4,9 @@
 wiki commit. If an active session exists for the page and the commit is external
 to it, the fold is enqueued as an ordinary co-edit queue task.
 
-A queue task is the natural home now. The previous version deliberately was not
-one — it fanned out over the realtime bus so that whichever process happened to
-hold the session's ``pycrdt.Doc`` could act, and noted that "a queue worker never
-holds a room either, so dispatching there would just relocate the same problem".
-That reasoning ended with the room: the document is rebuilt on demand from
-``(ydoc_snapshot, coedit_updates)``, so any worker can do the work, and the bus
-fan-out plus the local-room check have nothing left to resolve.
+A queue task is the right home because the work isn't tied to a process: the
+document is rebuilt on demand from ``(ydoc_snapshot, coedit_updates)``, so any
+worker can do it.
 
 The engine (``app.wiki.coedit_rebase``) does the merge and emits the fold as a
 logged, broadcast Yjs update.

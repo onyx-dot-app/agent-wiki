@@ -328,10 +328,10 @@ def get_document_by_path(
             path=rel, body=body, head_sha=head_sha, ref=ref, id=page_id, can_write=can_write
         )
 
-    # Session-aware live read: when a co-edit session is open on this page and
-    # its room lives in *this* process, the room's doc holds the freshest
-    # edits. The checkpoint that commits it to git runs asynchronously, so
-    # HEAD lags — reading it would show stale content right after a save.
+    # Session-aware live read: when a co-edit session is open on this page, its
+    # document holds edits the checkpoint hasn't committed yet. That commit runs
+    # asynchronously, so HEAD lags — reading it would show stale content right
+    # after a save.
     # Serve a quick, display-only 3-way merge of HEAD + the live doc so a
     # viewer sees both committed edits and in-session edits without waiting
     # on the commit. Best-effort and non-authoritative (no LLM, nothing
@@ -339,10 +339,10 @@ def get_document_by_path(
     # read; git stays the source of truth for committed pages.
     #
     # Any process can serve this: the document is rebuilt from the durable
-    # (snapshot, update log) rather than read out of one worker's memory. The
-    # resident-room version could only answer for sessions its own worker
-    # happened to hold and silently served committed HEAD for the rest, so
-    # under --workers 2 roughly half of these reads were stale.
+    # (snapshot, update log) rather than read out of one worker's memory. A
+    # worker-resident version could only answer for the sessions it happened to
+    # hold and silently served committed HEAD for the rest, so under
+    # --workers 2 roughly half of these reads were stale.
     sess = coedit.get_active_session(rel)
     live_body = coedit_live.read_body(sess.id) if sess is not None else None
     if sess is not None and live_body is not None:

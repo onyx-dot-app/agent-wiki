@@ -954,12 +954,10 @@ class CoeditSession(Base):
     # The Yjs doc's last-persisted binary state (``Doc.get_update()``/
     # equivalent snapshot) at ``ydoc_snapshot_seq`` — set once at session
     # creation (seeded from the page's HEAD, seq 0) and advanced by every
-    # checkpoint after that, so a session's document survives a process
-    # restart or a checkpoint running on a process that never held the live
-    # room. See ``app/wiki/coedit_checkpoint.py``: a checkpoint rebuilds a
-    # throwaway ``Doc`` from this snapshot plus every ``CoeditUpdate`` in
-    # ``(ydoc_snapshot_seq, ydoc_seq]``, rather than touching any process's
-    # in-memory room directly.
+    # checkpoint after that. With the log, this pair *is* the document: any
+    # process rebuilds a throwaway ``Doc`` from this snapshot plus every
+    # ``CoeditUpdate`` in ``(ydoc_snapshot_seq, ydoc_seq]`` — see
+    # ``app/wiki/coedit_live.py`` and ``app/wiki/coedit_checkpoint.py``.
     ydoc_snapshot: Mapped[bytes | None] = mapped_column(LargeBinary)
     # The ``ydoc_seq`` the current ``ydoc_snapshot`` bytes represent —
     # updates with ``seq > ydoc_snapshot_seq`` are exactly the ones a

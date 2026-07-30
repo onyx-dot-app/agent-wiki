@@ -1,28 +1,24 @@
 """Live-session store — the Postgres bookkeeping for a live co-edit session.
 
-The DB is the source of truth for a session's *lifecycle* (one active
-session per page, participants, checkpoint watermark) — not for its live
-document content, which lives entirely in this process's in-memory
-`pycrdt.Doc` rebuilt on demand (see `coedit_live.py`; `Doc`/`Subscription` are
-PyO3-"unsendable" Rust types, so a session's document can only ever be
-touched from the process — in practice, the single connection-handling path
-— that created it). This module never imports `pycrdt` at all; it is pure DB
-bookkeeping, on purpose, so the thread-affinity constraint stays confined to
-`coedit_live.py` and the WS route that drives it.
+The DB is the source of truth for a session's *lifecycle* (one active session
+per page, participants, checkpoint watermark) *and* for its document, which is
+the snapshot-plus-update-log pair described below. No process holds a replica:
+a `pycrdt.Doc` is built on demand from these rows, used, and dropped (see
+`coedit_live.py`). This module never imports `pycrdt` at all — it is pure DB
+bookkeeping, on purpose, so the `Doc` thread-affinity constraint stays confined
+to `coedit_live.py` and the WS route that drives it.
 
 `coedit_updates` is the durable, replayable log of every applied Yjs update
 (this session's analog of the old OT-era `coedit_ops`); `ydoc_snapshot` +
 `ydoc_snapshot_seq` on `coedit_sessions` is a point-in-time binary snapshot
 of the doc at that seq, set once at session creation (`set_initial_snapshot`,
 seeded from the page's HEAD) and advanced by every checkpoint
-(`advance_checkpoint`). Together they're what let a checkpoint run
-anywhere, not just in the process holding a session's live room: rebuild a
-throwaway `Doc` from the snapshot, replay every update in
-`(ydoc_snapshot_seq, ydoc_seq]` from this log onto it, and the result is
-byte-identical to what the live room would have produced — see
-`app/wiki/coedit_checkpoint.py`. This module still never imports `pycrdt`
-itself (that rebuild happens in the checkpoint engine); it only stores and
-serves the bytes.
+(`advance_checkpoint`). Together they *are* the document: rebuild a throwaway
+`Doc` from the snapshot, replay every update in
+`(ydoc_snapshot_seq, ydoc_seq]` from this log onto it, and any process gets the
+same result — see `app/wiki/coedit_live.py` and
+`app/wiki/coedit_checkpoint.py`. This module never imports `pycrdt` itself
+(rebuilding happens in those two); it only stores and serves the bytes.
 
 Git stays the source of truth for *committed* pages; this store only holds
 live-session bookkeeping. See
@@ -183,10 +179,9 @@ def get_session(session_id: int) -> SessionRow | None:
 
 
 class CheckpointSessionRow(BaseModel):
-    """A row from `coedit_sessions` with the fields the checkpoint engine
-    specifically needs to rebuild a doc without touching any process's live
-    room — including `ydoc_snapshot`, the blob `SessionRow` deliberately
-    excludes for every other (hot-path) caller."""
+    """A row from `coedit_sessions` with the fields a rebuild needs —
+    including `ydoc_snapshot`, the blob `SessionRow` deliberately excludes for
+    every other (hot-path) caller."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -226,13 +221,12 @@ def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
 def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     """Get-or-create the active session row for ``path``.
 
-    Pure DB bookkeeping — does not touch (or know about) the live document;
-    the caller seeds/adopts the in-process room separately
-    (``coedit_live``, on demand) once it has this row's id. Returns
-    the existing active session's row if one is open (its live room, if this
-    process holds one, wins — ``base_sha`` is ignored then). Concurrent
-    opens race on the partial unique index; the loser re-reads the winner's
-    row.
+    Pure DB bookkeeping — does not touch (or know about) the document, which
+    the caller reaches through ``coedit_live`` once it has this row's id.
+    Returns the existing active session's row if one is open, in which case
+    ``base_sha`` is ignored: that session's own merge base already reflects its
+    history. Concurrent opens race on the partial unique index; the loser
+    re-reads the winner's row.
     """
     with session() as s:
         existing = s.scalar(
@@ -281,22 +275,17 @@ def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> bool:
     bytes decode to, since this is the checkpoint engine's diff base with no git
     read to fall back on.
 
-    Conditional on ``ydoc_snapshot IS NULL`` so this is safe to call every
-    time a process creates a room for a session it didn't already know
-    about: a session that already has a snapshot (a checkpoint already ran,
-    or another process's connection already stamped one) leaves it alone —
-    only the very first room, for a brand-new session, ever actually
-    writes here.
+    Conditional on ``ydoc_snapshot IS NULL``, so it is safe to call on any
+    connection: a session that already has a snapshot (a checkpoint ran, or
+    another connection stamped one) is left alone.
 
-    Returns whether *this* call's snapshot actually won (persisted). Two
-    processes can both observe ``ydoc_snapshot IS NULL`` and each seed
-    their own room independently — each ``seed_doc_from_markdown`` call
-    invents its own CRDT lineage (see that function's own docstring), so
-    the loser's freshly-built room is now on a lineage nothing durable
-    corresponds to: no future checkpoint replay could ever integrate an
-    update logged against it (confirmed in review). The caller must check
-    this and, on ``False``, discard its own room in favor of rehydrating
-    from whichever snapshot *did* win — see ``app/api/coedit.py:ws``.
+    Returns whether *this* call's snapshot won. Two processes can both observe
+    ``ydoc_snapshot IS NULL`` and each seed one; each ``seed_doc_from_markdown``
+    call invents its own CRDT lineage (see that function's own docstring), so
+    the loser's bytes correspond to nothing durable and no replay could ever
+    integrate an update logged against that lineage. The caller must therefore
+    drop its own doc on ``False`` and rebuild from whichever snapshot did win —
+    which is what ``app/api/coedit.py:ws`` does by simply not keeping one.
     """
     with session() as s:
         # .returning(...).one_or_none() (not .rowcount) to detect whether
@@ -523,12 +512,10 @@ def sessions_due_for_checkpoint(
     (``updated_at``, ``last_checkpoint_at``, ``created_at``) are written in
     ``_iso`` format, so the lexicographic string comparisons are well-ordered.
 
-    Process-agnostic: a checkpoint no longer needs the process holding a
-    session's live room (it rebuilds its own throwaway ``Doc`` from
-    ``ydoc_snapshot`` + the update log — see
-    ``app/wiki/coedit_checkpoint.py``), so any worker that dequeues a
-    session id from here can act on it directly, regardless of which
-    process (if any) currently holds that session's room.
+    Process-agnostic: a checkpoint rebuilds its own throwaway ``Doc`` from
+    ``ydoc_snapshot`` + the update log (see
+    ``app/wiki/coedit_checkpoint.py``), so any worker that dequeues a session
+    id from here can act on it directly.
     """
     now = _now()
     idle_cutoff = _iso(now - timedelta(seconds=idle_seconds))

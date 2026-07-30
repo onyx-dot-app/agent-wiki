@@ -240,12 +240,10 @@ def after_doc_trashed(
     """
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
-    # coedit.py is pure DB bookkeeping (no pycrdt import) and so can't evict
-    # a superseded session's in-memory room itself — evict here, for each
-    # A superseded session (a destination collision, e.g. someone opened the
+    # A superseded session (a destination collision — someone opened the
     # just-moved-to path in the seconds-wide window before this move landed) is
     # closed in the DB by on_path_moved and needs nothing else: no process holds
-    # a live document to evict.
+    # a live document that would have to be evicted.
     coedit.on_path_moved(moves)
     # Tombstone the id(s) at the *original* root rather than following the move
     # into `.trash/` — the id keeps resolving (to a deleted state), and restore

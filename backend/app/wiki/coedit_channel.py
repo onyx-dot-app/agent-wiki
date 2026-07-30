@@ -61,9 +61,10 @@ class YjsBytes(BaseModel):
 
     payload: bytes
     # The ``ydoc_seq`` this update was assigned when logged, or ``None`` for
-    # traffic that isn't logged (awareness, sync replies). A dropped relay is
-    # otherwise invisible: room-less there is no resident replica to mask it,
-    # so the client needs to see the gap and fetch what it missed.
+    # traffic that isn't logged (awareness, sync replies, a checkpoint's merge
+    # delta — the snapshot carries that one durably). A dropped relay is
+    # otherwise invisible, so the client needs to see the gap in the sequence
+    # and fetch what it missed.
     seq: int | None = None
 
 

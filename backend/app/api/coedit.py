@@ -1,10 +1,9 @@
 """The page live-session channel — one WebSocket per session (cookie-authed
 humans), speaking raw Yjs sync/awareness protocol bytes over binary frames,
 plus a small set of JSON control messages over text frames. Driven by
-session/participant bookkeeping in ``app/wiki/coedit.py``, the in-process
-live document rebuilt on demand in ``app/wiki/coedit_live.py``, and the broadcast layer in
-``app/wiki/coedit_channel.py``. See ``plans/valiant-tickling-reddy.md`` (if
-still present) or the originating conversation for the design rationale.
+session/participant bookkeeping in ``app/wiki/coedit.py``, the document rebuilt
+on demand in ``app/wiki/coedit_live.py``, and the broadcast layer in
+``app/wiki/coedit_channel.py``.
 
 ``async`` here covers connection lifecycle (accept, the recv/send loops,
 task orchestration) plus — deliberately, unlike every other WebSocket route
@@ -99,9 +98,8 @@ def _connect_sync(path: str, user: User) -> tuple[coedit.SessionRow, bool]:
     offloading to a thread via ``asyncio.to_thread`` doesn't change that
     propagation.
 
-    Room creation, if needed, happens separately back on the event loop —
-    see ``ws()`` — since constructing a ``Doc`` must happen on the thread
-    that will go on to use it.
+    Seeding the session's first snapshot, if it still needs one, is a separate
+    step — see ``_ensure_snapshot``.
     """
     require_can("read", path, user)
     can_write = "write" in acl.effective(user.id, user.is_admin, path)
@@ -264,9 +262,9 @@ async def _recv_loop(
                 ).model_dump()
             )
             continue
-        # Enqueue rather than await in-process: the checkpoint engine no
-        # longer needs this (or any specific) process's live room, so
-        # there's no reason to block this connection's recv loop on it.
+        # Enqueue rather than await in-process: the checkpoint engine needs
+        # nothing from this connection, so there's no reason to block this
+        # recv loop on a commit-plus-merge.
         # The task itself publishes the CheckpointResultFrame ack once it
         # completes (broadcast to the session, this connection included —
         # see checkpoint_coedit_session_task).

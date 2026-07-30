@@ -210,10 +210,9 @@ def restamp_block_ids(doc: Doc, body: str) -> None:
     ``<block_id>:r<index>``/``<block_id>:sep``) — call once right after a
     checkpoint advances ``base_body`` to ``body`` (i.e. whenever the doc
     itself is kept, or spliced via ``apply_markdown_diff``, rather than
-    reseeded fresh from markdown text — see
-    ``app/tasks/coedit_checkpoint.py``'s ``_reconcile_room`` fast path and
-    ``app/wiki/coedit_checkpoint.py``'s ``checkpoint_session``, the only
-    call sites).
+    reseeded fresh from markdown text — see the call sites in
+    ``app/wiki/coedit_checkpoint.py``'s ``checkpoint_session`` and
+    ``app/wiki/coedit_live.py``'s ``rebase_delta``).
 
     Ids are stamped once when a block is created and never otherwise
     touched, so they silently drift out of sync with ``body``'s own
@@ -306,14 +305,13 @@ def apply_markdown_diff(doc: Doc, old_body: str, new_body: str) -> bool:
     (``coedit_checkpoint.checkpoint_session``'s diverged branch — the AI/3-way
     merge folded in content from an out-of-band commit, so the committed
     result differs from what ``doc`` held): re-seeding a fresh ``Doc`` from
-    ``new_body`` text was confirmed in review to silently drop any
-    concurrent edit logged during the checkpoint's git-commit-plus-merge
-    window. Those updates were generated against ``doc``'s *current*
-    lineage (still live and accepting edits the whole time — checkpointing
-    never touches any process's live room) — applying them to an unrelated
-    fresh lineage is a structural no-op, not an error, so the edit just
-    silently vanishes. Splicing onto the existing lineage instead means any
-    such update stays valid.
+    ``new_body`` text silently drops any concurrent edit logged during the
+    checkpoint's git-commit-plus-merge window. Those updates were generated
+    against ``doc``'s *current* lineage — editing carries on throughout, since
+    checkpointing never blocks it — and applying them to an unrelated fresh
+    lineage is a structural no-op rather than an error, so the edit just
+    vanishes. Splicing onto the existing lineage keeps any such update
+    valid.
 
     Only replaces the specific top-level blocks that actually changed
     (found via ``difflib`` over each side's block texts — reusing

@@ -36,18 +36,12 @@ Queues:
   sandbox provisioning).
 
 * ``coedit_queue`` — **co-edit checkpointing + session leave fallback.** A
-  session's live Yjs document only exists as one *web* process's in-memory
-  document, rebuilt on demand from ``(ydoc_snapshot, coedit_updates)`` (see
-  ``app/wiki/coedit_live.py``), so any worker can act on any session, and
-  be shared cross-process), but checkpointing doesn't need that room: the
-  checkpoint engine (``app/wiki/coedit_checkpoint.py``) rebuilds its own
-  throwaway ``Doc`` from the session's persisted snapshot + update log, so
-  ``checkpoint_coedit_session_task`` (``app/tasks/coedit_checkpoint.py``) is
-  a real task any worker can dequeue and act on, regardless of which process
-  (if any) holds the session's room live — a periodic scan enqueues one per
-  dirty session, explicit save and last-participant-leave enqueue directly.
-  A checkpoint's result is fanned out over the realtime bus so any process
-  that *does* hold the session's room live can reconcile it. This queue also
+  session's document is ``(ydoc_snapshot, coedit_updates)``, rebuilt on demand
+  by whoever needs it (see ``app/wiki/coedit_live.py``), so nothing about a
+  session belongs to a particular process. ``checkpoint_coedit_session_task``
+  (``app/tasks/coedit_checkpoint.py``) is therefore a plain task any worker can
+  dequeue for any session — a periodic scan enqueues one per dirty session,
+  explicit save and last-participant-leave enqueue directly. This queue also
   still carries ``leave_coedit_session``, the durable fallback the WS route
   enqueues when its own connection-teardown task is cancelled before it can
   record a leave itself (server shutdown, a torn-down test connection) — a

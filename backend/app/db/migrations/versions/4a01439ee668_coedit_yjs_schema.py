@@ -3,20 +3,19 @@
 Migrates ``coedit_sessions``/``coedit_ops`` from the OT (plain-text
 buffer + range-op log) shape to a Yjs (CRDT doc + binary-update log) shape:
 drops ``buffer_text`` in favor of ``ydoc_snapshot`` (bytea) +
-``ydoc_snapshot_seq`` (the ``ydoc_seq`` those bytes represent — a checkpoint
+``ydoc_snapshot_seq`` (the ``ydoc_seq`` those bytes represent — any reader
 rebuilds a throwaway ``Doc`` from the snapshot plus every ``coedit_updates``
-row with ``seq`` in ``(ydoc_snapshot_seq, ydoc_seq]``, rather than touching
-any process's live in-memory room directly), renames
+row with ``seq`` in ``(ydoc_snapshot_seq, ydoc_seq]``), renames
 ``version``/``checkpointed_version`` to ``ydoc_seq``/``ydoc_checkpointed_seq``
 (same monotonic-watermark semantics, renamed for clarity), and replaces
 ``coedit_ops`` (JSONB range-op log) with ``coedit_updates`` (bytea Yjs-update
 log). Also adds ``ydoc_snapshot_body`` (text) — the exact raw markdown
 ``ydoc_snapshot`` was seeded from, kept in lockstep with it everywhere it
-advances (``set_initial_snapshot``/``advance_checkpoint``/``rebase_onto`` in
-``app/wiki/coedit.py``). A checkpoint's diff base has to come from *here*,
-not a git read at ``base_sha``: a live-rebase fold-in has no corresponding
-git commit at all (the merge happens only in memory), so ``base_sha`` can't
-always resolve to the right content the way a real commit ref can. No
+advances (``set_initial_snapshot``/``advance_checkpoint`` in
+``app/wiki/coedit.py``). A checkpoint's diff base has to come from *here*, not
+a git read at ``base_sha``: a live-rebase fold has no git commit of its own, so
+``base_sha`` can't always resolve to the right content the way a real commit ref
+can. No
 coexistence period — this app is pre-production, one clean cut, per
 ``app/db/models.py``'s ``CoeditSession``/``CoeditUpdate``. Guarded with the
 inspector because ``0001_initial`` builds fresh databases from the current

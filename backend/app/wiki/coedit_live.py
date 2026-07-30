@@ -105,10 +105,8 @@ def initial_sync_message(session_id: int) -> bytes:
 def read_body(session_id: int) -> str | None:
     """The session's live document as markdown, for a session-aware page read.
 
-    Any process can serve this now: it reads the durable log rather than a
-    replica that happens to live in one worker. Under `--workers 2` the
-    resident-room version could only answer for sessions its own worker held,
-    and silently served committed HEAD for the rest.
+    Any process can serve this: it reads the durable log rather than a replica
+    that happens to live in one worker.
     """
     try:
         doc, _seq = _load(session_id)
