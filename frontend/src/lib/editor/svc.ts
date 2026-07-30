@@ -14,6 +14,7 @@
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
 import { apiSocketUrl, ApiError } from "@/lib/api";
+import { opaqueId } from "@/lib/editor/ids";
 import {
   encodeAwarenessMessage,
   encodeSyncStep1,
@@ -265,7 +266,7 @@ export function checkpointSession(connectionId: number): Promise<void> {
       setTimeout(() => reject(new ApiError(0, "not connected")), 0);
     });
   }
-  const requestId = crypto.randomUUID();
+  const requestId = opaqueId();
   return new Promise<void>((resolve, reject) => {
     entry.pendingCheckpoints.set(requestId, { resolve, reject });
     entry.ws.send(

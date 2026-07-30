@@ -23,6 +23,7 @@ import type { CoeditPeer } from "@/lib/editor/hooks";
 import { colorFor } from "@/lib/editor/presence";
 import type { CoeditParticipant } from "@/lib/editor/svc";
 import { pmPosToTextOffset, textOffsetToPmPos } from "@/lib/editor/textOffsets";
+import { opaqueId } from "@/lib/editor/ids";
 import type {
   AnchoredHighlightTarget,
   CoeditorHandle,
@@ -79,7 +80,7 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
     // lifecycle — a real live session's or multi-client verification's own
     // relay wiring); otherwise a fresh local one, owned and destroyed here.
     const [awareness] = useState(() => awarenessProp ?? new Awareness(doc));
-    const [localId] = useState(() => userId ?? crypto.randomUUID());
+    const [localId] = useState(() => userId ?? opaqueId());
     const scrollRef = useRef<HTMLDivElement | null>(null);
     // Layout subscribers (CommentMarginRail/EditorEdgeScrollbar-equivalents),
     // notified on scroll and geometry changes — see subscribeLayout below.

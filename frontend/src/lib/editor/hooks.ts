@@ -35,6 +35,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { ApiError } from "@/lib/api";
+import { opaqueId } from "@/lib/editor/ids";
 import {
   checkpointSession,
   closeSession,
@@ -156,7 +157,7 @@ export interface UseCoeditSession {
 }
 
 function newClientId(): string {
-  return crypto.randomUUID();
+  return opaqueId();
 }
 
 /** Peer cursor positions, resolved against the *current* doc via the sync
