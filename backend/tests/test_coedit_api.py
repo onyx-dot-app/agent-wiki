@@ -37,6 +37,8 @@ from pycrdt import (
 )
 from starlette.testclient import WebSocketDenialResponse
 
+from app.api import coedit as coedit_api
+from app.auth import User
 from app.auth import users as users_repo
 from app.main import create_app
 from app.tasks.queues import coedit_queue
@@ -51,6 +53,13 @@ _PATH = "guides/setup.md"
 @pytest.fixture
 def client(tmp_db, tmp_repo):
     return TestClient(create_app())
+
+
+def _user_of(user_id: str) -> User:
+    """The `User` the WS route would have resolved from the session cookie."""
+    row = users_repo.get_by_id(user_id)
+    assert row is not None
+    return User(id=row["id"], email=row["email"], name=row["name"], is_admin=row["is_admin"])
 
 
 def _seed_page(body: str = "# Setup\n\nhello\n") -> str:
@@ -601,6 +610,45 @@ def test_write_permission_revoked_mid_session_blocks_the_next_frame(client):
     # can render itself read-only.
     with _ws(client) as (_ws2, joined2, _doc2):
         assert joined2["can_write"] is False
+
+
+def test_heartbeat_closes_a_socket_whose_read_access_is_gone(client):
+    # The send loop is the push path: gating only the pull paths left a revoked
+    # reader still receiving every peer's relayed update for as long as the tab
+    # stayed open. The heartbeat re-checks read and closes the socket.
+    owner = users_repo.create(email="owner3@x.com", password="hunter2-x", name="Owner")
+    reader = users_repo.create(email="reader2@x.com", password="hunter2-x", name="Reader")
+    _seed_page("hello world")
+    acl.set_owner(_PATH, owner)
+    entry_id = acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=reader,
+        permission="read",
+        granted_by_user_id=owner,
+    )
+    login_fastapi(client, reader)
+    sess = coedit.open_session(_PATH, base_sha=None)
+    coedit.join(sess.id, reader)
+
+    # Still allowed while the grant stands.
+    assert coedit_api._heartbeat(sess.id, _user_of(reader)) is True
+
+    acl.revoke(entry_id)
+    assert coedit_api._heartbeat(sess.id, _user_of(reader)) is False
+
+
+def test_heartbeat_closes_a_socket_whose_presence_lease_expired(client):
+    uid = users_repo.create(email="lease@x.com", password="hunter2-x", name="Lease")
+    _seed_page("hello world")
+    sess = coedit.open_session(_PATH, base_sha=None)
+    coedit.join(sess.id, uid)
+    assert coedit_api._heartbeat(sess.id, _user_of(uid)) is True
+    coedit.expire_stale_participants(stale_seconds=0)
+    # touch() no longer finds a row to refresh — this socket is out of the
+    # session even though its ACL is untouched.
+    assert coedit_api._heartbeat(sess.id, _user_of(uid)) is False
 
 
 def test_read_permission_revoked_mid_session_stops_serving_content(client):

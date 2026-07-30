@@ -254,6 +254,10 @@ _emit_stop = threading.Event()
 # Whether this process ever started a drain thread — the difference between "a
 # worker, emitting inline by design" and "the web process's thread died".
 _emit_drain_started = False
+# The dead-thread warning is once per process, not once per broadcast: the
+# condition that trips it is permanent, and broadcasts run several times a
+# second per writer, so warning each time would bury the log it belongs in.
+_emit_drain_death_logged = False
 
 
 def start_emit_drain() -> None:
@@ -261,11 +265,12 @@ def start_emit_drain() -> None:
     process at startup (``app/main.py``'s lifespan), alongside
     ``bus.start_listener()``. A process that doesn't (a worker) emits inline
     instead; see ``_queue_emit``."""
-    global _emit_thread, _emit_drain_started
+    global _emit_thread, _emit_drain_started, _emit_drain_death_logged
     if _emit_thread is not None and _emit_thread.is_alive():
         return
     _emit_stop.clear()
     _emit_drain_started = True
+    _emit_drain_death_logged = False
     _emit_thread = threading.Thread(
         target=_drain_emit_queue, name="coedit-emit-drain", daemon=True
     )
@@ -296,11 +301,13 @@ def _queue_emit(payload: dict[str, Any]) -> None:
     if _emit_thread is not None and _emit_thread.is_alive() and not _emit_stop.is_set():
         _emit_queue.put_nowait(payload)
         return
-    if _emit_drain_started and not _emit_stop.is_set():
+    global _emit_drain_death_logged
+    if _emit_drain_started and not _emit_stop.is_set() and not _emit_drain_death_logged:
         # A drain thread was started in this process and is not alive, and we
         # aren't shutting down — it died. Inline still delivers the frame, so
         # this is a warning rather than a failure, but it means broadcasts are
         # now blocking the caller.
+        _emit_drain_death_logged = True
         log.warning(
             "coedit_channel: emit drain thread is gone; emitting inline (blocking)"
         )
@@ -408,8 +415,13 @@ def reset_for_tests() -> None:
     with _partial_lock:
         _partial_chunks.clear()
         _partial_started_at.clear()
-    # The emit queue is process-global like the rest: a frame left by an earlier
-    # test makes the next one's `get_nowait()` return the wrong payload.
+    # The emit queue and the drain-thread bookkeeping are process-global like the
+    # rest: a frame left by an earlier test makes the next one's `get_nowait()`
+    # return the wrong payload, and a leftover `_emit_drain_started` makes every
+    # later test's inline emit look like a dead thread.
+    global _emit_drain_started, _emit_drain_death_logged
+    _emit_drain_started = False
+    _emit_drain_death_logged = False
     while True:
         try:
             _emit_queue.get_nowait()

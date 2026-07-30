@@ -109,9 +109,8 @@ def _connect_sync(path: str, user: User) -> tuple[coedit.SessionRow, bool]:
     return sess, can_write
 
 
-def _authorize(session_id: int, user: User, action: str) -> str | None:
-    """Re-resolve ``action`` for one message; returns the session's current path,
-    or ``None`` if the message must be dropped.
+def _authorize(session_id: int, user: User, action: str) -> bool:
+    """Whether ``user`` may still do ``action`` on this session, right now.
 
     Per message, not per connection. A capability resolved once at connect and
     closed over for the socket's lifetime lets a revoked editor keep applying
@@ -124,14 +123,15 @@ def _authorize(session_id: int, user: User, action: str) -> str | None:
     re-keys the row), so the ACL is evaluated against the path the page lives at
     *now* rather than the one it had at connect.
 
-    Called from ``asyncio.to_thread`` like every other blocking call here.
+    Called from ``asyncio.to_thread`` like every other blocking call here. Costs
+    one session read plus one ACL read per frame — the same as main, and the
+    first thing to feel with many concurrent editors, since awareness frames are
+    the highest-frequency caller.
     """
     sess = coedit.get_session(session_id)
     if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
-        return None
-    if not acl.can(user.id, user.is_admin, action, sess.path):
-        return None
-    return sess.path
+        return False
+    return acl.can(user.id, user.is_admin, action, sess.path)
 
 
 def _sync_update_frame(update: bytes) -> bytes:
@@ -175,12 +175,12 @@ def _apply_yjs_frame(
             return None
         sync_type = inner[0]
         is_content = sync_type in (YSyncMessageType.SYNC_STEP2, YSyncMessageType.SYNC_UPDATE)
-        if is_content and _authorize(session_id, user, "write") is None:
+        if is_content and not _authorize(session_id, user, "write"):
             return None
         if not is_content:
             # SYNC_STEP1 answers with document content, so it needs read — which
             # can be revoked mid-session just like write.
-            if _authorize(session_id, user, "read") is None:
+            if not _authorize(session_id, user, "read"):
                 return None
             # Reply with whatever this client is missing, computed from a doc
             # built for this call and dropped with it.
@@ -203,7 +203,7 @@ def _apply_yjs_frame(
             return None
         return update
     if msg_type == YMessageType.AWARENESS:
-        if _authorize(session_id, user, "write") is None:
+        if not _authorize(session_id, user, "write"):
             return None  # a viewer — or a just-revoked editor — has no caret to show
         # Relayed as opaque bytes. The server holds no Awareness: nothing reads
         # its states, and a late joiner receives no awareness backlog either
@@ -266,7 +266,7 @@ async def _recv_loop(
             # A client that saw a gap in the relay stream asks for what it
             # missed. Room-less this is the whole recovery path for a dropped
             # relay — without it a client stays diverged until it reconnects.
-            if await asyncio.to_thread(_authorize, session_id, user, "read") is None:
+            if not await asyncio.to_thread(_authorize, session_id, user, "read"):
                 continue
             missed = await asyncio.to_thread(coedit.updates_since, session_id, since.since_seq)
             for u in missed.updates:
@@ -283,7 +283,7 @@ async def _recv_loop(
             checkpoint_msg = CheckpointMessage.model_validate(parsed)
         except ValidationError:
             continue
-        if await asyncio.to_thread(_authorize, session_id, user, "write") is None:
+        if not await asyncio.to_thread(_authorize, session_id, user, "write"):
             conn.post(
                 CheckpointResultFrame(
                     request_id=checkpoint_msg.request_id, ok=False, error="forbidden"
@@ -322,12 +322,28 @@ def _make_notifier(loop: asyncio.AbstractEventLoop, ready: asyncio.Event) -> Cal
     return notify
 
 
+def _heartbeat(session_id: int, user: User) -> bool:
+    """Refresh this connection's presence lease and re-check its read access;
+    False means the socket should close.
+
+    Read is re-checked *here* because the send loop is the push path: gating
+    only the pull paths (a sync query, catch-up) left a revoked reader still
+    receiving every peer's relayed update, for as long as they kept the tab
+    open. Per interval rather than per frame — outbound frames are the
+    highest-volume thing this process does, and a revocation that takes effect
+    within one heartbeat is the same guarantee the presence lease already gives.
+    """
+    if not coedit.touch(session_id, user.id):
+        return False
+    return _authorize(session_id, user, "read")
+
+
 async def _send_loop(
     websocket: WebSocket,
     conn: coedit_channel.Connection,
     ready: asyncio.Event,
     session_id: int,
-    user_id: str,
+    user: User,
 ) -> None:
     last_heartbeat = time.monotonic()
     while True:
@@ -342,10 +358,10 @@ async def _send_loop(
         ready.clear()
         if time.monotonic() - last_heartbeat >= _HEARTBEAT_SECONDS:
             last_heartbeat = time.monotonic()
-            alive = await asyncio.to_thread(coedit.touch, session_id, user_id)
-            if not alive:
-                # Our participant row expired, so this socket is no longer part
-                # of the session — close and let the client reconnect.
+            if not await asyncio.to_thread(_heartbeat, session_id, user):
+                # Either the participant row expired (this socket is no longer
+                # part of the session) or read access is gone. Close either way
+                # and let the client reconnect, where the join gate decides.
                 return
             await websocket.send_json({"type": "ping"})
         while (item := coedit_channel.drain(conn.queue, 0)) is not None:
@@ -476,7 +492,7 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         )
 
         recv_task = asyncio.create_task(_recv_loop(websocket, conn, sess.id, user))
-        send_task = asyncio.create_task(_send_loop(websocket, conn, ready, sess.id, user.id))
+        send_task = asyncio.create_task(_send_loop(websocket, conn, ready, sess.id, user))
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED
         )
