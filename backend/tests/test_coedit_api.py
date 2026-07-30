@@ -84,6 +84,11 @@ def _get_ops(ws, since_version: int) -> dict:
     return _receive_typed(ws, "ops_result")
 
 
+def _get_session(ws) -> dict:
+    ws.send_json({"type": "get_session", "request_id": "s"})
+    return _receive_typed(ws, "session_result")
+
+
 def _wait_for(predicate, timeout: float = 15.0) -> None:
     """Wait for a disconnect side effect. The server's disconnect handler is
     the leave signal, and nothing guarantees it has finished by the time
@@ -266,6 +271,72 @@ def test_checkpoint_message_commits_buffer(client):
 
     assert git.read_file(_PATH) == "hi world"
     assert sid is not None
+
+
+def test_get_session_returns_the_live_buffer(client):
+    # The catch-up a `resync` frame calls for: a buffer replacement is a git
+    # commit folded into the session, so it appends no op and `get_ops` has
+    # nothing to hand back. Only a whole-buffer read can express it.
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    sha = _seed_page("hello world")
+
+    with _ws(client) as (ws, joined):
+        sid = joined["session_id"]
+        _apply_op(ws, 0, [{"from": 0, "to": 5, "insert": "hi"}])
+        # Replace the buffer the way a checkpoint's merge does — no op logged.
+        merged = "hi world (merged)"
+        assert (
+            coedit.rebase_onto(
+                sid, base_version=1, merged_text=merged, new_base_sha=sha, checkpointed=False
+            )
+            is not None
+        )
+
+        result = _get_session(ws)
+        assert result["ok"] is True
+        assert result["buffer"] == merged
+        assert result["version"] == 2
+        assert result["base_sha"] == sha
+        # The replacement really is invisible to the op log.
+        assert _get_ops(ws, 1)["ops"] == []
+
+
+def test_get_session_on_closed_session_reports_terminal_error(client):
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    login_fastapi(client, uid)
+    _seed_page("hello world")
+
+    with _ws(client) as (ws, joined):
+        coedit.close_session(joined["session_id"])
+        result = _get_session(ws)
+        assert result["ok"] is False
+        assert result["error"] == "no_active_session"
+
+
+def test_get_session_requires_read(client):
+    # Read-gated like get_ops: the whole buffer is the payload, so losing read
+    # mid-session must stop serving it.
+    owner = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
+    reader = users_repo.create(email="reader@x.com", password="hunter2-x", name="Reader")
+    _seed_page("secret")
+    acl.set_owner(_PATH, owner)  # owner-only page...
+    entry = acl.grant(
+        resource_kind="page",
+        resource_path=_PATH,
+        principal_kind="user",
+        principal_id=reader,
+        permission="read",
+        granted_by_user_id=owner,
+    )  # ...plus an explicit read grant, revoked below
+
+    login_fastapi(client, reader)
+    with _ws(client) as (ws, _joined):
+        assert _get_session(ws)["ok"] is True
+        acl.revoke(entry)
+        result = _get_session(ws)
+        assert result["ok"] is False
+        assert result["error"] == "forbidden"
 
 
 def test_checkpoint_requires_write(client):

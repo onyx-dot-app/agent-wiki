@@ -23,6 +23,13 @@ vs viewers client-side from the live caret frames — a rendered caret IS the
 Participants leave after their shared heartbeat expires. A disconnect never
 deletes shared presence based on one process's local socket registry — it
 only commits the buffer, which needs no liveness information.
+
+Two catch-up reads, for the two ways a client can fall behind. ``get_ops``
+replays the op log after a missed frame or a stale-version reject, preserving
+the client's unconfirmed edits. ``get_session`` re-reads the whole buffer, for
+a ``resync`` — the buffer was *replaced* by a git commit folded into the
+session (a checkpoint merge, an inbound agent edit), which logs no op and so
+cannot be replayed.
 """
 
 from __future__ import annotations
@@ -43,12 +50,14 @@ from app.models.coedit import (
     CheckpointResultFrame,
     CursorMessage,
     GetOpsMessage,
+    GetSessionMessage,
     JoinedFrame,
     OpMessage,
     Operation,
     OpResultFrame,
     OpsResultFrame,
     ParticipantOut,
+    SessionResultFrame,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session
 from app.wiki import coedit, coedit_channel, git
@@ -123,11 +132,30 @@ def _handle_op(conn: coedit_channel.Connection, session_id: int, user: User, raw
         conn.post(OpResultFrame(request_id=msg.request_id, ok=False, error=e.error).model_dump(by_alias=True))
         return
     except ValueError:
+        # Out of bounds for the current buffer, which means the sender's
+        # document has diverged from the server's — worth a log line, since the
+        # client sees only an error code and this is the shape a desync takes.
+        log.warning(
+            "coedit: invalid op on session %s from user %s (base_version=%s, changes=%s)",
+            session_id,
+            user.id,
+            msg.base_version,
+            [c.model_dump(by_alias=True) for c in msg.changes],
+        )
         conn.post(
             OpResultFrame(request_id=msg.request_id, ok=False, error="invalid_op").model_dump(by_alias=True)
         )
         return
     if out is None:
+        # Expected under concurrent editing: the client rebases and retries.
+        # Logged at debug so a storm of them is visible when investigating
+        # without adding noise in steady state.
+        log.debug(
+            "coedit: stale op on session %s from user %s (base_version=%s)",
+            session_id,
+            user.id,
+            msg.base_version,
+        )
         conn.post(
             OpResultFrame(request_id=msg.request_id, ok=False, error="stale_version").model_dump(by_alias=True)
         )
@@ -220,6 +248,32 @@ def _handle_get_ops(conn: coedit_channel.Connection, session_id: int, user: User
     )
 
 
+def _handle_get_session(conn: coedit_channel.Connection, session_id: int, user: User, raw: dict[str, Any]) -> None:
+    """Serve the live buffer at its current version — the catch-up for a
+    ``resync``, which ``get_ops`` structurally cannot answer: the replacement
+    it announces is a git commit folded into the buffer, so it appends no
+    ``coedit_ops`` row for the client to replay."""
+    msg = GetSessionMessage.model_validate(raw)
+    try:
+        sess = _require_active(session_id, user, "read")
+    except _WsActionError as e:
+        conn.post(
+            SessionResultFrame(request_id=msg.request_id, ok=False, error=e.error).model_dump(
+                by_alias=True
+            )
+        )
+        return
+    conn.post(
+        SessionResultFrame(
+            request_id=msg.request_id,
+            ok=True,
+            buffer=sess.buffer_text,
+            version=sess.version,
+            base_sha=sess.base_sha,
+        ).model_dump(by_alias=True)
+    )
+
+
 async def _recv_loop(websocket: WebSocket, conn: coedit_channel.Connection, session_id: int, user: User) -> None:
     while True:
         raw = await websocket.receive_json()
@@ -237,6 +291,8 @@ async def _recv_loop(websocket: WebSocket, conn: coedit_channel.Connection, sess
                 await asyncio.to_thread(_handle_cursor, session_id, user, raw)
             elif msg_type == "checkpoint":
                 await asyncio.to_thread(_handle_checkpoint, conn, session_id, user, raw)
+            elif msg_type == "get_session":
+                await asyncio.to_thread(_handle_get_session, conn, session_id, user, raw)
             elif msg_type == "get_ops":
                 await asyncio.to_thread(_handle_get_ops, conn, session_id, user, raw)
             else:
