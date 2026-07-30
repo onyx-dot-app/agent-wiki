@@ -23,6 +23,7 @@ import logging
 import queue
 import threading
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -36,45 +37,56 @@ log = logging.getLogger(__name__)
 Frame = dict[str, Any]
 
 
-class _CloseSignal:
-    """Sentinel type for the one non-``Frame`` value a connection's queue can
-    carry. Distinct from ``None`` (which ``drain`` already uses to mean "the
-    poll timed out, nothing arrived") and from any real ``Frame`` (a plain
-    ``dict``, so nothing dict-shaped could ever collide with an ``is``
-    check against the singleton instance below)."""
-
-
-CLOSE_SIGNAL = _CloseSignal()
-QueueItem = Frame | _CloseSignal
-
-
 class Connection(BaseModel):
-    """Handle for one live connection: its opaque id (for ``disconnect``) and
-    the queue its send loop drains."""
+    """Handle for one live connection: its opaque id (for ``disconnect``), the
+    queue frames land in, and the callback that tells its send loop to drain.
+
+    ``notify`` is invoked after every enqueue, from whichever thread published
+    the frame — a request handler, the bus listener, a task worker. The send
+    loop supplies one that is safe to call from any thread (see
+    ``app/api/coedit.py``); it exists so a connection can be woken without any
+    thread blocking on its behalf.
+    """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     id: str
-    queue: queue.Queue[QueueItem]
+    queue: queue.Queue[Frame]
+    notify: Callable[[], None]
+
+    def post(self, frame: Frame) -> None:
+        """Queue ``frame`` for this connection and wake its send loop.
+
+        The only way to enqueue: a bare ``queue.put_nowait`` would land the
+        frame but leave the loop asleep until its next heartbeat.
+        """
+        self.queue.put_nowait(frame)
+        self.notify()
+
 
 # Per-connection registry, keyed by an opaque connection id (one per open
 # WebSocket). Parallel dicts rather than a class, mirroring ``pubsub``'s sync
 # ``_queues`` style for the same runtime state.
-_queues: dict[str, queue.Queue[QueueItem]] = {}
+_queues: dict[str, queue.Queue[Frame]] = {}
+_notifiers: dict[str, Callable[[], None]] = {}  # conn_id -> wake its send loop
 _session_of: dict[str, int] = {}  # conn_id -> coedit_session_id
 _conns_by_session: dict[int, set[str]] = {}  # coedit_session_id -> {conn_id}
 _lock = threading.Lock()
 
 
-def connect(coedit_session_id: int) -> Connection:
-    """Register a local delivery queue for a WebSocket."""
+def connect(coedit_session_id: int, notify: Callable[[], None]) -> Connection:
+    """Register a local delivery queue for a WebSocket.
+
+    ``notify`` is called once per delivered frame; see ``Connection``.
+    """
     conn_id = uuid.uuid4().hex
-    q: queue.Queue[QueueItem] = queue.Queue()
+    q: queue.Queue[Frame] = queue.Queue()
     with _lock:
         _queues[conn_id] = q
+        _notifiers[conn_id] = notify
         _session_of[conn_id] = coedit_session_id
         _conns_by_session.setdefault(coedit_session_id, set()).add(conn_id)
-    return Connection(id=conn_id, queue=q)
+    return Connection(id=conn_id, queue=q, notify=notify)
 
 
 def disconnect(conn_id: str) -> None:
@@ -82,6 +94,7 @@ def disconnect(conn_id: str) -> None:
     with _lock:
         sid = _session_of.pop(conn_id, None)
         _queues.pop(conn_id, None)
+        _notifiers.pop(conn_id, None)
         if sid is not None:
             conns = _conns_by_session.get(sid)
             if conns is not None:
@@ -89,36 +102,13 @@ def disconnect(conn_id: str) -> None:
                 if not conns:
                     _conns_by_session.pop(sid, None)
 
-def drain(q: queue.Queue[QueueItem], timeout: float) -> QueueItem | None:
-    """Block up to ``timeout`` seconds for the next frame; ``None`` on timeout so
-    the caller can emit a heartbeat. Can also return ``CLOSE_SIGNAL`` — see
-    ``wake``."""
+def drain(q: queue.Queue[Frame], timeout: float) -> Frame | None:
+    """Pop the next frame, waiting up to ``timeout`` seconds; ``None`` if none
+    arrived. ``timeout=0`` polls without blocking."""
     try:
         return q.get(timeout=timeout)
     except queue.Empty:
         return None
-
-
-def wake(conn_id: str) -> None:
-    """Unblock a connection's own ``drain`` call immediately, instead of
-    leaving it to run out its poll timeout.
-
-    ``queue.Queue.get(timeout=...)`` has no cancellation hook — a task
-    awaiting it via ``asyncio.to_thread`` can be cancelled at the asyncio
-    level, but the underlying OS thread has no way to know that and keeps
-    blocking regardless, for up to the full timeout, occupying a thread-pool
-    slot the whole time (confirmed directly: cancelling the wrapping Future
-    doesn't stop the executor's function, it only makes the *awaiter* stop
-    watching it — see ``loop.run_in_executor``'s documented behavior). This
-    reaches the blocked call the only way that's actually possible: pushing
-    something into the same queue it's already waiting on, so ``get()``
-    returns immediately the normal way, on its own thread, same as a real
-    frame arriving. The caller (``app/api/coedit.py``'s teardown path) must
-    call this whenever it's about to cancel a connection's send loop."""
-    with _lock:
-        q = _queues.get(conn_id)
-    if q is not None:
-        q.put_nowait(CLOSE_SIGNAL)
 
 
 def _bus_payload(coedit_session_id: int, frame: Frame) -> dict[str, Any]:
@@ -232,20 +222,25 @@ def broadcast_op(
 
 
 def _deliver_local(coedit_session_id: int, frame: Frame) -> None:
-    # ``queue.Queue`` is thread-safe, so a plain ``put_nowait`` works from any
-    # thread (the LISTEN listener, a request handler) — no event loop, no
-    # cross-thread scheduling dance.
+    # ``queue.Queue`` is thread-safe, so the put works from any thread (the
+    # LISTEN listener, a request handler, a task worker). Waking the send loop
+    # is the part that needs care, which is what ``notify`` encapsulates —
+    # called outside the lock, since it hands off to another thread.
     with _lock:
         targets = [
-            _queues.get(cid) for cid in _conns_by_session.get(coedit_session_id, ())
+            (_queues.get(cid), _notifiers.get(cid))
+            for cid in _conns_by_session.get(coedit_session_id, ())
         ]
-    for q in targets:
-        if q is not None:
-            q.put_nowait(frame)
+    for q, notify in targets:
+        if q is None or notify is None:
+            continue
+        q.put_nowait(frame)
+        notify()
 
 
 def reset_for_tests() -> None:
     with _lock:
         _queues.clear()
+        _notifiers.clear()
         _session_of.clear()
         _conns_by_session.clear()
