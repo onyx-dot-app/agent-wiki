@@ -40,6 +40,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User
@@ -103,6 +104,15 @@ class ParticipantRow(BaseModel):
     last_seen_at: str
     # NULL until the participant applies an edit op.
     last_edited_at: str | None = None
+
+
+class ParticipantExpiry(BaseModel):
+    """Roster changes made while expiring stale participants."""
+
+    model_config = ConfigDict(frozen=True)
+
+    changed_session_ids: list[int] = Field(default_factory=list)
+    empty_session_ids: list[int] = Field(default_factory=list)
 
 
 def _session_row(s: CoeditSession) -> SessionRow:
@@ -734,8 +744,11 @@ def on_path_moved(moves: list[PathMove]) -> list[int]:
 
 
 def close_if_clean(session_id: int) -> bool:
-    """Close the session only if it's clean (``ydoc_seq ==
-    ydoc_checkpointed_seq``). Returns True if it closed.
+    """Close an empty session only if it's clean (``ydoc_seq ==
+    ydoc_checkpointed_seq``).
+
+    Returns True if it closed. The participant predicate and ``join`` row lock
+    prevent a concurrent join from landing in a closed session.
 
     Atomic, to avoid orphaning a late edit: after a checkpoint commits, an
     update can still land (the session is ``active`` until this runs) and
@@ -751,12 +764,46 @@ def close_if_clean(session_id: int) -> bool:
                 CoeditSession.id == session_id,
                 CoeditSession.status == SessionStatus.ACTIVE.value,
                 CoeditSession.ydoc_seq == CoeditSession.ydoc_checkpointed_seq,
+                ~select(CoeditParticipant.session_id)
+                .where(CoeditParticipant.session_id == session_id)
+                .exists(),
             )
             .values(status=SessionStatus.CLOSED.value, updated_at=_iso(_now()))
             .returning(CoeditSession.id)
             .execution_options(synchronize_session=False)
         ).one_or_none()
         return closed is not None
+
+
+def close_abandoned_sessions() -> list[int]:
+    """Close every clean active session that has no participants. Returns their ids.
+
+    ``close_if_clean`` only runs for a session the caller already has in hand —
+    the one whose last participant just expired. A session that empties by any
+    other route (a participant row removed directly, an FK cascade, a leave
+    recorded by an older build) is invisible to that path, and being clean it is
+    also skipped by ``sessions_due_for_checkpoint``, so it stays ``active``
+    forever: it holds the active-path unique index, so page moves are refused
+    (``blocking_active_session_path``), and every new viewer adopts its buffer
+    instead of reading HEAD. This is the self-healing sweep for that state —
+    same predicate as ``close_if_clean``, applied set-wise rather than to one id.
+    """
+    with session() as s:
+        return list(
+            s.scalars(
+                update(CoeditSession)
+                .where(
+                    CoeditSession.status == SessionStatus.ACTIVE.value,
+                    CoeditSession.version == CoeditSession.checkpointed_version,
+                    ~select(CoeditParticipant.session_id)
+                    .where(CoeditParticipant.session_id == CoeditSession.id)
+                    .exists(),
+                )
+                .values(status=SessionStatus.CLOSED.value, updated_at=_iso(_now()))
+                .returning(CoeditSession.id)
+                .execution_options(synchronize_session=False)
+            ).all()
+        )
 
 
 def purge_viewer_sessions(limit: int = 500) -> int:
@@ -861,30 +908,83 @@ def rename_path(old_path: str, new_path: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Participants                                                                 #
+# Participants                                                                #
 # --------------------------------------------------------------------------- #
 
 
-def join(session_id: int, user_id: str) -> None:
-    """Add ``user_id`` to a session, or refresh their ``last_seen_at``."""
+def expire_stale_participants(*, stale_seconds: int, limit: int = 500) -> ParticipantExpiry:
+    """Remove participants whose shared heartbeat exceeded its grace period."""
+    cutoff = _iso(_now() - timedelta(seconds=stale_seconds))
+    changed_sessions: set[int] = set()
+    with session() as s:
+        candidates = s.execute(
+            select(CoeditParticipant.session_id, CoeditParticipant.user_id)
+            .where(CoeditParticipant.last_seen_at <= cutoff)
+            .order_by(CoeditParticipant.last_seen_at.asc())
+            .limit(limit)
+        ).all()
+        for session_id, user_id in candidates:
+            participant = s.scalar(
+                select(CoeditParticipant)
+                .where(
+                    CoeditParticipant.session_id == session_id,
+                    CoeditParticipant.user_id == user_id,
+                )
+                .with_for_update()
+            )
+            if participant is None:
+                continue
+            if participant.last_seen_at > cutoff:
+                continue
+            s.delete(participant)
+            changed_sessions.add(session_id)
+        s.flush()
+        nonempty_sessions: set[int] = set()
+        if changed_sessions:
+            nonempty_sessions = set(
+                s.scalars(
+                    select(CoeditParticipant.session_id).where(
+                        CoeditParticipant.session_id.in_(changed_sessions)
+                    )
+                ).all()
+            )
+    return ParticipantExpiry(
+        changed_session_ids=sorted(changed_sessions),
+        empty_session_ids=sorted(changed_sessions - nonempty_sessions),
+    )
+
+
+def join(session_id: int, user_id: str) -> bool:
+    """Join an active session, returning False if it closed during setup."""
     now = _iso(_now())
     with session() as s:
-        existing = s.get(CoeditParticipant, (session_id, user_id))
-        if existing is not None:
-            existing.last_seen_at = now
-        else:
-            s.add(
-                CoeditParticipant(
-                    session_id=session_id,
-                    user_id=user_id,
-                    joined_at=now,
-                    last_seen_at=now,
-                )
+        active = s.scalar(
+            select(CoeditSession.id)
+            .where(
+                CoeditSession.id == session_id,
+                CoeditSession.status == SessionStatus.ACTIVE.value,
             )
+            .with_for_update()
+        )
+        if active is None:
+            return False
+        participant = pg_insert(CoeditParticipant).values(
+            session_id=session_id,
+            user_id=user_id,
+            joined_at=now,
+            last_seen_at=now,
+        )
+        s.execute(
+            participant.on_conflict_do_update(
+                index_elements=["session_id", "user_id"],
+                set_={"last_seen_at": now},
+            )
+        )
+        return True
 
 
-def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
-    """Refresh a participant's ``last_seen_at`` (presence heartbeat).
+def touch(session_id: int, user_id: str, *, edited: bool = False) -> bool:
+    """Refresh a participant heartbeat, returning False if it expired.
 
     ``edited=True`` also stamps ``last_edited_at``."""
     with session() as s:
@@ -894,6 +994,8 @@ def touch(session_id: int, user_id: str, *, edited: bool = False) -> None:
             existing.last_seen_at = now
             if edited:
                 existing.last_edited_at = now
+            return True
+        return False
 
 
 def leave(session_id: int, user_id: str) -> None:

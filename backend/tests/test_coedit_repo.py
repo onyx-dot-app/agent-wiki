@@ -13,9 +13,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from sqlalchemy import text
+from sqlalchemy import text, update
 
-from app.db.models import CoeditSession
+from app.db.models import CoeditParticipant, CoeditSession
 from app.db.session import session as db_session
 from app.wiki import coedit
 from tests._seed import count_rows, seed_user
@@ -248,6 +248,51 @@ def test_participants_join_touch_leave(users):
     assert [r.user_id for r in coedit.list_participants(s.id)] == ["usr_b"]
 
 
+def _make_participant_stale(session_id: int, user_id: str) -> None:
+    with db_session() as db:
+        db.execute(
+            update(CoeditParticipant)
+            .where(
+                CoeditParticipant.session_id == session_id,
+                CoeditParticipant.user_id == user_id,
+            )
+            .values(last_seen_at="2000-01-01T00:00:00+00:00")
+        )
+
+
+def test_stale_participant_expiry_keeps_live_peer(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.join(s.id, "usr_a")
+    coedit.join(s.id, "usr_b")
+    _make_participant_stale(s.id, "usr_a")
+
+    expired = coedit.expire_stale_participants(stale_seconds=60)
+    assert expired.changed_session_ids == [s.id]
+    assert expired.empty_session_ids == []
+    assert [p.user_id for p in coedit.list_participants(s.id)] == ["usr_b"]
+    assert coedit.touch(s.id, "usr_b") is True
+
+
+def test_stale_participant_expiry_reports_empty_session(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.join(s.id, "usr_a")
+    _make_participant_stale(s.id, "usr_a")
+
+    expired = coedit.expire_stale_participants(stale_seconds=60)
+    assert expired.changed_session_ids == [s.id]
+    assert expired.empty_session_ids == [s.id]
+    assert coedit.list_participants(s.id) == []
+    assert coedit.touch(s.id, "usr_a") is False
+
+
+def test_join_rejects_session_closed_during_connect(users):
+    s = coedit.open_session(_PATH, base_sha=None)
+    coedit.close_session(s.id)
+    assert coedit.join(s.id, "usr_a") is False
+    assert coedit.list_participants(s.id) == []
+
+
+def test_mark_checkpointed(users):
 def test_advance_checkpoint(users):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
@@ -383,6 +428,32 @@ def test_close_if_clean_closes_a_clean_session(users):
     coedit.advance_checkpoint(s.id, seq=1, snapshot=b"snap", body="body", base_sha="sha")  # ydoc_seq == checkpointed
     assert coedit.close_if_clean(s.id) is True
     assert coedit.get_active_session(_PATH) is None
+
+
+def test_close_if_clean_skips_session_with_participant(users):
+    s = coedit.open_session(_PATH, base_sha=None, initial_buffer="hi")
+    assert coedit.join(s.id, "usr_a") is True
+    assert coedit.close_if_clean(s.id) is False
+    active = coedit.get_active_session(_PATH)
+    assert active is not None and active.id == s.id
+
+
+def test_close_abandoned_sessions_closes_only_clean_empty_ones(users):
+    # Empty and clean — the state nothing else reclaims, so the sweep closes it.
+    abandoned = coedit.open_session("abandoned.md", base_sha=None, initial_buffer="hi")
+    # Occupied — presence holds it open.
+    occupied = coedit.open_session("occupied.md", base_sha=None, initial_buffer="hi")
+    assert coedit.join(occupied.id, "usr_a") is True
+    # Empty but dirty — the checkpoint scan owns it; closing would seal the buffer.
+    dirty = coedit.open_session("dirty.md", base_sha=None, initial_buffer="hi")
+    coedit.apply_op(dirty.id, base_version=0, changes=[_ch(0, 2, "yo")], author_user_id="usr_a")
+
+    assert coedit.close_abandoned_sessions() == [abandoned.id]
+    assert coedit.get_active_session("abandoned.md") is None
+    assert coedit.get_active_session("occupied.md") is not None
+    assert coedit.get_active_session("dirty.md") is not None
+    # Idempotent: nothing left to close.
+    assert coedit.close_abandoned_sessions() == []
 
 
 def test_close_if_clean_skips_a_dirty_session(users):

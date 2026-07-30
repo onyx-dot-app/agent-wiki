@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -162,6 +163,20 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
     log.info(
         "agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1]
+    )
+    # ``asyncio.to_thread`` draws from the event loop's default executor, whose
+    # own default is ``min(32, cpu + 4)`` — 6 threads on a 2-core pod. That
+    # bounds how many short-lived offloads (DB reads, git calls) the process can
+    # run at once, across HTTP requests and WebSocket messages alike, so on a
+    # small pod it throttles ordinary concurrency for no reason: the work is
+    # I/O-bound, not CPU-bound. Long-lived occupancy is kept off this pool
+    # entirely — the co-edit send loops have their own (see
+    # ``app/api/coedit.py``) so accumulating sockets can't starve the work.
+    asyncio.get_running_loop().set_default_executor(
+        ThreadPoolExecutor(
+            max_workers=_app_config.CONFIG.web_thread_pool_size,
+            thread_name_prefix="web",
+        )
     )
     # Guard before init_db: a misconfigured prod must fail fast rather than
     # encrypt live data under the public default SECRET_KEY.

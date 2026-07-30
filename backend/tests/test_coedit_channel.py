@@ -16,17 +16,27 @@ import base64
 from app.wiki import coedit_channel
 
 
+def _connect(session_id: int) -> coedit_channel.Connection:
+    return coedit_channel.connect(session_id, lambda: None)
+
+
+def _connect_watched(session_id: int) -> tuple[coedit_channel.Connection, list[int]]:
+    """A registered connection plus the list its notifier appends to."""
+    woken: list[int] = []
+    return coedit_channel.connect(session_id, lambda: woken.append(1)), woken
+
+
 def test_connect_publish_delivers_to_connection():
     coedit_channel.reset_for_tests()
-    conn = coedit_channel.connect(1, "usr_a")
+    conn = _connect(1)
     coedit_channel._deliver_local(1, {"type": "presence", "n": 1})
     assert coedit_channel.drain(conn.queue, 0.5) == {"type": "presence", "n": 1}
 
 
 def test_fan_out_to_all_connections_in_session():
     coedit_channel.reset_for_tests()
-    a = coedit_channel.connect(7, "usr_a")
-    b = coedit_channel.connect(7, "usr_b")
+    a = _connect(7)
+    b = _connect(7)
     coedit_channel._deliver_local(7, {"hello": "world"})
     assert coedit_channel.drain(a.queue, 0.5) == {"hello": "world"}
     assert coedit_channel.drain(b.queue, 0.5) == {"hello": "world"}
@@ -34,14 +44,14 @@ def test_fan_out_to_all_connections_in_session():
 
 def test_other_session_does_not_receive():
     coedit_channel.reset_for_tests()
-    a = coedit_channel.connect(1, "usr_a")
+    a = _connect(1)
     coedit_channel._deliver_local(2, {"to": "other"})
     assert coedit_channel.drain(a.queue, 0.1) is None  # timed out — nothing delivered
 
 
 def test_disconnect_stops_delivery_and_clears_state():
     coedit_channel.reset_for_tests()
-    conn = coedit_channel.connect(3, "usr_a")
+    conn = _connect(3)
     coedit_channel.disconnect(conn.id)
     coedit_channel._deliver_local(3, {"x": 1})
     assert coedit_channel.drain(conn.queue, 0.1) is None
@@ -49,8 +59,8 @@ def test_disconnect_stops_delivery_and_clears_state():
 
 def test_user_still_connected_tracks_multiple_tabs():
     coedit_channel.reset_for_tests()
-    c1 = coedit_channel.connect(5, "usr_a")
-    c2 = coedit_channel.connect(5, "usr_a")
+    c1 = _connect(5)
+    c2 = _connect(5)
     assert coedit_channel.user_still_connected(5, "usr_a") is True
     coedit_channel.disconnect(c1.id)
     # One tab closed, the other still open → user is still present.
@@ -61,8 +71,8 @@ def test_user_still_connected_tracks_multiple_tabs():
 
 def test_publish_control_delivers_to_all_connections_in_session():
     coedit_channel.reset_for_tests()
-    a = coedit_channel.connect(4, "usr_a")
-    b = coedit_channel.connect(4, "usr_b")
+    a = _connect(4)
+    b = _connect(4)
     coedit_channel.publish_control(4, {"type": "resync", "session_id": 4})
     assert coedit_channel.drain(a.queue, 0.5) == {"type": "resync", "session_id": 4}
     assert coedit_channel.drain(b.queue, 0.5) == {"type": "resync", "session_id": 4}
@@ -70,8 +80,8 @@ def test_publish_control_delivers_to_all_connections_in_session():
 
 def test_broadcast_yjs_delivers_bytes_frame_to_peers():
     coedit_channel.reset_for_tests()
-    a = coedit_channel.connect(6, "usr_a")
-    b = coedit_channel.connect(6, "usr_b")
+    a = _connect(6)
+    b = _connect(6)
     payload = b"\x00\x01hello"
     coedit_channel.broadcast_yjs(6, payload)
     # No origin-exclusion — the sender's own connection receives the echo
@@ -82,14 +92,14 @@ def test_broadcast_yjs_delivers_bytes_frame_to_peers():
 
 def test_broadcast_yjs_other_session_does_not_receive():
     coedit_channel.reset_for_tests()
-    a = coedit_channel.connect(1, "usr_a")
+    a = _connect(1)
     coedit_channel.broadcast_yjs(2, b"\x00\x01other")
     assert coedit_channel.drain(a.queue, 0.1) is None
 
 
 def test_handle_remote_control_delivers_locally():
     coedit_channel.reset_for_tests()
-    conn = coedit_channel.connect(9, "usr_a")
+    conn = _connect(9)
     coedit_channel._handle_remote_control(
         {"session_id": 9, "frame": {"type": "presence", "via": "notify"}}
     )
@@ -98,7 +108,7 @@ def test_handle_remote_control_delivers_locally():
 
 def test_handle_remote_yjs_single_chunk_delivers_locally():
     coedit_channel.reset_for_tests()
-    conn = coedit_channel.connect(9, "usr_a")
+    conn = _connect(9)
     payload = b"\x00\x01remote-update"
     coedit_channel._handle_remote_yjs(
         {
@@ -114,7 +124,7 @@ def test_handle_remote_yjs_single_chunk_delivers_locally():
 
 def test_handle_remote_yjs_reassembles_chunks_in_any_order():
     coedit_channel.reset_for_tests()
-    conn = coedit_channel.connect(9, "usr_a")
+    conn = _connect(9)
     payload = b"x" * 100
     b64 = base64.b64encode(payload).decode("ascii")
     third = len(b64) // 3

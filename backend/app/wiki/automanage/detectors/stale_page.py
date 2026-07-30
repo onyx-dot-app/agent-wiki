@@ -21,17 +21,14 @@ detectors.
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from app.db import fts
-from app.llm import client as llm_client
 from app.llm.errors import LLMError
 from app.llm.prompts import load_prompt
 from app.wiki import git, page_views
-from app.wiki.automanage import fingerprint
+from app.wiki.automanage.detectors import llm_agent
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.change_proposals import ProposalOp
 
@@ -42,9 +39,29 @@ log = logging.getLogger(__name__)
 FLOOR_DAYS = 30
 # A slow drip builds reviewer trust; a flood of delete cards destroys it.
 MAX_PROPOSALS = 3
-# Bounds on the agent pass (a sweep must terminate whatever the model does).
-MAX_STEPS = 24
 MAX_CANDIDATES = 100
+
+_FINISH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "proposals": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "evidence": {
+                        "type": "string",
+                        "description": "One sentence a reviewer can judge "
+                        "at a glance.",
+                    },
+                },
+                "required": ["path", "evidence"],
+            },
+        }
+    },
+    "required": ["proposals"],
+}
 
 
 def _now() -> datetime:
@@ -53,55 +70,6 @@ def _now() -> datetime:
 
 def _iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _tools() -> list[dict[str, Any]]:
-    return [
-        {
-            "name": "read_page",
-            "description": "Read the current body of a candidate page.",
-            "input_schema": {
-                "type": "object",
-                "properties": {"path": {"type": "string"}},
-                "required": ["path"],
-            },
-        },
-        {
-            "name": "search_wiki",
-            "description": "Keyword-search the wiki (title + body) — use it to "
-            "check whether a candidate's information lives elsewhere.",
-            "input_schema": {
-                "type": "object",
-                "properties": {"query": {"type": "string"}},
-                "required": ["query"],
-            },
-        },
-        {
-            "name": "finish",
-            "description": "Deliver the final verdict. Call exactly once.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "proposals": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "path": {"type": "string"},
-                                "evidence": {
-                                    "type": "string",
-                                    "description": "One sentence a reviewer can "
-                                    "judge at a glance.",
-                                },
-                            },
-                            "required": ["path", "evidence"],
-                        },
-                    }
-                },
-                "required": ["proposals"],
-            },
-        },
-    ]
 
 
 class _StalePageDetector:
@@ -166,106 +134,31 @@ class _StalePageDetector:
         system = load_prompt("stale_page_detect.system").replace(
             "{max_proposals}", str(MAX_PROPOSALS)
         )
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system},
-            {
-                "role": "user",
-                "content": (
-                    "Wiki file tree:\n" + tree + "\n\nCandidate pages "
-                    f"(no edit and no recorded view in {self._floor_days}+ days):\n"
-                    + "\n".join(ages)
-                ),
-            },
-        ]
         candidate_set = set(candidates)
-        # The scope is one same-audience bucket (pairs_paths), so any
-        # member's fingerprint is the bucket's: every search result must
-        # share it before the model may see the path/title. (Per-path
-        # fingerprints — combined_fingerprint re-hashes and never matches.)
-        audience_fp = fingerprint.fingerprints_for_paths([candidates[0]])[
-            candidates[0]
-        ]
-        for _ in range(MAX_STEPS):
-            result = llm_client.complete(messages, tools=_tools())
-            if not result.tool_calls:
-                # A text-only turn is a stall; nudge once toward finish.
-                messages.append({"role": "assistant", "content": result.text})
-                messages.append(
-                    {"role": "user", "content": "Call finish with your proposals."}
+        raw = llm_agent.run_agent(
+            detector_name=self.name,
+            system=system,
+            user_content=(
+                "Wiki file tree:\n" + tree + "\n\nCandidate pages "
+                f"(no edit and no recorded view in {self._floor_days}+ days):\n"
+                + "\n".join(ages)
+            ),
+            candidates=candidate_set,
+            audience_fp=llm_agent.bucket_fingerprint(candidates),
+            finish_schema=_FINISH_SCHEMA,
+        )
+        picked: list[dict[str, str]] = []
+        for item in raw[:MAX_PROPOSALS]:
+            path = str(item.get("path", ""))
+            if path not in candidate_set:
+                log.warning(
+                    "stale_page: model proposed non-candidate %r — dropped", path
                 )
                 continue
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": result.text,
-                    "tool_calls": [
-                        {"id": c.id, "name": c.name, "arguments": c.arguments}
-                        for c in result.tool_calls
-                    ],
-                }
+            picked.append(
+                {"path": path, "evidence": str(item.get("evidence", ""))}
             )
-            for call in result.tool_calls:
-                if call.name == "finish":
-                    raw = cast(
-                        "list[dict[str, Any]]",
-                        call.arguments.get("proposals") or [],
-                    )
-                    picked: list[dict[str, str]] = []
-                    for item in raw[:MAX_PROPOSALS]:
-                        path = str(item.get("path", ""))
-                        if path not in candidate_set:
-                            log.warning(
-                                "stale_page: model proposed non-candidate %r "
-                                "— dropped",
-                                path,
-                            )
-                            continue
-                        picked.append(
-                            {"path": path, "evidence": str(item.get("evidence", ""))}
-                        )
-                    return picked
-                out = self._tool(
-                    call.name, call.arguments, candidate_set, audience_fp
-                )
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": json.dumps(out),
-                    }
-                )
-        log.warning("stale_page: agent pass hit step cap without finish")
-        return []
-
-    def _tool(
-        self, name: str, args: dict[str, Any], candidates: set[str],
-        audience_fp: str,
-    ) -> Any:
-        if name == "read_page":
-            path = str(args.get("path", ""))
-            if path not in candidates:
-                return {"error": "not a candidate page"}
-            body = git.read_file_opt(path)
-            return {"path": path, "body": body} if body is not None else {
-                "error": "page no longer exists"
-            }
-        if name == "search_wiki":
-            hits = fts.search(
-                str(args.get("query", "")), limit=16, is_admin=True,
-                apply_visibility=False,
-            )
-            # Same-audience rule (as pairing detectors): never surface a
-            # page across a visibility boundary — restricted paths/titles
-            # must not enter the transcript or a proposal's evidence text,
-            # which the candidate page's reviewers may not be cleared for.
-            paths = [h.path for h in hits]
-            fps = fingerprint.fingerprints_for_paths(paths) if paths else {}
-            return [
-                {"path": h.path, "title": h.title}
-                for h in hits
-                if fps.get(h.path) == audience_fp
-            ][:8]
-        return {"error": f"unknown tool {name!r}"}
+        return picked
 
     # ---- detector protocol ----------------------------------------------
 

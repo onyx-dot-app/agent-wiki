@@ -158,7 +158,8 @@ export function connectSession(
       if (
         type === "op_result" ||
         type === "checkpoint_result" ||
-        type === "ops_result"
+        type === "ops_result" ||
+        type === "session_result"
       ) {
         const p = pending.get(msg.request_id as string);
         if (!p) return;
@@ -166,7 +167,13 @@ export function connectSession(
         if (msg.ok) {
           p.resolve(msg);
         } else {
-          p.reject(errorFor(msg.error as string | null | undefined));
+          const error = msg.error as string | null | undefined;
+          p.reject(errorFor(error));
+          if (error === "no_active_session") {
+            // Reconnect by page path so the hook replays its local document
+            // onto a fresh server session.
+            ws.close();
+          }
         }
         return;
       }
@@ -257,6 +264,28 @@ export function sendCursor(
  * (or completed) the checkpoint. */
 export async function checkpointSession(sessionId: number): Promise<void> {
   await request<{ ok: boolean }>(sessionId, { type: "checkpoint" });
+}
+
+/** Re-read the whole live buffer at its current version.
+ *
+ * The catch-up for a `resync`, which announces that the buffer was *replaced*
+ * out of band — a checkpoint's merge folding in a committed change, or an
+ * inbound agent commit rebased into the session. Such a replacement is a git
+ * commit, not a co-edit op, so it logs nothing for `getOps` to return: a
+ * client that only replayed ops would keep the pre-merge document forever. */
+export async function getSession(
+  sessionId: number,
+): Promise<{ buffer: string; version: number; base_sha: string | null }> {
+  const result = await request<{
+    buffer: string;
+    version: number;
+    base_sha: string | null;
+  }>(sessionId, { type: "get_session" });
+  return {
+    buffer: result.buffer,
+    version: result.version,
+    base_sha: result.base_sha,
+  };
 }
 
 /** Fetch all ops after `sinceVersion` (oldest first) plus the current head

@@ -55,6 +55,9 @@ log = logging.getLogger(__name__)
 # purpose; a marathon session yields a handful of commits, not a stream.
 _IDLE_SECONDS = 300
 _MAX_INTERVAL_SECONDS = 900
+# Four missed 15-second heartbeats distinguish a departed participant from
+# ordinary event-loop lag.
+_PARTICIPANT_STALE_SECONDS = 60
 
 _CHECKPOINT_LANDED_BUS_KIND = "coedit_checkpoint_landed"
 
@@ -104,10 +107,25 @@ def checkpoint_coedit_session_task(session_id: int, *, request_id: str | None = 
 
 @coedit_queue.periodic_task(crontab())
 def scan_coedit_checkpoints() -> None:
-    """One pass of the periodic scan — enqueue a checkpoint task for every
-    dirty session process-wide (not just this process's own local rooms —
-    a worker can now act on any session regardless of where its room, if
-    any, lives), and purge closed never-edited sessions."""
+    """One pass of the periodic scan — expire stale participant heartbeats,
+    enqueue a checkpoint task for every dirty session process-wide (not just
+    this process's own local rooms — a worker can now act on any session
+    regardless of where its room, if any, lives), close sessions nothing is
+    connected to, and purge closed never-edited sessions.
+
+    Presence is a lease: no process ever deletes a participant from its own
+    view of its own sockets, so expiring a lapsed heartbeat here is the only
+    thing that removes one."""
+    expired = coedit.expire_stale_participants(stale_seconds=_PARTICIPANT_STALE_SECONDS)
+    for session_id in expired.changed_session_ids:
+        coedit_channel.broadcast_presence(session_id)
+    for session_id in expired.empty_session_ids:
+        checkpoint_coedit_session_task(session_id)
+    if expired.changed_session_ids:
+        log.info(
+            "coedit presence scan: expired participants in %d session(s)",
+            len(expired.changed_session_ids),
+        )
     due = coedit.sessions_due_for_checkpoint(
         idle_seconds=_IDLE_SECONDS, max_interval_seconds=_MAX_INTERVAL_SECONDS
     )
@@ -115,6 +133,9 @@ def scan_coedit_checkpoints() -> None:
         checkpoint_coedit_session_task(sess.id)
     if due:
         log.info("coedit checkpoint scan: enqueued %d session(s)", len(due))
+    abandoned = coedit.close_abandoned_sessions()
+    if abandoned:
+        log.info("coedit presence scan: closed %d abandoned session(s)", len(abandoned))
     purged = coedit.purge_viewer_sessions()
     if purged:
         log.info("coedit checkpoint scan: purged %d viewer-only session(s)", purged)

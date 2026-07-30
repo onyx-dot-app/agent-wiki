@@ -10,6 +10,10 @@ export interface EffectivePolicy {
   ingestion_auto_update_disabled: boolean;
   update_instruction: string | null;
   ai_management_allowed: boolean;
+  // Master "AI Auto-Edits" switch. The two fields above are the PRE-master
+  // (display) values — preserved children; the server applies the override
+  // on enforcement paths.
+  ai_edits_disabled: boolean;
 }
 
 export interface ExplicitPolicy {
@@ -18,6 +22,7 @@ export interface ExplicitPolicy {
   ingestion_auto_update_disabled: boolean | null;
   update_instruction: string | null;
   ai_management_allowed: boolean | null;
+  ai_edits_disabled: boolean | null;
   // Owner-set per-page warning threshold (auto-updates/24h). Null inherits
   // the global default, 0 alerts on every update.
   warn_update_threshold: number | null;
@@ -38,14 +43,9 @@ export interface UpdatePolicyResponse {
 export interface UpdatePolicyPatch {
   ingestion_auto_update_disabled?: boolean | null;
   update_instruction?: string | null;
+  ai_edits_disabled?: boolean | null;
   ai_management_allowed?: boolean | null;
   warn_update_threshold?: number | null;
-}
-
-export function getUpdatePolicy(path: string): Promise<UpdatePolicyResponse> {
-  return apiFetch<UpdatePolicyResponse>(
-    `/update-policy?path=${encodeURIComponent(path)}`,
-  );
 }
 
 export function patchUpdatePolicy(

@@ -1,8 +1,9 @@
 name: Nightly Image Build
 
 # Builds + pushes `onyxdotapp/agent-wiki-{backend,frontend}:nightly-latest-YYYYMMDD`
-# to Docker Hub on a daily cron. The downstream deploy job in
-# cloud-deployment-yamls picks up the tag an hour later.
+# to Docker Hub on a daily cron. The downstream deploy job in onyx-infra picks
+# up the tag an hour later. Postgres and nginx run stock upstream images
+# (`postgres:17`, `nginx:1.27-alpine`) — nothing custom to build for those.
 #
 # Stable `v*` releases continue to go through `docker-build-push.yml`; this
 # workflow is just the nightly cadence.
@@ -32,7 +33,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [backend, frontend]
+        include:
+          - component: backend
+            context: ./backend
+          - component: frontend
+            context: ./frontend
 
     steps:
       - name: Checkout
@@ -68,8 +73,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v5
         with:
-          context: ./${{ matrix.component }}
-          file: ./${{ matrix.component }}/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
           push: true
           platforms: linux/amd64
           tags: ${{ env.DOCKERHUB_USERNAME }}/agent-wiki-${{ matrix.component }}:${{ steps.tag.outputs.tag }}

@@ -283,6 +283,7 @@ def tmp_config(tmp_path, monkeypatch, _template_db):
         opensearch_url=_TEST_OPENSEARCH_URL,
         opensearch_index=f"wiki-docs-test-{dbname}",  # isolated per test
         max_queue_size=1000,
+        web_thread_pool_size=64,
         auth_mode="basic",
         oidc_issuer="",
         oidc_client_id="",

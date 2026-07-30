@@ -1,11 +1,16 @@
 """Update-policy repo — per-page / per-folder control over wiki auto-updates.
 
 Postgres-only governance metadata keyed by path (a ``.md`` page, a folder, or
-``""`` for the wiki root), mirroring ``app/wiki/acl.py``. Three independent
-settings — ``ingestion_auto_update_disabled`` (tri-state),
-``update_instruction``, and ``ai_management_allowed`` (tri-state) — are each
-resolved most-granular-wins by walking a path
-and its ancestor folders. See the design page
+``""`` for the wiki root), mirroring ``app/wiki/acl.py``. Four settings —
+``ingestion_auto_update_disabled`` (tri-state), ``update_instruction``,
+``ai_management_allowed`` (tri-state), and the master ``ai_edits_disabled``
+(tri-state) — are each resolved most-granular-wins by walking a path and its
+ancestor folders. The master is special: when effectively disabled it
+OVERRIDES the two sub-settings at resolution time (ingestion off,
+auto-management forbidden) without changing their stored values, so
+re-enabling it restores the children as they were. Enforcement consumers get
+the override by default; the API's display path opts out
+(``apply_master=False``) so the UI can render the preserved child values. See the design page
 ``Engineering Projects/Agent Wiki Project/design/Update Policy.md``.
 
 Free functions over the ``UpdatePolicy`` model; each opens its own session and
@@ -49,6 +54,9 @@ class ResolvedPolicy(BaseModel):
     # Effective default is False: without an explicit opt-in somewhere in the
     # scope chain, AI auto-management stays propose -> approve.
     ai_management_allowed: bool = False
+    # Master switch (default enabled). With apply_master=True (the default,
+    # enforcement view) a disabled master also forces the two fields above.
+    ai_edits_disabled: bool = False
 
 
 def _now() -> str:
@@ -76,6 +84,7 @@ def _to_dict(row: UpdatePolicy) -> dict[str, Any]:
         "ingestion_auto_update_disabled": row.ingestion_auto_update_disabled,
         "update_instruction": row.update_instruction,
         "ai_management_allowed": row.ai_management_allowed,
+        "ai_edits_disabled": row.ai_edits_disabled,
         "warn_update_threshold": row.warn_update_threshold,
         "updated_by_user_id": row.updated_by_user_id,
         "created_at": row.created_at,
@@ -111,6 +120,7 @@ def set_policy(
     ingestion_auto_update_disabled: bool | None | _UnsetType = _UNSET,
     update_instruction: str | None | _UnsetType = _UNSET,
     ai_management_allowed: bool | None | _UnsetType = _UNSET,
+    ai_edits_disabled: bool | None | _UnsetType = _UNSET,
     warn_update_threshold: int | None | _UnsetType = _UNSET,
     actor_user_id: str | None = None,
 ) -> dict[str, Any] | None:
@@ -133,6 +143,8 @@ def set_policy(
             row.update_instruction = update_instruction or None
         if not isinstance(ai_management_allowed, _UnsetType):
             row.ai_management_allowed = ai_management_allowed
+        if not isinstance(ai_edits_disabled, _UnsetType):
+            row.ai_edits_disabled = ai_edits_disabled
         if not isinstance(warn_update_threshold, _UnsetType):
             row.warn_update_threshold = warn_update_threshold
 
@@ -140,6 +152,7 @@ def set_policy(
             row.ingestion_auto_update_disabled is None
             and not row.update_instruction
             and row.ai_management_allowed is None
+            and row.ai_edits_disabled is None
             and row.warn_update_threshold is None
         ):
             if existed:
@@ -256,11 +269,20 @@ def _scope_chain(norm: str) -> list[str]:
     return chain
 
 
-def _resolve_chain(chain: list[str], by_path: dict[str, UpdatePolicy]) -> ResolvedPolicy:
-    """Resolve one scope chain (closest first) against pre-fetched rows."""
+def _resolve_chain(
+    chain: list[str], by_path: dict[str, UpdatePolicy], *, apply_master: bool = True
+) -> ResolvedPolicy:
+    """Resolve one scope chain (closest first) against pre-fetched rows.
+
+    ``apply_master`` (default, the enforcement view): an effectively disabled
+    master forces ingestion off and auto-management forbidden — the children's
+    stored values are preserved but overridden. The API's display path passes
+    ``False`` so the UI can render the preserved child values alongside the
+    master state."""
     disabled: bool | None = None
     instruction: str | None = None
     ai_managed: bool | None = None
+    master_off: bool | None = None
     for scope in chain:
         row = by_path.get(scope)
         if row is None:
@@ -271,12 +293,23 @@ def _resolve_chain(chain: list[str], by_path: dict[str, UpdatePolicy]) -> Resolv
             instruction = row.update_instruction
         if ai_managed is None and row.ai_management_allowed is not None:
             ai_managed = row.ai_management_allowed
-        if disabled is not None and instruction is not None and ai_managed is not None:
+        if master_off is None and row.ai_edits_disabled is not None:
+            master_off = row.ai_edits_disabled
+        if (
+            disabled is not None
+            and instruction is not None
+            and ai_managed is not None
+            and master_off is not None
+        ):
             break
+    if apply_master and master_off:
+        disabled = True
+        ai_managed = False
     return ResolvedPolicy(
         ingestion_auto_update_disabled=bool(disabled),
         update_instruction=instruction,
         ai_management_allowed=bool(ai_managed),
+        ai_edits_disabled=bool(master_off),
     )
 
 
@@ -299,12 +332,20 @@ def resolve_ai_management_for_paths(paths: Iterable[str]) -> dict[str, bool | No
     result: dict[str, bool | None] = {}
     for p, chain in chains.items():
         value: bool | None = None
+        master_off: bool | None = None
         for scope in chain:
             row = by_path.get(scope)
-            if row is not None and row.ai_management_allowed is not None:
+            if row is None:
+                continue
+            if value is None and row.ai_management_allowed is not None:
                 value = row.ai_management_allowed
+            if master_off is None and row.ai_edits_disabled is not None:
+                master_off = row.ai_edits_disabled
+            if value is not None and master_off is not None:
                 break
-        result[p] = value
+        # Master off = the do-not-touch override: detectors must skip the
+        # scope entirely, same semantics as an explicit False.
+        result[p] = False if master_off else value
     return result
 
 
@@ -320,7 +361,9 @@ def resolve_ai_management(path: str) -> bool | None:
     return resolve_ai_management_for_paths([path]).get(path)
 
 
-def resolve_for_paths(paths: Iterable[str]) -> dict[str, ResolvedPolicy]:
+def resolve_for_paths(
+    paths: Iterable[str], *, apply_master: bool = True
+) -> dict[str, ResolvedPolicy]:
     """Effective policy for many paths in a single query.
 
     Fetches the union of every path's scope chain once, then resolves each path
@@ -339,16 +382,21 @@ def resolve_for_paths(paths: Iterable[str]) -> dict[str, ResolvedPolicy]:
             .all()
         )
     by_path = {r.path: r for r in rows}
-    return {orig: _resolve_chain(chain, by_path) for orig, chain in chains.items()}
+    return {
+        orig: _resolve_chain(chain, by_path, apply_master=apply_master)
+        for orig, chain in chains.items()
+    }
 
 
-def resolve_for_path(path: str) -> ResolvedPolicy:
+def resolve_for_path(path: str, *, apply_master: bool = True) -> ResolvedPolicy:
     """Effective policy for a single ``path`` (convenience over
     :func:`resolve_for_paths`): most-granular scope that sets a field wins,
     walking the path then its ancestor folders, each field resolved
     independently — so a page can re-enable ingestion under a disabled folder.
     """
-    return resolve_for_paths([path]).get(path, ResolvedPolicy())
+    return resolve_for_paths([path], apply_master=apply_master).get(
+        path, ResolvedPolicy()
+    )
 
 
 def is_ingest_disabled(path: str) -> bool:

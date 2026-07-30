@@ -1273,6 +1273,12 @@ class UpdatePolicy(Base):
     ingestion_auto_update_disabled: Mapped[bool | None] = mapped_column(Boolean)
     update_instruction: Mapped[str | None] = mapped_column(Text)
     ai_management_allowed: Mapped[bool | None] = mapped_column(Boolean)
+    # Master "AI Auto-Edits" switch. Tri-state, cascaded like the two fields
+    # above. When effectively True it OVERRIDES both sub-settings at
+    # resolution time (ingestion updates off, auto-management forbidden)
+    # WITHOUT changing their stored values — re-enabling the master restores
+    # whatever the children were set to.
+    ai_edits_disabled: Mapped[bool | None] = mapped_column(Boolean)
     # Owner-set per-page warning threshold: notify the owner once a page is
     # auto-updated more than this many times in 24h. ``NULL`` inherits the
     # global default (``ingest_settings.warn_update_threshold_default``). Per-page

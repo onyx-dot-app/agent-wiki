@@ -35,13 +35,18 @@ def _normalize(path: str) -> str:
 
 def _build_response(path: str) -> UpdatePolicyResponse:
     explicit = policy_repo.get(path)
-    effective = policy_repo.resolve_for_path(path)
+    # Display view (apply_master=False): the children keep their resolved
+    # values even under a disabled master, so the UI can show them preserved;
+    # the master state rides alongside. Enforcement paths resolve with the
+    # override applied (the default).
+    effective = policy_repo.resolve_for_path(path, apply_master=False)
     return UpdatePolicyResponse(
         explicit=ExplicitPolicy(**explicit) if explicit is not None else None,
         effective=EffectivePolicy(
             ingestion_auto_update_disabled=effective.ingestion_auto_update_disabled,
             update_instruction=effective.update_instruction,
             ai_management_allowed=effective.ai_management_allowed,
+            ai_edits_disabled=effective.ai_edits_disabled,
         ),
     )
 
@@ -71,6 +76,8 @@ def patch_update_policy(
         patch["update_instruction"] = req.update_instruction
     if "ai_management_allowed" in req.model_fields_set:
         patch["ai_management_allowed"] = req.ai_management_allowed
+    if "ai_edits_disabled" in req.model_fields_set:
+        patch["ai_edits_disabled"] = req.ai_edits_disabled
     if "warn_update_threshold" in req.model_fields_set:
         patch["warn_update_threshold"] = req.warn_update_threshold
     # Nothing to change — don't touch the row (would falsify updated_by/_at).

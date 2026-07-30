@@ -42,6 +42,8 @@ import asyncio
 import json
 import logging
 import queue
+import time
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -65,7 +67,6 @@ from app.models.coedit import (
     ParticipantOut,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
-from app.tasks.coedit_leave import leave_coedit_session, record_leave
 from app.wiki import acl, coedit, coedit_channel, coedit_room, git
 from app.wiki.markdown_yjs import seed_doc_from_markdown
 
@@ -292,37 +293,55 @@ async def _recv_loop(
 # loop can miss uvicorn's own ping/pong window and get closed as
 # unresponsive) — a self-reinforcing spiral. Bounding the poll to ~1s
 # bounds any orphaned thread's worst case to ~1s instead of 15.
-_SEND_LOOP_POLL_SECONDS = 1.0
+# The send loop waits on this event rather than parking a thread in a blocking
+# queue read. A publisher calls ``Connection.notify`` (see ``coedit_channel``)
+# from whatever thread it is on, which schedules the set onto this loop — so no
+# thread is held on a connection's behalf and there is no per-connection ceiling
+# on how many sockets a process can serve. It also makes teardown ordinary
+# asyncio: cancelling the send task interrupts an ``Event.wait`` immediately.
+def _make_notifier(loop: asyncio.AbstractEventLoop, ready: asyncio.Event) -> Callable[[], None]:
+    def notify() -> None:
+        try:
+            loop.call_soon_threadsafe(ready.set)
+        except RuntimeError:
+            # The loop is closing (process shutting down); the connection is
+            # going away with it, so an undelivered item is moot.
+            pass
+
+    return notify
 
 
 async def _send_loop(
-    websocket: WebSocket, conn: coedit_channel.Connection, session_id: int, user_id: str
+    websocket: WebSocket,
+    conn: coedit_channel.Connection,
+    ready: asyncio.Event,
+    session_id: int,
+    user_id: str,
 ) -> None:
-    idle_elapsed = 0.0
+    last_heartbeat = time.monotonic()
     while True:
-        item = await asyncio.to_thread(coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS)
-        if item is coedit_channel.CLOSE_SIGNAL:
-            # ws()'s teardown path pushed this via coedit_channel.wake() right
-            # before cancelling this task — reachable here (not just via
-            # cancellation) because there's a real race between the two: this
-            # drain call may already have picked up the signal as an ordinary
-            # queue item before the asyncio-level cancellation is delivered.
-            # Either path ends the loop; this one just does it without
-            # waiting on a CancelledError that might arrive after the value
-            # already did.
-            return
-        if item is None:
-            idle_elapsed += _SEND_LOOP_POLL_SECONDS
-            if idle_elapsed >= _HEARTBEAT_SECONDS:
-                idle_elapsed = 0.0
-                await asyncio.to_thread(coedit.touch, session_id, user_id)
-                await websocket.send_json({"type": "ping"})
-            continue
-        idle_elapsed = 0.0
-        if isinstance(item, coedit_channel.YjsBytes):
-            await websocket.send_bytes(item.payload)
-        else:
-            await websocket.send_json(item)
+        remaining = _HEARTBEAT_SECONDS - (time.monotonic() - last_heartbeat)
+        if remaining > 0:
+            try:
+                await asyncio.wait_for(ready.wait(), remaining)
+            except asyncio.TimeoutError:
+                pass
+        # Cleared *before* draining, so an item published mid-drain re-sets it
+        # and the next pass picks it up.
+        ready.clear()
+        if time.monotonic() - last_heartbeat >= _HEARTBEAT_SECONDS:
+            last_heartbeat = time.monotonic()
+            alive = await asyncio.to_thread(coedit.touch, session_id, user_id)
+            if not alive:
+                # Our participant row expired, so this socket is no longer part
+                # of the session — close and let the client reconnect.
+                return
+            await websocket.send_json({"type": "ping"})
+        while (item := coedit_channel.drain(conn.queue, 0)) is not None:
+            if isinstance(item, coedit_channel.YjsBytes):
+                await websocket.send_bytes(item.payload)
+            else:
+                await websocket.send_json(item)
 
 
 async def _resolve_room(
@@ -505,17 +524,19 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         if room is None:
             return
 
-    # `_connect_sync` already registered the participant (`coedit.join`)
-    # before returning, so from here on a disconnect — including one during
-    # `accept()` itself, which the client can trigger mid-handshake since
-    # `_connect_sync`'s git/DB work takes measurable time — must still reach
-    # `record_leave` to undo it. Otherwise the user is stuck as a phantom
-    # participant forever, which also blocks the last-leave checkpoint
-    # trigger from ever firing for this session.
+    # `_connect_sync` already registered the participant (`coedit.join`).
+    # Nothing here undoes that: presence is a lease on the participant row's
+    # heartbeat, so a connection that dies — including one lost during
+    # `accept()` itself — simply stops refreshing it and the periodic scan
+    # expires it (`coedit.expire_stale_participants`). No process ever deletes
+    # presence from its own view of its own sockets.
     conn: coedit_channel.Connection | None = None
     try:
         await websocket.accept()
-        conn = coedit_channel.connect(sess.id, user.id)
+        ready = asyncio.Event()
+        conn = coedit_channel.connect(
+            sess.id, _make_notifier(asyncio.get_running_loop(), ready)
+        )
         participants = await asyncio.to_thread(_participants_out, sess.id)
         await websocket.send_json(
             JoinedFrame(
@@ -534,19 +555,10 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         recv_task = asyncio.create_task(
             _recv_loop(websocket, conn.queue, sess.id, user, room, can_write)
         )
-        send_task = asyncio.create_task(_send_loop(websocket, conn, sess.id, user.id))
+        send_task = asyncio.create_task(_send_loop(websocket, conn, ready, sess.id, user.id))
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED
         )
-        # Wake a still-blocked drain() *before* cancelling it: cancelling
-        # send_task only stops the asyncio Task watching the thread, not the
-        # already-dispatched OS thread itself — queue.Queue.get(timeout=...)
-        # has no cancellation hook, so without this it just keeps blocking,
-        # doing nothing, until its own timeout expires (see
-        # coedit_channel.wake's docstring). Pushing CLOSE_SIGNAL is what
-        # actually unblocks that thread immediately, same as a real frame
-        # arriving would.
-        coedit_channel.wake(conn.id)
         for t in pending:
             t.cancel()
         for t in done:
@@ -558,24 +570,29 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
     finally:
         if conn is not None:
             coedit_channel.disconnect(conn.id)
-        # The leave must survive this task being cancelled (server shutdown;
-        # the test portal tearing down the connection). A cancelled `await`
-        # is not enough: cancellation can land inside record_leave's own
-        # first asyncio.to_thread call before that executor item is even
-        # picked up — cancelling a not-yet-started future removes it from
-        # the queue — and the cancellation can land at any moment, so no
-        # up-front check closes the window. On that path, hand the leave to
-        # the coedit queue instead: a synchronous enqueue nothing can
-        # cancel, durable across the shutdown that caused it. `record_leave`
-        # is idempotent, so the rare both-ran overlap is safe.
+        # Commit this connection's tail now rather than waiting for the
+        # presence scan to expire the heartbeat. Needs no liveness information:
+        # the checkpoint no-ops on a clean session, and ``close_if_clean``'s
+        # participant predicate keeps a session with live connections open.
+        #
+        # Offloaded because the enqueue is a blocking Redis write and this body
+        # runs on the event loop every other socket shares. It must also survive
+        # this task being cancelled (server shutdown), and a cancelled ``await``
+        # is not enough — the executor item can be discarded before any pool
+        # worker picks it up — so that path enqueues inline, where blocking the
+        # loop is moot anyway.
         try:
-            await record_leave(sess.id, user.id)
+            await asyncio.to_thread(checkpoint_coedit_session_task, sess.id)
         except asyncio.CancelledError:
             try:
-                leave_coedit_session(sess.id, user.id)  # enqueue, no await
+                checkpoint_coedit_session_task(sess.id)
             except Exception:
                 log.exception(
-                    "coedit: queued-leave fallback failed for session %s", sess.id
+                    "coedit: queued-checkpoint fallback failed for session %s", sess.id
                 )
             raise
+        except Exception:
+            log.exception(
+                "coedit: checkpoint enqueue failed on disconnect for session %s", sess.id
+            )
         log.info("coedit ws closed session=%s user=%s", sess.id, user.id)

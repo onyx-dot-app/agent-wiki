@@ -12,6 +12,11 @@ class EffectivePolicy(BaseModel):
     ingestion_auto_update_disabled: bool
     update_instruction: str | None = None
     ai_management_allowed: bool = False
+    # Master "AI Auto-Edits" switch. In this response the two fields above
+    # are the PRE-master (display) values — the preserved children — and the
+    # client derives the acting state from this flag; enforcement paths apply
+    # the override server-side.
+    ai_edits_disabled: bool = False
 
 
 class ExplicitPolicy(BaseModel):
@@ -22,6 +27,7 @@ class ExplicitPolicy(BaseModel):
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
     ai_management_allowed: bool | None = None
+    ai_edits_disabled: bool | None = None
     warn_update_threshold: int | None = None
     updated_by_user_id: str | None = None
     created_at: str | None = None
@@ -63,4 +69,5 @@ class PatchUpdatePolicyRequest(BaseModel):
     ingestion_auto_update_disabled: bool | None = None
     update_instruction: str | None = None
     ai_management_allowed: bool | None = None
+    ai_edits_disabled: bool | None = None
     warn_update_threshold: int | None = Field(default=None, ge=0)

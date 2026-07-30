@@ -15,6 +15,8 @@ export const SWR_KEYS = {
     `/wiki/deleted?path=${encodeURIComponent(path)}`,
   updateHealth: (path: string) =>
     `/wiki/update-health?path=${encodeURIComponent(path)}`,
+  updatePolicy: (path: string) =>
+    `/update-policy?path=${encodeURIComponent(path)}`,
   documentActivity: (path: string) =>
     `/wiki/file/activity?path=${encodeURIComponent(path)}`,
   /** Tuple key: the head sha busts the cache on new commits even though the

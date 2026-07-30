@@ -44,7 +44,7 @@ _TASK_MODULES = (
     "app.tasks.chat_title",
     "app.tasks.automanage",
     "app.tasks.coedit_checkpoint",
-    "app.tasks.coedit_leave",
+    "app.tasks.coedit_rebase",
     "app.tasks.craft",
     "app.tasks.wiki_update",
     "app.tasks.expire_launch_artifacts",
