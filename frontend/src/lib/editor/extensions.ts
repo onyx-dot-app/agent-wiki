@@ -20,10 +20,7 @@ import {
   UniqueBlockIdentity,
 } from "@/lib/editor/blocks";
 import { CommandMenu } from "@/lib/editor/commandMenu";
-import {
-  AnchoredHighlights,
-  CurrentBlockHighlight,
-} from "@/lib/editor/highlights";
+import { AnchoredHighlights } from "@/lib/editor/highlights";
 import { presenceExtension } from "@/lib/editor/presence";
 
 /**
@@ -86,7 +83,6 @@ export function tiptapExtensions(
     }),
     Placeholder.configure({ placeholder: placeholder ?? "" }),
     AnchoredHighlights,
-    CurrentBlockHighlight,
     presenceExtension(awareness),
     CommandMenu,
   ];

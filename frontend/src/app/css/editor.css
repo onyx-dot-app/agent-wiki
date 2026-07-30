@@ -222,20 +222,6 @@
   height: 0;
 }
 
-/* Current-block highlight — the innermost block the cursor is in.
-   --background-tint-01 (a 2%-shifted tint) turned out to be imperceptibly
-   faint in practice - same issue the inline-code background had before it
-   was changed to solid black - so this uses a visibly stronger tint. */
-.editor-prose .current-block {
-  background: var(--background-tint-03);
-  border-radius: var(--radius-08);
-  /* Negative margin cancels the padding's own box-widening, so the
-     highlighted box bleeds outward around the text instead of shifting the
-     text itself inward relative to non-highlighted paragraphs. */
-  padding: 4px;
-  margin: -4px;
-}
-
 /* Comment/source highlights — same idle/active two-tier treatment as the
    CM6 version: idle threads at 30% amber (20% reads as unhighlighted on
    real content), hovered/selected at Highlight/Active (60%). Sources sit
