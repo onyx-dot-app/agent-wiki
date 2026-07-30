@@ -238,15 +238,17 @@ _partial_started_at: dict[str, float] = {}
 _partial_lock = threading.Lock()
 _PARTIAL_TTL_SECONDS = 30.0
 
-# bus.emit() is a blocking Postgres NOTIFY round-trip. broadcast_yjs fires on
-# every content/awareness frame from the WS route's Doc-touching code path
-# (app/api/coedit.py's _apply_yjs_frame — several times a second per writer,
-# more for a chunked large paste), which must stay inline on the event loop
-# and can't itself go through asyncio.to_thread without also offloading the
-# Doc access it's interleaved with. A dedicated drain thread absorbs the
-# blocking NOTIFY so the event loop's own call here is a cheap, non-blocking
-# queue.put_nowait — mirrors app/realtime/bus.py's own LISTEN thread: started
-# explicitly from app/main.py's lifespan, not at import time.
+# bus.emit() is a blocking Postgres NOTIFY round-trip, and broadcast_yjs fires
+# on every content/awareness frame relayed by the WS route — several times a
+# second per writer, more for a chunked large paste. A dedicated drain thread
+# absorbs the blocking NOTIFY so the web process's own call is a cheap,
+# non-blocking queue.put_nowait; it mirrors app/realtime/bus.py's own LISTEN
+# thread and is started explicitly from app/main.py's lifespan, not at import
+# time.
+#
+# Only the web process runs one. Workers broadcast too (a live-rebase fold, a
+# diverged checkpoint's merge delta) and have no event loop to protect, so
+# _queue_emit sends theirs inline — see its own comment.
 _emit_queue: queue.Queue[dict[str, Any]] = queue.Queue()
 _emit_thread: threading.Thread | None = None
 _emit_stop = threading.Event()
@@ -255,7 +257,8 @@ _emit_stop = threading.Event()
 def start_emit_drain() -> None:
     """Start the deferred cross-process emit thread — call once from the web
     process at startup (``app/main.py``'s lifespan), alongside
-    ``bus.start_listener()``."""
+    ``bus.start_listener()``. A process that doesn't (a worker) emits inline
+    instead; see ``_queue_emit``."""
     global _emit_thread
     if _emit_thread is not None and _emit_thread.is_alive():
         return
@@ -269,6 +272,21 @@ def start_emit_drain() -> None:
 def stop_emit_drain() -> None:
     """Signal the drain thread to exit. Mostly for tests + clean shutdown."""
     _emit_stop.set()
+
+
+def _queue_emit(payload: dict[str, Any]) -> None:
+    """Hand ``payload`` to the drain thread, or send it inline if there isn't one.
+
+    The fallback is what makes a broadcast from a *worker* work: only the web
+    process starts a drain thread, and queueing into a queue nothing drains
+    would strand the frame silently — no error, just editors who never see an
+    agent's fold. A worker has no event loop, so the blocking NOTIFY is fine
+    there.
+    """
+    if _emit_thread is not None and _emit_thread.is_alive():
+        _emit_queue.put_nowait(payload)
+    else:
+        bus.emit(payload)  # best-effort; logs + swallows its own errors
 
 
 def _drain_emit_queue() -> None:
@@ -290,13 +308,13 @@ def broadcast_yjs(coedit_session_id: int, payload: bytes, seq: int | None = None
     reason (relying on client-side ``client_id`` matching to skip re-
     applying, not on the server withholding the echo).
 
-    The cross-process fan-out is queued (``_emit_queue``), not emitted
-    inline — see that queue's own comment.
+    The cross-process fan-out goes through ``_queue_emit`` — deferred to a
+    drain thread in the web process, inline in a worker.
     """
     _deliver_local_bytes(coedit_session_id, payload, seq)
     b64 = base64.b64encode(payload).decode("ascii")
     if len(b64) <= _MAX_CHUNK_B64_LEN:
-        _emit_queue.put_nowait(
+        _queue_emit(
             {"kind": _YJS_BUS_KIND, "session_id": coedit_session_id, "i": 0, "n": 1,
              "group": None, "chunk": b64, "seq": seq}
         )
@@ -304,7 +322,7 @@ def broadcast_yjs(coedit_session_id: int, payload: bytes, seq: int | None = None
     group = uuid.uuid4().hex
     chunks = [b64[i : i + _MAX_CHUNK_B64_LEN] for i in range(0, len(b64), _MAX_CHUNK_B64_LEN)]
     for i, chunk in enumerate(chunks):
-        _emit_queue.put_nowait(
+        _queue_emit(
             {
                 "kind": _YJS_BUS_KIND,
                 "session_id": coedit_session_id,

@@ -61,9 +61,10 @@ def test_publish_control_delivers_to_all_connections_in_session():
     coedit_channel.reset_for_tests()
     a = _connect(4)
     b = _connect(4)
-    coedit_channel.publish_control(4, {"type": "resync", "session_id": 4})
-    assert coedit_channel.drain(a.queue, 0.5) == {"type": "resync", "session_id": 4}
-    assert coedit_channel.drain(b.queue, 0.5) == {"type": "resync", "session_id": 4}
+    frame = {"type": "checkpoint_result", "request_id": "r", "ok": True}
+    coedit_channel.publish_control(4, frame)
+    assert coedit_channel.drain(a.queue, 0.5) == frame
+    assert coedit_channel.drain(b.queue, 0.5) == frame
 
 
 def test_broadcast_yjs_delivers_bytes_frame_to_peers():
@@ -126,3 +127,40 @@ def test_handle_remote_yjs_reassembles_chunks_in_any_order():
     assert coedit_channel.drain(conn.queue, 0.5) == coedit_channel.YjsBytes(payload=payload)
     # Reassembly buffer is cleared once complete.
     assert group not in coedit_channel._partial_chunks
+
+
+def test_cross_process_emit_is_inline_when_no_drain_thread_runs(monkeypatch):
+    # Only the web process starts the emit drain thread. A worker broadcasts
+    # too — a live-rebase fold, a diverged checkpoint's merge delta — and
+    # queueing into a queue nothing drains stranded those frames silently:
+    # editors simply never saw the agent's edit (reproduced against the
+    # deployed stack, not hypothesized).
+    coedit_channel.reset_for_tests()
+    emitted: list[dict] = []
+    monkeypatch.setattr(coedit_channel.bus, "emit", emitted.append)
+    monkeypatch.setattr(coedit_channel, "_emit_thread", None)
+
+    coedit_channel.broadcast_yjs(11, b"\x00\x01fold")
+
+    assert [e["kind"] for e in emitted] == ["coedit_yjs"]
+    assert emitted[0]["session_id"] == 11
+    assert coedit_channel._emit_queue.empty()  # nothing left stranded
+
+
+def test_cross_process_emit_is_deferred_when_the_drain_thread_runs(monkeypatch):
+    # In the web process the NOTIFY must not happen inline: it's a blocking
+    # round-trip on the event loop's own thread, on a per-keystroke path.
+    coedit_channel.reset_for_tests()
+    emitted: list[dict] = []
+    monkeypatch.setattr(coedit_channel.bus, "emit", emitted.append)
+
+    class _AliveThread:
+        def is_alive(self) -> bool:
+            return True
+
+    monkeypatch.setattr(coedit_channel, "_emit_thread", _AliveThread())
+
+    coedit_channel.broadcast_yjs(12, b"\x00\x01keystroke")
+
+    assert emitted == []  # handed to the drain thread instead
+    assert coedit_channel._emit_queue.get_nowait()["session_id"] == 12
