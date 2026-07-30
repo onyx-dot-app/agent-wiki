@@ -726,7 +726,11 @@ def find_by_row_id(doc: Doc, row_id: str) -> XmlElement | None:
 
 
 def serialize_row(row: XmlElement) -> str:
-    return row.children[0].to_py()  # type: ignore[return-value]
+    """A row's verbatim source line. Empty-safe for the same reason as
+    ``_serialize_code_block``: delete a row's text and the XmlText child goes
+    with it, leaving a childless element whose ``children[0]`` raises."""
+    kids = list(row.children)
+    return kids[0].to_py() if kids else ""  # type: ignore[return-value]
 
 
 def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
@@ -793,10 +797,17 @@ def _serialize_code_block(node: XmlElement) -> str:
     """Always emits fenced syntax, even if the source was an indented code
     block — semantically identical, and simpler/more robust than
     reconstructing 4-space indentation. Same non-byte-identical-but-correct
-    tradeoff as ``_serialize_list``."""
+    tradeoff as ``_serialize_list``.
+
+    An *empty* code block has no text child at all, not a child holding "".
+    Indexing it raised ``IndexError`` straight out of pycrdt, which surfaced as
+    a checkpoint that crashed and retried forever: the page could never be
+    saved again, and every editor on it saw "could not save". Trivially reached
+    — insert a code block from the slash menu, type nothing, save."""
     attrs = dict(node.attributes)
     language = attrs.get("language", "")
-    content = node.children[0].to_py()  # type: ignore[union-attr]
+    kids = list(node.children)
+    content = kids[0].to_py() if kids else ""  # type: ignore[union-attr]
     fence = "```"
     while fence in content:
         fence += "`"

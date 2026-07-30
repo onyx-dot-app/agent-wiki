@@ -14,6 +14,8 @@ from app.wiki.markdown_yjs import (
     reconstruct_body,
     reconstruct_body_with_block_map,
     seed_doc_from_markdown,
+    serialize_block,
+    serialize_row,
 )
 
 _SAMPLE = """# Heading
@@ -956,3 +958,36 @@ def test_adjacent_links_with_different_hrefs_do_not_merge() -> None:
         xt.format(2, 5, {"link": {"href": "http://b.example"}})
     out = reconstruct_body(doc)
     assert out == "[pl](http://a.example)[ain](http://b.example)\n"
+
+
+def test_empty_code_block_serializes_instead_of_crashing() -> None:
+    # An empty code block has no text child at all, and indexing it raised
+    # IndexError out of pycrdt — a checkpoint that crashed and retried forever,
+    # so the page could never be saved again. Reached by inserting a code block
+    # and typing nothing.
+    doc = seed_doc_from_markdown("```python\nx = 1\n```\n")
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    block = root.children[0]
+    assert isinstance(block, XmlElement)
+    with doc.transaction():
+        while len(block.children):
+            del block.children[0]
+
+    assert serialize_block(block) == "```python\n```\n"
+    # And the whole-document path a checkpoint actually takes.
+    assert reconstruct_body(doc) == "```python\n```\n"
+
+
+def test_empty_table_row_serializes_instead_of_crashing() -> None:
+    doc = seed_doc_from_markdown("| a | b |\n| --- | --- |\n| 1 | 2 |\n")
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    table = root.children[0]
+    assert isinstance(table, XmlElement)
+    row = list(table.children)[-1]
+    assert isinstance(row, XmlElement)
+    with doc.transaction():
+        while len(row.children):
+            del row.children[0]
+
+    assert serialize_row(row) == ""
+    reconstruct_body(doc)  # must not raise
