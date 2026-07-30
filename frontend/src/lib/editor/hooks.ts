@@ -250,6 +250,28 @@ export function useCoeditSession(opts: {
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRetries = useRef(0);
+  // Guards against overlapping saves — a retry firing while an autosave is
+  // still in flight, or the reverse. Coalescing is safe rather than lossy: a
+  // checkpoint commits whatever the document currently holds, not a snapshot
+  // taken when it was requested, so the in-flight one already covers the
+  // skipped one's content. Without this, two promises settling out of order
+  // could leave a false "Couldn't save" sitting on top of a success (the server
+  // is fine either way — the per-session advisory lock means repeated attempts
+  // still produce a single commit).
+  const saveInFlight = useRef(false);
+  // Reached through a ref so a queued retry always runs the current closure,
+  // not the one captured when the failure happened.
+  const checkpointRef = useRef<(() => Promise<void>) | null>(null);
+
+  const armSaveRetry = useCallback(() => {
+    if (saveRetries.current >= SAVE_RETRY_LIMIT) return;
+    saveRetries.current += 1;
+    if (saveRetryTimer.current) clearTimeout(saveRetryTimer.current);
+    saveRetryTimer.current = setTimeout(() => {
+      saveRetryTimer.current = null;
+      void checkpointRef.current?.();
+    }, SAVE_RETRY_MS);
+  }, []);
 
   const sessionId = useRef<number | null>(null);
   // The connection this hook currently owns — svc.ts's per-socket handle.
@@ -279,9 +301,18 @@ export function useCoeditSession(opts: {
   }, []);
 
   const checkpoint = useCallback(async () => {
+    if (!canWrite || saveInFlight.current) return;
     const cid = ownedConnection.current;
-    if (cid === null || !canWrite) return;
+    if (cid === null) {
+      // Mid-reconnect: there is no socket to ask, and this used to return
+      // silently — so a save owed right before a drop was simply never made by
+      // the client, leaving it to the server's 300s idle scan. Arm the retry
+      // instead, which the reconnect will satisfy.
+      armSaveRetry();
+      return;
+    }
     setSaveStatus("saving");
+    saveInFlight.current = true;
     try {
       await checkpointSession(cid);
       saveRetries.current = 0;
@@ -299,20 +330,12 @@ export function useCoeditSession(opts: {
       // repeats the refusal. Everything else means "no socket right now", which
       // the reconnect loop is already fixing.
       const terminal = reason.toLowerCase().includes("forbidden");
-      if (!terminal && saveRetries.current < SAVE_RETRY_LIMIT) {
-        saveRetries.current += 1;
-        if (saveRetryTimer.current) clearTimeout(saveRetryTimer.current);
-        saveRetryTimer.current = setTimeout(() => {
-          saveRetryTimer.current = null;
-          void checkpointRef.current?.();
-        }, SAVE_RETRY_MS);
-      }
+      if (!terminal) armSaveRetry();
+    } finally {
+      saveInFlight.current = false;
     }
-  }, [canWrite]);
+  }, [canWrite, armSaveRetry]);
 
-  // The retry reaches `checkpoint` through a ref so the timer always runs the
-  // current closure rather than the one captured when the failure happened.
-  const checkpointRef = useRef(checkpoint);
   checkpointRef.current = checkpoint;
 
   const runAutoCheckpoint = useCallback(() => {
@@ -377,29 +400,57 @@ export function useCoeditSession(opts: {
     let cancelled = false;
     setJoinError(null);
 
+    // One doc/awareness pair per effect run — that is, per path — reused across
+    // every reconnect within it.
+    //
+    // NOT per reconnect, which is what this did before. A new `Y.Doc` mints a
+    // new Yjs client id; `yCursorPlugin` keys carets by client id; and nothing
+    // retires the old one, so every reconnect left a duplicate caret on every
+    // peer's screen until y-protocols' 30s `outdatedTimeout` swept it — the
+    // "why are there multiple Duo carets" report, and what a caret appearing to
+    // jump actually was. Reusing the pair also stops the editor remounting on
+    // reconnect (so your own caret stays put) and lets anything typed while
+    // disconnected merge on reconnect instead of being discarded.
+    //
+    // Still never the outer `doc`/`awareness` state: this effect re-runs on
+    // every path change and React does not reset that state, so reusing it would
+    // hand the previous path's populated doc to this path's session and risk it
+    // being checkpointed under the wrong page.
+    const sessionDoc = new Y.Doc();
+    const sessionAwareness = new Awareness(sessionDoc);
+    setDocInstance(sessionDoc);
+    setAwareness(sessionAwareness);
+    editorRef.current = null;
+    setBuffer("");
+    setConnectionId((n) => n + 1);
+    if (myUserId)
+      sessionAwareness.setLocalStateField("user", {
+        id: myUserId,
+        name: myUserDisplay ?? "Anonymous",
+      });
+
+    // Closes over this run's own awareness rather than calling the outer
+    // `recomputePresence`, whose useCallback identity is pinned to whichever
+    // `awareness` state value existed when this effect body started.
+    const recomputeForThisAwareness = () => {
+      setTyping(deriveTyping(sessionAwareness));
+      const editor = editorRef.current;
+      if (editor) setPeers(derivePeers(editor, sessionAwareness));
+    };
+    sessionAwareness.on("change", recomputeForThisAwareness);
+
     void (async () => {
       while (!cancelled) {
-        // Fresh doc/awareness every iteration, including the first — never
-        // reuse the outer `doc`/`awareness` state: this effect re-runs on
-        // every path change (deps: [enabled, path, retryToken]), and since
-        // `doc`/`awareness` state isn't reset by React on that re-run, a
-        // "first connect reuses the existing state" shortcut here would
-        // hand the *previous* path's populated doc to this path's brand
-        // new session — syncing its content in and risking it getting
-        // checkpointed under the wrong page.
-        const freshDoc = new Y.Doc();
-        const freshAwareness = new Awareness(freshDoc);
-        setDocInstance(freshDoc);
-        setAwareness(freshAwareness);
-        editorRef.current = null;
-        setBuffer("");
-        setConnectionId((n) => n + 1);
-
         let snap;
         try {
-          snap = await connectSession(path, freshDoc, freshAwareness, (p) => {
-            if (!cancelled) setParticipants(p);
-          });
+          snap = await connectSession(
+            path,
+            sessionDoc,
+            sessionAwareness,
+            (p) => {
+              if (!cancelled) setParticipants(p);
+            },
+          );
         } catch (e) {
           if (!cancelled) {
             // A 422 is svc.ts's join_error frame — a real, distinguishable
@@ -426,32 +477,10 @@ export function useCoeditSession(opts: {
         setCanWrite(snap.can_write);
         setParticipants(snap.participants);
         setActive(true);
-        if (myUserId)
-          freshAwareness.setLocalStateField("user", {
-            id: myUserId,
-            name: myUserDisplay ?? "Anonymous",
-          });
-        // Not the outer recomputePresence: this whole while loop runs
-        // inside one long-lived effect invocation (the effect's own deps,
-        // [enabled, path, retryToken], don't include `awareness`), so
-        // across reconnects within a single run, recomputePresence's
-        // useCallback closure stays pinned to whichever `awareness` state
-        // value existed when the effect body started — reading it here
-        // would derive presence from a stale, already-disconnected
-        // Awareness instance after setAwareness(freshAwareness) above.
-        // Closing over freshAwareness directly sidesteps the staleness
-        // instead of chasing it.
-        const recomputeForThisAwareness = () => {
-          setTyping(deriveTyping(freshAwareness));
-          const editor = editorRef.current;
-          if (editor) setPeers(derivePeers(editor, freshAwareness));
-        };
-        freshAwareness.on("change", recomputeForThisAwareness);
 
         const { expected } = await snap.closed;
         if (ownedConnection.current === snap.connectionId)
           ownedConnection.current = null;
-        freshAwareness.off("change", recomputeForThisAwareness);
         if (cancelled || expected) return;
         await new Promise((r) => setTimeout(r, STREAM_RECONNECT_MS));
       }
@@ -464,6 +493,7 @@ export function useCoeditSession(opts: {
       setActive(false);
       setPeers([]);
       setTyping([]);
+      sessionAwareness.off("change", recomputeForThisAwareness);
       // Captured now, and acted on below *by this handle*: the effect body for
       // the next path/retry starts before this async teardown finishes, and it
       // joins the same session id. Closing "the session" at that point would
@@ -472,7 +502,10 @@ export function useCoeditSession(opts: {
       sessionId.current = null;
       ownedConnection.current = null;
       onEnd?.();
-      if (cid === null) return;
+      if (cid === null) {
+        sessionAwareness.destroy();
+        return;
+      }
       void (async () => {
         if (canWrite) {
           try {
@@ -481,6 +514,13 @@ export function useCoeditSession(opts: {
             // The server-side close-triggered forced commit is the backstop.
           }
         }
+        // Before closing, not after: `destroy()` sets our local state to null,
+        // which emits an awareness update the still-open socket relays, so peers
+        // drop this caret immediately instead of waiting out the 30s timeout. It
+        // also clears the Awareness heartbeat interval. The Doc has no timers
+        // and is left to GC, since the editor may still be tearing down around
+        // it.
+        sessionAwareness.destroy();
         closeSession(cid);
       })();
     };
