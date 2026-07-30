@@ -60,6 +60,11 @@ class YjsBytes(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     payload: bytes
+    # The ``ydoc_seq`` this update was assigned when logged, or ``None`` for
+    # traffic that isn't logged (awareness, sync replies). A dropped relay is
+    # otherwise invisible: room-less there is no resident replica to mask it,
+    # so the client needs to see the gap and fetch what it missed.
+    seq: int | None = None
 
 
 QueueItem = YjsBytes | ControlFrame
@@ -159,13 +164,15 @@ def _deliver_local(coedit_session_id: int, frame: ControlFrame) -> None:
         notify()
 
 
-def _deliver_local_bytes(coedit_session_id: int, payload: bytes) -> None:
+def _deliver_local_bytes(
+    coedit_session_id: int, payload: bytes, seq: int | None = None
+) -> None:
     with _lock:
         targets = [
             (_queues.get(cid), _notifiers.get(cid))
             for cid in _conns_by_session.get(coedit_session_id, ())
         ]
-    item = YjsBytes(payload=payload)
+    item = YjsBytes(payload=payload, seq=seq)
     for q, notify in targets:
         if q is None or notify is None:
             continue
@@ -272,7 +279,7 @@ def _drain_emit_queue() -> None:
         bus.emit(payload)  # already best-effort — logs + swallows its own errors
 
 
-def broadcast_yjs(coedit_session_id: int, payload: bytes) -> None:
+def broadcast_yjs(coedit_session_id: int, payload: bytes, seq: int | None = None) -> None:
     """Relay a raw Yjs sync/awareness protocol message to every connection in
     the session, this process and every other.
 
@@ -285,11 +292,12 @@ def broadcast_yjs(coedit_session_id: int, payload: bytes) -> None:
     The cross-process fan-out is queued (``_emit_queue``), not emitted
     inline — see that queue's own comment.
     """
-    _deliver_local_bytes(coedit_session_id, payload)
+    _deliver_local_bytes(coedit_session_id, payload, seq)
     b64 = base64.b64encode(payload).decode("ascii")
     if len(b64) <= _MAX_CHUNK_B64_LEN:
         _emit_queue.put_nowait(
-            {"kind": _YJS_BUS_KIND, "session_id": coedit_session_id, "i": 0, "n": 1, "group": None, "chunk": b64}
+            {"kind": _YJS_BUS_KIND, "session_id": coedit_session_id, "i": 0, "n": 1,
+             "group": None, "chunk": b64, "seq": seq}
         )
         return
     group = uuid.uuid4().hex
@@ -303,6 +311,7 @@ def broadcast_yjs(coedit_session_id: int, payload: bytes) -> None:
                 "n": len(chunks),
                 "group": group,
                 "chunk": chunk,
+                "seq": seq,
             }
         )
 
@@ -321,7 +330,7 @@ def _handle_remote_yjs(payload: dict[str, Any]) -> None:
     n = int(payload["n"])
     if n == 1:
         raw = base64.b64decode(payload["chunk"])
-        _deliver_local_bytes(session_id, raw)
+        _deliver_local_bytes(session_id, raw, payload.get("seq"))
         # Also converge this process's own local room, if it holds one —
         # see coedit_room.apply_remote_frame_if_local's own docstring for
         # why _deliver_local_bytes alone (local WS *connections* only)
@@ -344,7 +353,7 @@ def _handle_remote_yjs(payload: dict[str, Any]) -> None:
             del _partial_started_at[group]
     if full_b64 is not None:
         raw = base64.b64decode(full_b64)
-        _deliver_local_bytes(session_id, raw)
+        _deliver_local_bytes(session_id, raw, payload.get("seq"))
         coedit_room.apply_remote_frame_if_local(session_id, raw)
 
 

@@ -794,7 +794,7 @@ def close_abandoned_sessions() -> list[int]:
                 update(CoeditSession)
                 .where(
                     CoeditSession.status == SessionStatus.ACTIVE.value,
-                    CoeditSession.version == CoeditSession.checkpointed_version,
+                    CoeditSession.ydoc_seq == CoeditSession.ydoc_checkpointed_seq,
                     ~select(CoeditParticipant.session_id)
                     .where(CoeditParticipant.session_id == CoeditSession.id)
                     .exists(),

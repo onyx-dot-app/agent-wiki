@@ -21,6 +21,20 @@ class CheckpointMessage(BaseModel):
     request_id: str
 
 
+class GetUpdatesSinceMessage(BaseModel):
+    """Client -> server ``{"type": "get_updates_since", ...}`` — replay the
+    logged updates after ``since_seq``.
+
+    The recovery path for a gap in the relay stream. Every relayed update
+    carries the ``ydoc_seq`` the log assigned it, so a client that sees seq
+    jump can ask for what it missed. Without this a dropped relay leaves that
+    client diverged until it reconnects: there is no resident server replica to
+    mask the loss.
+    """
+
+    since_seq: int
+
+
 class CheckpointResultFrame(BaseModel):
     type: str = "checkpoint_result"
     request_id: str
