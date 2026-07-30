@@ -213,6 +213,42 @@ def _apply_yjs_frame(
     return None
 
 
+def _ingest_yjs_frame(
+    conn: coedit_channel.Connection,
+    session_id: int,
+    user: User,
+    raw: bytes,
+) -> int | None:
+    """Authorize, validate, durably log and refresh presence for one inbound
+    frame — returning the ``ydoc_seq`` assigned, or ``None`` if nothing was
+    logged. One thread hop for all of it, deliberately.
+
+    Two reasons it is one hop rather than three. It was three round trips per
+    content frame (authorize+validate, log, touch) on the highest-frequency path
+    in the process. And the authorization is only as fresh as the gap to the
+    write that follows it: with the log write awaited separately, a revocation
+    committing in between persisted the update unchecked. Adjacent statements in
+    one transaction-per-call sequence make that gap as small as it can be here.
+
+    Small, not zero: the ACL read and the log append are still separate
+    transactions, so a revoke committing between them still lands one frame.
+    Closing it entirely would mean holding the ACL check inside the append's own
+    transaction — pushing an ACL dependency into `app/wiki/coedit.py`, which is
+    deliberately pure DB bookkeeping — and even then a revoke a microsecond later
+    would race the same way, since nothing locks the ACL rows. `main` had the
+    identical two-transaction shape, so this is a narrower version of a race that
+    is inherent to checking permission outside the write.
+    """
+    update = _apply_yjs_frame(conn, session_id, user, raw)
+    if update is None:
+        return None
+    seq = coedit.apply_update(session_id, update_bytes=update, author_user_id=user.id)
+    if seq is None:
+        return None  # session closed underneath us
+    coedit.touch(session_id, user.id, edited=True)
+    return seq
+
+
 async def _recv_loop(
     websocket: WebSocket,
     conn: coedit_channel.Connection,
@@ -230,24 +266,15 @@ async def _recv_loop(
 
         data = msg.get("bytes")
         if data is not None:
-            update_bytes = await asyncio.to_thread(
-                _apply_yjs_frame, conn, session_id, user, data
+            # Logged before relaying, so the broadcast carries the seq the log
+            # assigned: that seq is what lets a peer notice a dropped relay and
+            # fetch what it missed. Relaying first would leave the gap
+            # undetectable.
+            seq = await asyncio.to_thread(
+                _ingest_yjs_frame, conn, session_id, user, data
             )
-            if update_bytes is not None:
-                # Log *before* relaying, so the broadcast can carry the seq the
-                # log assigned: that seq is what lets a peer notice a dropped
-                # relay and fetch what it missed. Relaying first would leave the
-                # gap undetectable.
-                seq = await asyncio.to_thread(
-                    coedit.apply_update,
-                    session_id,
-                    update_bytes=update_bytes,
-                    author_user_id=user.id,
-                )
-                if seq is None:
-                    continue  # session closed underneath us; nothing to relay
+            if seq is not None:
                 coedit_channel.broadcast_yjs(session_id, data, seq)
-                await asyncio.to_thread(coedit.touch, session_id, user.id, edited=True)
             continue
 
         text = msg.get("text")
