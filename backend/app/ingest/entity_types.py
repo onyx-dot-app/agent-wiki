@@ -31,8 +31,10 @@ it runs WITHIN a type rather than over all pairs.
 
 The result is a frozen, versioned artifact. It must not be recomputed silently: stages 5 and
 6 are LLM calls, so re-deriving can rename a type, and anything keyed by the old name is
-orphaned. Same lifecycle as the two-tower relevance model — produced offline, pointed at
-explicitly, with a documented fallback when absent (see ``DEFAULT_TYPES``).
+orphaned. ``derive()`` therefore only computes — ``run_derivation()`` is the entry point a
+caller invokes (today the offline queue task; see ``app.tasks.entity_types``), and it is not
+scheduled. When nothing has been derived yet, ``load_taxonomy`` falls back to a small generic
+type list, the same degradation as the relevance scorer without its model file.
 """
 
 from __future__ import annotations
@@ -598,6 +600,53 @@ def derive(
         },
         "entity_types": [t.to_json() for t in final],
     }
+
+
+def run_derivation(
+    *, prefix: str = "", model: str | None = None, triggered_by_user_id: str | None = None
+) -> dict[str, Any]:
+    """Derive the taxonomy from the current wiki and store it. Returns the artifact.
+
+    The callable entry point — a caller invokes this rather than shelling out. Raises
+    RuntimeError when the corpus is too small to derive from or embeddings are unavailable;
+    the caller decides whether that is fatal (nothing is stored, so the previous taxonomy,
+    or the fallback, stays in force).
+    """
+    pages = read_corpus(prefix)
+    if not pages:
+        raise RuntimeError("no wiki pages to derive from")
+
+    log.info("entity_types: deriving from %d page(s)", len(pages))
+    artifact = derive(pages, model=model)
+    artifact["triggered_by_user_id"] = triggered_by_user_id
+
+    stats = artifact["stats"]
+    log.info(
+        "entity_types: %d mention(s) -> %d referent(s) -> %d kept -> %d type(s); ambient=%s",
+        stats["n_mentions"],
+        stats["n_referents"],
+        stats["n_kept"],
+        stats["n_types"],
+        ", ".join(stats["ambient"]) or "(none)",
+    )
+    store_taxonomy(artifact)
+    return artifact
+
+
+def store_taxonomy(artifact: dict[str, Any]) -> None:
+    """Persist a derived taxonomy.
+
+    A placeholder while there is no consumer in-tree. The eventual home is a versioned
+    table rather than a single current value: types key facts by entity, so a re-derivation
+    that renames one must not orphan rows keyed under the old name — which means keeping
+    the old taxonomy resolvable, not overwriting it. Deferred until the consumer lands and
+    can say what it needs to read.
+    """
+    log.info(
+        "entity_types: derived taxonomy v%s (%s) — not persisted; no store configured yet",
+        artifact.get("artifact_version"),
+        artifact.get("corpus_fingerprint", "")[:12],
+    )
 
 
 def read_corpus(prefix: str = "") -> list[tuple[str, str]]:
