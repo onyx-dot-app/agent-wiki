@@ -557,7 +557,7 @@ def _build_list(
             item_children, item_finishers = _build_block_sequence(tokens, item_start, item_end)
             items.append(
                 XmlElement(
-                    "taskItem", {"checked": "true" if checked else "false"}, contents=item_children
+                    "taskItem", {"checked": checked}, contents=item_children
                 )
             )
         else:
@@ -776,7 +776,7 @@ def _serialize_list(node: XmlElement) -> str:
     lines: list[str] = []
     for idx, item in enumerate(node.children):
         if is_task:
-            checked = dict(item.attributes).get("checked") == "true"
+            checked = _is_checked(dict(item.attributes).get("checked"))
             marker = f"- [{'x' if checked else ' '}] "
         elif ordered:
             marker = f"{start + idx}. "
@@ -785,6 +785,32 @@ def _serialize_list(node: XmlElement) -> str:
         body = _serialize_block_sequence(list(item.children), " " * len(marker))  # type: ignore[arg-type]
         lines.append(marker + body)
     return "\n\n".join(lines) + "\n"
+
+
+def _is_checked(value: object) -> bool:
+    """Whether a ``taskItem``'s ``checked`` attribute means checked.
+
+    Tolerant on purpose, because two writers disagree on the type. This codec
+    writes a real ``bool``; a Tiptap client goes through ``y-prosemirror``, which
+    stores the ProseMirror attribute value as-is — a ``bool`` normally, but the
+    string ``"true"``/``"false"`` if the node was built from an older snapshot or
+    parsed from ``data-checked`` HTML.
+
+    A strict ``== "true"`` silently lost every box checked in the editor: the
+    value was ``True``, the comparison was ``False``, and the box serialized back
+    to ``- [ ]``. Verified directly against pycrdt, not assumed.
+
+    Note the string case cannot be handled by truthiness — ``"false"`` is a
+    non-empty string, so it would read as checked. That asymmetry is also why
+    this codec now writes booleans: ``"false"`` is truthy in JavaScript too, so
+    a string-valued attribute made an *unchecked* markdown box render as ticked
+    in the editor.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "checked", "")
+    return False
 
 
 def _serialize_blockquote(node: XmlElement) -> str:

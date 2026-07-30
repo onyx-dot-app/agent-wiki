@@ -192,8 +192,11 @@ def test_task_list_structure_and_checked_attribute() -> None:
     assert lst.tag == "taskList"
     items = list(lst.children)
     assert [i.tag for i in items] == ["taskItem", "taskItem"]
-    assert dict(items[0].attributes)["checked"] == "false"
-    assert dict(items[1].attributes)["checked"] == "true"
+    # Booleans, not the strings "true"/"false". A string-valued attribute is
+    # truthy in JavaScript even when it says "false", so an unchecked markdown
+    # box rendered as a *ticked* box in the Tiptap client.
+    assert dict(items[0].attributes)["checked"] is False
+    assert dict(items[1].attributes)["checked"] is True
     # The checkbox marker itself must not leak into the item's paragraph text.
     assert items[0].children[0].children[0].to_py() == "todo"
 
@@ -991,3 +994,32 @@ def test_empty_table_row_serializes_instead_of_crashing() -> None:
 
     assert serialize_row(row) == ""
     reconstruct_body(doc)  # must not raise
+
+
+def test_checkbox_toggled_in_the_editor_serializes_as_checked() -> None:
+    # What a Tiptap client writes through y-prosemirror is the ProseMirror
+    # attribute value — a real bool. The serializer compared it against the
+    # string "true", so `True == "true"` was False and every box checked in the
+    # editor serialized back to `- [ ]`: the checkbox looked saved and wasn't.
+    doc = seed_doc_from_markdown("- [ ] todo\n")
+    lst = _root(doc).children[0]
+    assert isinstance(lst, XmlElement)
+    with doc.transaction():
+        lst.children[0].attributes["checked"] = True  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert reconstruct_body(doc) == "- [x] todo\n"
+
+
+def test_checkbox_accepts_the_legacy_string_attribute() -> None:
+    # Snapshots written before the switch to booleans hold "true"/"false", and a
+    # node parsed from `data-checked` HTML can too. Both must still read
+    # correctly — and note "false" can't be handled by truthiness, since a
+    # non-empty string is truthy.
+    doc = seed_doc_from_markdown("- [ ] one\n- [ ] two\n")
+    lst = _root(doc).children[0]
+    assert isinstance(lst, XmlElement)
+    with doc.transaction():
+        lst.children[0].attributes["checked"] = "true"  # pyright: ignore[reportAttributeAccessIssue]
+        lst.children[1].attributes["checked"] = "false"  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert reconstruct_body(doc) == "- [x] one\n\n- [ ] two\n"
