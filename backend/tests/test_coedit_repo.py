@@ -456,3 +456,46 @@ def test_close_abandoned_sessions_closes_only_clean_empty_ones(users):
     assert coedit.get_active_session("occupied.md") is not None  # presence holds it open
     assert coedit.get_active_session("dirty.md") is not None  # the checkpoint scan owns it
     assert coedit.close_abandoned_sessions() == []  # idempotent
+
+
+def test_snapshot_seq_and_checkpoint_watermark_stay_equal(users):
+    # The rebuild contract is that a doc is the snapshot plus
+    # `(ydoc_snapshot_seq, ydoc_seq]` from the log, and that pruning never
+    # outruns the snapshot. Both writers uphold it by construction —
+    # set_initial_snapshot stamps 0 against a fresh row's 0, advance_checkpoint
+    # moves both to the same seq — but nothing *enforces* it, so this pins it
+    # across every operation that touches either column.
+    #
+    # A CHECK constraint would be the stronger form and is deliberately not
+    # used: planned snapshot compaction (rewriting the snapshot forward to trim
+    # a long log, without committing) advances ydoc_snapshot_seq on purpose
+    # while the checkpoint watermark stays put. A test states today's coupling
+    # and can be updated by whoever changes it; a constraint would just block
+    # them.
+    def assert_equal(label: str) -> None:
+        row = coedit.get_session_for_checkpoint(s.id)
+        assert row is not None
+        assert row.ydoc_snapshot_seq == row.ydoc_checkpointed_seq, label
+
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    assert_equal("fresh session")
+
+    coedit.set_initial_snapshot(s.id, b"snap0", "body")
+    assert_equal("after the initial snapshot")
+
+    coedit.apply_update(s.id, update_bytes=b"a", author_user_id="usr_a")
+    coedit.apply_update(s.id, update_bytes=b"b", author_user_id="usr_a")
+    assert_equal("after edits, before any checkpoint")
+
+    coedit.advance_checkpoint(s.id, seq=2, snapshot=b"snap2", body="body2", base_sha="sha2")
+    assert_equal("after a checkpoint")
+
+    # A late update leaves the pair alone — only ydoc_seq moves ahead of it.
+    coedit.apply_update(s.id, update_bytes=b"c", author_user_id="usr_a")
+    assert_equal("after a late update")
+    row = coedit.get_session_for_checkpoint(s.id)
+    assert row is not None and row.ydoc_seq == 3
+
+    # And a live-rebase's base_sha move touches neither.
+    coedit.set_base_sha(s.id, "sha3")
+    assert_equal("after a live-rebase base move")

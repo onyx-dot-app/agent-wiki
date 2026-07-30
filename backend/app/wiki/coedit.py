@@ -351,17 +351,23 @@ def apply_update(
     author_user_id: str | None,
     client_id: str | None = None,
 ) -> int | None:
-    """Durably log an already-applied Yjs update, returning its assigned
-    seq (or ``None`` if the session isn't active).
+    """Durably log a Yjs update, returning its assigned seq (or ``None`` if the
+    session isn't active).
 
     ``author_user_id=None`` marks a server-produced update — a live-rebase
     fold of an out-of-band commit has no human author.
 
-    Unlike the OT-era ``apply_op``, there's no version-conflict rejection:
-    CRDT merges are commutative, and the merge itself already happened at
-    the ``pycrdt.Doc`` level (``handle_sync_message``, in the WS route)
-    *before* this is ever called. This just durably logs the update and
-    advances the watermark, atomically via one ``RETURNING`` update.
+    Unlike the OT-era ``apply_op``, there's no version-conflict rejection to
+    make: CRDT updates commute, so there is no "based on the wrong version"
+    state to reject. Nothing merges the update into a server-side replica
+    either, because there isn't one — the log *is* the document. Callers have
+    only established that the update is integrable: the WS route validates a
+    client's against a scratch ``Doc`` (``coedit_live.validate_update``), and
+    the live-rebase produces its own from a rebuild
+    (``coedit_live.rebase_delta``) with no route involved at all.
+
+    This just appends the row and advances the watermark, atomically via one
+    ``RETURNING`` update.
     """
     now = _iso(_now())
     with session() as s:
@@ -451,15 +457,16 @@ def advance_checkpoint(
     one transaction: ``ydoc_snapshot``/``ydoc_snapshot_seq``/
     ``ydoc_snapshot_body`` and ``ydoc_checkpointed_seq`` all advance to
     ``seq``, and every ``coedit_updates`` row with ``seq`` less-or-equal is
-    pruned. ``body`` must be exactly what ``snapshot`` decodes to — the
-    next checkpoint's diff base comes from here, not a git read at
-    ``base_sha`` (see ``ydoc_snapshot_body`` on the model).
+    pruned. ``body`` must be the markdown ``snapshot`` reconstructs to —
+    content-equal, not byte-equal: the codec normalizes (block terminators
+    especially), so ``reconstruct_body`` of the snapshot is what has to match,
+    not the author's original bytes. The next checkpoint's diff base comes from
+    here, not a git read at ``base_sha`` (see ``ydoc_snapshot_body`` on the
+    model).
 
-    The three have to move in lockstep — unlike ``rebase_onto``'s
-    unconditional clear (correct only for a rebase, which replaces the doc
-    wholesale so the *entire* pre-rebase log is meaningless regardless of
-    seq), a checkpoint's snapshot and its pruning boundary must always
-    agree, or a later checkpoint's replay-from-snapshot would be missing
+    The three have to move in lockstep: a checkpoint's snapshot and its pruning
+    boundary must always agree, or a later checkpoint's replay-from-snapshot
+    would be missing
     updates between the (stale) snapshot and the (already-pruned) log —
     exactly the class of bug this function exists to make structurally
     impossible: there is no code path that prunes without also advancing

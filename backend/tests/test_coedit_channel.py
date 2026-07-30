@@ -164,3 +164,50 @@ def test_cross_process_emit_is_deferred_when_the_drain_thread_runs(monkeypatch):
 
     assert emitted == []  # handed to the drain thread instead
     assert coedit_channel._emit_queue.get_nowait()["session_id"] == 12
+
+
+def test_emit_during_shutdown_is_not_stranded(monkeypatch):
+    # stop_emit_drain() only sets a flag; the thread notices it when its next
+    # 1s poll returns, so it stays is_alive() while already on its way out.
+    # Queueing into that window used to hand the frame to a drainer that then
+    # exited without flushing — a silent drop at shutdown, which is exactly when
+    # a session's last frames are in flight.
+    coedit_channel.reset_for_tests()
+    emitted: list[dict] = []
+    monkeypatch.setattr(coedit_channel.bus, "emit", emitted.append)
+
+    class _AliveThread:
+        def is_alive(self) -> bool:
+            return True
+
+    monkeypatch.setattr(coedit_channel, "_emit_thread", _AliveThread())
+    monkeypatch.setattr(coedit_channel, "_emit_drain_started", True)
+    coedit_channel._emit_stop.set()
+    try:
+        coedit_channel.broadcast_yjs(13, b"\x00\x01last-frame")
+    finally:
+        coedit_channel._emit_stop.clear()
+
+    assert [e["session_id"] for e in emitted] == [13]  # sent, not queued
+    assert coedit_channel._emit_queue.empty()
+
+
+def test_drain_thread_flushes_what_is_left_on_the_way_out():
+    # Whatever was queued before the stop flag is still owed to the other
+    # processes; dropping it would lose a session's final frames on every
+    # graceful shutdown.
+    coedit_channel.reset_for_tests()
+    emitted: list[dict] = []
+    original = coedit_channel.bus.emit
+    coedit_channel.bus.emit = emitted.append  # pyright: ignore[reportAttributeAccessIssue]
+    try:
+        coedit_channel._emit_queue.put_nowait({"kind": "coedit_yjs", "session_id": 1})
+        coedit_channel._emit_queue.put_nowait({"kind": "coedit_yjs", "session_id": 2})
+        coedit_channel._emit_stop.set()  # the loop exits on its first check
+        coedit_channel._drain_emit_queue()
+    finally:
+        coedit_channel.bus.emit = original  # pyright: ignore[reportAttributeAccessIssue]
+        coedit_channel._emit_stop.clear()
+
+    assert [e["session_id"] for e in emitted] == [1, 2]
+    assert coedit_channel._emit_queue.empty()

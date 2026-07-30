@@ -15,11 +15,10 @@ Postgres LISTEN/NOTIFY). Control frames go through unchanged (small, always
 fits). Yjs payloads are base64'd into the same JSON envelope and, on the rare
 oversized message (a large paste's CRDT update, or any payload that would
 exceed Postgres's 8000-byte NOTIFY cap), split into sequential chunks tagged
-with a shared group id and reassembled on the receiving end — chosen over a
-lossy "resync" fallback (what the old op-based ``broadcast_op`` did) because
-there's no cheap "refetch the live doc" endpoint to resync *from* here: the
-live document only exists as this process's in-memory ``pycrdt.Doc`` (see
-opaque relayed bytes), not as a row a resync request could just re-read.
+with a shared group id and reassembled on the receiving end. Chunking rather
+than a "tell the client to resync" fallback (what the old op-based
+``broadcast_op`` did): a resync costs every connected editor their caret, and
+splitting an oversized payload is both cheaper and lossless.
 
 One thread-safe ``queue.Queue`` per connection, mirroring the MCP pubsub's
 sync ``_queues`` / ``drain_blocking`` path — this module has no opinion on
@@ -252,6 +251,9 @@ _PARTIAL_TTL_SECONDS = 30.0
 _emit_queue: queue.Queue[dict[str, Any]] = queue.Queue()
 _emit_thread: threading.Thread | None = None
 _emit_stop = threading.Event()
+# Whether this process ever started a drain thread — the difference between "a
+# worker, emitting inline by design" and "the web process's thread died".
+_emit_drain_started = False
 
 
 def start_emit_drain() -> None:
@@ -259,10 +261,11 @@ def start_emit_drain() -> None:
     process at startup (``app/main.py``'s lifespan), alongside
     ``bus.start_listener()``. A process that doesn't (a worker) emits inline
     instead; see ``_queue_emit``."""
-    global _emit_thread
+    global _emit_thread, _emit_drain_started
     if _emit_thread is not None and _emit_thread.is_alive():
         return
     _emit_stop.clear()
+    _emit_drain_started = True
     _emit_thread = threading.Thread(
         target=_drain_emit_queue, name="coedit-emit-drain", daemon=True
     )
@@ -282,11 +285,26 @@ def _queue_emit(payload: dict[str, Any]) -> None:
     would strand the frame silently — no error, just editors who never see an
     agent's fold. A worker has no event loop, so the blocking NOTIFY is fine
     there.
+
+    ``_emit_stop`` is checked as well as liveness, because the two disagree for
+    up to a second: the thread only notices the stop flag when its next
+    ``get(timeout=1.0)`` returns, so it stays ``is_alive()`` after
+    ``stop_emit_drain()`` while already being on its way out. Queueing into that
+    window is the same silent drop, just at shutdown — and shutdown is exactly
+    when a session's last frames are in flight.
     """
-    if _emit_thread is not None and _emit_thread.is_alive():
+    if _emit_thread is not None and _emit_thread.is_alive() and not _emit_stop.is_set():
         _emit_queue.put_nowait(payload)
-    else:
-        bus.emit(payload)  # best-effort; logs + swallows its own errors
+        return
+    if _emit_drain_started and not _emit_stop.is_set():
+        # A drain thread was started in this process and is not alive, and we
+        # aren't shutting down — it died. Inline still delivers the frame, so
+        # this is a warning rather than a failure, but it means broadcasts are
+        # now blocking the caller.
+        log.warning(
+            "coedit_channel: emit drain thread is gone; emitting inline (blocking)"
+        )
+    bus.emit(payload)  # best-effort; logs + swallows its own errors
 
 
 def _drain_emit_queue() -> None:
@@ -296,6 +314,14 @@ def _drain_emit_queue() -> None:
         except queue.Empty:
             continue
         bus.emit(payload)  # already best-effort — logs + swallows its own errors
+    # Flush what's left on the way out. Whatever was queued before the stop
+    # flag was set is still owed to the other processes, and dropping it here
+    # would lose a session's final frames on every graceful shutdown.
+    while True:
+        try:
+            bus.emit(_emit_queue.get_nowait())
+        except queue.Empty:
+            return
 
 
 def broadcast_yjs(coedit_session_id: int, payload: bytes, seq: int | None = None) -> None:
@@ -382,3 +408,10 @@ def reset_for_tests() -> None:
     with _partial_lock:
         _partial_chunks.clear()
         _partial_started_at.clear()
+    # The emit queue is process-global like the rest: a frame left by an earlier
+    # test makes the next one's `get_nowait()` return the wrong payload.
+    while True:
+        try:
+            _emit_queue.get_nowait()
+        except queue.Empty:
+            break
