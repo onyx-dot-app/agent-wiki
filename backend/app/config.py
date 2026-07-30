@@ -40,9 +40,13 @@ class Config(BaseModel):
     opensearch_url: str
     opensearch_index: str
     max_queue_size: int
-    # Threads backing ``asyncio.to_thread`` in the web process. Sized for
-    # concurrent connections, not cores — see ``app/main.py``'s lifespan.
+    # Threads backing ``asyncio.to_thread`` in the web process — the
+    # short-lived offloads (DB, git) each request and WS message makes.
     web_thread_pool_size: int
+    # Threads backing the co-edit send loops, one held per open socket for
+    # its whole life. Deliberately a separate pool from the one above; see
+    # ``app/api/coedit.py``.
+    coedit_socket_pool_size: int
 
     auth_mode: str  # "basic" | "oidc"
     oidc_issuer: str
@@ -203,6 +207,7 @@ def load_config() -> Config:
         opensearch_index=os.environ.get("OPENSEARCH_INDEX", "wiki-docs"),
         max_queue_size=_positive_int("MAX_QUEUE_SIZE", 1000),
         web_thread_pool_size=_positive_int("WEB_THREAD_POOL_SIZE", 64),
+        coedit_socket_pool_size=_positive_int("COEDIT_SOCKET_POOL_SIZE", 256),
         ingest_bm25_min_score=_positive_float("INGEST_BM25_MIN_SCORE", 5.0),
         ingest_bm25_title_boost=_positive_float("INGEST_BM25_TITLE_BOOST", 2.0),
         ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 20),

@@ -164,13 +164,13 @@ async def _lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         "agent-wiki backend starting (database=%s)", _app_config.CONFIG.database_url.split("@")[-1]
     )
     # ``asyncio.to_thread`` draws from the event loop's default executor, whose
-    # own default is ``min(32, cpu + 4)`` — 6 threads on a 2-core pod. Each
-    # co-edit WebSocket permanently occupies one of them: its send loop sits in a
-    # blocking queue drain (see ``app/api/coedit.py``), re-entered as soon as it
-    # returns. So the default caps a web process at roughly five concurrent
-    # sockets, and past that *every* offloaded call in the process — connects,
-    # ops, cursor pings, checkpoints, for every session — waits for a free
-    # thread. Size the pool for concurrent connections instead of cores.
+    # own default is ``min(32, cpu + 4)`` — 6 threads on a 2-core pod. That
+    # bounds how many short-lived offloads (DB reads, git calls) the process can
+    # run at once, across HTTP requests and WebSocket messages alike, so on a
+    # small pod it throttles ordinary concurrency for no reason: the work is
+    # I/O-bound, not CPU-bound. Long-lived occupancy is kept off this pool
+    # entirely — the co-edit send loops have their own (see
+    # ``app/api/coedit.py``) so accumulating sockets can't starve the work.
     asyncio.get_running_loop().set_default_executor(
         ThreadPoolExecutor(
             max_workers=_app_config.CONFIG.web_thread_pool_size,

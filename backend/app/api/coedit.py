@@ -31,6 +31,7 @@ import asyncio
 import logging
 import queue
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
@@ -38,6 +39,7 @@ from pydantic import ValidationError
 
 from app.auth import PermissionDenied, User, require_can
 from app.auth.deps import require_user_ws
+from app.config import CONFIG
 from app.models.coedit import (
     CheckpointMessage,
     CheckpointResultFrame,
@@ -245,22 +247,33 @@ async def _recv_loop(websocket: WebSocket, outbox: queue.Queue[coedit_channel.Qu
             log.warning("coedit ws: malformed %r message", msg_type)
 
 
+# The send loops' own thread pool, separate from the default executor every
+# other offload uses. A drain thread is held for the *connection's whole life*
+# (see _send_loop), so on a shared pool accumulating sockets steadily consume
+# it and the short-lived offloads — the connect handshake, every op, cursor
+# ping and checkpoint, for every session — end up queueing behind parked
+# drains. That reads as "the whole app froze," and can cause more disconnects
+# itself: a starved loop misses uvicorn's ping/pong window and heartbeats slip
+# past the presence grace period, expiring live editors. Splitting the pools
+# means the two can't compete — socket occupancy is bounded by
+# coedit_socket_pool_size, work concurrency by web_thread_pool_size.
+#
+# It stays a thread per socket only because the drain is a blocking
+# queue.Queue.get; an asyncio.Queue fed via call_soon_threadsafe would need
+# none, at the cost of reworking this module's close/wake handshake.
+_DRAIN_POOL = ThreadPoolExecutor(
+    max_workers=CONFIG.coedit_socket_pool_size, thread_name_prefix="coedit-drain"
+)
+
 # How often _send_loop's blocking drain call returns to check for
-# cancellation. Short on purpose: asyncio.to_thread cancellation only
-# unblocks the *awaiting* coroutine, not the underlying OS thread still
-# parked in queue.Queue.get(timeout=...) — found the hard way, in
-# production, not just in theory. Every disconnect (a WS closes, we
-# reconnect) cancels this task; with a long timeout, the orphaned thread
-# lingers for up to that long, still holding a slot in the shared default
-# thread pool every asyncio.to_thread call in the process draws from. Under
-# frequent reconnects, orphaned threads accumulate faster than they drain,
-# eventually exhausting the pool — at which point *every* asyncio.to_thread
-# call across the whole backend (new connects, every op/cursor/checkpoint
-# message, for every session) queues for a free worker. That reads as "the
-# whole app froze," and can plausibly cause more disconnects itself (a
-# starved event loop can miss uvicorn's own ping/pong window and get
-# closed as unresponsive) — a self-reinforcing spiral. Bounding the poll to
-# ~1s bounds any orphaned thread's worst case to ~1s instead of 15.
+# cancellation. Short on purpose: cancelling the awaiting coroutine doesn't
+# unblock the underlying OS thread, still parked in queue.Queue.get(timeout=...)
+# — found the hard way, in production, not just in theory. Every disconnect
+# cancels this task; with a long timeout the orphaned thread lingers for up to
+# that long, still holding a slot in _DRAIN_POOL. Under frequent reconnects
+# orphans would accumulate faster than they drain and exhaust it, at which
+# point new connections get no send loop at all. Bounding the poll to ~1s
+# bounds any orphan's worst case to ~1s instead of 15.
 _SEND_LOOP_POLL_SECONDS = 1.0
 
 
@@ -268,8 +281,11 @@ async def _send_loop(
     websocket: WebSocket, conn: coedit_channel.Connection, session_id: int, user_id: str
 ) -> None:
     last_heartbeat = time.monotonic()
+    loop = asyncio.get_running_loop()
     while True:
-        frame = await asyncio.to_thread(coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS)
+        frame = await loop.run_in_executor(
+            _DRAIN_POOL, coedit_channel.drain, conn.queue, _SEND_LOOP_POLL_SECONDS
+        )
         if frame is coedit_channel.CLOSE_SIGNAL:
             # ws()'s teardown path pushed this via coedit_channel.wake() right
             # before cancelling this task — reachable here (not just via
