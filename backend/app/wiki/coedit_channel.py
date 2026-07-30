@@ -11,8 +11,8 @@ One thread-safe ``queue.Queue`` per connection, mirroring the MCP pubsub's
 sync ``_queues`` / ``drain_blocking`` path — this module has no opinion on
 how a connection drains its queue (``app/api/coedit.py``'s WS send loop
 calls ``drain`` in a thread). Frames are plain JSON-serializable dicts.
-Connection state is in-process and ephemeral — nothing here is persisted;
-durable session/participant state lives in ``app/wiki/coedit.py``.
+Delivery queues are in-process and ephemeral. Durable sessions and the shared
+participant heartbeat live in ``app/wiki/coedit.py``.
 
 See ``Engineering Projects/Agent Wiki Project/design/Co-Editing.md``.
 """
@@ -62,19 +62,17 @@ class Connection(BaseModel):
 # ``_queues`` style for the same runtime state.
 _queues: dict[str, queue.Queue[QueueItem]] = {}
 _session_of: dict[str, int] = {}  # conn_id -> coedit_session_id
-_user_of: dict[str, str] = {}  # conn_id -> user_id
 _conns_by_session: dict[int, set[str]] = {}  # coedit_session_id -> {conn_id}
 _lock = threading.Lock()
 
 
-def connect(coedit_session_id: int, user_id: str) -> Connection:
-    """Register a live connection for a session. Returns its handle."""
+def connect(coedit_session_id: int) -> Connection:
+    """Register a local delivery queue for a WebSocket."""
     conn_id = uuid.uuid4().hex
     q: queue.Queue[QueueItem] = queue.Queue()
     with _lock:
         _queues[conn_id] = q
         _session_of[conn_id] = coedit_session_id
-        _user_of[conn_id] = user_id
         _conns_by_session.setdefault(coedit_session_id, set()).add(conn_id)
     return Connection(id=conn_id, queue=q)
 
@@ -84,27 +82,12 @@ def disconnect(conn_id: str) -> None:
     with _lock:
         sid = _session_of.pop(conn_id, None)
         _queues.pop(conn_id, None)
-        _user_of.pop(conn_id, None)
         if sid is not None:
             conns = _conns_by_session.get(sid)
             if conns is not None:
                 conns.discard(conn_id)
                 if not conns:
                     _conns_by_session.pop(sid, None)
-
-
-def user_still_connected(coedit_session_id: int, user_id: str) -> bool:
-    """True if ``user_id`` still has any open connection to the session.
-
-    Lets the caller avoid firing ``leave`` when one of a user's several tabs
-    closes while another stays open.
-    """
-    with _lock:
-        return any(
-            _user_of.get(cid) == user_id
-            for cid in _conns_by_session.get(coedit_session_id, ())
-        )
-
 
 def drain(q: queue.Queue[QueueItem], timeout: float) -> QueueItem | None:
     """Block up to ``timeout`` seconds for the next frame; ``None`` on timeout so
@@ -265,5 +248,4 @@ def reset_for_tests() -> None:
     with _lock:
         _queues.clear()
         _session_of.clear()
-        _user_of.clear()
         _conns_by_session.clear()

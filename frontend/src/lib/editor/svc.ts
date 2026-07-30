@@ -166,7 +166,13 @@ export function connectSession(
         if (msg.ok) {
           p.resolve(msg);
         } else {
-          p.reject(errorFor(msg.error as string | null | undefined));
+          const error = msg.error as string | null | undefined;
+          p.reject(errorFor(error));
+          if (error === "no_active_session") {
+            // Reconnect by page path so the hook replays its local document
+            // onto a fresh server session.
+            ws.close();
+          }
         }
         return;
       }

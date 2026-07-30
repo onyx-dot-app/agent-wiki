@@ -18,7 +18,7 @@ import logging
 
 from app.tasks.queue import crontab
 from app.tasks.queues import coedit_queue
-from app.wiki import coedit
+from app.wiki import coedit, coedit_channel
 from app.wiki.coedit_checkpoint import checkpoint_session
 
 log = logging.getLogger(__name__)
@@ -40,6 +40,9 @@ log = logging.getLogger(__name__)
 # The scan is minute-granular, so both fire "within a minute of" the threshold.
 _IDLE_SECONDS = 300
 _MAX_INTERVAL_SECONDS = 900
+# Four missed 15-second heartbeats distinguish a departed participant from
+# ordinary event-loop lag.
+_PARTICIPANT_STALE_SECONDS = 60
 
 
 @coedit_queue.task()
@@ -58,8 +61,18 @@ def checkpoint_coedit_session(session_id: int) -> None:
 @coedit_queue.periodic_task(crontab(minute="*"))
 def scan_and_checkpoint() -> None:
     """Enqueue a checkpoint for every dirty session that's idle or overdue,
-    and purge closed never-edited sessions (view-only leftovers — see
-    ``coedit.purge_viewer_sessions``)."""
+    expire stale participants, close abandoned sessions, and purge closed
+    viewer-only sessions."""
+    expired = coedit.expire_stale_participants(stale_seconds=_PARTICIPANT_STALE_SECONDS)
+    for session_id in expired.changed_session_ids:
+        coedit_channel.broadcast_presence(session_id)
+    for session_id in expired.empty_session_ids:
+        checkpoint_coedit_session(session_id)
+    if expired.changed_session_ids:
+        log.info(
+            "coedit presence scan: expired participants in %d session(s)",
+            len(expired.changed_session_ids),
+        )
     due = coedit.sessions_due_for_checkpoint(
         idle_seconds=_IDLE_SECONDS, max_interval_seconds=_MAX_INTERVAL_SECONDS
     )
@@ -67,6 +80,9 @@ def scan_and_checkpoint() -> None:
         checkpoint_coedit_session(sess.id)
     if due:
         log.info("coedit checkpoint scan: enqueued %d session(s)", len(due))
+    abandoned = coedit.close_abandoned_sessions()
+    if abandoned:
+        log.info("coedit presence scan: closed %d abandoned session(s)", len(abandoned))
     purged = coedit.purge_viewer_sessions()
     if purged:
         log.info("coedit checkpoint scan: purged %d viewer-only session(s)", purged)
