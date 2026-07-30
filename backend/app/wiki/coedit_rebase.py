@@ -10,7 +10,7 @@ merge is deferred to whenever the session happens to go idle.
 
 Re-seed + full resync, not incremental CRDT translation: the room's ``Doc``
 is dropped and reconstructed fresh from the 3-way-merged text
-(``coedit_room.reseed``), and connected clients are told to reconnect
+as an ordinary logged Yjs update, so connected clients receive it as normal
 (``ResyncFrame``) rather than receive the fold-in as an incremental Yjs
 update. A true CRDT-native translator would need to turn the merge's text
 diff back into structural Yjs ops — the same block-level diffing machinery
@@ -22,13 +22,12 @@ Pure domain logic: does not decide when to run or how to reach the right
 process (the trigger + the cross-process fan-out live in
 ``app/tasks/coedit_rebase.py``). Can only ever run in the process that
 holds the session's room — a ``pycrdt.Doc`` is thread-affine (see
-``coedit_room.py``) — which is exactly what ``get_room`` returning ``None``
+``app/wiki/coedit_live.py``) — so there is no "not this process's session"
 here means: not "no session", just "not this process's session to rebase".
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from enum import Enum
 
@@ -48,10 +47,12 @@ class RebaseOutcome(str, Enum):
     CONFLICT = "conflict"  # overlap — caller falls back to the checkpoint engine's AI merge
 
 
-async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
+def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
     """Fold the commit at ``head_sha`` into the session's document.
 
-    Any process can do this: the document is rebuilt from
+    Plain sync: nothing here is bound to an event loop any more, because
+    nothing is bound to a process. Any worker can do this: the document is
+    rebuilt from
     ``(ydoc_snapshot, coedit_updates)`` rather than read out of one worker's
     memory, so there is no "not my room, skip" case left.
 
@@ -62,7 +63,7 @@ async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
     normal traffic and rebase their own pending edits over it, instead of being
     told to reconnect and losing their caret.
     """
-    sess = await asyncio.to_thread(coedit.get_session, session_id)
+    sess = coedit.get_session(session_id)
     if sess is None or sess.status != coedit.SessionStatus.ACTIVE.value:
         return RebaseOutcome.SKIP
     if sess.base_sha == head_sha:
@@ -73,10 +74,8 @@ async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         current = wiki_git.read_file_opt(sess.path, ref=head_sha)
         return base or "", current or ""
 
-    base_body, current_body = await asyncio.to_thread(_bodies)
-    outcome = await asyncio.to_thread(
-        coedit_live.rebase_delta, session_id, base_body, current_body
-    )
+    base_body, current_body = _bodies()
+    outcome = coedit_live.rebase_delta(session_id, base_body, current_body)
     if outcome is None:
         return RebaseOutcome.SKIP
     update_bytes, _merged, clean = outcome
@@ -89,17 +88,14 @@ async def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
     if update_bytes is None:
         # Nothing to fold in; only the merge base moves, so the next checkpoint
         # diffs against the right commit.
-        await asyncio.to_thread(coedit.set_base_sha, session_id, head_sha)
+        coedit.set_base_sha(session_id, head_sha)
         return RebaseOutcome.NOOP
 
-    seq = await asyncio.to_thread(
-        coedit.apply_update,
-        session_id,
-        update_bytes=update_bytes,
-        author_user_id=coedit.SYSTEM_AUTHOR_ID,
+    seq = coedit.apply_update(
+        session_id, update_bytes=update_bytes, author_user_id=coedit.SYSTEM_AUTHOR_ID
     )
     if seq is None:
         return RebaseOutcome.SKIP  # session closed underneath us
     coedit_channel.broadcast_yjs(session_id, create_update_message(update_bytes), seq)
-    await asyncio.to_thread(coedit.set_base_sha, session_id, head_sha)
+    coedit.set_base_sha(session_id, head_sha)
     return RebaseOutcome.APPLIED

@@ -2,7 +2,7 @@
 humans), speaking raw Yjs sync/awareness protocol bytes over binary frames,
 plus a small set of JSON control messages over text frames. Driven by
 session/participant bookkeeping in ``app/wiki/coedit.py``, the in-process
-live document in ``app/wiki/coedit_room.py``, and the broadcast layer in
+live document rebuilt on demand in ``app/wiki/coedit_live.py``, and the broadcast layer in
 ``app/wiki/coedit_channel.py``. See ``plans/valiant-tickling-reddy.md`` (if
 still present) or the originating conversation for the design rationale.
 
@@ -14,7 +14,7 @@ one; this one departs from it on purpose for pycrdt calls specifically:
 ``Doc``/``Awareness`` are PyO3 "unsendable" Rust types (thread-affine), so
 unlike a normal blocking call, they must run inline on this task's own
 thread (the event loop), never via ``asyncio.to_thread``'s shared worker
-pool — see ``app/wiki/coedit_room.py``. It's also a good fit regardless:
+pool. It's also a good fit regardless:
 in-memory CRDT math is fast, not the kind of blocking call that rule exists
 to keep off the loop. Every DB/git call (participant tracking, permission
 checks, the checkpoint's git commit) still goes through

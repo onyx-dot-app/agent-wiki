@@ -3,12 +3,12 @@
 The DB is the source of truth for a session's *lifecycle* (one active
 session per page, participants, checkpoint watermark) — not for its live
 document content, which lives entirely in this process's in-memory
-`pycrdt.Doc` (see `coedit_room.py`; `pycrdt.Doc`/`Subscription` are
+`pycrdt.Doc` rebuilt on demand (see `coedit_live.py`; `Doc`/`Subscription` are
 PyO3-"unsendable" Rust types, so a session's document can only ever be
 touched from the process — in practice, the single connection-handling path
 — that created it). This module never imports `pycrdt` at all; it is pure DB
 bookkeeping, on purpose, so the thread-affinity constraint stays confined to
-`coedit_room.py` and the WS route that drives it.
+`coedit_live.py` and the WS route that drives it.
 
 `coedit_updates` is the durable, replayable log of every applied Yjs update
 (this session's analog of the old OT-era `coedit_ops`); `ydoc_snapshot` +
@@ -80,7 +80,7 @@ class SessionStatus(str, Enum):
 class SessionRow(BaseModel):
     """A row from `coedit_sessions`. Deliberately excludes `ydoc_snapshot`
     (a potentially large blob nothing on the hot path needs) — the live
-    document lives in this process's `coedit_room.Room`, not here."""
+    document is rebuilt from the snapshot plus this log, not stored here."""
 
     id: int
     path: str
@@ -228,7 +228,7 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
 
     Pure DB bookkeeping — does not touch (or know about) the live document;
     the caller seeds/adopts the in-process room separately
-    (``coedit_room.get_or_create_room``) once it has this row's id. Returns
+    (``coedit_live``, on demand) once it has this row's id. Returns
     the existing active session's row if one is open (its live room, if this
     process holds one, wins — ``base_sha`` is ignored then). Concurrent
     opens race on the partial unique index; the loser re-reads the winner's
@@ -274,14 +274,12 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
 
 def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> bool:
     """Persist the very first ``ydoc_snapshot``/``ydoc_snapshot_body`` for a
-    session — call once, right after a process constructs the session's
-    room for the first time anywhere (``coedit_room.create_room`` in
-    ``app/api/coedit.py:ws``), with ``room.doc.get_update()`` taken on the
-    same thread that just built the ``Doc`` (required — see
-    ``coedit_room.py``). ``body`` is the exact raw text the room was seeded
-    from (the same string passed to ``create_room``) — must be exactly what
-    the snapshot bytes decode to, since this is the checkpoint engine's diff
-    base with no git read to fall back on.
+    session — call once, on first connect (``_seed_snapshot_sync`` in
+    ``app/api/coedit.py``), with ``get_update()`` taken on the same thread that
+    built the ``Doc`` (required: it is a PyO3 unsendable type). ``body`` is the
+    exact raw text the doc was seeded from — must be exactly what the snapshot
+    bytes decode to, since this is the checkpoint engine's diff base with no git
+    read to fall back on.
 
     Conditional on ``ydoc_snapshot IS NULL`` so this is safe to call every
     time a process creates a room for a session it didn't already know
@@ -575,15 +573,11 @@ def on_path_moved(moves: list[PathMove]) -> list[int]:
     ran. It is superseded (closed); if it managed to collect edits, they stay
     in the closed row's history.
 
-    Returns the ids of any superseded (closed) sessions — this module is
-    deliberately pure DB bookkeeping with no ``pycrdt`` import (see
-    ``app/wiki/coedit_room.py``'s own module docstring), so it can't evict
-    a superseded session's in-memory room itself; the caller
-    (``app/wiki/notify.py``) does that via ``coedit_room.evict_if_local``
-    for each returned id. Left un-evicted, a superseded room would pin its
-    ``Doc``/``Awareness``/``TouchedTracker`` in its owning process's memory
-    forever — nothing else would ever call ``coedit_room.close_room`` for
-    it once its session row is already closed here (confirmed in review).
+    Returns the ids of any superseded (closed) sessions. Closing the row is the
+    whole job: no process holds a live document for a session, so there is
+    nothing in memory to evict and no caller has to be told. Callers are free to
+    ignore the return value.
+
     Each pair runs in a savepoint so a racing insert that still trips the
     active-unique index degrades to a logged skip instead of aborting the
     whole move fan-out.

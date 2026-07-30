@@ -8,12 +8,12 @@ the same 3-way + AI merge. Durability is the update log + snapshot in
 Postgres, so a checkpoint is about visibility (making the committed page
 fresh for readers/search/agents) and bounding merge size — not data safety.
 
-Deliberately never touches any process's live ``coedit_room.Room`` — the
+Rebuilds its own throwaway ``Doc`` rather than sharing one — the
 whole point of rebuilding from (snapshot, updates) instead. That's what lets
 this run as a plain ``coedit_queue`` task (``app/tasks/coedit_checkpoint.py``)
 dispatched to any worker, not just the one process (if any) holding the
 session's room live: a live room is thread-affine (PyO3-unsendable
-``Doc``/``Awareness`` — see ``coedit_room.py``), so touching one from here,
+``Doc`` (see ``coedit_live.py``), so sharing one across threads,
 on a worker's own thread, would be exactly the cross-thread violation this
 rearchitecture exists to remove. A room that *is* live somewhere still needs
 telling once a checkpoint lands elsewhere — see
@@ -98,7 +98,7 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     The ``TouchedTracker`` is created right after the doc is seeded, before
     replay, so every replayed update is observed by the tracker exactly as
     it would be for a live edit (``TouchedTracker.observe_deep`` sees any
-    mutation regardless of origin) — matching ``coedit_room.Room.__init__``'s
+    mutation regardless of origin) — matching ``coedit_live``'s own rebuild
     own seed-then-track ordering.
 
     Returns the seq actually replayed up to (the caller's own ``sess.ydoc_seq``
@@ -147,7 +147,7 @@ class CheckpointOutcome(BaseModel):
     reconciled must reseed from the exact bytes just persisted as
     ``ydoc_snapshot``, never from an independent ``seed_doc_from_markdown(body)``
     call of its own, since two separate seedings of "the same" text produce
-    incompatible CRDT lineages (see ``coedit_room.reseed``) — so the
+    incompatible CRDT lineages — so the
     reconciling room re-reads ``ydoc_snapshot`` fresh from the DB instead
     (already durably there by the time this notify fires; also sidesteps
     carrying a whole page's snapshot bytes through the cross-process

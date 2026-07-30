@@ -3,7 +3,7 @@ session (``app/api/coedit.py``).
 
 The document itself travels as raw Yjs sync/awareness protocol bytes (WS
 binary frames, handled directly against ``pycrdt`` — see
-``app/wiki/coedit_room.py``), never as JSON. These models are only the
+relayed as opaque bytes), never as JSON. These models are only the
 small set of JSON control messages (WS text frames) that ride alongside:
 explicit checkpoint requests and the connection handshake. Kept separate
 from the ORM rows in ``app/wiki/coedit.py`` (the DB shape) and the in-memory
@@ -93,14 +93,3 @@ class PresenceFrame(BaseModel):
     participants: list[ParticipantOut]
 
 
-class ResyncFrame(BaseModel):
-    """Server -> client: the live document was replaced wholesale (a
-    live-rebase folding in an out-of-band commit, see
-    ``app/wiki/coedit_rebase.py``) rather than incrementally updated. The
-    client's local Yjs state no longer has a valid incremental path to the
-    new server state, so it must reconnect (close and reopen the
-    WebSocket) to redo the sync handshake fresh, rather than attempt to
-    reconcile in place."""
-
-    type: str = "resync"
-    session_id: int

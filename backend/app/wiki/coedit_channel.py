@@ -19,7 +19,7 @@ with a shared group id and reassembled on the receiving end — chosen over a
 lossy "resync" fallback (what the old op-based ``broadcast_op`` did) because
 there's no cheap "refetch the live doc" endpoint to resync *from* here: the
 live document only exists as this process's in-memory ``pycrdt.Doc`` (see
-``coedit_room.py``), not as a row a resync request could just re-read.
+opaque relayed bytes), not as a row a resync request could just re-read.
 
 One thread-safe ``queue.Queue`` per connection, mirroring the MCP pubsub's
 sync ``_queues`` / ``drain_blocking`` path — this module has no opinion on
@@ -27,7 +27,7 @@ how a connection drains its queue (``app/api/coedit.py``'s WS send loop
 calls ``drain`` in a thread). Connection state is in-process and ephemeral —
 nothing here is persisted; durable session/participant state lives in
 ``app/wiki/coedit.py``, and the live document itself lives in
-``app/wiki/coedit_room.py``.
+``app/wiki/coedit_live.py``, rebuilt on demand.
 """
 
 from __future__ import annotations

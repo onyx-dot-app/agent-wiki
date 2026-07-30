@@ -223,7 +223,7 @@ def restamp_block_ids(doc: Doc, body: str) -> None:
     an untouched live block against the *wrong* ``base_body`` range —
     confirmed in review to silently drop or duplicate content (insert a
     block, checkpoint, edit a different block, checkpoint again). A
-    reseed (``coedit_room.reseed``, or ``seed_doc_from_markdown`` for a
+    a fresh seeding (``seed_doc_from_markdown``, for a
     diverged snapshot) doesn't need this call — building fresh from
     markdown text via ``top_level_block_ranges`` already assigns ids this
     same way, by construction.

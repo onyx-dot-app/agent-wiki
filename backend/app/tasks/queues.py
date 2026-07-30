@@ -37,7 +37,8 @@ Queues:
 
 * ``coedit_queue`` — **co-edit checkpointing + session leave fallback.** A
   session's live Yjs document only exists as one *web* process's in-memory
-  room (``app/wiki/coedit_room.py`` — ``pycrdt.Doc`` is thread-affine, can't
+  document, rebuilt on demand from ``(ydoc_snapshot, coedit_updates)`` (see
+  ``app/wiki/coedit_live.py``), so any worker can act on any session, and
   be shared cross-process), but checkpointing doesn't need that room: the
   checkpoint engine (``app/wiki/coedit_checkpoint.py``) rebuilds its own
   throwaway ``Doc`` from the session's persisted snapshot + update log, so
