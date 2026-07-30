@@ -1021,8 +1021,15 @@ export function FileView({ path }: FileViewProps) {
             carries no idle "Saved" label, so the saved state renders
             nothing. */}
         {!viewingVersion && coedit.saveStatus !== "saved" && (
-          <span className="mr-1 text-[12px] text-(--text-03)">
-            {coedit.saveStatus === "saving" ? "Saving…" : "Couldn't save"}
+          <span
+            className="mr-1 max-w-64 truncate text-[12px] text-(--text-03)"
+            title={coedit.saveError ?? undefined}
+          >
+            {coedit.saveStatus === "saving"
+              ? "Saving…"
+              : coedit.saveError
+                ? `Couldn't save: ${coedit.saveError}`
+                : "Couldn't save"}
           </span>
         )}
         {!viewingVersion && !isMobile && (

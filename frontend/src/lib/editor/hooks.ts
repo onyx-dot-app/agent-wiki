@@ -118,6 +118,12 @@ export interface UseCoeditSession {
   retryJoin: () => void;
   /** Autosave state, for a "Saving…/Saved/Couldn't save" indicator. */
   saveStatus: "saved" | "saving" | "error";
+  /** Why the last save failed, when `saveStatus` is "error" — the server's own
+   * reason ("forbidden", the task's failure) or "not connected" when there was
+   * no live socket to ask. Surfaced because a bare "Couldn't save" is
+   * undiagnosable: three unrelated faults produce it, and the reason was being
+   * swallowed by a `catch {}` so it reached neither the UI nor the console. */
+  saveError: string | null;
   /** Wire the underlying Tiptap `Editor` instance once it mounts — needed
    * to resolve peer cursor positions and to drive `setDoc`. Pass directly
    * as `<TiptapEditor onEditorReady={coedit.onEditorReady}>`. */
@@ -225,6 +231,7 @@ export function useCoeditSession(opts: {
   }, []);
   const [saveStatus, setSaveStatus] =
     useState<UseCoeditSession["saveStatus"]>("saved");
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const sessionId = useRef<number | null>(null);
   // The connection this hook currently owns — svc.ts's per-socket handle.
@@ -255,8 +262,15 @@ export function useCoeditSession(opts: {
     setSaveStatus("saving");
     try {
       await checkpointSession(cid);
+      setSaveError(null);
       setSaveStatus("saved");
-    } catch {
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      // Logged as well as surfaced: the indicator has room for a short reason,
+      // and a stack in the console is what makes an intermittent report
+      // actionable.
+      console.warn("[coedit] save failed", e);
+      setSaveError(reason);
       setSaveStatus("error");
     }
   }, [canWrite]);
@@ -447,6 +461,7 @@ export function useCoeditSession(opts: {
     joinErrorRetryable,
     retryJoin,
     saveStatus,
+    saveError,
     onEditorReady,
     setDoc,
   };
