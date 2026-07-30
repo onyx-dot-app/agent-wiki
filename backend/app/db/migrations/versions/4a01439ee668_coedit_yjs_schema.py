@@ -35,7 +35,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = "4a01439ee668"
-down_revision: str | None = "c2e7a4d9f1b8"
+down_revision: str | None = "d7f2c8b4a1e6"
 branch_labels: Sequence[str] | None = None
 depends_on: Sequence[str] | None = None
 
