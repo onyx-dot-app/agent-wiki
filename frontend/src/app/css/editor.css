@@ -145,8 +145,28 @@
   gap: 0.5rem;
 }
 .editor-prose ul[data-type="taskList"] input {
-  margin-top: 0.3em;
+  /* Native control, deliberately: `accent-color` keeps the design system's
+     near-black tick box and the browser draws a correct checkmark, where
+     `appearance: none` would mean hand-rolling the tick.
+     Sized explicitly because the platform default doesn't track the prose font
+     — it renders noticeably larger than the line it sits on, which is what made
+     it read as a heavy black slab rather than a checkbox. `flex: none` stops the
+     flex row from stretching it. */
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  margin-top: 0.25em;
   accent-color: var(--background-tint-inverted-00);
+  cursor: pointer;
+}
+
+/* A completed item reads as completed, the way Notion's to-dos do — otherwise
+   the only difference between done and not-done is a 16px box. Purely visual:
+   keyed on the `data-checked` attribute the codec already round-trips, and it
+   changes no content. */
+.editor-prose ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: var(--text-02);
+  text-decoration: line-through;
 }
 
 /* Links — accent is near-black warm grey, not a hue, per the design
