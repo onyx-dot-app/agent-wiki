@@ -85,6 +85,21 @@ class GetOpsMessage(BaseModel):
     since_version: int
 
 
+class GetSessionMessage(BaseModel):
+    """Client -> server ``{"type": "get_session", ...}`` — re-read the live
+    buffer at its current version.
+
+    The catch-up call for a ``resync`` frame, which announces that the buffer
+    was *replaced* out of band (a checkpoint's merge folded in a committed
+    change, or an inbound agent commit was rebased in). Such a replacement is
+    a git commit, not a co-edit op, so it appends no ``coedit_ops`` row and
+    ``get_ops`` cannot express it — a client that only replayed ops would
+    silently keep the pre-merge document.
+    """
+
+    request_id: str
+
+
 class ParticipantOut(BaseModel):
     user_id: str
     user_display: str
@@ -119,6 +134,20 @@ class Operation(BaseModel):
     author: str  # author_user_id
     client_id: str | None  # originating connection (collab); None for non-collab ops
     changes: list[Change]
+
+
+class SessionResultFrame(BaseModel):
+    """Server -> client reply to a ``GetSessionMessage``, correlated by
+    ``request_id``. The whole buffer and the version it is current as of, so
+    the caller can reset its document and its collab baseline together."""
+
+    type: str = "session_result"
+    request_id: str
+    ok: bool = True
+    error: str | None = None  # "no_active_session" | "forbidden"
+    buffer: str = ""
+    version: int = 0
+    base_sha: str | None = None
 
 
 class OpsResultFrame(BaseModel):
