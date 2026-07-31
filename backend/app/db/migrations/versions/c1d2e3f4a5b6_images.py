@@ -5,7 +5,7 @@ Guarded with the inspector because ``0001_initial`` builds fresh
 databases from the current models.
 
 Revision ID: c1d2e3f4a5b6
-Revises: c2e7a4d9f1b8
+Revises: 4a01439ee668
 Create Date: 2026-07-24 19:00:00.000000+00:00
 """
 from __future__ import annotations

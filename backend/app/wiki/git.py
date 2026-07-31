@@ -590,8 +590,15 @@ def grep_working_tree_url_bounded(needles: Iterable[str]) -> set[str]:
         return set()
     if res.returncode != 0:
         raise RuntimeError(f"git grep failed (exit {res.returncode}): {res.stderr.strip()!r}")
-    matches = [line for line in res.stdout.splitlines() if line]
-    return {needle for needle in wanted if any(m.startswith(needle) for m in matches)}
+    # `-o` emits a needle plus at most the one boundary character the pattern
+    # consumed, so both spellings resolve by lookup.
+    found: set[str] = set()
+    for line in res.stdout.splitlines():
+        if line in wanted:
+            found.add(line)
+        elif line[:-1] in wanted:
+            found.add(line[:-1])
+    return found
 
 
 def bundle(dest_path: str) -> None:

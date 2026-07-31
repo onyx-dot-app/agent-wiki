@@ -29,6 +29,11 @@ def handle(args: dict[str, Any]) -> Any:
         if user is None:
             raise ToolError("no authenticated user to attribute the upload to")
 
+        # Base64 costs 4 bytes per 3 encoded, so the cap is checkable before
+        # the argument is expanded into bytes.
+        if len(encoded) > (image_upload.UPLOAD_CAP_BYTES + 2) // 3 * 4:
+            raise ToolError("image exceeds 10 MiB limit")
+
         try:
             # validate=True so a truncated or mangled payload is a clear error
             # rather than silently decoding to bytes that fail the sniff.

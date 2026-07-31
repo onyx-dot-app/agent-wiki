@@ -415,7 +415,10 @@ def _image_destination(src: str) -> str:
 def _serialize_image(node: XmlElement) -> str:
     attrs = dict(node.attributes)
     src = _image_destination(attrs.get("src", ""))
-    alt = _escape_inline_text(attrs.get("alt", ""))
+    # A label cannot span lines and still parse as an image, and a live
+    # session can set an alt from a filename that carries one.
+    raw_alt = attrs.get("alt", "").replace("\r", " ").replace("\n", " ")
+    alt = _escape_inline_text(raw_alt)
     title = attrs.get("title")
     if title is not None:
         return f'![{alt}]({src} "{_escape_title(title)}")'

@@ -318,6 +318,13 @@ function imageFilesFrom(data: DataTransfer | null): File[] {
   );
 }
 
+/** Whether a drag carries files. During dragover the drag data store is in
+ * protected mode, so the files themselves are unreadable and the type list is
+ * the only signal available for deciding to claim the drop. */
+function dragCarriesFiles(data: DataTransfer | null): boolean {
+  return !!data && Array.from(data.types).includes("Files");
+}
+
 function findPlaceholder(
   key: PluginKey<DecorationSet>,
   state: EditorState,
@@ -349,11 +356,14 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
     view.dispatch(view.state.tr.setMeta(key, { add: { id, pos: point } }));
 
     const query = `path=${encodeURIComponent(pagePath)}&filename=${encodeURIComponent(file.name)}`;
+    // Navigating away destroys the view mid-upload, and dispatching on a
+    // destroyed view throws. Split handlers keep a failed insert off the toast.
     Promise.all([
       apiUpload<UploadResponse>(`/wiki/images?${query}`, file, file.type),
       naturalWidthOf(file),
-    ])
-      .then(([res, natural]) => {
+    ]).then(
+      ([res, natural]) => {
+        if (view.isDestroyed) return;
         const at = findPlaceholder(key, view.state, id);
         if (at == null) return; // the target was deleted mid-upload - drop it
         const width = Math.min(natural ?? INSERT_MAX_WIDTH, INSERT_MAX_WIDTH);
@@ -367,13 +377,15 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
             .replaceWith(at, at, node)
             .setMeta(key, { remove: { id } }),
         );
-      })
-      .catch((err: unknown) => {
+      },
+      (err: unknown) => {
+        if (view.isDestroyed) return;
         view.dispatch(view.state.tr.setMeta(key, { remove: { id } }));
         toast.error(
           err instanceof ApiError ? err.message : "Image upload failed",
         );
-      });
+      },
+    );
   };
 
   return new Plugin<DecorationSet>({
@@ -395,7 +407,7 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
       // drop target, which is what makes the drop navigate instead.
       const onDragOver = (event: DragEvent) => {
         if (!editorView.editable || !outside(event)) return;
-        if (imageFilesFrom(event.dataTransfer).length === 0) return;
+        if (!dragCarriesFiles(event.dataTransfer)) return;
         event.preventDefault();
       };
       const onDrop = (event: DragEvent) => {

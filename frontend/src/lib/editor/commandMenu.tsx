@@ -236,8 +236,9 @@ export const CommandMenu = Extension.create({
         // path, a fraction) from ever triggering the menu.
         startOfLine: true,
         allowedPrefixes: null,
-        items: ({ query, editor }) =>
-          filterCommands(query, editor).slice(0, 10),
+        // Unsliced: the list is already short and the menu scrolls, and a cap
+        // silently drops whichever command sorts last.
+        items: ({ query, editor }) => filterCommands(query, editor),
         command: ({ editor, range, props }) => props.run(editor, range),
         render: () => {
           let component: ReactRenderer<

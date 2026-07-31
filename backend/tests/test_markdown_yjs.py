@@ -1196,3 +1196,20 @@ def test_code_block_closing_fence_starts_its_own_line() -> None:
     # into a paragraph of literal backticks.
     again = seed_doc_from_markdown(reconstruct_body(doc))
     assert _root(again).children[0].tag == "codeBlock"
+
+
+def test_image_alt_with_a_newline_still_serializes_as_an_image() -> None:
+    # A live session can set an alt straight from a filename, and a label that
+    # spans lines re-parses as literal text, losing the image entirely.
+    doc = seed_doc_from_markdown("![placeholder](s.png)\n")
+    image = _root(doc).children[0].children[0]
+    assert isinstance(image, XmlElement)
+    with doc.transaction():
+        image.attributes["alt"] = "line1\nline2"  # pyright: ignore[reportArgumentType]
+
+    body = reconstruct_body(doc)
+    assert body == "![line1 line2](s.png)\n"
+    again = seed_doc_from_markdown(body)
+    reparsed = _root(again).children[0].children[0]
+    assert isinstance(reparsed, XmlElement)
+    assert reparsed.tag == "image"
