@@ -1,7 +1,9 @@
-"""d3a71f5c8b40: ``entity_taxonomies`` -> ``entity_type_taxonomies``.
+"""f2c9a41e7b06: ``entity_taxonomies`` -> ``entity_type_taxonomies``, then ``page_needs``.
 
 The table holds a taxonomy of entity TYPES; the old name read as a taxonomy of entities, which is
-a different thing. Renamed while the window was open — no rows anywhere, one consumer.
+a different thing. Renamed while the window was open — no rows anywhere, one consumer, which the same revision
+adds. The two are one revision because the rename has to precede ``page_needs``: its foreign key
+would otherwise be built against a name about to disappear.
 
 Normal test schemas never have the old name (``0001_initial`` builds from the current registry, so
 they arrive already renamed), which means the branch that actually runs against a deployed

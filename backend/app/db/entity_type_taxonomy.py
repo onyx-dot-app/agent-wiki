@@ -90,7 +90,7 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
         entity_type_taxonomy_id = row.id
 
     log.info(
-        "entity_taxonomy: recorded taxonomy %d (%d type(s), corpus %s)",
+        "entity_type_taxonomy: recorded taxonomy %d (%d type(s), corpus %s)",
         entity_type_taxonomy_id,
         len(types),
         str(artifact.get("corpus_fingerprint") or "")[:12],
