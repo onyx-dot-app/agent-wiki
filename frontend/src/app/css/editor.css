@@ -304,6 +304,15 @@
   margin-right: -1px;
   border-left: 2px solid;
   border-left-style: solid;
+  /* Sized to the text line, not the line box. An inline-block image makes the
+     box as tall as the image, which otherwise stretches the caret to match and
+     makes it jump between lines. */
+  display: inline-block;
+  height: 1.2em;
+  vertical-align: text-bottom;
+  /* Above the image, which is a positioned inline-block and would paint over
+     a caret sitting beside it. */
+  z-index: 1;
 }
 .editor-prose .ProseMirror-yjs-cursor div {
   position: absolute;
@@ -330,7 +339,9 @@
   display: inline-block;
   max-width: 100%;
   line-height: 0;
-  vertical-align: bottom;
+  /* Top, matching the task-list line. Bottom-aligning drops the image below
+     the text baseline, so a line mixing both reads as two different lines. */
+  vertical-align: top;
 }
 .editor-prose .editor-image-img {
   display: block;

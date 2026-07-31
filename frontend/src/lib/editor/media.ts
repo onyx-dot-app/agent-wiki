@@ -7,6 +7,14 @@ function stripFragment(src: string): string {
   return hash === -1 ? src : src.slice(0, hash);
 }
 
+/** Largest upload the server stores, mirroring `media_upload.UPLOAD_CAP_BYTES`.
+ * Enforced here too because a proxy in front of the app answers an oversized
+ * body first, with an HTML page carrying no message this client can show. */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/** How that cap reads to a person. */
+export const MAX_UPLOAD_LABEL = "10 MB";
+
 /** A base that exists only to resolve against. Any origin works, since the
  * question is whether `src` escapes whatever base it is resolved from. */
 const RESOLUTION_BASE = "http://same-origin.invalid";

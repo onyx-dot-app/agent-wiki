@@ -9,7 +9,9 @@ import {
 } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 
+import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { toast } from "@/hooks/useToast";
 import { createComment } from "@/lib/comments";
 import type { CoeditorHandle, CommentDraft } from "@/lib/editor/types";
 import { useIsMobile } from "@/lib/viewport";
@@ -62,6 +64,21 @@ function threadHaystack(t: CommentThreadView): string {
  * search row. Orphaned and resolved threads appear only in list mode.
  * Mobile always lists, the sheet covers the doc the cards would track.
  */
+/** What to show a person when a comment action fails. A server validation
+ * dump names internal files and helps nobody, so anything unrecognized becomes
+ * a plain sentence and the detail stays in the network tab. */
+function commentErrorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.status === 403) return "You do not have permission to comment here.";
+    if (e.status === 404) return "That page or comment no longer exists.";
+    if (e.status === 409) return "The page changed. Reload and try again.";
+    if (e.status < 500 && !/\n|{|validation error/i.test(e.message)) {
+      return e.message;
+    }
+  }
+  return "Could not save that comment. Try again.";
+}
+
 export function CommentsPanel({
   path,
   headSha,
@@ -80,7 +97,6 @@ export function CommentsPanel({
 }: Props) {
   const { user } = useAuth();
   const isMobile = useIsMobile();
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const listMode = listView || isMobile || !editorRef;
@@ -95,7 +111,7 @@ export function CommentsPanel({
         await onChanged();
         return true;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "action failed");
+        toast.error(commentErrorMessage(e));
         return false;
       } finally {
         setBusy(false);
@@ -159,7 +175,7 @@ export function CommentsPanel({
   const submitDraft = async (body: string) => {
     if (!draft) return;
     if (!headSha) {
-      setError("page version unknown, reload and retry");
+      toast.error("Page version unknown. Reload and try again.");
       return;
     }
     const ok = await run(() =>
@@ -214,11 +230,6 @@ export function CommentsPanel({
         <div className="shrink-0 rounded-(--radius-12) border border-(--border-01) p-1">
           {searchRow}
         </div>
-        {error && (
-          <div className="px-2 py-1 text-xs text-(--status-text-error-05)">
-            {error}
-          </div>
-        )}
         <CommentMarginRail
           inPanel
           threads={searched}
@@ -257,12 +268,6 @@ export function CommentsPanel({
         gap={0.25}
         className="scroll-fade-bottom scroll-y-hidden min-h-0 flex-1 overflow-y-auto"
       >
-        {error && (
-          <div className="px-2 py-1 text-xs text-(--status-text-error-05)">
-            {error}
-          </div>
-        )}
-
         {draft && (
           <NewCommentComposer
             selfName={user?.name || user?.email || "You"}
