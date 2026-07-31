@@ -2018,10 +2018,10 @@ class EntityTaxonomy(Base):
 
     __tablename__ = "entity_taxonomies"
 
+    # Monotonic, and what a consumer records to say which taxonomy it keyed facts under.
+    # SERIAL rather than an application-computed counter: "SELECT max + 1" then INSERT is
+    # not atomic, so two concurrent derivations could pick the same number.
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # Monotonic per deployment. What a status row records to say which taxonomy it was
-    # keyed under; the primary key would do, but a version reads as an ordering.
-    version: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     # Exactly one row is active. Enforced by a partial unique index, not by convention.
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
     # sha256 over the corpus this was derived from. Answers "has the wiki moved far enough

@@ -33,31 +33,31 @@ def _artifact(*, types: list[dict[str, object]] | None = None, fingerprint: str 
 
 
 class TestRecord:
-    def test_first_taxonomy_is_version_one_and_active(self) -> None:
+    def test_first_taxonomy_is_id_one_and_active(self) -> None:
         assert entity_taxonomy.active() is None
 
-        version = entity_taxonomy.record(_artifact())
+        taxonomy_id = entity_taxonomy.record(_artifact())
 
-        assert version == 1
+        assert taxonomy_id == 1
         row = entity_taxonomy.active()
         assert row is not None
-        assert row.version == 1
+        assert row.id == 1
         assert row.corpus_fingerprint == "abc123"
         assert row.types[0]["name"] == "organization"
         assert row.provenance["group_similarity"] == 0.45
 
-    def test_versions_increment_and_only_the_newest_is_active(self) -> None:
+    def test_ids_increment_and_only_the_newest_is_active(self) -> None:
         entity_taxonomy.record(_artifact(fingerprint="first"))
         second = entity_taxonomy.record(_artifact(fingerprint="second"))
 
         assert second == 2
         active = entity_taxonomy.active()
         assert active is not None
-        assert (active.version, active.corpus_fingerprint) == (2, "second")
+        assert (active.id, active.corpus_fingerprint) == (2, "second")
 
     def test_a_superseded_taxonomy_stays_resolvable(self) -> None:
-        """The whole point of append-only: rows keyed under v1's type names must still be
-        able to look those names up after v2 renames them."""
+        """The whole point of append-only: facts keyed under the first taxonomy's type names
+        must still resolve after a later one renames them."""
         entity_taxonomy.record(
             _artifact(types=[{"name": "software_product_or_service", "definition": "d"}])
         )
@@ -85,18 +85,18 @@ class TestRecord:
 
 
 class TestRead:
-    def test_get_unknown_version_is_none(self) -> None:
+    def test_get_unknown_id_is_none(self) -> None:
         assert entity_taxonomy.get(99) is None
 
     def test_history_is_newest_first(self) -> None:
         for n in range(3):
             entity_taxonomy.record(_artifact(fingerprint=f"c{n}"))
-        assert [row.version for row in entity_taxonomy.history()] == [3, 2, 1]
+        assert [row.id for row in entity_taxonomy.history()] == [3, 2, 1]
 
     def test_history_respects_the_limit(self) -> None:
         for n in range(4):
             entity_taxonomy.record(_artifact(fingerprint=f"c{n}"))
-        assert [row.version for row in entity_taxonomy.history(limit=2)] == [4, 3]
+        assert [row.id for row in entity_taxonomy.history(limit=2)] == [4, 3]
 
 
 class TestLoadTaxonomy:
@@ -122,7 +122,7 @@ class TestLoadTaxonomy:
 
         assert defs == {"person": "A named individual."}
 
-    def test_reads_a_specific_version(self) -> None:
+    def test_reads_a_specific_taxonomy(self) -> None:
         """How a consumer resolves the types it keyed facts under, rather than assuming the
         active taxonomy still means the same thing."""
         from app.ingest.entity_types import load_taxonomy
@@ -130,7 +130,7 @@ class TestLoadTaxonomy:
         entity_taxonomy.record(_artifact(types=[{"name": "old_name", "definition": "d"}]))
         entity_taxonomy.record(_artifact(types=[{"name": "new_name", "definition": "d"}]))
 
-        assert set(load_taxonomy(version=1)[0]) == {"old_name"}
+        assert set(load_taxonomy(taxonomy_id=1)[0]) == {"old_name"}
         assert set(load_taxonomy()[0]) == {"new_name"}
 
     def test_home_entities_come_from_stats(self) -> None:

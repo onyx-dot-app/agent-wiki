@@ -7,8 +7,8 @@ makes that failure silent and unrecoverable; keeping a history makes a rename a 
 event with the superseded taxonomy still readable.
 
 So ``record()`` inserts and promotes rather than updating, and the previous row stays. A
-consumer that keys by type should store the ``version`` it used alongside, and resolve
-through ``get(version)`` rather than assuming the active one still means what it meant.
+consumer that keys by type should store the taxonomy ``id`` it used alongside, and resolve
+through ``get(id)`` rather than assuming the active one still means what it meant.
 """
 
 from __future__ import annotations
@@ -35,24 +35,22 @@ def active() -> EntityTaxonomy | None:
         return db.scalars(select(EntityTaxonomy).where(EntityTaxonomy.active)).one_or_none()
 
 
-def get(version: int) -> EntityTaxonomy | None:
-    """A specific taxonomy by version — how a consumer resolves the types it keyed under."""
+def get(taxonomy_id: int) -> EntityTaxonomy | None:
+    """A specific taxonomy by id — how a consumer resolves the types it keyed facts under."""
     with session() as db:
-        return db.scalars(
-            select(EntityTaxonomy).where(EntityTaxonomy.version == version)
-        ).one_or_none()
+        return db.get(EntityTaxonomy, taxonomy_id)
 
 
 def history(limit: int = 20) -> list[EntityTaxonomy]:
     """Newest first. For seeing what a re-derivation changed."""
     with session() as db:
         return list(
-            db.scalars(select(EntityTaxonomy).order_by(EntityTaxonomy.version.desc()).limit(limit))
+            db.scalars(select(EntityTaxonomy).order_by(EntityTaxonomy.id.desc()).limit(limit))
         )
 
 
 def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
-    """Store a derived taxonomy and make it active. Returns its version.
+    """Store a derived taxonomy and make it active. Returns its id.
 
     Takes the artifact ``app.ingest.entity_types.derive`` produces, so the producer decides
     what is worth keeping rather than this layer imposing a shape.
@@ -66,29 +64,23 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
         raise ValueError("refusing to record a taxonomy with no types")
 
     with session() as db:
-        latest = db.scalars(
-            select(EntityTaxonomy.version).order_by(EntityTaxonomy.version.desc()).limit(1)
-        ).first()
-        version = (latest or 0) + 1
-
         db.execute(update(EntityTaxonomy).where(EntityTaxonomy.active).values(active=False))
-        db.add(
-            EntityTaxonomy(
-                version=version,
-                active=True,
-                corpus_fingerprint=str(artifact.get("corpus_fingerprint") or ""),
-                types=types,
-                provenance=artifact.get("provenance") or {},
-                stats=artifact.get("stats") or {},
-                triggered_by=triggered_by,
-            )
+        row = EntityTaxonomy(
+            active=True,
+            corpus_fingerprint=str(artifact.get("corpus_fingerprint") or ""),
+            types=types,
+            provenance=artifact.get("provenance") or {},
+            stats=artifact.get("stats") or {},
+            triggered_by=triggered_by,
         )
+        db.add(row)
         db.commit()
+        taxonomy_id = row.id
 
     log.info(
-        "entity_taxonomy: recorded v%d (%d type(s), corpus %s)",
-        version,
+        "entity_taxonomy: recorded taxonomy %d (%d type(s), corpus %s)",
+        taxonomy_id,
         len(types),
         str(artifact.get("corpus_fingerprint") or "")[:12],
     )
-    return version
+    return taxonomy_id

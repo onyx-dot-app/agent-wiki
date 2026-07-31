@@ -34,7 +34,6 @@ def upgrade() -> None:
     op.create_table(
         "entity_taxonomies",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("version", sa.Integer(), nullable=False),
         sa.Column("active", sa.Boolean(), server_default=sa.text("FALSE"), nullable=False),
         sa.Column("corpus_fingerprint", sa.Text(), nullable=False),
         sa.Column("types", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
@@ -59,7 +58,6 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(["triggered_by"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("version", name="uq_entity_taxonomies_version"),
     )
     # Partial unique index: at most one active row, enforced by the database rather than by
     # every writer remembering to clear the previous one.

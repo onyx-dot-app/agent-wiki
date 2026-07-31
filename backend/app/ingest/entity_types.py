@@ -479,17 +479,21 @@ def fold(mentions: list[Mention]) -> list[Referent]:
 
 
 # --- artifact ---------------------------------------------------------------------------
-def load_taxonomy(version: int | None = None) -> tuple[dict[str, str], frozenset[str]]:
+def load_taxonomy(taxonomy_id: int | None = None) -> tuple[dict[str, str], frozenset[str]]:
     """``(type definitions, home entity names)`` for the active taxonomy.
 
-    ``version`` resolves a specific one instead — how a consumer reads back the types it
+    ``taxonomy_id`` resolves a specific one instead — how a consumer reads back the types it
     keyed facts under, rather than assuming the active taxonomy still means the same thing.
 
     Falls back to ``DEFAULT_TYPES`` when nothing has been derived, mirroring how the
     relevance scorer degrades to cosine without its model file: a deployment that has never
     run a derivation still works, with types that are generic rather than tailored.
     """
-    row = entity_taxonomy.get(version) if version is not None else entity_taxonomy.active()
+    row = (
+        entity_taxonomy.get(taxonomy_id)
+        if taxonomy_id is not None
+        else entity_taxonomy.active()
+    )
     if row is None:
         return dict(DEFAULT_TYPES), frozenset()
 
@@ -621,12 +625,12 @@ def run_derivation(
         stats["n_typed"],
         stats["n_types"],
     )
-    artifact["version"] = store_taxonomy(artifact, triggered_by=triggered_by_user_id)
+    artifact["taxonomy_id"] = store_taxonomy(artifact, triggered_by=triggered_by_user_id)
     return artifact
 
 
 def store_taxonomy(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
-    """Persist a derived taxonomy and make it active. Returns its version.
+    """Persist a derived taxonomy and make it active. Returns its id.
 
     Append-only: see ``app.db.entity_taxonomy`` for why a rename must not overwrite.
     """
