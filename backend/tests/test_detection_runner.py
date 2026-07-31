@@ -5,6 +5,7 @@ Uses a zero-age empty-folder detector (via monkeypatched ``DETECTORS``) so the
 fresh tmp-repo commits qualify without forging commit dates; the age gate
 itself is covered in ``test_empty_folder_detector.py``.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -42,6 +43,24 @@ def _eager_detector(monkeypatch):
     monkeypatch.setattr(runner, "DETECTORS", [_EmptyFolderDetector(min_age_days=0)])
 
 
+def test_scanned_count_excludes_folder_markers_and_trigger_files(repo):
+    """`.gitkeep` markers and `.trigger_*.yaml` stay in the scope — the folder
+    detectors read them as facts about a folder, and a marker *is* the folder
+    as far as git is concerned. They are never candidates, though (every page
+    detector filters to `.md`, empty-folder names the folder rather than its
+    marker, folder-chain bails on a chain holding any non-page file) and they
+    aren't shown in the tree, so counting them reported work on objects nobody
+    manages or can see."""
+    wiki_git.commit_file("team/.trigger_abc.yaml", "id: abc\n", "add trigger", author=None)
+    wiki_git.commit_file("team/roadmap.md", "# Roadmap\n", "seed", author=None)
+
+    result = runner.run_sweep(triggered_by_user_id=None)
+
+    # Scope is unchanged: 2 pages + 2 .gitkeep + 1 trigger.
+    assert len(wiki_git.list_paths()) == 5
+    assert result["paths_scanned"] == 2
+
+
 def test_sweep_emits_proposals_and_records_run(repo):
     result = runner.run_sweep(triggered_by_user_id=None)
 
@@ -61,7 +80,8 @@ def test_sweep_emits_proposals_and_records_run(repo):
     assert run["status"] == "completed"
     assert run["trigger"] == "sweep"
     assert run["proposals_emitted"] == 2
-    assert run["paths_scanned"] >= 3
+    # Three tracked files, two of them .gitkeep markers — one page counts.
+    assert run["paths_scanned"] == 1
     assert run["finished_at"] is not None
 
 
@@ -186,7 +206,5 @@ def test_emitted_proposal_carries_acl_fingerprint(repo):
     runner.run_sweep(triggered_by_user_id=None)
 
     for p in list_by_status(ProposalStatus.PENDING):
-        expected = fingerprint.combined_fingerprint(
-            p["source_paths"] + p["target_paths"]
-        )
+        expected = fingerprint.combined_fingerprint(p["source_paths"] + p["target_paths"])
         assert p["acl_fingerprint_before"] == expected
