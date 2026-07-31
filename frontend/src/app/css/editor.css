@@ -341,9 +341,10 @@
   content: "";
   position: absolute;
   top: 0;
-  /* Fixed to the prose line-height rather than an em, which would scale with a
-     heading's font size and resize the line as a peer moves through it. */
-  height: 1.5rem;
+  /* Tracks font size, which is what the browser's own caret does (measured 21px
+     at 16px text, 41.5px at 32px). Line-height would misfit headings, whose
+     line-height here is smaller than their font size. */
+  height: 1.3em;
   border-left: 2px solid;
   border-color: inherit;
 }
@@ -360,6 +361,14 @@
 }
 .editor-prose .ProseMirror-yjs-selection {
   opacity: 0.3;
+}
+
+/* Chrome's UA styles make a draggable element unselectable, so a selection
+   covering media highlights the text around it and leaves the media untinted.
+   prosemirror-view ships this override; its stylesheet is not loaded here.
+   Keyed off the attributes, so any later draggable node view inherits it. */
+.editor-prose [draggable][contenteditable="false"] {
+  user-select: text;
 }
 
 /* Inline image node (lib/editor/images.ts). The NodeView renders this raw
