@@ -737,6 +737,10 @@ export const MarkdownLink = Extension.create({
   },
 });
 
+/** Images this wiki serves, the only srcs the node accepts from pasted HTML.
+ * Matches `image_store.serving_url`, optionally carrying a `#w=` fragment. */
+const MANAGED_IMAGE_SRC = /^\/api\/wiki\/images\/[0-9a-f]+(#.*)?$/i;
+
 /** The inline image node. Named `image` with exactly `{src, alt, title}` so
  * y-prosemirror name-matches the backend codec's leaf
  * (`app/wiki/markdown_yjs.py`) and round-trips every attribute. Width is
@@ -758,7 +762,20 @@ export const Image = Node.create({
     };
   },
   parseHTML() {
-    return [{ tag: "img[src]" }];
+    return [
+      {
+        tag: "img[src]",
+        // Only images this wiki serves. An external src pasted from a web page
+        // would put a third-party URL in the shared document that every reader
+        // then fetches, and that breaks for good once the source moves.
+        getAttrs: (element) =>
+          MANAGED_IMAGE_SRC.test(
+            (element as HTMLElement).getAttribute("src") ?? "",
+          )
+            ? null
+            : false,
+      },
+    ];
   },
   renderHTML({ HTMLAttributes }) {
     return ["img", mergeAttributes(HTMLAttributes)];
