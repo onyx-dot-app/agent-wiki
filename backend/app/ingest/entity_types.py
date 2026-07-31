@@ -474,6 +474,18 @@ def fold(mentions: list[Mention]) -> list[Referent]:
 # --- artifact ---------------------------------------------------------------------------
 
 
+def active_taxonomy_id() -> int | None:
+    """Id of the taxonomy in force, or None when nothing has been derived.
+
+    A consumer that labels things with type names should read this ONCE per run and store it
+    alongside what it wrote, so its labels stay resolvable through ``load_taxonomy(id)`` after
+    a re-derivation renames a type. Reading it per item would let a derivation land mid-run and
+    leave one batch labelled under two taxonomies.
+    """
+    row = entity_taxonomy.active()
+    return row.id if row is not None else None
+
+
 def load_taxonomy(taxonomy_id: int | None = None) -> dict[str, str]:
     """``{type name: definition}`` for the active taxonomy.
 

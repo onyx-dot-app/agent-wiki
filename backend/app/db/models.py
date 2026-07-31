@@ -2051,3 +2051,42 @@ class EntityTaxonomy(Base):
             postgresql_where=text("active"),
         ),
     )
+
+
+class PageNeeds(Base):
+    """What one wiki page keeps track of — its information needs.
+
+    Path-keyed and current-valued, unlike ``entity_taxonomies``: a page's needs describe that
+    page as it is now, so re-extracting replaces them. There is nothing to orphan, because
+    nothing keys facts by a need.
+
+    ``content_sha256`` / ``model`` / ``taxonomy_id`` together are the re-extract guard, and
+    all three belong in it. The hash catches an edited page; ``model`` catches a model change,
+    which changes what gets extracted; ``taxonomy_id`` catches a re-derived taxonomy, whose
+    type menu the entity labels were drawn from. A run that skipped a page because only the
+    taxonomy moved would leave behind entity types the current taxonomy no longer defines.
+    """
+
+    __tablename__ = "page_needs"
+
+    # Wiki-relative page path — the natural key, following page moves/deletes like other
+    # path-keyed live rows (see ``PageEmbedding``).
+    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    # sha256 of the page body extracted from.
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    # The completion model used. Empty string means "the deployment default", which is what
+    # the extractor records when the caller does not pin one.
+    model: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # The taxonomy whose type menu these entity labels came from. SET NULL rather than
+    # CASCADE: losing the taxonomy row must not delete a page's needs, only the ability to
+    # resolve their type names — and NULL here reads correctly as "types unresolvable", which
+    # makes the page stale and gets it re-extracted.
+    taxonomy_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("entity_taxonomies.id", ondelete="SET NULL")
+    )
+    # [{aspect_name, need_kind, description, detail_level, cadence, current_content,
+    #   entities: [{canonical_name, entity_type, primary}], focus}, ...]
+    # JSONB and free-form for the same reason as ``EntityTaxonomy.types``: the shape is owned
+    # by ``app.ingest.needs``, read whole, and never queried by field.
+    needs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)

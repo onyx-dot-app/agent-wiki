@@ -1,0 +1,264 @@
+"""``run_extraction`` end to end: a real wiki repo, a real database, a stubbed LLM.
+
+The orchestration is where the money is spent, so the properties pinned here are all about
+which pages get a call and which do not. Every one of them is silent when wrong — an
+over-eager guard just costs money, and a lax one leaves needs labelled against a taxonomy
+that no longer defines their types.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from app.db import entity_taxonomy, page_needs
+from app.ingest import needs
+from app.llm.client import CompletionResult
+from app.wiki import git as wiki_git
+
+
+def _page(path: str, body: str = "# P\n\nStatus: open\n") -> None:
+    wiki_git.commit_file(path, body, "seed", author=None)
+
+
+def _taxonomy(name: str = "organization") -> int:
+    return entity_taxonomy.record(
+        {
+            "corpus_fingerprint": "abc",
+            "entity_types": [{"name": name, "definition": "A named company."}],
+        }
+    )
+
+
+@pytest.fixture
+def llm(monkeypatch):
+    """Stub the LLM and count calls — the unit of cost this step is measured in."""
+    calls: list[str] = []
+
+    def fake_complete(messages, **kwargs):
+        calls.append(messages[-1]["content"])
+        return CompletionResult(
+            text=json.dumps(
+                {
+                    "needs": [
+                        {
+                            "aspect_name": "deal status",
+                            "need_kind": "entity_status",
+                            "description": "status and blockers",
+                            "current_content": "Status: open",
+                            "entities": [
+                                {
+                                    "canonical_name": "Acme",
+                                    "entity_type": "organization",
+                                    "primary": True,
+                                }
+                            ],
+                            "focus": "specific",
+                        }
+                    ]
+                }
+            )
+        )
+
+    monkeypatch.setattr(needs.client, "complete", fake_complete)
+    return calls
+
+
+class TestFirstRun:
+    def test_extracts_every_page_and_stores_the_needs(self, tmp_repo, llm) -> None:
+        _page("a.md")
+        _page("b.md")
+
+        counts = needs.run_extraction()
+
+        assert counts["extracted"] == 2
+        assert counts["needs"] == 2
+        assert len(llm) == 2
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.needs[0]["aspect_name"] == "deal status"
+        assert stored.needs[0]["entities"][0]["entity_type"] == "organization"
+
+    def test_records_the_active_taxonomy_on_every_page(self, tmp_repo, llm) -> None:
+        """Need extraction is the first real consumer of the derived taxonomy, so the link
+        back to it has to be written — it is what makes the type labels resolvable later."""
+        taxonomy_id = _taxonomy()
+        _page("a.md")
+
+        needs.run_extraction()
+
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.taxonomy_id == taxonomy_id
+
+    def test_works_with_no_taxonomy_at_all(self, tmp_repo, llm) -> None:
+        """A deployment that has never derived still extracts, against the generic fallback
+        types — the same way the relevance scorer degrades without its model file."""
+        _page("a.md")
+
+        counts = needs.run_extraction()
+
+        assert counts["needs"] == 1
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.taxonomy_id is None
+
+    def test_the_derived_types_reach_the_prompt(self, tmp_repo, llm, monkeypatch) -> None:
+        prompts: list[str] = []
+
+        def capture(messages, **kwargs):
+            prompts.append(messages[0]["content"])
+            return CompletionResult(text=json.dumps({"needs": []}))
+
+        monkeypatch.setattr(needs.client, "complete", capture)
+        _taxonomy("aircraft_model")
+        _page("a.md")
+
+        needs.run_extraction()
+
+        assert "aircraft_model" in prompts[0]
+
+
+class TestIncremental:
+    def test_a_second_run_over_an_unchanged_wiki_costs_nothing(self, tmp_repo, llm) -> None:
+        _page("a.md")
+        _page("b.md")
+        needs.run_extraction()
+        llm.clear()
+
+        counts = needs.run_extraction()
+
+        assert llm == []
+        assert counts["extracted"] == 0
+        assert counts["skipped"] == 2
+
+    def test_one_edit_costs_one_call(self, tmp_repo, llm) -> None:
+        """The reason needs are stored rather than recomputed."""
+        _page("a.md")
+        _page("b.md")
+        needs.run_extraction()
+        llm.clear()
+        _page("b.md", "# P\n\nStatus: closed\n")
+
+        counts = needs.run_extraction()
+
+        assert len(llm) == 1
+        assert counts["extracted"] == 1
+        assert counts["skipped"] == 1
+
+    def test_a_new_page_is_extracted_and_the_rest_left_alone(self, tmp_repo, llm) -> None:
+        _page("a.md")
+        needs.run_extraction()
+        llm.clear()
+        _page("new.md")
+
+        needs.run_extraction()
+
+        assert len(llm) == 1
+
+    def test_a_re_derived_taxonomy_re_extracts_everything(self, tmp_repo, llm) -> None:
+        """A page skipped here would keep entity types the current taxonomy no longer
+        defines, and nothing downstream could detect it."""
+        _taxonomy("software_product_or_service")
+        _page("a.md")
+        needs.run_extraction()
+        llm.clear()
+        second = _taxonomy("software_product")
+
+        counts = needs.run_extraction()
+
+        assert len(llm) == 1
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.taxonomy_id == second
+        assert counts["skipped"] == 0
+
+    def test_force_re_extracts_an_unchanged_wiki(self, tmp_repo, llm) -> None:
+        """What a prompt change requires: stored needs are only comparable to each other when
+        they came from the same prompt, and the prompt is not part of the guard."""
+        _page("a.md")
+        needs.run_extraction()
+        llm.clear()
+
+        counts = needs.run_extraction(force=True)
+
+        assert len(llm) == 1
+        assert counts["extracted"] == 1
+
+
+class TestBookkeeping:
+    def test_a_page_that_yields_nothing_is_recorded_and_not_retried(
+        self, tmp_repo, monkeypatch
+    ) -> None:
+        """Storing the empty answer is what stops a page being paid for on every run."""
+        calls: list[str] = []
+
+        def empty(messages, **kwargs):
+            calls.append("x")
+            return CompletionResult(text=json.dumps({"needs": []}))
+
+        monkeypatch.setattr(needs.client, "complete", empty)
+        _page("a.md")
+
+        counts = needs.run_extraction()
+        assert counts["empty"] == 1
+        assert counts["needs"] == 0
+
+        needs.run_extraction()
+        assert len(calls) == 1
+
+    def test_one_unparseable_page_does_not_stop_the_others(self, tmp_repo, monkeypatch) -> None:
+        def flaky(messages, **kwargs):
+            if "bad.md" in messages[-1]["content"]:
+                return CompletionResult(text="not json")
+            return CompletionResult(
+                text=json.dumps(
+                    {
+                        "needs": [
+                            {
+                                "aspect_name": "a",
+                                "need_kind": "reference",
+                                "description": "d",
+                            }
+                        ]
+                    }
+                )
+            )
+
+        monkeypatch.setattr(needs.client, "complete", flaky)
+        _page("bad.md")
+        _page("good.md")
+
+        counts = needs.run_extraction()
+
+        assert counts["needs"] == 1
+        assert counts["empty"] == 1
+        assert page_needs.get("good.md") is not None
+
+    def test_deleted_pages_are_pruned(self, tmp_repo, llm) -> None:
+        """Needs of a page that no longer exists would still cluster downstream, so a fact
+        could be reconciled onto a page that is gone."""
+        _page("a.md")
+        _page("gone.md")
+        needs.run_extraction()
+
+        wiki_git.delete_path("gone.md", "remove")
+        needs.run_extraction()
+
+        assert [row.path for row in page_needs.load_all()] == ["a.md"]
+
+    def test_prefix_limits_the_pass(self, tmp_repo, llm) -> None:
+        _page("keep/a.md")
+        _page("other/b.md")
+
+        counts = needs.run_extraction(prefix="keep")
+
+        assert counts["pages"] == 1
+        assert [row.path for row in page_needs.load_all()] == ["keep/a.md"]
+
+    def test_an_empty_wiki_is_not_an_error(self, tmp_repo, llm) -> None:
+        counts = needs.run_extraction()
+
+        assert counts == {"pages": 0, "extracted": 0, "skipped": 0, "needs": 0, "empty": 0}
+        assert llm == []
