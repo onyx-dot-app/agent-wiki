@@ -311,12 +311,12 @@ def run_extraction(
     The entity-type menu is read ONCE per run and its taxonomy id stored with every need set,
     so a later re-derivation that renames a type leaves these mentions resolvable.
     """
-    taxonomy_id = entity_types.active_taxonomy_id()
-    type_defs = entity_types.load_taxonomy(taxonomy_id)
+    entity_type_taxonomy_id = entity_types.active_entity_type_taxonomy_id()
+    type_defs = entity_types.load_taxonomy(entity_type_taxonomy_id)
     log.info(
         "needs: extracting with %d entity type(s) from taxonomy %s",
         len(type_defs),
-        taxonomy_id if taxonomy_id is not None else "(fallback)",
+        entity_type_taxonomy_id if entity_type_taxonomy_id is not None else "(fallback)",
     )
 
     pages = entity_types.read_corpus(prefix)
@@ -324,7 +324,7 @@ def run_extraction(
     stale = (
         [path for path, _ in pages]
         if force
-        else page_needs.stale_paths(pages, model=model, taxonomy_id=taxonomy_id)
+        else page_needs.stale_paths(pages, model=model, entity_type_taxonomy_id=entity_type_taxonomy_id)
     )
     counts = {
         "pages": len(pages),
@@ -347,7 +347,7 @@ def run_extraction(
             body=by_path[path],
             needs=[need.model_dump(mode="json") for need in needs],
             model=model,
-            taxonomy_id=taxonomy_id,
+            entity_type_taxonomy_id=entity_type_taxonomy_id,
         )
         counts["extracted"] += 1
         counts["needs"] += len(needs)

@@ -13,7 +13,7 @@ minting and re-keying ids is the repo's job.
 
 from __future__ import annotations
 
-from app.db import entity_taxonomy, page_needs
+from app.db import entity_type_taxonomy, page_needs
 from app.wiki import doc_ids, git as wiki_git
 
 # Every test here takes ``tmp_repo`` — the conftest fixture giving a migrated database AND an
@@ -36,7 +36,7 @@ NEEDS = [
 
 
 def _taxonomy(name: str = "organization") -> int:
-    return entity_taxonomy.record(
+    return entity_type_taxonomy.record(
         {
             "corpus_fingerprint": "abc",
             "entity_types": [{"name": name, "definition": "A named company."}],
@@ -46,7 +46,7 @@ def _taxonomy(name: str = "organization") -> int:
 
 class TestStoreAndGet:
     def test_round_trips_a_page_s_needs(self, tmp_repo) -> None:
-        page_needs.store("a.md", body="body", needs=NEEDS, model="gpt-5", taxonomy_id=None)
+        page_needs.store("a.md", body="body", needs=NEEDS, model="gpt-5", entity_type_taxonomy_id=None)
 
         row = page_needs.get("a.md")
         assert row is not None
@@ -76,12 +76,12 @@ class TestStoreAndGet:
         assert page_needs.get("missing.md") is None
 
     def test_records_the_taxonomy_the_types_came_from(self, tmp_repo) -> None:
-        taxonomy_id = _taxonomy()
-        page_needs.store("a.md", body="body", needs=NEEDS, taxonomy_id=taxonomy_id)
+        entity_type_taxonomy_id = _taxonomy()
+        page_needs.store("a.md", body="body", needs=NEEDS, entity_type_taxonomy_id=entity_type_taxonomy_id)
 
         row = page_needs.get("a.md")
         assert row is not None
-        assert row.taxonomy_id == taxonomy_id
+        assert row.entity_type_taxonomy_id == entity_type_taxonomy_id
 
 
 class TestStalePaths:
@@ -89,7 +89,7 @@ class TestStalePaths:
         assert page_needs.stale_paths([("a.md", "body")]) == ["a.md"]
 
     def test_an_unchanged_page_is_not(self, tmp_repo) -> None:
-        page_needs.store("a.md", body="body", needs=NEEDS, model="m", taxonomy_id=None)
+        page_needs.store("a.md", body="body", needs=NEEDS, model="m", entity_type_taxonomy_id=None)
 
         assert page_needs.stale_paths([("a.md", "body")], model="m") == []
 
@@ -109,10 +109,10 @@ class TestStalePaths:
         re-derivation keeps types the current taxonomy no longer defines — stale in a way no
         later step could detect."""
         first = _taxonomy("software_product_or_service")
-        page_needs.store("a.md", body="body", needs=NEEDS, model="m", taxonomy_id=first)
+        page_needs.store("a.md", body="body", needs=NEEDS, model="m", entity_type_taxonomy_id=first)
         second = _taxonomy("software_product")
 
-        assert page_needs.stale_paths([("a.md", "body")], model="m", taxonomy_id=second) == ["a.md"]
+        assert page_needs.stale_paths([("a.md", "body")], model="m", entity_type_taxonomy_id=second) == ["a.md"]
 
     def test_only_the_changed_pages_are_stale(self, tmp_repo) -> None:
         """What makes a re-run cost one call instead of a corpus."""
@@ -275,11 +275,11 @@ class TestRepositoryBoundary:
             assert not isinstance(value, PageNeedsRow)
 
     def test_the_record_carries_the_current_path(self, tmp_repo) -> None:
-        page_needs.store("a.md", body="body", needs=NEEDS, model="m", taxonomy_id=None)
+        page_needs.store("a.md", body="body", needs=NEEDS, model="m", entity_type_taxonomy_id=None)
 
         row = page_needs.get("a.md")
         assert row is not None
-        assert (row.path, row.model, row.taxonomy_id) == ("a.md", "m", None)
+        assert (row.path, row.model, row.entity_type_taxonomy_id) == ("a.md", "m", None)
         assert row.doc_id == doc_ids.id_for_path("a.md")
 
 
@@ -339,18 +339,18 @@ class TestTaxonomyLink:
         type names, not the extracted needs themselves."""
         from sqlalchemy import delete as sa_delete
 
-        from app.db.models import EntityTaxonomy
+        from app.db.models import EntityTypeTaxonomy
         from app.db.session import session
 
-        taxonomy_id = _taxonomy()
-        page_needs.store("a.md", body="body", needs=NEEDS, model="m", taxonomy_id=taxonomy_id)
+        entity_type_taxonomy_id = _taxonomy()
+        page_needs.store("a.md", body="body", needs=NEEDS, model="m", entity_type_taxonomy_id=entity_type_taxonomy_id)
 
         with session() as s:
-            s.execute(sa_delete(EntityTaxonomy).where(EntityTaxonomy.id == taxonomy_id))
+            s.execute(sa_delete(EntityTypeTaxonomy).where(EntityTypeTaxonomy.id == entity_type_taxonomy_id))
 
         row = page_needs.get("a.md")
         assert row is not None
-        assert row.taxonomy_id is None
+        assert row.entity_type_taxonomy_id is None
         assert row.needs[0]["need_name"] == "deal status"
 
     def test_needs_orphaned_by_a_deleted_taxonomy_are_stale(self, tmp_repo) -> None:
@@ -358,13 +358,13 @@ class TestTaxonomyLink:
         run re-extracts the page instead of leaving unresolvable type names in place."""
         from sqlalchemy import delete as sa_delete
 
-        from app.db.models import EntityTaxonomy
+        from app.db.models import EntityTypeTaxonomy
         from app.db.session import session
 
         first = _taxonomy()
-        page_needs.store("a.md", body="body", needs=NEEDS, model="m", taxonomy_id=first)
+        page_needs.store("a.md", body="body", needs=NEEDS, model="m", entity_type_taxonomy_id=first)
         with session() as s:
-            s.execute(sa_delete(EntityTaxonomy).where(EntityTaxonomy.id == first))
+            s.execute(sa_delete(EntityTypeTaxonomy).where(EntityTypeTaxonomy.id == first))
         second = _taxonomy()
 
-        assert page_needs.stale_paths([("a.md", "body")], model="m", taxonomy_id=second) == ["a.md"]
+        assert page_needs.stale_paths([("a.md", "body")], model="m", entity_type_taxonomy_id=second) == ["a.md"]

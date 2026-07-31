@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from app.db import entity_taxonomy, page_needs
+from app.db import entity_type_taxonomy, page_needs
 from app.ingest import needs
 from app.llm.client import CompletionResult
 from app.wiki import git as wiki_git
@@ -23,7 +23,7 @@ def _page(path: str, body: str = "# P\n\nStatus: open\n") -> None:
 
 
 def _taxonomy(name: str = "organization") -> int:
-    return entity_taxonomy.record(
+    return entity_type_taxonomy.record(
         {
             "corpus_fingerprint": "abc",
             "entity_types": [{"name": name, "definition": "A named company."}],
@@ -83,14 +83,14 @@ class TestFirstRun:
     def test_records_the_active_taxonomy_on_every_page(self, tmp_repo, llm) -> None:
         """Need extraction is the first real consumer of the derived taxonomy, so the link
         back to it has to be written — it is what makes the type labels resolvable later."""
-        taxonomy_id = _taxonomy()
+        entity_type_taxonomy_id = _taxonomy()
         _page("a.md")
 
         needs.run_extraction()
 
         stored = page_needs.get("a.md")
         assert stored is not None
-        assert stored.taxonomy_id == taxonomy_id
+        assert stored.entity_type_taxonomy_id == entity_type_taxonomy_id
 
     def test_works_with_no_taxonomy_at_all(self, tmp_repo, llm) -> None:
         """A deployment that has never derived still extracts, against the generic fallback
@@ -102,7 +102,7 @@ class TestFirstRun:
         assert counts["needs"] == 1
         stored = page_needs.get("a.md")
         assert stored is not None
-        assert stored.taxonomy_id is None
+        assert stored.entity_type_taxonomy_id is None
 
     def test_the_derived_types_reach_the_prompt(self, tmp_repo, llm, monkeypatch) -> None:
         prompts: list[str] = []
@@ -171,7 +171,7 @@ class TestIncremental:
         assert len(llm) == 1
         stored = page_needs.get("a.md")
         assert stored is not None
-        assert stored.taxonomy_id == second
+        assert stored.entity_type_taxonomy_id == second
         assert counts["skipped"] == 0
 
     def test_a_rename_costs_nothing(self, tmp_repo, llm) -> None:

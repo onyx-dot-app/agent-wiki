@@ -18,7 +18,7 @@ from typing import Any, cast
 
 from sqlalchemy import select, update
 
-from app.db.models import EntityTaxonomy
+from app.db.models import EntityTypeTaxonomy
 from app.db.session import advisory_xact_lock, session
 
 log = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 _RECORD_ADVISORY_LOCK = 0x65746178
 
 
-def active() -> EntityTaxonomy | None:
+def active() -> EntityTypeTaxonomy | None:
     """The taxonomy in force, or None when nothing has been derived yet.
 
     None is a normal state, not an error — a deployment that has never run a derivation has
@@ -36,20 +36,20 @@ def active() -> EntityTaxonomy | None:
     ``app.ingest.entity_types.load_taxonomy``).
     """
     with session() as db:
-        return db.scalars(select(EntityTaxonomy).where(EntityTaxonomy.active)).one_or_none()
+        return db.scalars(select(EntityTypeTaxonomy).where(EntityTypeTaxonomy.active)).one_or_none()
 
 
-def get(taxonomy_id: int) -> EntityTaxonomy | None:
+def get(entity_type_taxonomy_id: int) -> EntityTypeTaxonomy | None:
     """A specific taxonomy by id — how a consumer resolves the types it keyed facts under."""
     with session() as db:
-        return db.get(EntityTaxonomy, taxonomy_id)
+        return db.get(EntityTypeTaxonomy, entity_type_taxonomy_id)
 
 
-def history(limit: int = 20) -> list[EntityTaxonomy]:
+def history(limit: int = 20) -> list[EntityTypeTaxonomy]:
     """Newest first. For seeing what a re-derivation changed."""
     with session() as db:
         return list(
-            db.scalars(select(EntityTaxonomy).order_by(EntityTaxonomy.id.desc()).limit(limit))
+            db.scalars(select(EntityTypeTaxonomy).order_by(EntityTypeTaxonomy.id.desc()).limit(limit))
         )
 
 
@@ -76,8 +76,8 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
 
     with session() as db:
         advisory_xact_lock(db, _RECORD_ADVISORY_LOCK)
-        db.execute(update(EntityTaxonomy).where(EntityTaxonomy.active).values(active=False))
-        row = EntityTaxonomy(
+        db.execute(update(EntityTypeTaxonomy).where(EntityTypeTaxonomy.active).values(active=False))
+        row = EntityTypeTaxonomy(
             active=True,
             corpus_fingerprint=str(artifact.get("corpus_fingerprint") or ""),
             types=types,
@@ -87,12 +87,12 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
         )
         db.add(row)
         db.commit()
-        taxonomy_id = row.id
+        entity_type_taxonomy_id = row.id
 
     log.info(
         "entity_taxonomy: recorded taxonomy %d (%d type(s), corpus %s)",
-        taxonomy_id,
+        entity_type_taxonomy_id,
         len(types),
         str(artifact.get("corpus_fingerprint") or "")[:12],
     )
-    return taxonomy_id
+    return entity_type_taxonomy_id

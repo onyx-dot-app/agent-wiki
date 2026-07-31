@@ -2002,7 +2002,7 @@ class Notification(Base):
         Index("idx_notifications_user_dismissed", "user_id", "dismissed"),
     )
 
-class EntityTaxonomy(Base):
+class EntityTypeTaxonomy(Base):
     """A derived entity-type taxonomy, kept as a history rather than a current value.
 
     Entity types key facts by entity, so a re-derivation that renames a type would orphan
@@ -2016,7 +2016,7 @@ class EntityTaxonomy(Base):
     migration every time a derivation stage learns to record something new.
     """
 
-    __tablename__ = "entity_taxonomies"
+    __tablename__ = "entity_type_taxonomies"
 
     # Monotonic, and what a consumer records to say which taxonomy it keyed facts under.
     # SERIAL rather than an application-computed counter: "SELECT max + 1" then INSERT is
@@ -2045,7 +2045,7 @@ class EntityTaxonomy(Base):
 
     __table_args__ = (
         Index(
-            "uq_entity_taxonomies_active",
+            "uq_entity_type_taxonomies_active",
             "active",
             unique=True,
             postgresql_where=text("active"),
@@ -2056,7 +2056,7 @@ class EntityTaxonomy(Base):
 class PageNeeds(Base):
     """What one wiki page keeps track of — its information needs.
 
-    Current-valued, unlike ``entity_taxonomies``: a page's needs describe that page as it is
+    Current-valued, unlike ``entity_type_taxonomies``: a page's needs describe that page as it is
     now, so re-extracting replaces them. There is nothing to orphan, because nothing keys
     facts by a need.
 
@@ -2075,9 +2075,9 @@ class PageNeeds(Base):
     stop being visible at once rather than at the next extraction, while the row itself survives
     long enough for a restore to get them back for free.
 
-    ``content_sha256`` / ``model`` / ``taxonomy_id`` together are the re-extract guard, and
+    ``content_sha256`` / ``model`` / ``entity_type_taxonomy_id`` together are the re-extract guard, and
     all three belong in it. The hash catches an edited page; ``model`` catches a model change,
-    which changes what gets extracted; ``taxonomy_id`` catches a re-derived taxonomy, whose
+    which changes what gets extracted; ``entity_type_taxonomy_id`` catches a re-derived taxonomy, whose
     type menu the entity labels were drawn from. A run that skipped a page because only the
     taxonomy moved would leave behind entity types the current taxonomy no longer defines.
     """
@@ -2099,12 +2099,12 @@ class PageNeeds(Base):
     # CASCADE: losing the taxonomy row must not delete a page's needs, only the ability to
     # resolve their type names — and NULL here reads correctly as "types unresolvable", which
     # makes the page stale and gets it re-extracted.
-    taxonomy_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("entity_taxonomies.id", ondelete="SET NULL")
+    entity_type_taxonomy_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("entity_type_taxonomies.id", ondelete="SET NULL")
     )
     # [{need_name, need_kind, description, detail_level, current_content,
     #   entities: [{canonical_name, entity_type, primary}], focus}, ...]
-    # JSONB and free-form for the same reason as ``EntityTaxonomy.types``: the shape is owned
+    # JSONB and free-form for the same reason as ``EntityTypeTaxonomy.types``: the shape is owned
     # by ``app.ingest.needs``, read whole, and never queried by field.
     needs: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)

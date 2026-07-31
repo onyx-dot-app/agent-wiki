@@ -1,7 +1,7 @@
 """Postgres store for per-page information needs.
 
 Current-valued: a page's needs describe that page as it is now, so a re-extraction replaces
-them. That is the opposite of ``app.db.entity_taxonomy``, which is append-only — and the
+them. That is the opposite of ``app.db.entity_type_taxonomy``, which is append-only — and the
 difference is that nothing keys facts by a need, so there is nothing a replacement can orphan.
 
 The reason this is stored at all rather than recomputed is cost. Extraction is one LLM call per
@@ -44,7 +44,7 @@ class StoredNeeds(NamedTuple):
     path: str
     needs: list[dict[str, Any]]
     model: str
-    taxonomy_id: int | None
+    entity_type_taxonomy_id: int | None
     updated_at: str
 
 
@@ -59,7 +59,7 @@ def content_sha256(body: str) -> str:
 
 
 def stale_paths(
-    pages: list[tuple[str, str]], *, model: str | None = None, taxonomy_id: int | None = None
+    pages: list[tuple[str, str]], *, model: str | None = None, entity_type_taxonomy_id: int | None = None
 ) -> list[str]:
     """Which of ``pages`` need extracting: never extracted, edited since, or extracted under a
     different model or taxonomy. Returns paths, since that is what the caller holds bodies by.
@@ -85,7 +85,7 @@ def stale_paths(
                     PageNeeds.doc_id,
                     PageNeeds.content_sha256,
                     PageNeeds.model,
-                    PageNeeds.taxonomy_id,
+                    PageNeeds.entity_type_taxonomy_id,
                 )
             )
         }
@@ -93,7 +93,7 @@ def stale_paths(
         path
         for path, body in pages
         if path not in ids
-        or stored.get(ids[path]) != (content_sha256(body), want_model, taxonomy_id)
+        or stored.get(ids[path]) != (content_sha256(body), want_model, entity_type_taxonomy_id)
     ]
 
 
@@ -103,7 +103,7 @@ def store(
     body: str,
     needs: list[dict[str, Any]],
     model: str | None = None,
-    taxonomy_id: int | None = None,
+    entity_type_taxonomy_id: int | None = None,
 ) -> str:
     """Replace the needs of the page at ``path``. Returns the ``doc_id`` written.
 
@@ -121,7 +121,7 @@ def store(
             s.add(row)
         row.content_sha256 = content_sha256(body)
         row.model = model or ""
-        row.taxonomy_id = taxonomy_id
+        row.entity_type_taxonomy_id = entity_type_taxonomy_id
         row.needs = needs
         row.updated_at = _now()
     return doc_id
@@ -134,7 +134,7 @@ def _select_stored():
         WikiDocId.path,
         PageNeeds.needs,
         PageNeeds.model,
-        PageNeeds.taxonomy_id,
+        PageNeeds.entity_type_taxonomy_id,
         PageNeeds.updated_at,
     ).join(WikiDocId, WikiDocId.id == PageNeeds.doc_id)
 
