@@ -55,8 +55,6 @@ from app.wiki import filesystem, git as wiki_git
 
 log = logging.getLogger(__name__)
 
-ARTIFACT_VERSION = 1
-
 # --- thresholds -------------------------------------------------------------------------
 # All distributional or count-based rather than fractions of the corpus. A fraction does not
 # survive a change of scale: on a small wiki almost everything recurring clears 40% of pages,
@@ -571,7 +569,6 @@ def derive(
 
     fingerprint = embeddings.content_sha256("\n".join(sorted(f"{p}:{len(b)}" for p, b in pages)))
     return {
-        "artifact_version": ARTIFACT_VERSION,
         "derived_at": datetime.now(timezone.utc).isoformat(),
         "corpus_fingerprint": fingerprint,
         "provenance": {
@@ -643,9 +640,8 @@ def store_taxonomy(artifact: dict[str, Any]) -> None:
     can say what it needs to read.
     """
     log.info(
-        "entity_types: derived taxonomy v%s (%s) — not persisted; no store configured yet",
-        artifact.get("artifact_version"),
-        artifact.get("corpus_fingerprint", "")[:12],
+        "entity_types: derived taxonomy for corpus %s — not persisted; no store configured yet",
+        str(artifact.get("corpus_fingerprint", ""))[:12],
     )
 
 
