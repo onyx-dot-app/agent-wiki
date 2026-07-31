@@ -18,13 +18,18 @@ describe the corpus it will be applied to:
     4. GROUP     cluster referents by kind — this one IS semantic.
     5. NAME      one call per group: name the kind from its observed instances.
     6. MERGE     one call over the whole taxonomy; per-group naming cannot generalise.
-    7. FLOOR     types with too little support fold into ``other``. Deterministic.
 
-Note what is NOT filtered: nothing is excluded for being too common or too rare. Both were
-tried and both were wrong. Excluding ubiquitous referents starved the taxonomy of real
-members — a tool named on every page is still a tool. Excluding single sightings answered
-"is this entity real?" when the question here is "what kinds exist?", and dropped two thirds
-of the evidence. The only evidence test that belongs is at the TYPE level, in apply_floor().
+Note what is NOT filtered: nothing is excluded for being too common or too rare, at either
+the referent or the type level. All three were tried and all three were wrong. Excluding
+ubiquitous referents starved the taxonomy of real members — a tool named on every page is
+still a tool. Excluding single sightings answered "is this entity real?" when the question
+here is "what kinds exist?". And a minimum-members floor on the types themselves was a
+no-op whenever the merge worked, while replacing true statements with a bucket: a `font`
+type with two members says something, `other` says nothing.
+
+Keeping types few and general is the MERGE step's job, and it does it — 75 types to 9 on a
+137-page corpus. A second, count-based implementation of the same intent only cost
+information.
 
 Home entities — the organization a wiki is written BY, whose name therefore carries no
 discriminative signal — are a real and separate need, consumed by the extraction prompt.
@@ -63,17 +68,8 @@ from app.wiki import filesystem, git as wiki_git
 
 log = logging.getLogger(__name__)
 
-# --- thresholds -------------------------------------------------------------------------
-# Absolute counts, and they do not scale: 3 referents out of 2,000 is meaningful, 3 out of
-# 50,000 is not. Fractions of the corpus fail the other way (on a small wiki everything
-# recurring clears them). Both want expressing against the observed distribution instead —
-# they are stated as counts for now because the corpus sizes they have been checked against
-# are narrow.
+# --- parameters ---------------------------------------------------------------------------
 GROUP_SIMILARITY = 0.35  # cosine floor for "same kind of thing"
-MIN_TYPE_REFERENTS = 3  # a category needs this many distinct members to exist
-MIN_TYPE_DOCS = 2  # ...spread over at least this many pages
-OTHER_TYPE = "other"
-
 MERGE_ROUNDS = 3  # merge exits on convergence; this only bounds the loop
 
 # Fallback when no derived artifact is present, so a deployment that has never run the
@@ -439,37 +435,6 @@ def fold(mentions: list[Mention]) -> list[Referent]:
     return referents
 
 
-def apply_floor(types: list[EntityType]) -> list[EntityType]:
-    """Fold under-supported types into ``other``.
-
-    Not a cap on type COUNT — that would force merges regardless of evidence and would not
-    scale. This is a floor in EVIDENCE units, so a larger corpus supports more types without
-    changing the parameter. ``other`` is a first-class destination: for a referent with one
-    sighting, "not enough evidence to type this yet" is the true answer, and forcing every
-    referent into a named type is what pressures the namer into inventing a category for a
-    single acronym.
-    """
-    keep: list[EntityType] = []
-    folded: list[EntityType] = []
-    for t in types:
-        strong = t.n_referents >= MIN_TYPE_REFERENTS and t.n_docs >= MIN_TYPE_DOCS
-        (keep if strong and t.name != OTHER_TYPE else folded).append(t)
-    if folded:
-        keep.append(
-            EntityType(
-                name=OTHER_TYPE,
-                definition=(
-                    "A named referent with too few sightings to establish its own category. "
-                    "Not a kind of thing — a holding bucket, revisited as the corpus grows."
-                ),
-                examples=[e for t in folded for e in t.examples][:10],
-                n_referents=sum(t.n_referents for t in folded),
-                n_docs=max(t.n_docs for t in folded),
-            )
-        )
-    return sorted(keep, key=lambda t: (t.name == OTHER_TYPE, -t.n_referents))
-
-
 # --- artifact ---------------------------------------------------------------------------
 def load_taxonomy(path: str | None) -> tuple[dict[str, str], frozenset[str]]:
     """``(type definitions, home entity names)`` from a derived artifact.
@@ -560,8 +525,7 @@ def derive(
         else:
             collapsed[t.name] = t
 
-    merged = merge_types(list(collapsed.values()), model=model)
-    final = apply_floor(merged)
+    final = merge_types(list(collapsed.values()), model=model)
 
     fingerprint = embeddings.content_sha256("\n".join(sorted(f"{p}:{len(b)}" for p, b in pages)))
     return {
@@ -571,8 +535,6 @@ def derive(
             "model": model or "(default)",
             "embedding_model": embeddings.model_name(),
             "group_similarity": GROUP_SIMILARITY,
-            "min_type_referents": MIN_TYPE_REFERENTS,
-            "min_type_docs": MIN_TYPE_DOCS,
         },
         "stats": {
             "n_pages": len(pages),
@@ -583,7 +545,6 @@ def derive(
             "n_typed": len(surviving),
             "n_groups": len(groups),
             "n_types_named": len(collapsed),
-            "n_types_merged": len(merged),
             "n_types": len(final),
         },
         "entity_types": [t.to_json() for t in final],

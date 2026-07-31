@@ -1,19 +1,15 @@
 """The deterministic half of entity-type derivation.
 
-Stages 5 and 6 are LLM calls and are not pinned here. Everything else is a pure function,
-and those are exactly the parts that must not drift: they decide which referents count as
-one thing, which carry signal, and which categories have enough evidence to exist. A change
-in any of them silently changes the taxonomy, and the taxonomy keys facts by entity.
+Naming and merging are LLM calls and are not pinned here. What is left is pure: deciding
+which spellings are one referent, and which extracted strings are things the wiki tracks
+rather than things it is made of. Both change the taxonomy silently if they drift, and the
+taxonomy is what keys facts by entity.
 """
 
 from __future__ import annotations
 
 from app.ingest.entity_types import (
-    MIN_TYPE_REFERENTS,
-    OTHER_TYPE,
-    EntityType,
     Mention,
-    apply_floor,
     fold,
     is_corpus_artifact,
     normalize_surface,
@@ -79,31 +75,3 @@ class TestFold:
             [Mention(surface="Zendesk", page="a.md"), Mention(surface="Freshdesk", page="a.md")]
         )
         assert len(folded) == 2
-
-
-class TestApplyFloor:
-    def _type(self, name: str, refs: int, docs: int = 5) -> EntityType:
-        return EntityType(name=name, definition="d", examples=[name], n_referents=refs, n_docs=docs)
-
-    def test_well_supported_types_survive(self) -> None:
-        kept = apply_floor([self._type("organization", 120), self._type("person", 9)])
-        assert [t.name for t in kept] == ["organization", "person"]
-
-    def test_thin_types_fold_into_other(self) -> None:
-        """One instance is a classification guess, not evidence that a category exists."""
-        kept = apply_floor(
-            [self._type("organization", 120), self._type("facility", 1), self._type("font", 2)]
-        )
-        assert [t.name for t in kept] == ["organization", OTHER_TYPE]
-        other = kept[-1]
-        assert other.n_referents == 3  # 1 + 2, nothing lost
-        assert set(other.examples) == {"facility", "font"}
-
-    def test_a_type_needs_spread_across_pages_too(self) -> None:
-        """Three referents from a single page is one author's vocabulary, not a kind."""
-        kept = apply_floor([self._type("local", MIN_TYPE_REFERENTS, docs=1)])
-        assert [t.name for t in kept] == [OTHER_TYPE]
-
-    def test_other_sorts_last(self) -> None:
-        kept = apply_floor([self._type("thin", 1), self._type("organization", 50)])
-        assert kept[-1].name == OTHER_TYPE
