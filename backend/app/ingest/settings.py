@@ -1,4 +1,5 @@
 """DB-backed ingest settings. Configured from /admin/ingest."""
+
 from __future__ import annotations
 
 import logging
@@ -27,6 +28,11 @@ class IngestSettings(BaseModel):
     # Outbound half of the "Onyx Connection" admin page — the public Onyx
     # origin for Craft launches. None = Craft unavailable.
     onyx_base_url: str | None
+    # The organisation this wiki belongs to. Entity extraction is told not to treat it as a
+    # referent: its name is on nearly every page, so it distinguishes nothing. A setting
+    # rather than derived output — an admin knows it on day one, long before a corpus is big
+    # enough for any statistical signal, and a re-derivation must not overwrite it.
+    organization_name: str | None
     # Auto-update health knobs (see "Taming Bad-Behaved Wikis"): the default
     # per-page warning threshold owners can override, and a hard cap above which
     # a page's ingestion auto-update is turned off. 0 = off.
@@ -45,6 +51,7 @@ def get() -> IngestSettings:
                 max_doc_chars=DEFAULT_MAX_DOC_CHARS,
                 api_key=None,
                 onyx_base_url=None,
+                organization_name=None,
                 warn_update_threshold_default=DEFAULT_WARN_UPDATE_THRESHOLD,
                 auto_update_cap=DEFAULT_AUTO_UPDATE_CAP,
                 updated_at=None,
@@ -54,6 +61,7 @@ def get() -> IngestSettings:
             max_doc_chars=row.max_doc_chars,
             api_key=row.api_key,
             onyx_base_url=row.onyx_base_url,
+            organization_name=row.organization_name,
             warn_update_threshold_default=row.warn_update_threshold_default,
             auto_update_cap=row.auto_update_cap,
             updated_at=row.updated_at,
@@ -66,10 +74,16 @@ def get_onyx_base_url() -> str | None:
     return get().onyx_base_url
 
 
+def get_organization_name() -> str | None:
+    """The organisation the wiki belongs to, or None when an admin has not set it."""
+    return get().organization_name
+
+
 def upsert(
     *,
     max_doc_chars: int,
     onyx_base_url: str | None,
+    organization_name: str | None = None,
     warn_update_threshold_default: int | None = None,
     auto_update_cap: int | None = None,
     updated_by_user_id: str | None = None,
@@ -86,6 +100,10 @@ def upsert(
             s.add(row)
         row.max_doc_chars = max_doc_chars
         row.onyx_base_url = onyx_base_url
+        # Patch semantics, like the health knobs below: None leaves it unchanged, so a
+        # connection-only save cannot silently clear an organisation name someone set.
+        if organization_name is not None:
+            row.organization_name = organization_name.strip() or None
         if warn_update_threshold_default is not None:
             row.warn_update_threshold_default = warn_update_threshold_default
         if auto_update_cap is not None:
@@ -106,10 +124,15 @@ def regenerate_key(*, updated_by_user_id: str | None = None) -> str:
     with session() as s:
         row = s.get(IngestSettingsRow, 1)
         if row is None:
-            s.add(IngestSettingsRow(
-                id=1, max_doc_chars=DEFAULT_MAX_DOC_CHARS, api_key=key, updated_at=now,
-                updated_by_user_id=updated_by_user_id,
-            ))
+            s.add(
+                IngestSettingsRow(
+                    id=1,
+                    max_doc_chars=DEFAULT_MAX_DOC_CHARS,
+                    api_key=key,
+                    updated_at=now,
+                    updated_by_user_id=updated_by_user_id,
+                )
+            )
         else:
             row.api_key = key
             row.updated_at = now

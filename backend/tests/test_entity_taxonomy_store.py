@@ -133,16 +133,27 @@ class TestLoadTaxonomy:
         assert set(load_taxonomy(taxonomy_id=1)[0]) == {"old_name"}
         assert set(load_taxonomy()[0]) == {"new_name"}
 
-    def test_home_entities_come_from_stats(self) -> None:
-        """Not produced yet — the reader is wired so a per-page vote can fill it without
-        changing this side."""
+    def test_names_to_skip_come_from_the_configured_organisation(self) -> None:
+        """Types are derived and versioned; the organisation is configured. An admin knows it
+        on day one, and a re-derivation over a thin corpus must not overwrite it."""
+        from app.ingest import settings as ingest_settings
         from app.ingest.entity_types import load_taxonomy
 
-        artifact = _artifact()
-        artifact["stats"]["home_entities"] = ["Acme"]
-        entity_taxonomy.record(artifact)
+        entity_taxonomy.record(_artifact())
+        assert load_taxonomy()[1] == frozenset()
+
+        ingest_settings.upsert(max_doc_chars=1000, onyx_base_url=None, organization_name="Acme")
 
         assert load_taxonomy()[1] == frozenset({"Acme"})
+
+    def test_a_blank_organisation_name_is_not_a_skip_name(self) -> None:
+        """Whitespace must not become a name the extractor is told to ignore."""
+        from app.ingest import settings as ingest_settings
+        from app.ingest.entity_types import load_taxonomy
+
+        ingest_settings.upsert(max_doc_chars=1000, onyx_base_url=None, organization_name="   ")
+
+        assert load_taxonomy()[1] == frozenset()
 
     def test_a_taxonomy_of_unusable_entries_falls_back(self) -> None:
         """Malformed rows should degrade to the generic list, not to an empty menu that

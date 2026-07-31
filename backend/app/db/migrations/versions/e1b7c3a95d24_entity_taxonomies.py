@@ -1,7 +1,7 @@
 """entity_taxonomies
 
 Adds ``entity_taxonomies``: derived entity-type taxonomies, append-only with one row
-flagged ``active``. Append-only because entity types key facts by entity — a re-derivation
+flagged ``active``, plus ``ingest_settings.organization_name``. Append-only because entity types key facts by entity — a re-derivation
 that renames a type must not orphan rows keyed under the old name, so the superseded
 taxonomy has to stay readable rather than being overwritten.
 
@@ -68,8 +68,12 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("active"),
     )
+    # The organisation the wiki belongs to. A setting, not derived output — see the model.
+    if "organization_name" not in {c["name"] for c in inspector.get_columns("ingest_settings")}:
+        op.add_column("ingest_settings", sa.Column("organization_name", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:
+    op.drop_column("ingest_settings", "organization_name")
     op.drop_index("uq_entity_taxonomies_active", table_name="entity_taxonomies")
     op.drop_table("entity_taxonomies")

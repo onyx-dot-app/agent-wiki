@@ -65,6 +65,7 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 from app.db import entity_taxonomy
+from app.ingest import settings as ingest_settings
 from app.llm import client, embeddings
 from app.llm.prompts import load_prompt
 from app.wiki import filesystem, git as wiki_git
@@ -479,8 +480,24 @@ def fold(mentions: list[Mention]) -> list[Referent]:
 
 
 # --- artifact ---------------------------------------------------------------------------
+def _skip_names() -> frozenset[str]:
+    """Names extraction should not treat as referents — the organisation itself.
+
+    Empty when no organisation is configured, which simply drops the "ignore these" line
+    from the prompt rather than guessing.
+    """
+    name = (ingest_settings.get_organization_name() or "").strip()
+    return frozenset({name}) if name else frozenset()
+
+
 def load_taxonomy(taxonomy_id: int | None = None) -> tuple[dict[str, str], frozenset[str]]:
-    """``(type definitions, home entity names)`` for the active taxonomy.
+    """``(type definitions, names to skip)`` for the active taxonomy.
+
+    The two halves come from different places on purpose. Types are DERIVED, and versioned
+    so a rename cannot orphan facts keyed under the old name. The organisation the wiki
+    belongs to is CONFIGURED (``app.ingest.settings``) — one value, stable, known to an admin
+    on day one, and deliberately not something a re-derivation over a thin corpus can
+    overwrite with a guess.
 
     ``taxonomy_id`` resolves a specific one instead — how a consumer reads back the types it
     keyed facts under, rather than assuming the active taxonomy still means the same thing.
@@ -489,11 +506,7 @@ def load_taxonomy(taxonomy_id: int | None = None) -> tuple[dict[str, str], froze
     relevance scorer degrades to cosine without its model file: a deployment that has never
     run a derivation still works, with types that are generic rather than tailored.
     """
-    row = (
-        entity_taxonomy.get(taxonomy_id)
-        if taxonomy_id is not None
-        else entity_taxonomy.active()
-    )
+    row = entity_taxonomy.get(taxonomy_id) if taxonomy_id is not None else entity_taxonomy.active()
     if row is None:
         return dict(DEFAULT_TYPES), frozenset()
 
@@ -505,11 +518,7 @@ def load_taxonomy(taxonomy_id: int | None = None) -> tuple[dict[str, str], froze
         name, definition = entry.get("name"), entry.get("definition")
         if isinstance(name, str) and isinstance(definition, str) and name and definition:
             defs[name] = definition
-    # Home entities are not derived yet — see the module docstring. The field is read so a
-    # future producer (a per-page vote) can populate it without changing this reader.
-    stats = row.stats or {}
-    home = frozenset(str(a) for a in cast(list[Any], stats.get("home_entities") or []))
-    return (defs or dict(DEFAULT_TYPES)), home
+    return (defs or dict(DEFAULT_TYPES)), _skip_names()
 
 
 def derive(

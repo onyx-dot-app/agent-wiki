@@ -804,6 +804,14 @@ class IngestSettings(Base):
     # origin used for Craft build-API calls, connect redirects, and
     # "Open Craft" deep links. Null = Craft launches unavailable.
     onyx_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The organisation this wiki belongs to. Its name saturates the corpus, so it carries no
+    # discriminative signal and entity extraction is told not to treat it as a referent.
+    #
+    # A SETTING rather than derived output: it is one value, it is stable, and an admin knows
+    # it on day one — long before there are enough pages for any statistical signal to
+    # exist. A derivation may later suggest it, but must not own it, or a re-derivation on a
+    # thin corpus could overwrite something correct with a guess.
+    organization_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Auto-update health knobs (see "Taming Bad-Behaved Wikis"): the default
     # per-page warning threshold owners override via update_policies, and a hard
     # cap above which a page's ingestion auto-update is turned off. 0 = off.
