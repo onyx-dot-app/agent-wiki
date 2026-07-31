@@ -26,10 +26,12 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # Guarded because ``0001_initial`` builds fresh databases from the current models,
-    # which already carry this table.
+    # which already carry this table. Both names are checked: the models now declare it as
+    # ``entity_type_taxonomies`` (renamed in f2c9a41e7b06), so a fresh database arrives here
+    # with the new name and must not have the old one created alongside it.
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    if inspector.has_table("entity_taxonomies"):
+    if inspector.has_table("entity_taxonomies") or inspector.has_table("entity_type_taxonomies"):
         return
     op.create_table(
         "entity_taxonomies",

@@ -57,7 +57,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
-from app.db import entity_taxonomy
+from app.db import entity_type_taxonomy
 from app.llm import client, embeddings
 from app.llm.prompts import load_prompt
 from app.wiki import filesystem, git as wiki_git
@@ -474,17 +474,29 @@ def fold(mentions: list[Mention]) -> list[Referent]:
 # --- artifact ---------------------------------------------------------------------------
 
 
-def load_taxonomy(taxonomy_id: int | None = None) -> dict[str, str]:
+def active_entity_type_taxonomy_id() -> int | None:
+    """Id of the taxonomy in force, or None when nothing has been derived.
+
+    A consumer that labels things with type names should read this ONCE per run and store it
+    alongside what it wrote, so its labels stay resolvable through ``load_taxonomy(id)`` after
+    a re-derivation renames a type. Reading it per item would let a derivation land mid-run and
+    leave one batch labelled under two taxonomies.
+    """
+    row = entity_type_taxonomy.active()
+    return row.id if row is not None else None
+
+
+def load_taxonomy(entity_type_taxonomy_id: int | None = None) -> dict[str, str]:
     """``{type name: definition}`` for the active taxonomy.
 
-    ``taxonomy_id`` resolves a specific one instead — how a consumer reads back the types it
+    ``entity_type_taxonomy_id`` resolves a specific one instead — how a consumer reads back the types it
     keyed facts under, rather than assuming the active taxonomy still means the same thing.
 
     Falls back to ``DEFAULT_TYPES`` when nothing has been derived, mirroring how the
     relevance scorer degrades to cosine without its model file: a deployment that has never
     run a derivation still works, with types that are generic rather than tailored.
     """
-    row = entity_taxonomy.get(taxonomy_id) if taxonomy_id is not None else entity_taxonomy.active()
+    row = entity_type_taxonomy.get(entity_type_taxonomy_id) if entity_type_taxonomy_id is not None else entity_type_taxonomy.active()
     if row is None:
         return dict(DEFAULT_TYPES)
 
@@ -612,16 +624,16 @@ def run_derivation(
         stats["n_typed"],
         stats["n_types"],
     )
-    artifact["taxonomy_id"] = store_taxonomy(artifact, triggered_by=triggered_by_user_id)
+    artifact["entity_type_taxonomy_id"] = store_taxonomy(artifact, triggered_by=triggered_by_user_id)
     return artifact
 
 
 def store_taxonomy(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
     """Persist a derived taxonomy and make it active. Returns its id.
 
-    Append-only: see ``app.db.entity_taxonomy`` for why a rename must not overwrite.
+    Append-only: see ``app.db.entity_type_taxonomy`` for why a rename must not overwrite.
     """
-    return entity_taxonomy.record(artifact, triggered_by=triggered_by)
+    return entity_type_taxonomy.record(artifact, triggered_by=triggered_by)
 
 
 def read_corpus(prefix: str = "") -> list[tuple[str, str]]:
