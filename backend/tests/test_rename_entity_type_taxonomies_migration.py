@@ -106,6 +106,39 @@ def test_the_active_index_follows_the_table(tmp_db) -> None:
     assert "uq_entity_taxonomies_active" not in names
 
 
+def test_constraints_are_renamed_so_both_paths_agree(tmp_db) -> None:
+    """Postgres renames neither indexes nor constraints with a table. Left alone, an upgraded
+    database keeps ``entity_taxonomies_pkey`` while a fresh one gets
+    ``entity_type_taxonomies_pkey`` — two different schemas, and any later migration naming a
+    constraint would work on one and fail on the other."""
+    with session() as s:
+        fresh = _constraint_names(s)
+    assert fresh, "fresh schema should have constraints to compare against"
+
+    _rewind_to_the_old_name()
+    init_db()
+
+    with session() as s:
+        upgraded = _constraint_names(s)
+    assert upgraded == fresh
+    assert not any(name.startswith("entity_taxonomies") for name in upgraded)
+
+
+def _constraint_names(s) -> set[str]:
+    return set(
+        s.scalars(
+            sa.text(
+                "SELECT conname FROM pg_constraint "
+                "WHERE conrelid = 'entity_type_taxonomies'::regclass"
+            )
+        )
+    ) | set(
+        s.scalars(
+            sa.text("SELECT indexname FROM pg_indexes WHERE tablename = 'entity_type_taxonomies'")
+        )
+    )
+
+
 def test_page_needs_lands_on_the_renamed_table(tmp_db) -> None:
     """``page_needs`` is created after the rename and keys into it, so the ordering of the two
     migrations is load-bearing: created first, its foreign key would point at a gone name."""

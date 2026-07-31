@@ -289,12 +289,25 @@ class TestOutputCap:
 
         assert seen == [needs.MAX_OUTPUT_TOKENS]
 
-    def test_truncation_is_logged_as_truncation(self, monkeypatch, caplog) -> None:
-        """The fix for a truncated response is a bigger cap, not another prompt — so it must
-        not be logged as a parse failure."""
+    @pytest.mark.parametrize(
+        "stop_reason",
+        [
+            "max_tokens",  # anthropic, bedrock, gemini (MAX_TOKENS)
+            "length",  # ollama, custom (OpenAI-compatible finish_reason)
+            "incomplete",  # openai Responses API reports status, not a stop_reason
+        ],
+    )
+    def test_truncation_is_logged_as_truncation(self, monkeypatch, caplog, stop_reason) -> None:
+        """The fix for a truncated response is a bigger cap, not another prompt — so it must not
+        be logged as a parse failure.
+
+        Every provider's own vocabulary counts, and "incomplete" is the one that matters most:
+        it is what the OpenAI Responses API reports, and OpenAI is the provider a truncated
+        response was actually observed on. Matching only the other two made this silent exactly
+        where it was needed."""
 
         def fake_complete(messages, **kwargs):
-            return CompletionResult(text='{"needs": [{"need_', stop_reason="max_tokens")
+            return CompletionResult(text='{"needs": [{"need_', stop_reason=stop_reason)
 
         monkeypatch.setattr(needs.client, "complete", fake_complete)
         with caplog.at_level("WARNING"):

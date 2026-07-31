@@ -50,9 +50,19 @@ def upgrade() -> None:
     # the new name; a deployed one carries the old name from e1b7c3a95d24.
     if inspector.has_table(_OLD) and not inspector.has_table(_NEW):
         op.rename_table(_OLD, _NEW)
-        # The partial unique index enforcing "at most one active" is renamed too, so the
-        # constraint stays findable by the name the model declares.
+        # Postgres renames NEITHER indexes nor constraints with the table, so each is renamed
+        # explicitly. Without this an upgraded database and a database built fresh from the
+        # models end up with different schemas — the fresh one gets
+        # ``entity_type_taxonomies_pkey``, the upgraded one keeps ``entity_taxonomies_pkey`` —
+        # and any later migration that names a constraint would then work on one and fail on the
+        # other. IF EXISTS on each, because a database that reached this revision by some other
+        # route may already carry the new names.
         op.execute(f"ALTER INDEX IF EXISTS uq_{_OLD}_active RENAME TO uq_{_NEW}_active")
+        op.execute(f"ALTER INDEX IF EXISTS {_OLD}_pkey RENAME TO {_NEW}_pkey")
+        op.execute(
+            f"ALTER TABLE {_NEW} RENAME CONSTRAINT {_OLD}_triggered_by_fkey "
+            f"TO {_NEW}_triggered_by_fkey"
+        )
 
     # Guarded because ``0001_initial`` builds fresh databases from the current models, which
     # already carry this table.
@@ -81,5 +91,10 @@ def downgrade() -> None:
     op.drop_table("page_needs")
     inspector = sa.inspect(op.get_bind())
     if inspector.has_table(_NEW) and not inspector.has_table(_OLD):
+        op.execute(
+            f"ALTER TABLE {_NEW} RENAME CONSTRAINT {_NEW}_triggered_by_fkey "
+            f"TO {_OLD}_triggered_by_fkey"
+        )
+        op.execute(f"ALTER INDEX IF EXISTS {_NEW}_pkey RENAME TO {_OLD}_pkey")
         op.execute(f"ALTER INDEX IF EXISTS uq_{_NEW}_active RENAME TO uq_{_OLD}_active")
         op.rename_table(_NEW, _OLD)

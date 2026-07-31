@@ -308,6 +308,26 @@ class TestBookkeeping:
 
         assert sorted(row.path for row in page_needs.load_all()) == ["team/a.md", "teamwork.md"]
 
+    def test_an_empty_read_does_not_discard_stored_needs(
+        self, tmp_repo, llm, caplog, monkeypatch
+    ) -> None:
+        """``read_corpus`` skips a page it cannot read, so a filesystem fault is indistinguishable
+        from a wiki that lost every page. Pruning on that discards needs costing one LLM call each
+        and unrecoverable without re-paying; keeping them costs nothing, because ``load_all``
+        already hides pages whose doc-id row is not live."""
+        _page("a.md")
+        _page("b.md")
+        needs.run_extraction()
+        assert len(page_needs.load_all()) == 2
+
+        monkeypatch.setattr(needs.entity_types, "read_corpus", lambda prefix="": [])
+        with caplog.at_level("WARNING"):
+            counts = needs.run_extraction()
+
+        assert counts["pages"] == 0
+        assert sorted(row.path for row in page_needs.load_all()) == ["a.md", "b.md"]
+        assert any("skipping prune" in r.getMessage() for r in caplog.records)
+
     def test_an_empty_wiki_is_not_an_error(self, tmp_repo, llm) -> None:
         counts = needs.run_extraction()
 

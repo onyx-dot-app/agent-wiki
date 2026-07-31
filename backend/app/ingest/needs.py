@@ -247,8 +247,16 @@ def extract_page(
 
         # Named explicitly because truncation is otherwise indistinguishable from a model that
         # simply emitted bad JSON, and the fix is different: raise the cap, don't re-prompt.
-        # Providers pass their own vocabulary through, hence the substring match.
-        if any(token in result.stop_reason.lower() for token in ("max_token", "length")):
+        #
+        # Providers pass their own vocabulary straight through, so this matches all of them:
+        # "max_tokens" (anthropic, bedrock, gemini's MAX_TOKENS), "length" (ollama, custom), and
+        # "incomplete" -- the OpenAI Responses API has no stop_reason and reports status instead
+        # (app/llm/providers/openai.py). Omitting that last one made this silent on OpenAI, which
+        # is the provider a truncated response was actually observed on.
+        if any(
+            token in result.stop_reason.lower()
+            for token in ("max_token", "length", "incomplete")
+        ):
             log.warning(
                 "needs: response for %s hit the %d-token output cap — its needs will be "
                 "incomplete or unparseable",
@@ -354,9 +362,22 @@ def run_extraction(
         if progress:
             progress(n, len(stale))
 
-    # Scoped to the prefix walked: ``by_path`` only describes that scope, so an unscoped prune
-    # would read every page outside it as deleted.
-    page_needs.prune(set(by_path), prefix=prefix)
+    if pages:
+        # Scoped to the prefix walked: ``by_path`` only describes that scope, so an unscoped
+        # prune would read every page outside it as deleted.
+        page_needs.prune(set(by_path), prefix=prefix)
+    else:
+        # A read that comes back empty is not evidence the wiki is empty — ``read_corpus``
+        # silently skips a page it cannot read, so a filesystem fault looks identical to a
+        # deletion of everything. Pruning on it discards needs that cost one LLM call each and
+        # cannot be recovered without re-paying, while KEEPING them costs nothing: ``load_all``
+        # already excludes pages whose doc-id row is not live, so orphans stay invisible
+        # downstream. So the safe direction is to refuse, loudly.
+        log.warning(
+            "needs: corpus read returned no pages for prefix %r — skipping prune rather than "
+            "discarding stored needs",
+            prefix,
+        )
     log.info(
         "needs: %d need(s) from %d page(s); %d unchanged, %d yielded nothing",
         counts["needs"],
