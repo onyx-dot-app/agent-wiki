@@ -2001,3 +2001,53 @@ class Notification(Base):
         UniqueConstraint("user_id", "notif_type", "data", name="uq_notifications_user_type_data"),
         Index("idx_notifications_user_dismissed", "user_id", "dismissed"),
     )
+
+class EntityTaxonomy(Base):
+    """A derived entity-type taxonomy, kept as a history rather than a current value.
+
+    Entity types key facts by entity, so a re-derivation that renames a type would orphan
+    every row keyed under the old name. Rows are therefore append-only and one is marked
+    ``active``: a new derivation inserts and flips the flag, and the superseded taxonomy
+    stays resolvable for anything still pointing at it.
+
+    ``types`` and ``provenance`` are free-form JSONB. The shape is owned by
+    ``app.ingest.entity_types`` (which produces it) rather than by a column layout, because
+    it is read whole and never queried by field — and because pinning it would mean a
+    migration every time a derivation stage learns to record something new.
+    """
+
+    __tablename__ = "entity_taxonomies"
+
+    # Monotonic, and what a consumer records to say which taxonomy it keyed facts under.
+    # SERIAL rather than an application-computed counter: "SELECT max + 1" then INSERT is
+    # not atomic, so two concurrent derivations could pick the same number.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Exactly one row is active. Enforced by a partial unique index, not by convention.
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    # sha256 over the corpus this was derived from. Answers "has the wiki moved far enough
+    # to warrant re-deriving?", which nothing else can reconstruct after the fact.
+    corpus_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    # The type list: [{name, definition, examples, n_referents, n_docs}, ...]
+    types: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    # Models, thresholds, and the funnel counts. Kept so a human can judge whether a
+    # derivation is trustworthy without re-running it — a merge that collapsed 75 types to 9
+    # looks very different from one that left 75 standing.
+    provenance: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    stats: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    triggered_by: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (
+        Index(
+            "uq_entity_taxonomies_active",
+            "active",
+            unique=True,
+            postgresql_where=text("active"),
+        ),
+    )
