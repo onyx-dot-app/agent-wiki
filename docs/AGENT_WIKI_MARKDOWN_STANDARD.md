@@ -94,3 +94,12 @@ preserve it byte-for-byte:
    the line's block type is unchanged by the next parse — escaping just the
    marker and leaving the whitespace in front of it round-trips the marker
    characters as literal text but not the indentation that preceded them.
+
+2. A block nested inside a list item or blockquote is rebuilt from parsed
+   tokens, not from a slice of the source: the same token line numbers
+   address the undecorated source, so a slice taken inside a blockquote
+   would carry its `> ` prefixes into the content. Content MUST survive
+   unchanged; the syntax that spelled it MAY not. Specifically, a nested
+   thematic break MAY be re-emitted as `---` whatever spelling the source
+   used, and a nested table's cells MAY be re-emitted with single-space
+   padding.
