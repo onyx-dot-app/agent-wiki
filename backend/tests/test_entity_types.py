@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from app.ingest.entity_types import (
     Mention,
+    _member_indices,
     fold,
     is_corpus_artifact,
     normalize_surface,
@@ -75,3 +76,26 @@ class TestFold:
             [Mention(surface="Zendesk", page="a.md"), Mention(surface="Freshdesk", page="a.md")]
         )
         assert len(folded) == 2
+
+
+class TestMemberIndices:
+    """The LLM contract at the naming/merge boundary.
+
+    Both prompts require a partition — every input index in exactly one output type. The
+    caller has to enforce that: an omitted index silently drops a referent, and a repeated
+    one inflates the support a type is judged on.
+    """
+
+    def test_converts_to_zero_based(self) -> None:
+        assert _member_indices({"member_indices": [1, 3]}, 5) == [0, 2]
+
+    def test_drops_out_of_range(self) -> None:
+        assert _member_indices({"member_indices": [1, 99, 0, -2]}, 3) == [0]
+
+    def test_ignores_non_numeric_and_booleans(self) -> None:
+        """True is an int in Python; it is not an index."""
+        assert _member_indices({"member_indices": ["2", None, True, 2]}, 4) == [1]
+
+    def test_missing_or_malformed_is_empty(self) -> None:
+        assert _member_indices({}, 3) == []
+        assert _member_indices({"member_indices": "1,2"}, 3) == []

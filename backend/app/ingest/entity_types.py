@@ -308,16 +308,27 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
         for i, r in enumerate(group, start=1)
     )
     data = _complete_json(system, f"Referents in this group:\n\n{listing}", model=model)
+
+    # The prompt requires a partition: every member in exactly one type. Enforce it. A
+    # response that omits members would silently drop referents, and one that repeats them
+    # would inflate the support counts a type is judged on — so a partial answer is treated
+    # as no answer, not as a smaller one.
     out: list[EntityType] = []
+    claimed: set[int] = set()
     for raw_entry in cast(list[Any], (data or {}).get("types") or []):
         if not isinstance(raw_entry, dict):
             continue
         entry = cast(dict[str, Any], raw_entry)
         name = str(entry.get("type_name") or "").strip().lower().replace(" ", "_")
-        if not name:
-            continue
         indices = _member_indices(entry, len(group))
-        members = [group[i] for i in indices] or group
+        if not name or not indices:
+            continue
+        if claimed & set(indices):
+            log.warning("entity_types: naming returned overlapping members; ignoring response")
+            out = []
+            break
+        claimed.update(indices)
+        members = [group[i] for i in indices]
         out.append(
             EntityType(
                 name=name,
@@ -327,6 +338,13 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
                 n_docs=len({p for r in members for p in r.pages}),
             )
         )
+    if out and len(claimed) < len(group):
+        log.warning(
+            "entity_types: naming covered %d of %d member(s); ignoring response",
+            len(claimed),
+            len(group),
+        )
+        out = []
     if out:
         return out
     # A group we could not name is still evidence; keep it visible rather than dropping it.
@@ -408,9 +426,16 @@ def _merge_once(types: list[EntityType], *, model: str | None) -> list[EntityTyp
 def fold(mentions: list[Mention]) -> list[Referent]:
     """Group surface variants into approximate referents by lexical key.
 
-    Runs BEFORE any counting: variation splits an entity's document frequency across its
-    spellings, and the ambient entity — the one we most need to detect — is the one most
-    likely to be split below the threshold.
+    Nothing is filtered on frequency any more, so this is no longer load-bearing for a
+    threshold — it keeps a type's member and page counts honest (``Jira`` and ``JIRA`` are
+    one referent, not two) and saves embedding one string per spelling.
+
+    Which is also why this stays a cheap rule rather than becoming LLM entity resolution.
+    A rule cannot see ``k8s``/``Kubernetes`` or ``IBM``/``International Business Machines``,
+    and doing better means blocking then adjudicating — real machinery, and non-deterministic.
+    The payoff no longer justifies it: a missed fold now costs one inflated member count,
+    because both spellings still land in the same group and get the same type. Resolution
+    proper belongs where identity actually matters — keying facts, within a type, downstream.
     """
     surfaces: OrderedDict[str, Counter[str]] = OrderedDict()
     pages: dict[str, set[str]] = {}
@@ -527,7 +552,10 @@ def derive(
 
     final = merge_types(list(collapsed.values()), model=model)
 
-    fingerprint = embeddings.content_sha256("\n".join(sorted(f"{p}:{len(b)}" for p, b in pages)))
+    # Hash the CONTENT, not just path and length: an edit that preserves length would
+    # otherwise leave the fingerprint unchanged, and this is what tells you whether the
+    # corpus has moved far enough to warrant re-deriving.
+    fingerprint = embeddings.content_sha256("\n".join(f"{p}\n{b}" for p, b in sorted(pages)))
     return {
         "derived_at": datetime.now(timezone.utc).isoformat(),
         "corpus_fingerprint": fingerprint,
