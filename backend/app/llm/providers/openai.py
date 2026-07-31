@@ -186,18 +186,29 @@ class OpenAIProvider:
                     reason = getattr(incomplete, "reason", "") or ""
                     if etype == "response.failed" or status == "failed":
                         err = getattr(resp, "error", None)
-                        detail = str(getattr(err, "message", "") or "").strip()
+                        # ``code`` is a short, stable identifier ("server_error"); ``message`` is
+                        # free-form upstream text. Only the code reaches the user, because
+                        # LLMError.message is user-presentable by contract and free text from a
+                        # provider can carry request ids, org detail, or echoed input. The
+                        # message is still worth having when diagnosing, so it goes to DEBUG —
+                        # the same split ``_debug_dump`` makes for request/response payloads.
+                        code = str(getattr(err, "code", "") or "").strip()
                         log.error(
-                            "llm failed provider=openai model=%s tokens=%d/%d detail=%s",
+                            "llm failed provider=openai model=%s tokens=%d/%d code=%s",
                             model,
                             in_tok,
                             out_tok,
-                            detail or "(none given)",
+                            code or "(none given)",
                         )
+                        if log.isEnabledFor(logging.DEBUG):
+                            log.debug(
+                                "llm failed provider=openai detail=%s",
+                                str(getattr(err, "message", "") or "").strip() or "(none given)",
+                            )
                         raise LLMError(
                             "provider",
-                            f"OpenAI reported the response failed: {detail}"
-                            if detail
+                            f"OpenAI reported the response failed ({code})."
+                            if code
                             else "OpenAI reported the response failed.",
                         )
                     log_at = log.info if status == "completed" else log.warning

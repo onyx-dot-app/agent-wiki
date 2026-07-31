@@ -963,15 +963,32 @@ def test_openai_raises_on_a_failed_response(configure_openai, fake_openai):
     assert excinfo.value.code == "provider"
 
 
-def test_openai_failure_message_carries_the_provider_detail(configure_openai, fake_openai):
+def test_openai_failure_names_the_code_not_the_upstream_text(configure_openai, fake_openai):
+    """``LLMError.message`` is user-presentable by contract, and this one travels to HTTP, SSE and
+    agent-tool responses. So the stable ``code`` goes to the user and the free-form upstream
+    ``message`` — which can carry request ids, org detail, or echoed input — does not."""
     event = _o_terminal("response.failed", status="failed")
-    event.response.error = SimpleNamespace(message="upstream capacity exceeded")
+    event.response.error = SimpleNamespace(
+        code="server_error", message="request 7f3a for org-XYZ echoed: <internal detail>"
+    )
     fake_openai([_o_text_delta("half"), event])
 
     with pytest.raises(LLMError) as excinfo:
         llm_client.complete([{"role": "user", "content": "extract"}])
 
-    assert "upstream capacity exceeded" in excinfo.value.message
+    assert "server_error" in excinfo.value.message
+    assert "org-XYZ" not in excinfo.value.message
+    assert "internal detail" not in excinfo.value.message
+
+
+def test_openai_failure_without_a_code_still_raises(configure_openai, fake_openai):
+    fake_openai([_o_text_delta("half"), _o_terminal("response.failed", status="failed")])
+
+    with pytest.raises(LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "extract"}])
+
+    assert excinfo.value.code == "provider"
+    assert "failed" in excinfo.value.message
 
 
 def test_a_truncated_response_is_not_treated_as_a_failure(configure_openai, fake_openai):
