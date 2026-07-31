@@ -31,6 +31,7 @@ from typing import Any
 from app.wiki import git
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
 from app.wiki.automanage.detectors.template_echo import template_body_blob_shas
+from app.wiki.filesystem import is_page
 from app.wiki.change_proposals import ProposalOp
 
 log = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ class _BodyDupDetector:
         return trigger in (TriggerKind.SWEEP, TriggerKind.ON_CREATE)
 
     def detect(self, scope: Scope) -> list[ProposalDraft]:
-        in_scope = {p for p in scope.paths if p.endswith(".md")}
+        in_scope = {p for p in scope.paths if is_page(p)}
         if len(in_scope) < 2:
             return []
         by_blob: dict[str, list[str]] = defaultdict(list)

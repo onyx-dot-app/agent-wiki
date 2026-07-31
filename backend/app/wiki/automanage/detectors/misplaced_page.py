@@ -30,6 +30,7 @@ from app.llm.prompts import load_prompt
 from app.wiki import git
 from app.wiki.automanage.detectors import llm_agent
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
+from app.wiki.filesystem import is_page
 from app.wiki.change_proposals import ProposalOp
 
 log = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ class _MisplacedPageDetector:
         already hold real pages)."""
         counts: dict[str, int] = {}
         for p in scope.paths:
-            if not p.endswith(".md") or "/" not in p:
+            if not is_page(p) or "/" not in p:
                 continue
             folder = p.rsplit("/", 1)[0]
             counts[folder] = counts.get(folder, 0) + 1
@@ -106,7 +107,7 @@ class _MisplacedPageDetector:
 
     def _candidates(self, scope: Scope) -> list[str]:
         root_pages = sorted(
-            p for p in scope.paths if p.endswith(".md") and "/" not in p
+            p for p in scope.paths if is_page(p) and "/" not in p
         )
         root_pages = [
             p

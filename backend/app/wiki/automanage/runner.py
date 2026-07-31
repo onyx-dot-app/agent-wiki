@@ -42,6 +42,7 @@ from app.wiki.automanage import (
 )
 from app.wiki.automanage.detectors import DETECTORS
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
+from app.wiki.filesystem import is_page
 from app.wiki.change_proposals import (
     ProposalCreatedVia,
     ProposalStatus,
@@ -102,7 +103,7 @@ def _partition_by_audience(scope: Scope) -> list[Scope]:
     single page are dropped — nothing to pair. Most wikis are default-public,
     so this usually returns one big bucket and the partition costs one batched
     fingerprint pass."""
-    pages = [p for p in scope.paths if p.endswith(".md")]
+    pages = [p for p in scope.paths if is_page(p)]
     if not pages:
         return []
     fps = fingerprint.fingerprints_for_paths(pages)
@@ -429,7 +430,7 @@ def run_detection(
         # 148 pages read as 193. Folders join this count when they become
         # scanned units; the scope size stays in the log line, where it is the
         # useful cost signal.
-        scanned = sum(1 for p in paths if p.endswith(".md"))
+        scanned = sum(1 for p in paths if is_page(p))
         runs.mark_completed(run_id, paths_scanned=scanned, proposals_emitted=emitted)
         log.info(
             "detection run %s (%s): scanned %d pages (%d files in scope), emitted %d proposals",
