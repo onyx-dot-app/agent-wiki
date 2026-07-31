@@ -6,8 +6,8 @@ the obvious way to get one is for someone to write it down. That does not surviv
 with customers: nobody arriving with a wiki is going to author a type list first, and a list
 written for one deployment is wrong for the next.
 
-So derive it from the pages themselves. The pipeline reads only the wiki — never an incoming document — because a taxonomy has to
-describe the corpus it will be applied to:
+So derive it from the pages themselves. The pipeline reads only the wiki — never an
+incoming document — because a taxonomy has to describe the corpus it will be applied to:
 
     1. EXTRACT   per page, whole page, with NO type menu. Supplying one would presuppose the
                  answer; we want the referents the corpus actually contains.
@@ -31,7 +31,6 @@ Keeping types few and general is the MERGE step's job, and it is effective at it
 per-group naming step over-splits by construction, and one pass over the whole taxonomy
 collapses that. A second, count-based implementation of the same intent only cost
 information.
-
 
 Deliberately NOT solved here: exact entity resolution to canonical ids. Types need
 approximate counts, not identities — and once types exist, resolution gets easier because
