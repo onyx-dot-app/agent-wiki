@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from pycrdt import Doc, XmlElement, XmlFragment, XmlText
 
+from app.wiki.markdown_blocks import gfm_parser
 from app.wiki.markdown_yjs import (
     BLOCK_ID_ATTR,
     ROOT_XML_KEY,
@@ -504,6 +505,28 @@ def test_pipe_in_a_nested_table_cell_stays_escaped() -> None:
     table = list(_root(doc).children[0].children[0].children)[1]
     assert serialize_row(list(table.children)[0]) == "| a \\| b | c |\n"
     assert reconstruct_body(doc) == body
+
+
+def test_pipe_inside_a_code_span_in_a_nested_table_cell_gains_no_backslash() -> None:
+    """GFM requires a cell's pipe to be escaped even inside a code span, and
+    the table tokenizer unescapes it while splitting cells — before inline
+    parsing runs. So a cell's token content holds source-level text with bare
+    pipes either way, and re-escaping every one of them reproduces the source
+    spelling exactly rather than leaking a backslash into the code span."""
+    body = "- item\n\n  | h1 | h2 |\n  | --- | --- |\n  | b `\\|` az | y |\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    assert once == body
+    # The rendered code span still holds one bare pipe, and repeated
+    # checkpoints don't accumulate backslashes in front of it.
+    code_spans = [
+        child.content
+        for token in gfm_parser().parse(once)
+        if token.type == "inline"
+        for child in (token.children or [])
+        if child.type == "code_inline"
+    ]
+    assert code_spans == ["|"]
+    assert reconstruct_body(seed_doc_from_markdown(once)) == once
 
 
 def test_code_block_language_and_content_stored_without_fence_syntax() -> None:
