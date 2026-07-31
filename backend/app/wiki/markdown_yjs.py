@@ -630,6 +630,11 @@ def _build_block_sequence(
 # inline text and matched by hand rather than via a token type.
 _TASK_MARKER_RE = re.compile(r"^\[([ xX])\](?:\s+|$)")
 
+# The same marker in the spelling `_escape_inline_text` gives it, which is how
+# it reaches the front of a plain list item's serialized body. See the
+# un-escaping call site in `_serialize_list`.
+_ESCAPED_TASK_MARKER_RE = re.compile(r"^\\\[([ xX])\\\](\s|$)")
+
 
 def _list_item_task_marker(
     tokens: list[Any], item_start: int, item_end: int
@@ -1002,6 +1007,28 @@ def _serialize_list(node: XmlElement) -> str:
             marker = f"{start + idx}. " if ordered else "- "
             indent = " " * len(marker)
         body = _serialize_block_sequence(list(item.children), indent)  # type: ignore[arg-type]
+        if not is_task:
+            # A literal "[x] " opening a plain list item is a checkbox marker
+            # the parse declined to promote — the list is mixed (a taskList's
+            # children must be uniformly taskItems, see `_build_list`) or it's
+            # ordered — not decorative text. `_escape_inline_text` escapes every
+            # "["/"]" it sees, which here would rewrite a marker that GFM
+            # readers and a later uniform version of this same list still act on
+            # into permanently inert text, an edit nothing in the editor shows
+            # (the item renders identically either way). Bare, it re-parses to
+            # exactly the text it was serialized from, so the round trip stays
+            # byte-stable *and* the marker survives.
+            #
+            # This also normalizes a marker the source deliberately escaped,
+            # and can't do otherwise: markdown-it resolves "\[x\]" to the text
+            # "[x]" before this codec sees a token, so by here the two
+            # spellings are one string and one of them has to be picked for
+            # both. Live is the same choice `_build_list` makes on the other
+            # side of the fork — a list whose items *all* carry an escaped
+            # marker promotes to real taskItems — so the two paths agree
+            # rather than making escaping mean opposite things in a mixed
+            # list and a uniform one.
+            body = _ESCAPED_TASK_MARKER_RE.sub(r"[\1]\2", body, count=1)
         lines.append(marker + body)
     return "\n\n".join(lines) + "\n"
 

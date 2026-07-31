@@ -140,10 +140,22 @@
   list-style: none;
   padding-left: 0;
 }
-.editor-prose ul[data-type="taskList"] li {
+/* Direct children only. A task item's own `li` is a flex row so the checkbox
+   sits beside its content, but a plain `li` renders as `<li><p>text</p><ul>
+   …</ul></li>` — flexed, its paragraph and its nested list become two
+   side-by-side columns instead of a list under a line of text. A descendant
+   selector hits every nested plain item under a task list, which on a page
+   that mixes the two is most of the page. */
+.editor-prose ul[data-type="taskList"] > li {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
+}
+/* A nested task list carries no bullet or marker to sit under, so without an
+   indent of its own it starts at the parent's text column and the nesting
+   reads as flat. Matches what the base `ul` rule gives a nested bullet list. */
+.editor-prose li ul[data-type="taskList"] {
+  padding-left: 1.5rem;
 }
 .editor-prose ul[data-type="taskList"] input {
   /* Native control, deliberately: `accent-color` keeps the design system's
