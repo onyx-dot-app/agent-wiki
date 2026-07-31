@@ -353,3 +353,76 @@ def test_send_message_enqueues_title_generation_only_on_first_turn(tmp_db, monke
     ).text
 
     assert calls == [sid]
+
+
+# --------------------------------------------------------------------------- #
+# Message feedback. Recorded only, never read back into the agent            #
+# --------------------------------------------------------------------------- #
+
+
+def test_feedback_round_trips_on_an_assistant_turn(tmp_db):
+    client = _signed_in_client(tmp_db, "alice@example.com")
+    sid = client.post("/api/chat/sessions").json()["id"]
+    answer = repo.append_message(sid, role="assistant", content="an answer")
+
+    assert (
+        client.put(
+            f"/api/chat/messages/{answer['id']}/feedback",
+            json={"feedback": "up"},
+        ).status_code
+        == 204
+    )
+    messages = client.get(f"/api/chat/sessions/{sid}").json()["messages"]
+    assert messages[0]["feedback"] == "up"
+
+    # Null clears it, so a reader can undo a rating.
+    client.put(
+        f"/api/chat/messages/{answer['id']}/feedback", json={"feedback": None}
+    )
+    messages = client.get(f"/api/chat/sessions/{sid}").json()["messages"]
+    assert messages[0]["feedback"] is None
+
+
+def test_feedback_rejects_bad_values_and_user_turns(tmp_db):
+    client = _signed_in_client(tmp_db, "alice@example.com")
+    sid = client.post("/api/chat/sessions").json()["id"]
+    question = repo.append_message(sid, role="user", content="a question")
+
+    # Only answers are rateable.
+    assert (
+        client.put(
+            f"/api/chat/messages/{question['id']}/feedback",
+            json={"feedback": "up"},
+        ).status_code
+        == 404
+    )
+    # And only up/down.
+    assert (
+        client.put(
+            f"/api/chat/messages/{question['id']}/feedback",
+            json={"feedback": "sideways"},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.put(
+            f"/api/chat/messages/{question['id']}/feedback",
+            json={},
+        ).status_code
+        == 400
+    )
+
+
+def test_feedback_is_owner_scoped(tmp_db):
+    a_client = _signed_in_client(tmp_db, "alice@example.com")
+    b_client = _signed_in_client(tmp_db, "bob@example.com")
+    sid = a_client.post("/api/chat/sessions").json()["id"]
+    answer = repo.append_message(sid, role="assistant", content="an answer")
+
+    assert (
+        b_client.put(
+            f"/api/chat/messages/{answer['id']}/feedback",
+            json={"feedback": "down"},
+        ).status_code
+        == 404
+    )

@@ -34,6 +34,7 @@ from app.models.chat import (
     ChatSessionOut,
     DraftingInitRequest,
     SendChatRequest,
+    SetFeedbackRequest,
 )
 from app.tasks.chat_title import generate_chat_title
 from app.tracing import trace_flow
@@ -143,11 +144,26 @@ def get_session(
                 role=m["role"],
                 content=m["content"],
                 events=m["events"],
+                feedback=m["feedback"],
                 created_at=m["created_at"],
             )
             for m in messages
         ],
     )
+
+
+@router.put(
+    "/messages/{message_id}/feedback", status_code=status.HTTP_204_NO_CONTENT
+)
+def set_message_feedback(
+    message_id: str,
+    req: SetFeedbackRequest,
+    user: User = Depends(require_user),
+) -> Response:
+    """Record advisory feedback without changing future agent answers."""
+    if not sessions_repo.set_feedback(message_id, user.id, req.feedback):
+        raise HTTPException(status_code=404, detail="message not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -266,7 +282,7 @@ async def send_message(
 
         # Stream completed cleanly — persist the assistant turn.
         try:
-            await run_in_threadpool(
+            saved = await run_in_threadpool(
                 lambda: sessions_repo.append_message(
                     session_id,
                     role="assistant",
@@ -275,6 +291,9 @@ async def send_message(
                 ),
             )
             await run_in_threadpool(sessions_repo.touch, session_id)
+            # Emit after persistence so the client can rate the turn. Replay
+            # reconstructs this event from the saved message row.
+            yield _sse({"type": "message_saved", "id": saved["id"]})
         except Exception:
             log.exception("failed to persist assistant turn session_id=%s", session_id)
 

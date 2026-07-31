@@ -11,11 +11,14 @@ export interface ChatStreamEventBase {
   type: string;
 }
 
+export type ChatFeedback = "up" | "down";
+
 export interface PersistedChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   events: ChatStreamEventBase[] | null;
+  feedback?: ChatFeedback | null;
   created_at: string;
 }
 
@@ -35,6 +38,18 @@ export function createSession(): Promise<ChatSession> {
 export function getSession(id: string): Promise<ChatSessionDetail> {
   return apiFetch<ChatSessionDetail>(
     `/chat/sessions/${encodeURIComponent(id)}`,
+  );
+}
+
+/** Rate an assistant turn, or pass ``null`` to clear the rating. Ratings are
+ *  message metadata and do not change later agent answers. */
+export function setMessageFeedback(
+  messageId: string,
+  feedback: ChatFeedback | null,
+): Promise<void> {
+  return apiFetch<void>(
+    `/chat/messages/${encodeURIComponent(messageId)}/feedback`,
+    { method: "PUT", body: JSON.stringify({ feedback }) },
   );
 }
 

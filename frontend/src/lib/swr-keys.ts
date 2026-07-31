@@ -44,6 +44,10 @@ export const SWR_KEYS = {
 
   // ── LLM ───────────────────────────────────────────────────────────────
   llmStatus: "/llm/status",
+  llmAvailable: "/llm/available",
+
+  // ── User settings ─────────────────────────────────────────────────────
+  userSettings: "/user/settings",
 
   // ── Auto Organize ─────────────────────────────────────────────────────
   autoOrganizeSettings: "/automanage/settings",

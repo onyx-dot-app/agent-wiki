@@ -49,6 +49,7 @@ def _message_to_dict(m: ChatMessage) -> dict[str, Any]:
         "content": m.content,
         "events": events,
         "hidden": m.hidden,
+        "feedback": m.feedback,
         "created_at": m.created_at,
     }
 
@@ -186,6 +187,24 @@ def get_messages(
             stmt = stmt.where(ChatMessage.hidden.is_(False))
         rows = s.scalars(stmt).all()
         return [_message_to_dict(r) for r in rows]
+
+
+def set_feedback(message_id: str, user_id: str, value: str | None) -> bool:
+    """Set feedback on an owned assistant turn, returning False if invalid."""
+    with session() as s:
+        row = s.scalar(
+            select(ChatMessage)
+            .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+            .where(
+                ChatMessage.id == message_id,
+                ChatSession.user_id == user_id,
+                ChatMessage.role == "assistant",
+            )
+        )
+        if row is None:
+            return False
+        row.feedback = value
+        return True
 
 
 def count_messages(session_id: str) -> int:

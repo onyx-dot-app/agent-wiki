@@ -312,11 +312,15 @@ def test_sse_endpoint_streams_text_then_done(signed_in_client, monkeypatch):
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
     events = _parse_sse(resp.text)
-    assert events == [
+    assert events[:3] == [
         {"type": "text_delta", "text": "hi "},
         {"type": "text_delta", "text": "there"},
         {"type": "done"},
     ]
+    # The persisted turn's id trails the stream so the client can rate it.
+    assert events[3]["type"] == "message_saved"
+    assert events[3]["id"]
+    assert len(events) == 4
 
 
 def test_sse_endpoint_emits_error_event_on_llm_error(signed_in_client, monkeypatch):
@@ -387,6 +391,7 @@ def test_sse_endpoint_real_run_chat_stream_under_iterate_in_threadpool(
     events = _parse_sse(resp.text)
     types = [e.get("type") for e in events]
     # If the ContextVar reset crashes the stream, the handler emits an
-    # ``error`` event. A healthy run ends on ``done``.
+    # ``error`` event. A healthy run reaches ``done`` and persists the turn.
     assert "error" not in types, f"stream errored: {events}"
-    assert types[-1] == "done", f"got events: {events}"
+    assert "done" in types, f"got events: {events}"
+    assert types[-1] == "message_saved", f"got events: {events}"

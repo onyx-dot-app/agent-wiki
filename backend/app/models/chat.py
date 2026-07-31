@@ -66,7 +66,14 @@ class ChatMessageOut(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     events: list[dict[str, Any]] | None
+    feedback: Literal["up", "down"] | None = None
     created_at: str
+
+
+class SetFeedbackRequest(BaseModel):
+    """``None`` clears an existing rating."""
+
+    feedback: Literal["up", "down"] | None
 
 
 class ChatSessionDetail(BaseModel):
