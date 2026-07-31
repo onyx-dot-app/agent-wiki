@@ -46,7 +46,8 @@ _URL_TAIL = re.compile(f"[{wiki_git.URL_TAIL_CHARS}]")
 def _draft_bodies() -> list[str]:
     """Markdown of every live co-edit buffer. A draft holds references no
     working-tree scan can see, on whatever page it was pasted into."""
-    bodies = (coedit_live.read_body(sid) for sid in coedit.active_session_ids())
+    ids = coedit.active_session_versions()
+    bodies = (coedit_live.read_body(sid) for sid in ids)
     return [body for body in bodies if body]
 
 
@@ -94,7 +95,10 @@ def sweep_wiki_media() -> None:
     try:
         candidates = media_store.list_for_sweep()
         if not candidates:
-            log.info("image sweep: scanned=0 referenced=0 flagged=0 cleared=0 deleted=0")
+            log.info(
+                "media sweep: scanned=0 referenced=0 flagged=0 cleared=0 "
+                "deferred=0 deleted=0"
+            )
             return
 
         referenced_ids = _referenced(candidates)
@@ -105,6 +109,7 @@ def sweep_wiki_media() -> None:
         now_text = _now_text()
         flagged = 0
         cleared = 0
+        deferred = 0
         for candidate in candidates:
             if candidate.id in referenced_ids:
                 if candidate.unreferenced_since is not None:
@@ -123,30 +128,36 @@ def sweep_wiki_media() -> None:
             if unreferenced_since is None or not deletion_enabled:
                 continue
             if now - unreferenced_since > timedelta(days=_DEREFERENCE_RETENTION_DAYS):
-                # The commit lock holds off every page writer across this
-                # re-scan and delete. Live drafts are not under it, so a
-                # citation added in the gap loses.
+                # The commit lock holds off page writers across the re-scan and
+                # delete. Drafts are not under it, so their versions bracket the
+                # scan instead: any edit in the gap defers to the next sweep.
                 try:
                     with wiki_git.commit_lock():
+                        before = coedit.active_session_versions()
                         if candidate.id in _referenced([candidate]):
                             media_store.set_unreferenced_since(candidate.id, None)
                             cleared += 1
+                            continue
+                        if coedit.active_session_versions() != before:
+                            deferred += 1
                             continue
                         if media_store.delete_if_still_flagged(
                             candidate.id, candidate.unreferenced_since
                         ):
                             deleted += 1
                 except Exception:
-                    log.exception("image sweep: delete failed for %s", candidate.id)
+                    log.exception("media sweep: delete failed for %s", candidate.id)
 
         if deleted:
             wiki_media_sweep_deleted_total.inc(deleted)
         log.info(
-            "image sweep: scanned=%d referenced=%d flagged=%d cleared=%d deleted=%d",
+            "media sweep: scanned=%d referenced=%d flagged=%d cleared=%d "
+            "deferred=%d deleted=%d",
             len(candidates),
             len(referenced_ids),
             flagged,
             cleared,
+            deferred,
             deleted,
         )
     finally:

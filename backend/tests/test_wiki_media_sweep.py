@@ -317,3 +317,31 @@ def test_draft_on_another_page_keeps_a_pasted_image_live(tmp_repo) -> None:
     assert row is not None
     assert row.unreferenced_since is None
     assert media_store.stat(image_id) is not None
+
+
+def test_a_draft_edit_during_the_rescan_defers_the_delete(tmp_repo, monkeypatch) -> None:
+    # Drafts are not under the commit lock, so a citation added between the
+    # re-scan and the delete would otherwise lose its blob.
+    media_id = _put_image("guides/anchored.md")
+    _set_created_at(media_id, _timestamp_ago(timedelta(hours=25)))
+    media_store.set_unreferenced_since(media_id, _timestamp_ago(timedelta(days=31)))
+    sess = coedit.open_session("guides/other.md", base_sha=None)
+
+    # Read order inside the lock is: batch draft scan, `before`, re-scan,
+    # then the comparison. Only the last read sees the simulated edit.
+    real = coedit.active_session_versions
+    calls: list[int] = []
+
+    def bumping() -> dict[int, int]:
+        calls.append(1)
+        versions = real()
+        if len(calls) < 4:
+            return versions
+        return {sid: seq + 1 for sid, seq in versions.items()} or {sess.id: 1}
+
+    monkeypatch.setattr(coedit, "active_session_versions", bumping)
+    _run_sweep()
+
+    row = _image_row(media_id)
+    assert row is not None, "a draft edit in the window must defer, not delete"
+    assert media_store.stat(media_id) is not None

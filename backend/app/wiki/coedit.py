@@ -171,20 +171,20 @@ def blocking_active_session_path(dest: str) -> str | None:
         )
 
 
-def active_session_ids() -> list[int]:
-    """Ids of live co-edit sessions, whose uncommitted drafts no tree scan sees.
+def active_session_versions() -> dict[int, int]:
+    """Live co-edit sessions mapped to their update sequence.
 
-    Ids rather than paths, so a caller can reconstruct each draft's text and
-    inspect what it actually references.
+    Ids let a caller reconstruct each draft and read what it references, which
+    no tree scan sees. The sequence advances on every logged update, so two
+    reads differing means some draft changed in between.
     """
     with session() as s:
-        return list(
-            s.scalars(
-                select(CoeditSession.id).where(
-                    CoeditSession.status == SessionStatus.ACTIVE.value
-                )
+        rows = s.execute(
+            select(CoeditSession.id, CoeditSession.ydoc_seq).where(
+                CoeditSession.status == SessionStatus.ACTIVE.value
             )
-        )
+        ).all()
+        return {session_id: seq for session_id, seq in rows}
 
 
 def get_session(session_id: int) -> SessionRow | None:
