@@ -9,12 +9,9 @@ from app.auth import User, require_can
 from app.auth.deps import require_user, require_user_or_bearer
 from app.metrics import wiki_image_upload_rejected_total
 from app.models.images import UploadImageResponse
-from app.wiki import doc_ids, filesystem, image_store
-from app.wiki import git as wiki_git
+from app.wiki import doc_ids, filesystem, image_store, image_upload
 
 router = APIRouter()
-
-_UPLOAD_CAP_BYTES = 10 * 1024 * 1024
 
 
 @router.post("", response_model=UploadImageResponse)
@@ -25,59 +22,32 @@ async def upload_image(
     user: User = Depends(require_user),
 ) -> UploadImageResponse:
     # Cross-site POSTs arrive without the session cookie (SameSite=lax, app/main.py), so require_user rejects them.
-    if not path.strip():
-        raise HTTPException(status_code=400, detail="path required")
     try:
-        rel = filesystem.safe_rel_path(path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    # Anchors are wiki pages. Folders and tracked non-page files (trigger
-    # YAML, .gitkeep) must not accumulate image anchors.
-    if not rel.endswith(".md"):
-        raise HTTPException(status_code=400, detail="anchor must be a wiki page")
-    await run_in_threadpool(require_can, "write", rel, user)
+        anchor = image_upload.validate_anchor(path)
+    except image_upload.ImageUploadError as e:
+        raise HTTPException(status_code=e.status, detail=e.message) from e
 
+    # Streamed rather than handed to the shared path whole, so an oversized
+    # body is refused mid-flight instead of after it is all in memory.
     buf = bytearray()
     async for chunk in request.stream():
-        if len(buf) + len(chunk) > _UPLOAD_CAP_BYTES:
+        if len(buf) + len(chunk) > image_upload.UPLOAD_CAP_BYTES:
             wiki_image_upload_rejected_total.labels(reason="too_large").inc()
             raise HTTPException(status_code=413, detail="image exceeds 10 MiB limit")
         buf.extend(chunk)
-    data = bytes(buf)
-    if not data:
-        raise HTTPException(status_code=400, detail="empty image body")
 
-    sniffed = image_store.sniff_image_type(data)
-    if sniffed is None:
-        wiki_image_upload_rejected_total.labels(reason="unsupported_type").inc()
-        raise HTTPException(status_code=415, detail="unsupported image type")
-    declared = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
-    if declared != sniffed:
-        wiki_image_upload_rejected_total.labels(reason="content_type_mismatch").inc()
-        raise HTTPException(status_code=415, detail="content-type does not match image data")
-
-    # Uploading to a page that doesn't exist at HEAD would mint a live doc id
-    # for it. Presence check, not history: a deleted or trashed page still has
-    # commits touching its old path.
-    if not await run_in_threadpool(wiki_git.exists_at_head, rel):
-        raise HTTPException(status_code=404, detail="anchor page not found")
-    anchor_doc_id = await run_in_threadpool(doc_ids.get_or_mint, rel)
-    image_id = await run_in_threadpool(
-        image_store.put,
-        data=data,
-        content_type=sniffed,
-        anchor_doc_id=anchor_doc_id,
-        uploaded_by=user.id,
-    )
-    # Brackets the mint+put against a concurrent page move/trash/delete: if
-    # the page left HEAD in the window, drop the blob instead of orphaning it.
-    if not await run_in_threadpool(wiki_git.exists_at_head, rel):
-        await run_in_threadpool(image_store.delete, image_id)
-        raise HTTPException(status_code=404, detail="anchor page not found")
-
-    url = image_store.serving_url(image_id)
-    alt = (filename or "").replace("\n", " ").replace("\r", " ").replace("]", "")
-    return UploadImageResponse(id=image_id, url=url, markdown=f"![{alt}]({url})")
+    try:
+        return await run_in_threadpool(
+            image_upload.store,
+            data=bytes(buf),
+            anchor=anchor,
+            filename=filename,
+            user=user,
+        )
+    except image_upload.ImageUploadError as e:
+        if e.reason:
+            wiki_image_upload_rejected_total.labels(reason=e.reason).inc()
+        raise HTTPException(status_code=e.status, detail=e.message) from e
 
 
 @router.get("/{image_id}")

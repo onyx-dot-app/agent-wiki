@@ -22,6 +22,52 @@ import type { EditorView, NodeView } from "@tiptap/pm/view";
 import { ApiError, apiUpload } from "@/lib/api";
 import { toast } from "@/hooks/useToast";
 
+/** Per-view uploader, registered by the upload plugin so surfaces outside it
+ * (the slash menu's Image entry) reach the same upload path instead of
+ * duplicating it. Absent when the view has no `pagePath` and so cannot upload. */
+const uploaders = new WeakMap<EditorView, (file: File) => void>();
+
+/** Open the OS file picker and upload the chosen images at the caret. No-op
+ * on a view that cannot upload, which is also why the menu entry hides. */
+export function promptImageUpload(view: EditorView): void {
+  const upload = uploaders.get(view);
+  if (!upload) return;
+  // raw-ok: the OS file dialog is only reachable by clicking a file input.
+  // Opal ships no equivalent, and this element is never rendered.
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.multiple = true;
+  input.addEventListener("change", () => {
+    for (const file of Array.from(input.files ?? [])) upload(file);
+  });
+  input.click();
+}
+
+/** True when this view can upload, so a caller can hide an entry that would
+ * do nothing. */
+export function canUploadImages(view: EditorView): boolean {
+  return uploaders.has(view);
+}
+
+/** Width an inserted image lands on, in px. Capped rather than fixed so a
+ * small icon is never upscaled, and a screenshot arrives readable instead of
+ * filling the column. Resizing from here is one drag. */
+const INSERT_MAX_WIDTH = 225;
+
+/** Natural width of an image file, or null when it cannot be decoded (a
+ * corrupt or unsupported file still uploads and the server decides). */
+async function naturalWidthOf(file: File): Promise<number | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const width = bitmap.width;
+    bitmap.close();
+    return width || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Smallest width a resize can land on, in px. */
 const MIN_IMAGE_WIDTH = 80;
 
@@ -303,12 +349,16 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
     view.dispatch(view.state.tr.setMeta(key, { add: { id, pos: point } }));
 
     const query = `path=${encodeURIComponent(pagePath)}&filename=${encodeURIComponent(file.name)}`;
-    apiUpload<UploadResponse>(`/wiki/images?${query}`, file, file.type)
-      .then((res) => {
+    Promise.all([
+      apiUpload<UploadResponse>(`/wiki/images?${query}`, file, file.type),
+      naturalWidthOf(file),
+    ])
+      .then(([res, natural]) => {
         const at = findPlaceholder(key, view.state, id);
         if (at == null) return; // the target was deleted mid-upload - drop it
+        const width = Math.min(natural ?? INSERT_MAX_WIDTH, INSERT_MAX_WIDTH);
         const node = imageType.create({
-          src: res.url,
+          src: withImageWidth(res.url, width),
           alt: file.name,
           title: null,
         });
@@ -328,6 +378,60 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
 
   return new Plugin<DecorationSet>({
     key,
+    // handleDrop only sees the contenteditable, but the wrapper centres a
+    // capped column, so a drop in the gutters either side falls through to
+    // the browser and navigates away. These listeners claim that region.
+    view(editorView) {
+      uploaders.set(editorView, (file) =>
+        startUpload(editorView, file, editorView.state.selection.from),
+      );
+      // Resolved on a later tick: this runs while the EditorView is being
+      // constructed, before its dom is inside the scroll wrapper, so an
+      // eager closest() finds nothing.
+      let scroller: Element | null = null;
+      const outside = (event: DragEvent) =>
+        !editorView.dom.contains(event.target as Node | null);
+      // Without a prevented dragover the browser never offers the region as a
+      // drop target, which is what makes the drop navigate instead.
+      const onDragOver = (event: DragEvent) => {
+        if (!editorView.editable || !outside(event)) return;
+        if (imageFilesFrom(event.dataTransfer).length === 0) return;
+        event.preventDefault();
+      };
+      const onDrop = (event: DragEvent) => {
+        if (!editorView.editable || !outside(event)) return;
+        const files = imageFilesFrom(event.dataTransfer);
+        if (files.length === 0) return;
+        event.preventDefault();
+        // A gutter drop has no text under it, and the doc's end is not a
+        // position an inline image is allowed at, so fall back to the caret
+        // the way paste does.
+        const coords = editorView.posAtCoords({
+          left: event.clientX,
+          top: event.clientY,
+        });
+        const at = coords?.pos ?? editorView.state.selection.from;
+        for (const file of files) startUpload(editorView, file, at);
+      };
+      const attach = () => {
+        scroller = editorView.dom.closest(".editor-prose");
+        if (!scroller) return;
+        scroller.addEventListener("dragover", onDragOver as EventListener);
+        scroller.addEventListener("drop", onDrop as EventListener);
+      };
+      const attachTimer = window.setTimeout(attach, 0);
+      return {
+        destroy() {
+          window.clearTimeout(attachTimer);
+          uploaders.delete(editorView);
+          scroller?.removeEventListener(
+            "dragover",
+            onDragOver as EventListener,
+          );
+          scroller?.removeEventListener("drop", onDrop as EventListener);
+        },
+      };
+    },
     state: {
       init: () => DecorationSet.empty,
       apply(tr, set) {

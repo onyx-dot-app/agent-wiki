@@ -75,7 +75,7 @@ def test_upload_cleans_up_when_page_vanishes_mid_upload(
         calls["n"] += 1
         return False if calls["n"] > 1 else real(rel_path)
 
-    monkeypatch.setattr("app.api.images.wiki_git.exists_at_head", racing)
+    monkeypatch.setattr("app.wiki.image_upload.wiki_git.exists_at_head", racing)
     resp = client.post(
         "/api/wiki/images?path=guides/setup.md",
         content=PNG_BYTES,
@@ -117,7 +117,9 @@ def test_sniff_image_type_rejects_unknown_and_too_short() -> None:
     assert sniff_image_type(b"RIFF") is None
 
 
-def test_upload_rejects_content_type_mismatch(client: TestClient) -> None:
+def test_upload_ignores_a_mislabelled_content_type(client: TestClient) -> None:
+    # Browsers type a File from its extension, so a JPEG saved as .png arrives
+    # declared as image/png. The bytes decide, and the sniffed type is served.
     uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
     login_fastapi(client, uid)
 
@@ -127,18 +129,20 @@ def test_upload_rejects_content_type_mismatch(client: TestClient) -> None:
         headers={"Content-Type": "image/jpeg"},
     )
 
-    assert resp.status_code == 415
-    assert resp.json() == {"error": "content-type does not match image data"}
+    assert resp.status_code == 200
+    served = client.get(resp.json()["url"])
+    assert served.headers["Content-Type"] == "image/png"
 
 
-def test_upload_rejects_missing_content_type(client: TestClient) -> None:
+def test_upload_without_a_content_type_still_sniffs(client: TestClient) -> None:
     uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
     login_fastapi(client, uid)
 
     resp = client.post("/api/wiki/images?path=guides/setup.md", content=PNG_BYTES)
 
-    assert resp.status_code == 415
-    assert resp.json() == {"error": "content-type does not match image data"}
+    assert resp.status_code == 200
+    served = client.get(resp.json()["url"])
+    assert served.headers["Content-Type"] == "image/png"
 
 
 def test_upload_rejects_oversize_body(client: TestClient) -> None:

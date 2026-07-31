@@ -39,6 +39,7 @@ unsupported, raises rather than mis-encodes.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Any, Literal
 
 from pycrdt import Doc, XmlElement, XmlFragment, XmlText
@@ -308,6 +309,21 @@ def _close_delim(key: _MarkKey) -> str:
     return _SYMMETRIC_MARK_DELIMS[key]
 
 
+def _close_after(out: str, keys: Iterable[_MarkKey]) -> str:
+    """Append closing delimiters, keeping trailing whitespace outside them.
+
+    CommonMark only closes emphasis on a delimiter preceded by non-whitespace,
+    so `*before *` is literal text, not emphasis. A leaf (an image, a hard
+    break) splitting a marked run forces a close mid-run, which is exactly
+    where that trailing space appears.
+    """
+    closing = "".join(_close_delim(key) for key in keys)
+    if not closing:
+        return out
+    body = out.rstrip()
+    return body + closing + out[len(body) :]
+
+
 def _serialize_inline_text(xt: XmlText) -> str:
     """Serializes one ``XmlText``'s runs (``xt.diff()``) back to markdown.
 
@@ -336,7 +352,7 @@ def _serialize_inline_text(xt: XmlText) -> str:
     doesn't participate in this cross-run nesting.
     """
     open_keys: list[_MarkKey] = []
-    parts: list[str] = []
+    out = ""
     for text, attrs in xt.diff():
         attrs = attrs or {}
         target = [_mark_key(m, attrs) for m in _NESTING_MARK_ORDER if m in attrs]
@@ -347,19 +363,24 @@ def _serialize_inline_text(xt: XmlText) -> str:
             and open_keys[common] == target[common]
         ):
             common += 1
-        for key in reversed(open_keys[common:]):
-            parts.append(_close_delim(key))
-        for key in target[common:]:
-            parts.append(_open_delim(key))
+        out = _close_after(out, reversed(open_keys[common:]))
         open_keys = target
         # Inline code spans are verbatim — CommonMark never processes
         # escapes inside them, so escaping here would corrupt the code's
         # actual text (a literal backslash would become part of the
         # visible content).
-        parts.append(_wrap_code_run(text) if "code" in attrs else _escape_inline_text(text))
-    for key in reversed(open_keys):
-        parts.append(_close_delim(key))
-    return "".join(parts)
+        rendered = (
+            _wrap_code_run(text) if "code" in attrs else _escape_inline_text(text)
+        )
+        opening = "".join(_open_delim(key) for key in target[common:])
+        if opening:
+            # An opener must be followed by non-whitespace, so any leading
+            # space stays in front of it.
+            lead = len(rendered) - len(rendered.lstrip())
+            out += rendered[:lead] + opening + rendered[lead:]
+        else:
+            out += rendered
+    return _close_after(out, reversed(open_keys))
 
 
 def _escape_title(title: str) -> str:

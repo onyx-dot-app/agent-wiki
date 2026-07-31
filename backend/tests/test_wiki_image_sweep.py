@@ -99,7 +99,7 @@ def test_session_on_another_page_does_not_keep_image_live(tmp_repo) -> None:
     image_id = _put_image("guides/anchored.md")
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
     _set_unreferenced_since(image_id, _timestamp_ago(timedelta(days=31)))
-    coedit.open_session("guides/elsewhere.md", base_sha=None, initial_buffer="unrelated")
+    coedit.open_session("guides/elsewhere.md", base_sha=None)
 
     _run_sweep()
 
@@ -189,7 +189,7 @@ def test_open_session_on_the_anchor_page_keeps_image_live(tmp_repo) -> None:
     path = "drafts/live.md"
     image_id = _put_image(path)
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
-    coedit.open_session(path, base_sha=None, initial_buffer="")
+    coedit.open_session(path, base_sha=None)
 
     _run_sweep()
 
