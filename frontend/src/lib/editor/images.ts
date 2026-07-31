@@ -75,6 +75,16 @@ function stripFragment(src: string): string {
   return hash === -1 ? src : src.slice(0, hash);
 }
 
+/** Images this wiki serves, matching `image_store.serving_url`. */
+const MANAGED_IMAGE_SRC = /^\/api\/wiki\/images\/[0-9a-f]+$/i;
+
+/** Whether `src` is one this wiki serves. A node's attrs arrive from any
+ * collaborator's document and from page markdown, so a foreign src must never
+ * become a request. */
+export function isManagedImageSrc(src: string): boolean {
+  return MANAGED_IMAGE_SRC.test(stripFragment(src));
+}
+
 /** Read the opaque `w=<int>` width hint the backend keeps inside an image
  * src's URL fragment. Returns null when there is no integer width there. */
 export function parseImageWidth(src: string): number | null {
@@ -162,23 +172,39 @@ class ImageNodeView implements NodeView {
     const nextBase = stripFragment(src);
     if (this.loadedBase !== nextBase) {
       this.loadedBase = nextBase;
-      this.dom.classList.remove("is-broken");
-      this.img.src = nextBase;
+      this.clearBroken();
+      // Enforced here because this is where a src becomes a request, and a
+      // node's attrs can arrive from any collaborator or from page markdown.
+      if (isManagedImageSrc(nextBase)) {
+        this.img.src = nextBase;
+      } else {
+        this.img.removeAttribute("src");
+        this.markBroken("External image blocked");
+      }
     }
     const width = parseImageWidth(src);
     if (width != null) this.img.style.width = `${width}px`;
     else this.img.style.removeProperty("width");
   }
 
-  private onImgError = (): void => {
+  private clearBroken(): void {
+    this.dom.classList.remove("is-broken");
+    this.broken?.remove();
+    this.broken = null;
+  }
+
+  private markBroken(message: string): void {
     this.dom.classList.add("is-broken");
-    if (!this.broken) {
-      const box = document.createElement("span");
-      box.className = "editor-image-broken";
-      box.textContent = "Image failed to load";
-      this.broken = box;
-      this.dom.appendChild(box);
-    }
+    if (this.broken) return;
+    const box = document.createElement("span");
+    box.className = "editor-image-broken";
+    box.textContent = message;
+    this.broken = box;
+    this.dom.appendChild(box);
+  }
+
+  private onImgError = (): void => {
+    this.markBroken("Image failed to load");
   };
 
   private columnWidth(): number {
