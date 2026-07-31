@@ -11,7 +11,7 @@ describe the corpus it will be applied to:
 
     1. EXTRACT   per page, whole page, with NO type menu. Supplying one would presuppose the
                  answer; we want the referents the corpus actually contains.
-    2. FOLD      merge spellings of one thing ("Jira"/"JIRA", "Scania"/"Scania AB").
+    2. FOLD      merge spellings of one thing (case, punctuation, legal suffix, version).
                  LEXICAL, not semantic — see fold() for why embeddings fail here.
     3. DROP      corpus artifacts: page titles and code symbols are things the wiki is MADE
                  OF, not things it tracks.
@@ -27,8 +27,9 @@ here is "what kinds exist?". And a minimum-members floor on the types themselves
 no-op whenever the merge worked, while replacing true statements with a bucket: a `font`
 type with two members says something, `other` says nothing.
 
-Keeping types few and general is the MERGE step's job, and it does it — 75 types to 9 on a
-137-page corpus. A second, count-based implementation of the same intent only cost
+Keeping types few and general is the MERGE step's job, and it is effective at it — the
+per-group naming step over-splits by construction, and one pass over the whole taxonomy
+collapses that. A second, count-based implementation of the same intent only cost
 information.
 
 Home entities — the organization a wiki is written BY, whose name therefore carries no
@@ -57,10 +58,11 @@ import logging
 import math
 import re
 from collections import Counter, OrderedDict
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from collections.abc import Callable
 from typing import Any, cast
+
+from pydantic import BaseModel, Field
 
 from app.llm import client, embeddings
 from app.llm.prompts import load_prompt
@@ -69,15 +71,20 @@ from app.wiki import filesystem, git as wiki_git
 log = logging.getLogger(__name__)
 
 # --- parameters ---------------------------------------------------------------------------
-# Cosine floor for "same kind of thing". Measured against 1,827 real referents, comparing
-# this leader clustering to the sklearn agglomerative linkage the taxonomy was validated with
-# (209 groups, largest 172):
-#     0.35 ->   30 groups, largest 695   -- 38% of the corpus in one group
-#     0.45 ->  220 groups, largest 233   <-- chosen; matches the validated shape
-#     0.55 ->  680 groups, largest 196   -- naming loses the examples it generalises from
-# Thresholds do NOT transfer between clustering algorithms: leader clustering compares a
-# candidate to a running centroid, which drifts toward a generic average as a group grows and
-# then admits almost anything. Average linkage resists that. Re-measure if either changes.
+# Cosine floor for "same kind of thing" — the one parameter with real leverage, because it
+# sets how many groups the naming step sees and therefore what it can generalise from.
+#
+# Both extremes fail, in opposite ways:
+#   too low   a few enormous groups. Naming is asked what kind hundreds of unrelated
+#             referents share and produces something vacuous. Looks like a prompt problem.
+#   too high  mostly singletons. Naming has ONE example to generalise from, so it emits a
+#             hyper-specific type per referent and the merge step has to undo all of it.
+# Aim for groups of roughly ten: enough examples to see a kind, few enough to be one kind.
+#
+# Retune it if the clustering algorithm changes. The value is specific to leader clustering,
+# which compares a candidate against a running centroid — that centroid drifts toward a
+# generic average as a group grows and then admits almost anything, so it tolerates far less
+# permissiveness than a linkage-based method at the "same" threshold.
 GROUP_SIMILARITY = 0.45
 MERGE_ROUNDS = 3  # merge exits on convergence; this only bounds the loop
 
@@ -96,15 +103,28 @@ DEFAULT_TYPES: dict[str, str] = {
 }
 
 # --- lexical folding --------------------------------------------------------------------
-# Folding is a LEXICAL job — the same name written differently — and embeddings are a
-# semantic tool. Measured on a real corpus the bands overlap and no threshold separates them:
-#     "Onyx"    vs "Onyx Cloud"   0.818   same thing, MISSED at 0.88
-#     "Zendesk" vs "Freshdesk"    0.701   different things, only 0.12 lower
-# So a similarity cut either misses variants or merges competitors.
+# LEXICAL means the comparison looks only at the CHARACTERS — case, punctuation, whitespace,
+# token order, suffixes. Not at meaning. The variants we need to merge differ only in form
+# while denoting the same thing:
 #
-# Containment is deliberately NOT used: "Onyx" is a prefix of "Onyx Cloud", but "Microsoft"
-# is a prefix of "Microsoft Teams" — a vendor and its product. Real corpora contain that
-# shape, so a containment rule would collapse vendors into their product lines.
+#     "ACME" / "Acme"                 case
+#     "ACME&CO" / "Acme & Co"         punctuation and spacing
+#     "Acme AB" / "Acme"              legal suffix
+#     "Acme v4" / "Acme"              version marker
+#
+# Every one of those is recoverable by normalising the string. None of them requires knowing
+# what Acme is.
+#
+# An embedding, by contrast, compares MEANING, and that is the wrong axis. Two competing
+# products in one category are semantically close while denoting different things; a product
+# and its own sub-brand can be semantically further apart than that pair, because the
+# sub-brand adds a distinguishing word. So the "same thing, different spelling" band and the
+# "different thing, similar meaning" band overlap, and no similarity cut separates them —
+# it either misses variants or merges competitors.
+#
+# Containment is deliberately NOT used either. One name being a prefix of another does not
+# make them the same thing: a vendor's name usually prefixes its products' names, so a
+# containment rule collapses vendors into their product lines.
 LEGAL_SUFFIXES = frozenset(
     {
         "inc",
@@ -137,8 +157,8 @@ def normalize_surface(surface: str) -> str:
     """Lexical key for variant folding. Deterministic, no model involved.
 
     Tokenises on non-alphanumerics, then strips trailing legal suffixes and version markers,
-    so "Scania AB" -> "scania" and "Onyx v4" -> "onyx", while "Microsoft Teams" stays
-    "microsoft teams" — a vendor is not collapsed into its product.
+    so "Acme AB" -> "acme" and "Acme v4" -> "acme", while "Acme Teams" keeps both tokens —
+    "Teams" is not a suffix, so a vendor is not collapsed into its product.
     """
     tokens = [t for t in _TOKENS.split(surface.lower()) if t]
     while tokens and (tokens[-1] in LEGAL_SUFFIXES or _VERSION_TOKEN.match(tokens[-1])):
@@ -164,8 +184,7 @@ def is_corpus_artifact(surface: str, page_titles: set[str]) -> str:
 
 
 # --- records ----------------------------------------------------------------------------
-@dataclass
-class Mention:
+class Mention(BaseModel):
     """One referent as a single page named it."""
 
     surface: str
@@ -173,38 +192,27 @@ class Mention:
     role: str = ""
 
 
-@dataclass
-class Referent:
+class Referent(BaseModel):
     """Folded surface variants — one approximate entity."""
 
     canonical: str
-    variants: list[str] = field(default_factory=list)
-    pages: set[str] = field(default_factory=set)
-    roles: list[str] = field(default_factory=list)
+    variants: list[str] = Field(default_factory=list)
+    pages: set[str] = Field(default_factory=set)
+    roles: list[str] = Field(default_factory=list)
 
     @property
     def n_docs(self) -> int:
         return len(self.pages)
 
 
-@dataclass
-class EntityType:
+class EntityType(BaseModel):
     """A derived type, carrying the evidence for its own existence."""
 
     name: str
     definition: str
-    examples: list[str] = field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
     n_referents: int = 0
     n_docs: int = 0
-
-    def to_json(self) -> dict[str, Any]:
-        return {
-            "name": self.name,
-            "definition": self.definition,
-            "examples": self.examples,
-            "n_referents": self.n_referents,
-            "n_docs": self.n_docs,
-        }
 
 
 # --- vector helpers (no numpy in the backend) -------------------------------------------
@@ -436,12 +444,12 @@ def fold(mentions: list[Mention]) -> list[Referent]:
     """Group surface variants into approximate referents by lexical key.
 
     Nothing is filtered on frequency any more, so this is no longer load-bearing for a
-    threshold — it keeps a type's member and page counts honest (``Jira`` and ``JIRA`` are
-    one referent, not two) and saves embedding one string per spelling.
+    threshold — it keeps a type's member and page counts honest (one referent, not one per
+    spelling) and saves an embedding call per variant.
 
     Which is also why this stays a cheap rule rather than becoming LLM entity resolution.
-    A rule cannot see ``k8s``/``Kubernetes`` or ``IBM``/``International Business Machines``,
-    and doing better means blocking then adjudicating — real machinery, and non-deterministic.
+    A rule cannot see an acronym as its expansion, or a nickname as its product, and doing
+    better means blocking then adjudicating — real machinery, and non-deterministic.
     The payoff no longer justifies it: a missed fold now costs one inflated member count,
     because both spellings still land in the same group and get the same type. Resolution
     proper belongs where identity actually matters — keying facts, within a type, downstream.
@@ -584,7 +592,7 @@ def derive(
             "n_types_named": len(collapsed),
             "n_types": len(final),
         },
-        "entity_types": [t.to_json() for t in final],
+        "entity_types": [t.model_dump() for t in final],
     }
 
 
