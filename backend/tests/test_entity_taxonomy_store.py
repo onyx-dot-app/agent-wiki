@@ -1,0 +1,154 @@
+"""Storage for derived entity-type taxonomies.
+
+What matters here is that a re-derivation cannot quietly invalidate what came before.
+Entity types are keys: anything recording facts per entity records them under a type name,
+so a rename must leave the old taxonomy readable and must not leave two rows claiming to be
+in force. Both are properties of the store, not of the derivation, so they are pinned here.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from app.db import entity_taxonomy
+
+
+def _artifact(*, types: list[dict[str, object]] | None = None, fingerprint: str = "abc123") -> dict:
+    return {
+        "corpus_fingerprint": fingerprint,
+        "provenance": {"model": "test-model", "group_similarity": 0.45},
+        "stats": {"n_pages": 3, "n_types": 1},
+        "entity_types": types
+        if types is not None
+        else [
+            {
+                "name": "organization",
+                "definition": "A named company or institution.",
+                "examples": ["Acme"],
+                "n_referents": 12,
+                "n_docs": 3,
+            }
+        ],
+    }
+
+
+class TestRecord:
+    def test_first_taxonomy_is_version_one_and_active(self) -> None:
+        assert entity_taxonomy.active() is None
+
+        version = entity_taxonomy.record(_artifact())
+
+        assert version == 1
+        row = entity_taxonomy.active()
+        assert row is not None
+        assert row.version == 1
+        assert row.corpus_fingerprint == "abc123"
+        assert row.types[0]["name"] == "organization"
+        assert row.provenance["group_similarity"] == 0.45
+
+    def test_versions_increment_and_only_the_newest_is_active(self) -> None:
+        entity_taxonomy.record(_artifact(fingerprint="first"))
+        second = entity_taxonomy.record(_artifact(fingerprint="second"))
+
+        assert second == 2
+        active = entity_taxonomy.active()
+        assert active is not None
+        assert (active.version, active.corpus_fingerprint) == (2, "second")
+
+    def test_a_superseded_taxonomy_stays_resolvable(self) -> None:
+        """The whole point of append-only: rows keyed under v1's type names must still be
+        able to look those names up after v2 renames them."""
+        entity_taxonomy.record(
+            _artifact(types=[{"name": "software_product_or_service", "definition": "d"}])
+        )
+        entity_taxonomy.record(_artifact(types=[{"name": "software_product", "definition": "d"}]))
+
+        old = entity_taxonomy.get(1)
+        assert old is not None
+        assert old.types[0]["name"] == "software_product_or_service"
+        assert old.active is False
+
+    def test_refuses_a_taxonomy_with_no_types(self) -> None:
+        """An empty derivation is a failure, and recording it would deactivate a good one."""
+        with pytest.raises(ValueError):
+            entity_taxonomy.record(_artifact(types=[]))
+        assert entity_taxonomy.active() is None
+
+    def test_a_failed_record_leaves_the_previous_one_in_force(self) -> None:
+        entity_taxonomy.record(_artifact(fingerprint="good"))
+        with pytest.raises(ValueError):
+            entity_taxonomy.record(_artifact(types=[]))
+
+        active = entity_taxonomy.active()
+        assert active is not None
+        assert active.corpus_fingerprint == "good"
+
+
+class TestRead:
+    def test_get_unknown_version_is_none(self) -> None:
+        assert entity_taxonomy.get(99) is None
+
+    def test_history_is_newest_first(self) -> None:
+        for n in range(3):
+            entity_taxonomy.record(_artifact(fingerprint=f"c{n}"))
+        assert [row.version for row in entity_taxonomy.history()] == [3, 2, 1]
+
+    def test_history_respects_the_limit(self) -> None:
+        for n in range(4):
+            entity_taxonomy.record(_artifact(fingerprint=f"c{n}"))
+        assert [row.version for row in entity_taxonomy.history(limit=2)] == [4, 3]
+
+
+class TestLoadTaxonomy:
+    """``load_taxonomy`` is what the extraction prompt reads, so its fallback matters as
+    much as its happy path — a deployment that has never derived must still work."""
+
+    def test_falls_back_to_generic_types_when_nothing_is_derived(self) -> None:
+        from app.ingest.entity_types import DEFAULT_TYPES, load_taxonomy
+
+        defs, home = load_taxonomy()
+
+        assert defs == dict(DEFAULT_TYPES)
+        assert home == frozenset()
+
+    def test_reads_the_active_taxonomy(self) -> None:
+        from app.ingest.entity_types import load_taxonomy
+
+        entity_taxonomy.record(
+            _artifact(types=[{"name": "person", "definition": "A named individual."}])
+        )
+
+        defs, _ = load_taxonomy()
+
+        assert defs == {"person": "A named individual."}
+
+    def test_reads_a_specific_version(self) -> None:
+        """How a consumer resolves the types it keyed facts under, rather than assuming the
+        active taxonomy still means the same thing."""
+        from app.ingest.entity_types import load_taxonomy
+
+        entity_taxonomy.record(_artifact(types=[{"name": "old_name", "definition": "d"}]))
+        entity_taxonomy.record(_artifact(types=[{"name": "new_name", "definition": "d"}]))
+
+        assert set(load_taxonomy(version=1)[0]) == {"old_name"}
+        assert set(load_taxonomy()[0]) == {"new_name"}
+
+    def test_home_entities_come_from_stats(self) -> None:
+        """Not produced yet — the reader is wired so a per-page vote can fill it without
+        changing this side."""
+        from app.ingest.entity_types import load_taxonomy
+
+        artifact = _artifact()
+        artifact["stats"]["home_entities"] = ["Acme"]
+        entity_taxonomy.record(artifact)
+
+        assert load_taxonomy()[1] == frozenset({"Acme"})
+
+    def test_a_taxonomy_of_unusable_entries_falls_back(self) -> None:
+        """Malformed rows should degrade to the generic list, not to an empty menu that
+        would make the extractor unable to type anything."""
+        from app.ingest.entity_types import DEFAULT_TYPES, load_taxonomy
+
+        entity_taxonomy.record(_artifact(types=[{"name": "", "definition": ""}, {"nope": 1}]))
+
+        assert load_taxonomy()[0] == dict(DEFAULT_TYPES)

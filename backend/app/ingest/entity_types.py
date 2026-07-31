@@ -64,6 +64,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
+from app.db import entity_taxonomy
 from app.llm import client, embeddings
 from app.llm.prompts import load_prompt
 from app.wiki import filesystem, git as wiki_git
@@ -478,32 +479,31 @@ def fold(mentions: list[Mention]) -> list[Referent]:
 
 
 # --- artifact ---------------------------------------------------------------------------
-def load_taxonomy(path: str | None) -> tuple[dict[str, str], frozenset[str]]:
-    """``(type definitions, home entity names)`` from a derived artifact.
+def load_taxonomy(version: int | None = None) -> tuple[dict[str, str], frozenset[str]]:
+    """``(type definitions, home entity names)`` for the active taxonomy.
 
-    Falls back to ``DEFAULT_TYPES`` when absent or unreadable, mirroring how the relevance
-    scorer degrades to cosine when its model file is missing: a deployment that has never
-    run the derivation still works.
+    ``version`` resolves a specific one instead — how a consumer reads back the types it
+    keyed facts under, rather than assuming the active taxonomy still means the same thing.
+
+    Falls back to ``DEFAULT_TYPES`` when nothing has been derived, mirroring how the
+    relevance scorer degrades to cosine without its model file: a deployment that has never
+    run a derivation still works, with types that are generic rather than tailored.
     """
-    if not path:
+    row = entity_taxonomy.get(version) if version is not None else entity_taxonomy.active()
+    if row is None:
         return dict(DEFAULT_TYPES), frozenset()
-    try:
-        with open(path, encoding="utf-8") as handle:
-            payload = cast(dict[str, Any], json.load(handle))
-    except (OSError, json.JSONDecodeError):
-        log.warning("entity_types: no usable artifact at %s; using defaults", path)
-        return dict(DEFAULT_TYPES), frozenset()
+
     defs: dict[str, str] = {}
-    for raw_type in cast(list[Any], payload.get("entity_types") or []):
+    for raw_type in cast(list[Any], row.types or []):
         if not isinstance(raw_type, dict):
             continue
         entry = cast(dict[str, Any], raw_type)
         name, definition = entry.get("name"), entry.get("definition")
         if isinstance(name, str) and isinstance(definition, str) and name and definition:
             defs[name] = definition
-    # Home entities are not derived here — see the module docstring. The field is read so a
+    # Home entities are not derived yet — see the module docstring. The field is read so a
     # future producer (a per-page vote) can populate it without changing this reader.
-    stats = cast(dict[str, Any], payload.get("stats") or {})
+    stats = row.stats or {}
     home = frozenset(str(a) for a in cast(list[Any], stats.get("home_entities") or []))
     return (defs or dict(DEFAULT_TYPES)), home
 
@@ -612,7 +612,6 @@ def run_derivation(
 
     log.info("entity_types: deriving from %d page(s)", len(pages))
     artifact = derive(pages, model=model)
-    artifact["triggered_by_user_id"] = triggered_by_user_id
 
     stats = artifact["stats"]
     log.info(
@@ -622,23 +621,16 @@ def run_derivation(
         stats["n_typed"],
         stats["n_types"],
     )
-    store_taxonomy(artifact)
+    artifact["version"] = store_taxonomy(artifact, triggered_by=triggered_by_user_id)
     return artifact
 
 
-def store_taxonomy(artifact: dict[str, Any]) -> None:
-    """Persist a derived taxonomy.
+def store_taxonomy(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
+    """Persist a derived taxonomy and make it active. Returns its version.
 
-    A placeholder while there is no consumer in-tree. The eventual home is a versioned
-    table rather than a single current value: types key facts by entity, so a re-derivation
-    that renames one must not orphan rows keyed under the old name — which means keeping
-    the old taxonomy resolvable, not overwriting it. Deferred until the consumer lands and
-    can say what it needs to read.
+    Append-only: see ``app.db.entity_taxonomy`` for why a rename must not overwrite.
     """
-    log.info(
-        "entity_types: derived taxonomy for corpus %s — not persisted; no store configured yet",
-        str(artifact.get("corpus_fingerprint", ""))[:12],
-    )
+    return entity_taxonomy.record(artifact, triggered_by=triggered_by)
 
 
 def read_corpus(prefix: str = "") -> list[tuple[str, str]]:
