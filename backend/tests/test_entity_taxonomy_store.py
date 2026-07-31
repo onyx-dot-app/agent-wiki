@@ -163,3 +163,85 @@ class TestLoadTaxonomy:
         entity_taxonomy.record(_artifact(types=[{"name": "", "definition": ""}, {"nope": 1}]))
 
         assert load_taxonomy()[0] == dict(DEFAULT_TYPES)
+
+
+class TestOrganizationNameSource:
+    """The source column, not the value, gates inference.
+
+    "Do not overwrite a non-null value" would freeze a bad guess forever; and an admin who
+    deliberately CLEARS the name has decided there is none, which must not look like "unset"
+    and re-trigger detection.
+    """
+
+    def _set(self, name: str | None, source: str) -> None:
+        from app.ingest import settings as ingest_settings
+
+        ingest_settings.set_organization_name(name, source=source)
+
+    def test_inference_may_claim_an_unset_name(self) -> None:
+        from app.ingest import settings as ingest_settings
+
+        self._set("Acme", "inferred")
+
+        assert ingest_settings.get_organization_name() == "Acme"
+        assert ingest_settings.organization_name_is_admin_set() is False
+
+    def test_inference_may_correct_its_own_earlier_guess(self) -> None:
+        """A later derivation sees far more corpus; it should be allowed to improve on itself."""
+        from app.ingest import settings as ingest_settings
+
+        self._set("Acme", "inferred")
+        self._set("Acme Industries", "inferred")
+
+        assert ingest_settings.get_organization_name() == "Acme Industries"
+
+    def test_inference_never_overwrites_an_admin(self) -> None:
+        from app.ingest import settings as ingest_settings
+
+        self._set("CBRE", "admin")
+        self._set("Cbre", "inferred")
+
+        assert ingest_settings.get_organization_name() == "CBRE"
+
+    def test_an_admin_clearing_the_name_stops_inference(self) -> None:
+        """("admin", NULL) means "there is no name" — not "nobody has said"."""
+        from app.ingest import settings as ingest_settings
+
+        self._set("Acme", "admin")
+        self._set(None, "admin")
+
+        assert ingest_settings.get_organization_name() is None
+        assert ingest_settings.organization_name_is_admin_set() is True
+
+        self._set("Guessed", "inferred")
+        assert ingest_settings.get_organization_name() is None
+
+    def test_an_admin_may_override_an_inferred_value(self) -> None:
+        from app.ingest import settings as ingest_settings
+
+        self._set("Acme", "inferred")
+        self._set("Acme Industries GmbH", "admin")
+
+        assert ingest_settings.get_organization_name() == "Acme Industries GmbH"
+        assert ingest_settings.organization_name_is_admin_set() is True
+
+    def test_upsert_stamps_an_admin_source(self) -> None:
+        """A name arriving through the admin settings save is a human decision, so inference
+        must not later overwrite it."""
+        from app.ingest import settings as ingest_settings
+
+        ingest_settings.upsert(max_doc_chars=1000, onyx_base_url=None, organization_name="Acme")
+
+        assert ingest_settings.organization_name_is_admin_set() is True
+
+    def test_whitespace_is_not_a_name(self) -> None:
+        from app.ingest import settings as ingest_settings
+
+        self._set("   ", "inferred")
+        assert ingest_settings.get_organization_name() is None
+
+    def test_an_unknown_source_is_rejected(self) -> None:
+        from app.ingest import settings as ingest_settings
+
+        with pytest.raises(ValueError):
+            ingest_settings.set_organization_name("Acme", source="guessed")

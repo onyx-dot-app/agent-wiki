@@ -33,6 +33,9 @@ class IngestSettings(BaseModel):
     # rather than derived output — an admin knows it on day one, long before a corpus is big
     # enough for any statistical signal, and a re-derivation must not overwrite it.
     organization_name: str | None
+    # "admin" | "inferred" | None. Gates inference: see the model for why the source, not the
+    # value's nullness, decides whether a derivation may write.
+    organization_name_source: str | None
     # Auto-update health knobs (see "Taming Bad-Behaved Wikis"): the default
     # per-page warning threshold owners can override, and a hard cap above which
     # a page's ingestion auto-update is turned off. 0 = off.
@@ -52,6 +55,7 @@ def get() -> IngestSettings:
                 api_key=None,
                 onyx_base_url=None,
                 organization_name=None,
+                organization_name_source=None,
                 warn_update_threshold_default=DEFAULT_WARN_UPDATE_THRESHOLD,
                 auto_update_cap=DEFAULT_AUTO_UPDATE_CAP,
                 updated_at=None,
@@ -62,6 +66,7 @@ def get() -> IngestSettings:
             api_key=row.api_key,
             onyx_base_url=row.onyx_base_url,
             organization_name=row.organization_name,
+            organization_name_source=row.organization_name_source,
             warn_update_threshold_default=row.warn_update_threshold_default,
             auto_update_cap=row.auto_update_cap,
             updated_at=row.updated_at,
@@ -75,8 +80,46 @@ def get_onyx_base_url() -> str | None:
 
 
 def get_organization_name() -> str | None:
-    """The organisation the wiki belongs to, or None when an admin has not set it."""
+    """The organisation the wiki belongs to, or None when nobody has claimed it."""
     return get().organization_name
+
+
+def organization_name_is_admin_set() -> bool:
+    """Whether a human decided the name — in which case inference must not run.
+
+    A derivation checks this before spending anything on detection: an admin's value is not
+    to be improved upon, and that includes an admin who deliberately CLEARED it.
+    """
+    return get().organization_name_source == "admin"
+
+
+def set_organization_name(
+    name: str | None, *, source: str, updated_by_user_id: str | None = None
+) -> None:
+    """Claim the organisation name. ``source`` is "admin" or "inferred".
+
+    Inference must not clobber a human decision, so an "inferred" write is refused once the
+    source is "admin". An "admin" write always wins, including clearing the value.
+    """
+    if source not in ("admin", "inferred"):
+        raise ValueError(f"unknown organization_name source: {source!r}")
+
+    cleaned = (name or "").strip() or None
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    with session() as s:
+        row = s.get(IngestSettingsRow, 1)
+        if row is None:
+            row = IngestSettingsRow(id=1)
+            s.add(row)
+        if source == "inferred" and row.organization_name_source == "admin":
+            log.info("organization_name: keeping the admin-set value; inference skipped")
+            return
+        row.organization_name = cleaned
+        row.organization_name_source = source
+        row.updated_at = now
+        if updated_by_user_id is not None:
+            row.updated_by_user_id = updated_by_user_id
+    log.info("organization_name set (source=%s, cleared=%s)", source, cleaned is None)
 
 
 def upsert(
@@ -102,8 +145,11 @@ def upsert(
         row.onyx_base_url = onyx_base_url
         # Patch semantics, like the health knobs below: None leaves it unchanged, so a
         # connection-only save cannot silently clear an organisation name someone set.
+        # A value arriving here came from an admin, so it is stamped as such — otherwise a
+        # human edit would be indistinguishable from a guess and inference would overwrite it.
         if organization_name is not None:
             row.organization_name = organization_name.strip() or None
+            row.organization_name_source = "admin"
         if warn_update_threshold_default is not None:
             row.warn_update_threshold_default = warn_update_threshold_default
         if auto_update_cap is not None:
