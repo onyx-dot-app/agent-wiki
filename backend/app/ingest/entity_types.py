@@ -69,7 +69,16 @@ from app.wiki import filesystem, git as wiki_git
 log = logging.getLogger(__name__)
 
 # --- parameters ---------------------------------------------------------------------------
-GROUP_SIMILARITY = 0.35  # cosine floor for "same kind of thing"
+# Cosine floor for "same kind of thing". Measured against 1,827 real referents, comparing
+# this leader clustering to the sklearn agglomerative linkage the taxonomy was validated with
+# (209 groups, largest 172):
+#     0.35 ->   30 groups, largest 695   -- 38% of the corpus in one group
+#     0.45 ->  220 groups, largest 233   <-- chosen; matches the validated shape
+#     0.55 ->  680 groups, largest 196   -- naming loses the examples it generalises from
+# Thresholds do NOT transfer between clustering algorithms: leader clustering compares a
+# candidate to a running centroid, which drifts toward a generic average as a group grows and
+# then admits almost anything. Average linkage resists that. Re-measure if either changes.
+GROUP_SIMILARITY = 0.45
 MERGE_ROUNDS = 3  # merge exits on convergence; this only bounds the loop
 
 # Fallback when no derived artifact is present, so a deployment that has never run the
