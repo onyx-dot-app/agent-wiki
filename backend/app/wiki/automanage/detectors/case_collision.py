@@ -36,6 +36,7 @@ from typing import Any
 
 from app.wiki import git
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
+from app.wiki.filesystem import is_page
 from app.wiki.change_proposals import ProposalOp
 
 log = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ class _CaseCollisionDetector:
         return trigger in (TriggerKind.SWEEP, TriggerKind.ON_CREATE)
 
     def detect(self, scope: Scope) -> list[ProposalDraft]:
-        pages = {p for p in scope.paths if p.endswith(".md")}
+        pages = {p for p in scope.paths if is_page(p)}
         if len(pages) < 2:
             return []
         by_lower: dict[str, list[str]] = defaultdict(list)

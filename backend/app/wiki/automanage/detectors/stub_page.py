@@ -36,6 +36,7 @@ from app.wiki.automanage.detectors.template_echo import (
     blob_sha,
     template_body_blob_shas,
 )
+from app.wiki.filesystem import is_page
 from app.wiki.change_proposals import ProposalOp
 
 log = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ class _StubPageDetector:
     def detect(self, scope: Scope) -> list[ProposalDraft]:
         if not self.applicable(scope.trigger):
             return []
-        pages = sorted(p for p in scope.paths if p.endswith(".md"))
+        pages = sorted(p for p in scope.paths if is_page(p))
         if not pages:
             return []
         echoes = template_body_blob_shas()

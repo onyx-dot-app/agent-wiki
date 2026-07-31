@@ -39,6 +39,7 @@ from typing import Any
 
 from app.wiki import git
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
+from app.wiki.filesystem import is_page
 from app.wiki.change_proposals import ProposalOp
 
 log = logging.getLogger(__name__)
@@ -125,7 +126,7 @@ def _plan_moves(
     while stack:
         d = stack.pop()
         for f in sorted(tree.plain_files.get(d, ())):
-            if not f.endswith(".md"):
+            if not is_page(f):
                 return None
             pages.append(f)
         stack.extend(tree.subdirs.get(d, ()))
@@ -207,8 +208,8 @@ class _FolderChainDetector:
         stranded half-flattened), and every destination still free. Body
         edits to the pages don't break the premise; moves stay content-
         preserving."""
-        folders = [s for s in proposal["source_paths"] if not s.endswith(".md")]
-        pages = [s for s in proposal["source_paths"] if s.endswith(".md")]
+        folders = [s for s in proposal["source_paths"] if not is_page(s)]
+        pages = [s for s in proposal["source_paths"] if is_page(s)]
         if not folders:
             return "proposal is missing its chain folders"
         head, tail = min(folders, key=len), max(folders, key=len)

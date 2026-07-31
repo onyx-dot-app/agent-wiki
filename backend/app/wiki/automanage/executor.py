@@ -35,7 +35,7 @@ from app.wiki import change_proposals, doc_ids, git, notify, trash
 from app.wiki.automanage import fingerprint, settings
 from app.wiki.automanage.detectors import DETECTORS_BY_NAME
 from app.wiki.change_proposals import ProposalOp, ProposalStatus
-from app.wiki.filesystem import TRASH_PREFIX
+from app.wiki.filesystem import TRASH_PREFIX, is_page
 
 log = logging.getLogger(__name__)
 
@@ -220,7 +220,7 @@ def _reconverge_after_revert(
     live = set(git.list_paths())
     doc_ids.on_restored([path for path in sorted(allowed) if path in live])
     for path in sorted(allowed):
-        if not path.endswith(".md"):
+        if not is_page(path):
             continue
         if path in live:
             notify.after_doc_write(

@@ -28,6 +28,7 @@ from typing import Any
 
 from app.wiki import git, templates
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
+from app.wiki.filesystem import is_page
 from app.wiki.change_proposals import ProposalOp
 
 log = logging.getLogger(__name__)
@@ -81,7 +82,7 @@ class _TemplateEchoDetector:
         echoes = template_body_blob_shas()
         if not echoes:
             return []
-        in_scope = {p for p in scope.paths if p.endswith(".md")}
+        in_scope = {p for p in scope.paths if is_page(p)}
         if not in_scope:
             return []
         now = datetime.now(UTC)

@@ -19,6 +19,20 @@ log = logging.getLogger(__name__)
 TRASH_DIR = ".trash"
 TRASH_PREFIX = TRASH_DIR + "/"
 
+# What makes a tracked file a wiki *page*. A path listing also carries files
+# that exist to represent structure rather than content — the `.gitkeep`
+# markers that materialize folders (git can't track an empty directory) and
+# the `.trigger_*.yaml` files that sit beside the scope they act on. Those are
+# neither editable nor visible in the tree, so most callers want pages only.
+PAGE_SUFFIX = ".md"
+
+
+def is_page(rel_path: str) -> bool:
+    """Whether ``rel_path`` is a wiki page, as opposed to a folder path or one
+    of the structural files that share the tree with pages (see
+    ``PAGE_SUFFIX``)."""
+    return rel_path.endswith(PAGE_SUFFIX)
+
 
 def is_trash_path(rel_path: str) -> bool:
     """Whether ``rel_path`` lives in the reserved ``.trash/`` area."""

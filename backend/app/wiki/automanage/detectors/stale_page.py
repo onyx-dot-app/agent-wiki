@@ -30,6 +30,7 @@ from app.llm.prompts import load_prompt
 from app.wiki import git, page_views
 from app.wiki.automanage.detectors import llm_agent
 from app.wiki.automanage.detectors.base import ProposalDraft, Scope, TriggerKind
+from app.wiki.filesystem import is_page
 from app.wiki.change_proposals import ProposalOp
 
 log = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ class _StalePageDetector:
     # ---- mechanical prefilter ------------------------------------------
 
     def _candidates(self, scope: Scope) -> list[str]:
-        pages = sorted(p for p in scope.paths if p.endswith(".md"))
+        pages = sorted(p for p in scope.paths if is_page(p))
         if not pages:
             return []
         floor_dt = _now() - timedelta(days=self._floor_days)
