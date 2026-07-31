@@ -104,16 +104,14 @@ class TestRead:
 
 
 class TestLoadTaxonomy:
-    """``load_taxonomy`` is what the extraction prompt reads, so its fallback matters as
-    much as its happy path — a deployment that has never derived must still work."""
+    """``load_taxonomy`` is what the extractor's type menu comes from, so its fallback
+    matters as much as its happy path — a deployment that has never derived must still
+    work."""
 
     def test_falls_back_to_generic_types_when_nothing_is_derived(self, tmp_db) -> None:
         from app.ingest.entity_types import DEFAULT_TYPES, load_taxonomy
 
-        defs, home = load_taxonomy()
-
-        assert defs == dict(DEFAULT_TYPES)
-        assert home == frozenset()
+        assert load_taxonomy() == dict(DEFAULT_TYPES)
 
     def test_reads_the_active_taxonomy(self, tmp_db) -> None:
         from app.ingest.entity_types import load_taxonomy
@@ -122,9 +120,7 @@ class TestLoadTaxonomy:
             _artifact(types=[{"name": "person", "definition": "A named individual."}])
         )
 
-        defs, _ = load_taxonomy()
-
-        assert defs == {"person": "A named individual."}
+        assert load_taxonomy() == {"person": "A named individual."}
 
     def test_reads_a_specific_taxonomy(self, tmp_db) -> None:
         """How a consumer resolves the types it keyed facts under, rather than assuming the
@@ -134,30 +130,8 @@ class TestLoadTaxonomy:
         entity_taxonomy.record(_artifact(types=[{"name": "old_name", "definition": "d"}]))
         entity_taxonomy.record(_artifact(types=[{"name": "new_name", "definition": "d"}]))
 
-        assert set(load_taxonomy(taxonomy_id=1)[0]) == {"old_name"}
-        assert set(load_taxonomy()[0]) == {"new_name"}
-
-    def test_names_to_skip_come_from_the_configured_organisation(self, tmp_db) -> None:
-        """Types are derived and versioned; the organisation is configured. An admin knows it
-        on day one, and a re-derivation over a thin corpus must not overwrite it."""
-        from app.ingest import settings as ingest_settings
-        from app.ingest.entity_types import load_taxonomy
-
-        entity_taxonomy.record(_artifact())
-        assert load_taxonomy()[1] == frozenset()
-
-        ingest_settings.upsert(max_doc_chars=1000, onyx_base_url=None, organization_name="Acme")
-
-        assert load_taxonomy()[1] == frozenset({"Acme"})
-
-    def test_a_blank_organisation_name_is_not_a_skip_name(self, tmp_db) -> None:
-        """Whitespace must not become a name the extractor is told to ignore."""
-        from app.ingest import settings as ingest_settings
-        from app.ingest.entity_types import load_taxonomy
-
-        ingest_settings.upsert(max_doc_chars=1000, onyx_base_url=None, organization_name="   ")
-
-        assert load_taxonomy()[1] == frozenset()
+        assert set(load_taxonomy(taxonomy_id=1)) == {"old_name"}
+        assert set(load_taxonomy()) == {"new_name"}
 
     def test_a_taxonomy_of_unusable_entries_falls_back(self, tmp_db) -> None:
         """Malformed rows should degrade to the generic list, not to an empty menu that
@@ -166,86 +140,4 @@ class TestLoadTaxonomy:
 
         entity_taxonomy.record(_artifact(types=[{"name": "", "definition": ""}, {"nope": 1}]))
 
-        assert load_taxonomy()[0] == dict(DEFAULT_TYPES)
-
-
-class TestOrganizationNameSource:
-    """The source column, not the value, gates inference.
-
-    "Do not overwrite a non-null value" would freeze a bad guess forever; and an admin who
-    deliberately CLEARS the name has decided there is none, which must not look like "unset"
-    and re-trigger detection.
-    """
-
-    def _set(self, name: str | None, source: str) -> None:
-        from app.ingest import settings as ingest_settings
-
-        ingest_settings.set_organization_name(name, source=source)
-
-    def test_inference_may_claim_an_unset_name(self, tmp_db) -> None:
-        from app.ingest import settings as ingest_settings
-
-        self._set("Acme", "inferred")
-
-        assert ingest_settings.get_organization_name() == "Acme"
-        assert ingest_settings.organization_name_is_admin_set() is False
-
-    def test_inference_may_correct_its_own_earlier_guess(self, tmp_db) -> None:
-        """A later derivation sees far more corpus; it should be allowed to improve on itself."""
-        from app.ingest import settings as ingest_settings
-
-        self._set("Acme", "inferred")
-        self._set("Acme Industries", "inferred")
-
-        assert ingest_settings.get_organization_name() == "Acme Industries"
-
-    def test_inference_never_overwrites_an_admin(self, tmp_db) -> None:
-        from app.ingest import settings as ingest_settings
-
-        self._set("CBRE", "admin")
-        self._set("Cbre", "inferred")
-
-        assert ingest_settings.get_organization_name() == "CBRE"
-
-    def test_an_admin_clearing_the_name_stops_inference(self, tmp_db) -> None:
-        """("admin", NULL) means "there is no name" — not "nobody has said"."""
-        from app.ingest import settings as ingest_settings
-
-        self._set("Acme", "admin")
-        self._set(None, "admin")
-
-        assert ingest_settings.get_organization_name() is None
-        assert ingest_settings.organization_name_is_admin_set() is True
-
-        self._set("Guessed", "inferred")
-        assert ingest_settings.get_organization_name() is None
-
-    def test_an_admin_may_override_an_inferred_value(self, tmp_db) -> None:
-        from app.ingest import settings as ingest_settings
-
-        self._set("Acme", "inferred")
-        self._set("Acme Industries GmbH", "admin")
-
-        assert ingest_settings.get_organization_name() == "Acme Industries GmbH"
-        assert ingest_settings.organization_name_is_admin_set() is True
-
-    def test_upsert_stamps_an_admin_source(self, tmp_db) -> None:
-        """A name arriving through the admin settings save is a human decision, so inference
-        must not later overwrite it."""
-        from app.ingest import settings as ingest_settings
-
-        ingest_settings.upsert(max_doc_chars=1000, onyx_base_url=None, organization_name="Acme")
-
-        assert ingest_settings.organization_name_is_admin_set() is True
-
-    def test_whitespace_is_not_a_name(self, tmp_db) -> None:
-        from app.ingest import settings as ingest_settings
-
-        self._set("   ", "inferred")
-        assert ingest_settings.get_organization_name() is None
-
-    def test_an_unknown_source_is_rejected(self, tmp_db) -> None:
-        from app.ingest import settings as ingest_settings
-
-        with pytest.raises(ValueError):
-            ingest_settings.set_organization_name("Acme", source="guessed")
+        assert load_taxonomy() == dict(DEFAULT_TYPES)

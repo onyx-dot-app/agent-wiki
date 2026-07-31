@@ -32,12 +32,6 @@ per-group naming step over-splits by construction, and one pass over the whole t
 collapses that. A second, count-based implementation of the same intent only cost
 information.
 
-Home entities — the organization a wiki is written BY, whose name therefore carries no
-discriminative signal — are a real and separate need, consumed by the extraction prompt.
-Document frequency is the wrong instrument for it: it conflates "whose wiki is this" with
-"what gets mentioned a lot", and on a small corpus the two are indistinguishable. That
-signal wants asking each page directly and taking a vote; until then ``load_taxonomy``
-returns no home entities rather than a guess.
 
 Deliberately NOT solved here: exact entity resolution to canonical ids. Types need
 approximate counts, not identities — and once types exist, resolution gets easier because
@@ -65,7 +59,6 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 
 from app.db import entity_taxonomy
-from app.ingest import settings as ingest_settings
 from app.llm import client, embeddings
 from app.llm.prompts import load_prompt
 from app.wiki import filesystem, git as wiki_git
@@ -480,24 +473,10 @@ def fold(mentions: list[Mention]) -> list[Referent]:
 
 
 # --- artifact ---------------------------------------------------------------------------
-def _skip_names() -> frozenset[str]:
-    """Names extraction should not treat as referents — the organisation itself.
-
-    Empty when no organisation is configured, which simply drops the "ignore these" line
-    from the prompt rather than guessing.
-    """
-    name = (ingest_settings.get_organization_name() or "").strip()
-    return frozenset({name}) if name else frozenset()
 
 
-def load_taxonomy(taxonomy_id: int | None = None) -> tuple[dict[str, str], frozenset[str]]:
-    """``(type definitions, names to skip)`` for the active taxonomy.
-
-    The two halves come from different places on purpose. Types are DERIVED, and versioned
-    so a rename cannot orphan facts keyed under the old name. The organisation the wiki
-    belongs to is CONFIGURED (``app.ingest.settings``) — one value, stable, known to an admin
-    on day one, and deliberately not something a re-derivation over a thin corpus can
-    overwrite with a guess.
+def load_taxonomy(taxonomy_id: int | None = None) -> dict[str, str]:
+    """``{type name: definition}`` for the active taxonomy.
 
     ``taxonomy_id`` resolves a specific one instead — how a consumer reads back the types it
     keyed facts under, rather than assuming the active taxonomy still means the same thing.
@@ -508,7 +487,7 @@ def load_taxonomy(taxonomy_id: int | None = None) -> tuple[dict[str, str], froze
     """
     row = entity_taxonomy.get(taxonomy_id) if taxonomy_id is not None else entity_taxonomy.active()
     if row is None:
-        return dict(DEFAULT_TYPES), frozenset()
+        return dict(DEFAULT_TYPES)
 
     defs: dict[str, str] = {}
     for raw_type in cast(list[Any], row.types or []):
@@ -518,7 +497,7 @@ def load_taxonomy(taxonomy_id: int | None = None) -> tuple[dict[str, str], froze
         name, definition = entry.get("name"), entry.get("definition")
         if isinstance(name, str) and isinstance(definition, str) and name and definition:
             defs[name] = definition
-    return (defs or dict(DEFAULT_TYPES)), _skip_names()
+    return defs or dict(DEFAULT_TYPES)
 
 
 def derive(

@@ -804,25 +804,6 @@ class IngestSettings(Base):
     # origin used for Craft build-API calls, connect redirects, and
     # "Open Craft" deep links. Null = Craft launches unavailable.
     onyx_base_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # The organisation this wiki belongs to. Its name saturates the corpus, so it carries no
-    # discriminative signal and entity extraction is told not to treat it as a referent.
-    #
-    # A SETTING rather than derived output: it is one value, it is stable, and an admin knows
-    # it on day one — long before there are enough pages for any statistical signal to
-    # exist. A derivation may later suggest it, but must not own it, or a re-derivation on a
-    # thin corpus could overwrite something correct with a guess.
-    organization_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Who last claimed the name above: "admin" | "inferred" | NULL (nobody yet).
-    #
-    # This, not the value's nullness, is what gates inference. "Do not overwrite a non-null
-    # value" would freeze a bad guess forever — a later derivation with far more corpus to
-    # work with should be allowed to correct its own earlier guess. And an admin who CLEARS
-    # the field has decided there is no name, which must not re-trigger inference; that state
-    # is ("admin", NULL), indistinguishable from "unset" if we only looked at the value.
-    #
-    # "admin" also means inference need not run at all, so a derivation spends nothing
-    # computing a value it is not allowed to use.
-    organization_name_source: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Auto-update health knobs (see "Taming Bad-Behaved Wikis"): the default
     # per-page warning threshold owners override via update_policies, and a hard
     # cap above which a page's ingestion auto-update is turned off. 0 = off.
