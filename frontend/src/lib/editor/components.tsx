@@ -59,6 +59,7 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
       userDisplay,
       readOnly,
       placeholder,
+      pagePath,
       commentHighlights,
       activeCommentIds,
       onCommentCaret,
@@ -112,7 +113,7 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
       // the client's hydration pass. Tiptap's documented fix for SSR.
       immediatelyRender: false,
       editable: !readOnly,
-      extensions: tiptapExtensions(doc, awareness, placeholder),
+      extensions: tiptapExtensions(doc, awareness, placeholder, pagePath),
     });
 
     useEffect(() => {

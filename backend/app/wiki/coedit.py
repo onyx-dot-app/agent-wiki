@@ -171,6 +171,22 @@ def blocking_active_session_path(dest: str) -> str | None:
         )
 
 
+def active_session_ids() -> list[int]:
+    """Ids of live co-edit sessions, whose uncommitted drafts no tree scan sees.
+
+    Ids rather than paths, so a caller can reconstruct each draft's text and
+    inspect what it actually references.
+    """
+    with session() as s:
+        return list(
+            s.scalars(
+                select(CoeditSession.id).where(
+                    CoeditSession.status == SessionStatus.ACTIVE.value
+                )
+            )
+        )
+
+
 def get_session(session_id: int) -> SessionRow | None:
     """Look up a session by id, regardless of status (active or closed)."""
     with session() as s:

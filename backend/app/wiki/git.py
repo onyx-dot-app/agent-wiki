@@ -14,7 +14,7 @@ import re
 import subprocess
 import tempfile
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -276,6 +276,18 @@ def read_file(rel_path: str, ref: str = "HEAD") -> str:
         return _run(["show", f"{ref}:{rel_path}"]).stdout
     except subprocess.CalledProcessError as e:
         raise UnknownSha(ref) from e
+
+
+def exists_at_head(rel_path: str) -> bool:
+    """True when ``rel_path`` is a file (blob) in HEAD's tree.
+
+    Presence, not history: ``head_sha_for_path`` answers "which commit last
+    touched this path" and stays truthy forever after a delete or trash move,
+    so it must never gate on whether a page currently exists. Blob-typed so a
+    directory at the path does not count as an existing file.
+    """
+    res = _run(["cat-file", "-t", f"HEAD:{rel_path}"], check=False)
+    return res.returncode == 0 and res.stdout.strip() == "blob"
 
 
 def read_file_opt(rel_path: str, ref: str = "HEAD") -> str | None:
@@ -551,6 +563,47 @@ def list_paths(prefix: str = "") -> list[str]:
     """List tracked files under a path prefix (excluding the hidden ``.trash/``)."""
     out = _run(["ls-files", "-z", prefix or "."]).stdout
     return [p for p in out.split("\0") if p and not p.startswith(TRASH_PREFIX)]
+
+
+#: Characters that continue a URL path. A needle followed by one of these is a
+#: match inside a longer URL, which resolves elsewhere.
+URL_TAIL_CHARS = "A-Za-z0-9._~%/-"
+
+
+def grep_working_tree_url_bounded(needles: Iterable[str]) -> set[str]:
+    """Search the working tree, INCLUDING ``.trash/``, for URL needles that
+    must not be followed by another URL-path character.
+
+    The boundary keeps a needle from matching inside a longer URL (a hex tail,
+    a ``.png`` suffix, a deeper path segment), all of which resolve elsewhere.
+    No ``.trash/`` exclusion is applied, so a reference inside a trashed page
+    still counts.
+    """
+    wanted = {needle for needle in needles if needle}
+    if not wanted:
+        return set()
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=True) as f:
+        f.write(
+            "\n".join(f"{needle}([^{URL_TAIL_CHARS}]|$)" for needle in wanted)
+        )
+        f.flush()
+        res = _run(
+            ["grep", "--no-color", "-I", "-E", "-f", f.name, "-o", "-h"],
+            check=False,
+        )
+    if res.returncode == 1:
+        return set()
+    if res.returncode != 0:
+        raise RuntimeError(f"git grep failed (exit {res.returncode}): {res.stderr.strip()!r}")
+    # `-o` emits a needle plus at most the one boundary character the pattern
+    # consumed, so both spellings resolve by lookup.
+    found: set[str] = set()
+    for line in res.stdout.splitlines():
+        if line in wanted:
+            found.add(line)
+        elif line[:-1] in wanted:
+            found.add(line[:-1])
+    return found
 
 
 def bundle(dest_path: str) -> None:

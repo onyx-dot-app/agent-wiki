@@ -1363,6 +1363,28 @@ class WikiDocId(Base):
     )
 
 
+class Media(Base):
+    """Binary media blob (image, video, gif) anchored to a page's stable doc id."""
+
+    __tablename__ = "media"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    anchor_doc_id: Mapped[str] = mapped_column(Text, nullable=False)
+    uploaded_by: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    unreferenced_since: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (Index("idx_media_anchor_doc_id", "anchor_doc_id"),)
+
+
 # --------------------------------------------------------------------------- #
 # Wiki auto-management — change proposals (Postgres-only)                     #
 # --------------------------------------------------------------------------- #

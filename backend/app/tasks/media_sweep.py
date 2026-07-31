@@ -1,0 +1,153 @@
+"""Daily retention sweep for unreferenced wiki media.
+
+Media lives in Postgres, so dereferenced blobs need a periodic sweep to keep
+storage bounded without touching the wiki commit path.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from datetime import datetime, timedelta, timezone
+
+from app.metrics import (
+    wiki_media_sweep_deleted_total,
+    wiki_media_bytes_total,
+    wiki_media_total,
+)
+from app.tasks.queue import crontab
+from app.tasks.queues import lightweight_maintenance_queue
+from app.tasks.trash_purge import TRASH_RETENTION_DAYS
+from app.wiki import coedit, coedit_live, git as wiki_git, media_store
+
+log = logging.getLogger(__name__)
+
+_CREATION_GRACE = timedelta(hours=24)
+# Image dereference retention stays aligned with trash retention.
+_DEREFERENCE_RETENTION_DAYS = TRASH_RETENTION_DAYS
+_TEXT_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def _now_text() -> str:
+    return datetime.now(timezone.utc).strftime(_TEXT_TIMESTAMP_FORMAT)
+
+
+def _parse(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.strptime(ts, _TEXT_TIMESTAMP_FORMAT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+_URL_TAIL = re.compile(f"[{wiki_git.URL_TAIL_CHARS}]")
+
+
+def _draft_bodies() -> list[str]:
+    """Markdown of every live co-edit buffer. A draft holds references no
+    working-tree scan can see, on whatever page it was pasted into."""
+    bodies = (coedit_live.read_body(sid) for sid in coedit.active_session_ids())
+    return [body for body in bodies if body]
+
+
+def _cited_in(body: str, url: str) -> bool:
+    """Whether ``body`` cites ``url`` and not a longer URL sharing its prefix,
+    the same boundary the working-tree scan applies."""
+    start = 0
+    while (found := body.find(url, start)) != -1:
+        after = body[found + len(url) : found + len(url) + 1]
+        if not after or not _URL_TAIL.match(after):
+            return True
+        start = found + 1
+    return False
+
+
+def _referenced(rows: list[media_store.MediaSweepRow]) -> set[str]:
+    """Ids whose serving URL appears in the working tree or in a live draft.
+
+    Drafts are read rather than approximated by their anchor: an image can be
+    pasted into any page, so the page holding it is not necessarily the one it
+    was uploaded against.
+    """
+    urls = {row.id: media_store.serving_url(row.id) for row in rows}
+    matched = wiki_git.grep_working_tree_url_bounded(urls.values())
+    drafts = _draft_bodies()
+    return {
+        row.id
+        for row in rows
+        if urls[row.id] in matched
+        or any(_cited_in(body, urls[row.id]) for body in drafts)
+    }
+
+
+def _refresh_gauges() -> None:
+    count, total_bytes = media_store.totals()
+    wiki_media_total.set(count)
+    wiki_media_bytes_total.set(total_bytes)
+
+
+# 12:00 UTC == 04:00 PST (UTC-8). The scheduler evaluates cron in UTC and does
+# not follow DST, so this lands at 04:00 Pacific in winter and 05:00 in summer.
+@lightweight_maintenance_queue.periodic_task(crontab(hour="12", minute="0"))
+def sweep_wiki_media() -> None:
+    deleted = 0
+    try:
+        candidates = media_store.list_for_sweep()
+        if not candidates:
+            log.info("image sweep: scanned=0 referenced=0 flagged=0 cleared=0 deleted=0")
+            return
+
+        referenced_ids = _referenced(candidates)
+
+        now = datetime.now(timezone.utc)
+        # 0 disables deletion, matching the trash-purge retention contract.
+        deletion_enabled = _DEREFERENCE_RETENTION_DAYS > 0
+        now_text = _now_text()
+        flagged = 0
+        cleared = 0
+        for candidate in candidates:
+            if candidate.id in referenced_ids:
+                if candidate.unreferenced_since is not None:
+                    media_store.set_unreferenced_since(candidate.id, None)
+                    cleared += 1
+                continue
+
+            if candidate.unreferenced_since is None:
+                created_at = _parse(candidate.created_at)
+                if created_at is not None and now - created_at > _CREATION_GRACE:
+                    media_store.set_unreferenced_since(candidate.id, now_text)
+                    flagged += 1
+                continue
+
+            unreferenced_since = _parse(candidate.unreferenced_since)
+            if unreferenced_since is None or not deletion_enabled:
+                continue
+            if now - unreferenced_since > timedelta(days=_DEREFERENCE_RETENTION_DAYS):
+                # The commit lock holds off every page writer across this
+                # re-scan and delete. Live drafts are not under it, so a
+                # citation added in the gap loses.
+                try:
+                    with wiki_git.commit_lock():
+                        if candidate.id in _referenced([candidate]):
+                            media_store.set_unreferenced_since(candidate.id, None)
+                            cleared += 1
+                            continue
+                        if media_store.delete_if_still_flagged(
+                            candidate.id, candidate.unreferenced_since
+                        ):
+                            deleted += 1
+                except Exception:
+                    log.exception("image sweep: delete failed for %s", candidate.id)
+
+        if deleted:
+            wiki_media_sweep_deleted_total.inc(deleted)
+        log.info(
+            "image sweep: scanned=%d referenced=%d flagged=%d cleared=%d deleted=%d",
+            len(candidates),
+            len(referenced_ids),
+            flagged,
+            cleared,
+            deleted,
+        )
+    finally:
+        _refresh_gauges()

@@ -27,6 +27,7 @@ import {
   SvgCheckSquare,
   SvgCode,
   SvgHash,
+  SvgImage,
   SvgListTree,
   SvgMinus,
   SvgQuoteStart,
@@ -34,10 +35,14 @@ import {
 } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
+import { canUploadImages, promptImageUpload } from "@/lib/editor/images";
+
 interface CommandItem {
   title: string;
   icon: IconFunctionComponent;
   run: (editor: Editor, range: Range) => void;
+  /** Omitted means always offered. */
+  available?: (editor: Editor) => boolean;
 }
 
 const COMMANDS: CommandItem[] = [
@@ -131,12 +136,26 @@ const COMMANDS: CommandItem[] = [
         .run();
     },
   },
+  {
+    title: "Image",
+    icon: SvgImage,
+    // A view with no page path cannot upload, so the picker would discard the
+    // file it collected.
+    available: (editor) => canUploadImages(editor.view),
+    run: (editor, range) => {
+      // Close the menu first: the OS dialog steals focus, and the leftover
+      // "/image" text would otherwise survive in the doc behind it.
+      editor.chain().focus().deleteRange(range).run();
+      promptImageUpload(editor.view);
+    },
+  },
 ];
 
-function filterCommands(query: string): CommandItem[] {
+function filterCommands(query: string, editor: Editor): CommandItem[] {
+  const available = COMMANDS.filter((c) => c.available?.(editor) ?? true);
   const q = query.trim().toLowerCase();
-  if (!q) return COMMANDS;
-  return COMMANDS.filter((c) => c.title.toLowerCase().includes(q));
+  if (!q) return available;
+  return available.filter((c) => c.title.toLowerCase().includes(q));
 }
 
 interface CommandListHandle {
@@ -218,7 +237,9 @@ export const CommandMenu = Extension.create({
         // path, a fraction) from ever triggering the menu.
         startOfLine: true,
         allowedPrefixes: null,
-        items: ({ query }) => filterCommands(query).slice(0, 10),
+        // Unsliced: the list is already short and the menu scrolls, and a cap
+        // silently drops whichever command sorts last.
+        items: ({ query, editor }) => filterCommands(query, editor),
         command: ({ editor, range, props }) => props.run(editor, range),
         render: () => {
           let component: ReactRenderer<

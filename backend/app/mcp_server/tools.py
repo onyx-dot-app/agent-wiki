@@ -62,6 +62,7 @@ MCP_ALLOWED_TOOLS: frozenset[str] = frozenset(
         "move_path",
         "delete_doc",
         "create_directory",
+        "upload_media",
         "add_comment",
         "reply_comment",
         "resolve_comment",

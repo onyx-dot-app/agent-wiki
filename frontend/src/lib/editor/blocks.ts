@@ -46,6 +46,7 @@ import {
 } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { Plugin, TextSelection, type Transaction } from "@tiptap/pm/state";
+import { isSameOriginSrc } from "./media";
 
 /** Internal bookkeeping attrs never rendered into the DOM (`rendered:
  * false`) — they exist purely for the Yjs XML round trip, not for display
@@ -734,5 +735,44 @@ export const MarkdownLink = Extension.create({
         },
       }),
     ];
+  },
+});
+
+/** The inline image node. Named `image` with exactly `{src, alt, title}` so
+ * y-prosemirror name-matches the backend codec's leaf
+ * (`app/wiki/markdown_yjs.py`) and round-trips every attribute. Width is
+ * deliberately not an attr, see `images.ts` for the `#w=` src-fragment
+ * scheme. Atom + draggable so it selects and moves as one unit. This
+ * `renderHTML` is only the clipboard/serialization fallback, and `parseHTML`
+ * is what lets a pasted `<img>` become this node. */
+export const Image = Node.create({
+  name: "image",
+  group: "inline",
+  inline: true,
+  atom: true,
+  draggable: true,
+  addAttributes() {
+    return {
+      src: { default: "" },
+      alt: { default: "" },
+      title: { default: null },
+    };
+  },
+  parseHTML() {
+    return [
+      {
+        tag: "img[src]",
+        // Only images this wiki serves. An external src pasted from a web page
+        // would put a third-party URL in the shared document that every reader
+        // then fetches, and that breaks for good once the source moves.
+        getAttrs: (element) =>
+          isSameOriginSrc((element as HTMLElement).getAttribute("src") ?? "")
+            ? null
+            : false,
+      },
+    ];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["img", mergeAttributes(HTMLAttributes)];
   },
 });
