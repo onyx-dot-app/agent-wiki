@@ -140,6 +140,36 @@ def test_young_tracking_gates_unviewed_pages(monkeypatch, tmp_repo):
 # ---- agent pass ------------------------------------------------------------ #
 
 
+def test_prompt_tree_holds_pages_only(monkeypatch, tmp_repo):
+    """The scope carries `.gitkeep` markers and folder-scoped trigger YAMLs for
+    the folder detectors' benefit; they are not content this model can reason
+    about. Mirrors the misplaced-page assertion — the two detectors build their
+    tree independently, so one-sided coverage would let a regression through."""
+    _age_tracking()
+    _backdated_commit("notes/old.md", _OLD_BODY)
+    calls = _script(
+        monkeypatch,
+        _finish({"path": "notes/old.md", "evidence": "agenda for a past event"}),
+    )
+
+    _StalePageDetector().detect(
+        _scope(
+            "notes/old.md",
+            "anchor/tracked.md",
+            "Empty Folder/.gitkeep",
+            "notes/.trigger_abc.yaml",
+        )
+    )
+
+    prompt = "".join(
+        str(m.get("content", "")) for m in calls[0] if m.get("role") == "user"
+    )
+    assert "notes/old.md" in prompt  # folders with pages still show
+    assert ".gitkeep" not in prompt
+    assert ".trigger_abc.yaml" not in prompt
+    assert "Empty Folder" not in prompt
+
+
 def test_confirmed_stale_page_emits_a_deletion_draft(monkeypatch, tmp_repo):
     _age_tracking()
     _backdated_commit("notes/old.md", _OLD_BODY)
