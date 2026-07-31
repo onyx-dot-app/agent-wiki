@@ -19,9 +19,13 @@ from typing import Any, cast
 from sqlalchemy import select, update
 
 from app.db.models import EntityTaxonomy
-from app.db.session import session
+from app.db.session import advisory_xact_lock, session
 
 log = logging.getLogger(__name__)
+
+# Serializes record(): the whole DB shares one 64-bit advisory keyspace (see
+# triggers/repo.py's _REBUILD_ADVISORY_LOCK), so this is a distinct constant. Spells "etax".
+_RECORD_ADVISORY_LOCK = 0x65746178
 
 
 def active() -> EntityTaxonomy | None:
@@ -55,15 +59,23 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
     Takes the artifact ``app.ingest.entity_types.derive`` produces, so the producer decides
     what is worth keeping rather than this layer imposing a shape.
 
-    Deactivating the previous row and inserting the new one happen in one transaction: the
-    partial unique index on ``active`` means a half-applied write would either leave no
-    taxonomy in force or fail outright, and the second is much easier to notice.
+    Deactivating the previous row and inserting the new one happen in one transaction, under
+    an advisory lock, because the partial unique index alone is not enough to make concurrent
+    recorders safe. Two workers would each deactivate the row their statement could see, both
+    insert with ``active=true``, and the second would hit the index and roll back — losing a
+    derivation that had already paid for its LLM calls. The lock makes the second recorder
+    WAIT and then succeed, rather than fail.
+
+    Transaction-scoped, so a worker that dies mid-record cannot strand it. Unbounded rather
+    than ``try_advisory_xact_lock``: the caller has already done the expensive work, so
+    waiting is always better than skipping.
     """
     types = cast(list[dict[str, Any]], artifact.get("entity_types") or [])
     if not types:
         raise ValueError("refusing to record a taxonomy with no types")
 
     with session() as db:
+        advisory_xact_lock(db, _RECORD_ADVISORY_LOCK)
         db.execute(update(EntityTaxonomy).where(EntityTaxonomy.active).values(active=False))
         row = EntityTaxonomy(
             active=True,
