@@ -12,6 +12,7 @@ from sqlalchemy.orm import defer
 
 from app.db.models import Media
 from app.db.session import execute_dml, session
+from app.wiki import coedit
 
 
 class StoredMedia(BaseModel):
@@ -202,18 +203,22 @@ def totals() -> tuple[int, int]:
         return int(count), int(total_bytes)
 
 
-def delete_if_still_flagged(media_id: str, flagged_at: str) -> bool:
-    """Delete the row only while it carries the exact flag the caller saw.
+def delete_if_still_flagged(media_id: str, flagged_at: str, drafts: str) -> bool:
+    """Delete the row only while its flag and every live draft are unchanged.
 
-    Compare-and-delete in one statement, so anything that cleared or refreshed
-    ``unreferenced_since`` in the meantime wins and the row survives. Whether
-    it is still cited is the caller's question, answered against the working
-    tree and live drafts. Returns True only when a row was deleted.
+    Both conditions live inside the one DELETE, so the check and the write see
+    a single snapshot and nothing can commit between them. A draft edit or a
+    cleared flag leaves the row for the next sweep. Whether it is still cited
+    is the caller's question. Returns True only when a row was deleted.
     """
     with session() as s:
         stmt = (
             sqla_delete(Media)
-            .where(Media.id == media_id, Media.unreferenced_since == flagged_at)
+            .where(
+                Media.id == media_id,
+                Media.unreferenced_since == flagged_at,
+                coedit.active_draft_fingerprint_expr() == drafts,
+            )
             .execution_options(synchronize_session=False)
         )
         return execute_dml(s, stmt) > 0

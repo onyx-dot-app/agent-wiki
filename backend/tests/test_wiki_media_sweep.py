@@ -317,3 +317,22 @@ def test_draft_on_another_page_keeps_a_pasted_image_live(tmp_repo) -> None:
     assert row is not None
     assert row.unreferenced_since is None
     assert media_store.stat(image_id) is not None
+
+
+def test_a_draft_edit_during_the_rescan_defers_the_delete(tmp_repo, monkeypatch) -> None:
+    # Drafts are not under the commit lock, so a citation added between the
+    # re-scan and the delete would otherwise lose its blob.
+    media_id = _put_image("guides/anchored.md")
+    _set_created_at(media_id, _timestamp_ago(timedelta(hours=25)))
+    media_store.set_unreferenced_since(media_id, _timestamp_ago(timedelta(days=31)))
+    coedit.open_session("guides/other.md", base_sha=None)
+
+    # The sweep reads the fingerprint before its re-scan and the DELETE
+    # re-evaluates it. Returning a stale value simulates a draft advancing in
+    # between, which must make the guarded delete match nothing.
+    monkeypatch.setattr(coedit, "active_draft_fingerprint", lambda: "stale-value")
+    _run_sweep()
+
+    row = _image_row(media_id)
+    assert row is not None, "a draft edit in the window must defer, not delete"
+    assert media_store.stat(media_id) is not None
