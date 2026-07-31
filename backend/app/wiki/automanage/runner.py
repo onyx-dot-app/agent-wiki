@@ -23,6 +23,7 @@ pages with different audiences are never named together in one proposal.
 Single-path detectors (empty-folder) see the whole scope. Every emitted
 proposal is stamped with the combined audience fingerprint of its path-set.
 """
+
 from __future__ import annotations
 
 import logging
@@ -80,9 +81,7 @@ def _resolve_management(drafts: list[ProposalDraft]) -> dict[str, bool | None]:
     return update_policy.resolve_ai_management_for_paths(paths)
 
 
-def _base_shas(
-    source_paths: list[str], target_paths: list[str]
-) -> dict[str, str] | None:
+def _base_shas(source_paths: list[str], target_paths: list[str]) -> dict[str, str] | None:
     """Drift anchors: every affected path that has history gets one. Paths
     without history are reserved/new names (a rename option, a move
     destination) — nothing to anchor. A draft none of whose paths can be
@@ -166,9 +165,7 @@ def run_detection(
             }
         run_id = acquired
     else:
-        run_id = runs.start(
-            trigger=trigger, triggered_by_user_id=triggered_by_user_id
-        )
+        run_id = runs.start(trigger=trigger, triggered_by_user_id=triggered_by_user_id)
     try:
         scope = Scope(trigger=trigger, paths=tuple(paths), run_id=run_id)
         deduper = dedup.Deduper(paths)
@@ -196,9 +193,7 @@ def run_detection(
                 drafts = [
                     d
                     for d in drafts
-                    if any(
-                        p in focus_paths for p in d.source_paths + d.target_paths
-                    )
+                    if any(p in focus_paths for p in d.source_paths + d.target_paths)
                 ]
             # One policy query per detector, not one per path per draft.
             mgmt = _resolve_management(drafts)
@@ -250,25 +245,19 @@ def run_detection(
         # Carried pendings were just re-confirmed against current wiki
         # state — stamp them so the banner's freshness line ("confirmed by
         # the last scan …") reflects this run, not the original emit.
-        touch_last_emitted(
-            [row["id"] for row in pending_rows if row["id"] in carried_ids]
-        )
+        touch_last_emitted([row["id"] for row in pending_rows if row["id"] in carried_ids])
         if trigger is TriggerKind.SWEEP:
             revive_ids = {
-                d.existing_id for _, _, d, _ in candidates
-                if d.action is dedup.DedupAction.REVIVE
+                d.existing_id for _, _, d, _ in candidates if d.action is dedup.DedupAction.REVIVE
             }
             for row in pending_rows:
                 if row["id"] in carried_ids or row["id"] in revive_ids:
                     continue
-                if mark_stale(
-                    row["id"], reason=f"not re-detected by run {run_id}"
-                ):
+                if mark_stale(row["id"], reason=f"not re-detected by run {run_id}"):
                     invalidated += 1
             if invalidated:
                 log.info(
-                    "detection run %s: invalidated %d pending proposal(s) "
-                    "no longer detected",
+                    "detection run %s: invalidated %d pending proposal(s) no longer detected",
                     run_id,
                     invalidated,
                 )
@@ -284,9 +273,7 @@ def run_detection(
             blocked |= selection.claim_of(row["source_paths"] + row["target_paths"])
         for row in pending_rows:
             if row["id"] in carried_ids:
-                blocked |= selection.claim_of(
-                    row["source_paths"] + row["target_paths"]
-                )
+                blocked |= selection.claim_of(row["source_paths"] + row["target_paths"])
 
         emitted = 0
         persisted_invalid = 0
@@ -347,8 +334,7 @@ def run_detection(
             if until is not None:
                 if decision.action is dedup.DedupAction.CREATE:
                     _persist_invalid(
-                        f"in cooldown until {until} — these pages were "
-                        "recently declined"
+                        f"in cooldown until {until} — these pages were recently declined"
                     )
                     persisted_invalid += 1
                 # REVIVE: the row already rests as persisted-invalid.
@@ -356,8 +342,7 @@ def run_detection(
             if selection.conflicts(frozenset(claim), frozenset(blocked)):
                 if decision.action is dedup.DedupAction.CREATE:
                     _persist_invalid(
-                        f"not selected by run {run_id} — a live proposal "
-                        "holds the page"
+                        f"not selected by run {run_id} — a live proposal holds the page"
                     )
                     persisted_invalid += 1
                 # A REVIVE candidate stays at rest (stale/expired) — its
@@ -369,8 +354,7 @@ def run_detection(
                     # Unreachable: DedupDecision enforces this at
                     # construction. Skip loudly rather than crash a run.
                     log.error(
-                        "detection run %s: REVIVE decision without a row "
-                        "(%s) — skipped",
+                        "detection run %s: REVIVE decision without a row (%s) — skipped",
                         run_id,
                         decision.dedup_key,
                     )
@@ -423,9 +407,7 @@ def run_detection(
             # consent (`auto_approvable`) — probabilistic detectors emit
             # False so their proposals always get a human even in
             # AI-managed scopes.
-            if auto_ok and not review.auto_approve(
-                proposal["id"], acting_user_id=AI_USER_ID
-            ):
+            if auto_ok and not review.auto_approve(proposal["id"], acting_user_id=AI_USER_ID):
                 # Shouldn't happen for a just-created proposal; if a race
                 # transitioned it out of pending, it stays pending (a
                 # human can still action it) — surface the anomaly loudly.
@@ -436,13 +418,24 @@ def run_detection(
                     proposal["id"],
                     decision.dedup_key,
                 )
-        runs.mark_completed(
-            run_id, paths_scanned=len(paths), proposals_emitted=emitted
-        )
+        # Wiki paths, not files in scope. `paths` also carries the `.gitkeep`
+        # markers that materialize folders and any `.trigger_*.yaml`, because
+        # the folder detectors read them as facts about a folder (a marker IS
+        # the folder — git can't track an empty directory). Neither is ever a
+        # candidate: every page detector filters to `.md`, empty-folder names
+        # the folder rather than its marker, and folder-chain bails on a chain
+        # holding any non-page file. They aren't shown in the tree either, so
+        # counting them reported work on objects nobody manages or can see —
+        # 148 pages read as 193. Folders join this count when they become
+        # scanned units; the scope size stays in the log line, where it is the
+        # useful cost signal.
+        scanned = sum(1 for p in paths if p.endswith(".md"))
+        runs.mark_completed(run_id, paths_scanned=scanned, proposals_emitted=emitted)
         log.info(
-            "detection run %s (%s): scanned %d paths, emitted %d proposals",
+            "detection run %s (%s): scanned %d pages (%d files in scope), emitted %d proposals",
             run_id,
             trigger.value,
+            scanned,
             len(paths),
             emitted,
         )
@@ -452,7 +445,7 @@ def run_detection(
         raise
     return {
         "run_id": run_id,
-        "paths_scanned": len(paths),
+        "paths_scanned": scanned,
         "proposals_emitted": emitted,
     }
 

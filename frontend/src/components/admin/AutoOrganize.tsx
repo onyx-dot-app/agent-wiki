@@ -149,10 +149,16 @@ function proposalsCell(_value: number, row: DetectionRun) {
   );
 }
 
+// Paths, not pages: a run's scope is every tracked file, so the count also
+// covers the `.gitkeep` markers that materialize folders and any
+// `.trigger_*.yaml`. Detectors need those — empty-folder finds a folder by its
+// marker, and a folder-scoped trigger is what keeps that folder from counting
+// as empty — so the count is right; calling them pages was not (148 pages read
+// as 193). "Paths" also still fits once folders are scanned as units.
 function scannedCell(_value: number, row: DetectionRun) {
   return (
     <Text font="main-ui-body" color="text-03">
-      {row.status === "completed" ? `${row.paths_scanned} pages` : "—"}
+      {row.status === "completed" ? `${row.paths_scanned} paths` : "—"}
     </Text>
   );
 }
