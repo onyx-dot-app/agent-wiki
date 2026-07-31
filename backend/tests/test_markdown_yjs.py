@@ -417,6 +417,95 @@ def test_blockquote_containing_list() -> None:
     assert len(list(inner_list.children)) == 2
 
 
+def test_task_item_continuation_indents_to_the_bullet_not_the_checkbox() -> None:
+    """A task item's later blocks belong at the item's CommonMark content
+    column — right after "- ". Indenting them under the whole "- [x] "
+    marker instead put them 4 columns further out, which is an indented
+    code block on the next parse: a checkpoint rewrote a task item's nested
+    list into code, and the page then wouldn't open at all (the codec had
+    no support for a code block inside a list item). The indentation of the
+    output is what matters here — the blank line the first case gains is
+    this module's usual tight->loose list normalization."""
+    assert reconstruct_body(seed_doc_from_markdown("- [ ] top\n  - [x] nested\n")) == (
+        "- [ ] top\n\n  - [x] nested\n"
+    )
+    for body in (
+        "- [ ] top\n\n  a second paragraph\n",
+        "- [ ] top\n\n  ```py\n  x = 1\n  ```\n",
+    ):
+        assert reconstruct_body(seed_doc_from_markdown(body)) == body
+
+
+def test_code_block_inside_a_list_item_round_trips() -> None:
+    body = "- item\n\n  ```py\n  x = 1\n  ```\n"
+    doc = seed_doc_from_markdown(body)
+    item = _root(doc).children[0].children[0]
+    assert [c.tag for c in item.children] == ["paragraph", "codeBlock"]
+    assert dict(list(item.children)[1].attributes)["language"] == "py"
+    assert reconstruct_body(doc) == body
+
+
+def test_indented_code_block_inside_a_list_item_becomes_fenced() -> None:
+    """Sub-bullets indented 4+ columns past their item's content column are
+    an indented code block, not a nested list — what CommonMark says, and
+    what a real page in the wiki turned out to contain."""
+    body = "- item\n\n      - not a nested bullet\n"
+    doc = seed_doc_from_markdown(body)
+    item = _root(doc).children[0].children[0]
+    assert [c.tag for c in item.children] == ["paragraph", "codeBlock"]
+    got = reconstruct_body(doc)
+    assert got == "- item\n\n  ```\n  - not a nested bullet\n  ```\n"
+    assert reconstruct_body(seed_doc_from_markdown(got)) == got
+
+
+def test_heading_and_thematic_break_inside_a_list_item() -> None:
+    body = "- item\n\n  ## nested heading\n\n  ---\n"
+    doc = seed_doc_from_markdown(body)
+    item = _root(doc).children[0].children[0]
+    assert [c.tag for c in item.children] == ["paragraph", "heading", "thematic_break"]
+    assert dict(list(item.children)[1].attributes)["level"] == "2"
+    assert reconstruct_body(doc) == body
+
+
+def test_nested_thematic_break_normalizes_to_dashes() -> None:
+    # A nested break is rebuilt from tokens, not from a source slice (a
+    # blockquote's would carry its "> " prefixes), so it loses the source's
+    # own spelling. It carries no content, so every spelling is the same
+    # block — but the result still has to be stable, not drift each pass.
+    got = reconstruct_body(seed_doc_from_markdown("> quote\n>\n> ***\n"))
+    assert got == "> quote\n>\n> ---\n"
+    assert reconstruct_body(seed_doc_from_markdown(got)) == got
+
+
+def test_table_inside_a_list_item_keeps_rows_and_alignment() -> None:
+    body = "- item\n\n  | a | b |\n  | :--- | ---: |\n  | 1 | 2 |\n"
+    doc = seed_doc_from_markdown(body)
+    item = _root(doc).children[0].children[0]
+    table = list(item.children)[1]
+    assert table.tag == "table"
+    assert [c.tag for c in table.children] == ["tableRow", "tableSeparator", "tableRow"]
+    assert reconstruct_body(doc) == body
+
+
+def test_table_inside_a_blockquote_re_pads_cells() -> None:
+    # Cells are re-emitted with single-space padding — a nested table's rows
+    # are rebuilt from their cells rather than sliced verbatim out of the
+    # source, which inside a blockquote would carry the "> " prefixes.
+    got = reconstruct_body(
+        seed_doc_from_markdown("> |  a  |  b  |\n> | --- | --- |\n> | 1 | 2 |\n")
+    )
+    assert got == "> | a | b |\n> | --- | --- |\n> | 1 | 2 |\n"
+    assert reconstruct_body(seed_doc_from_markdown(got)) == got
+
+
+def test_pipe_in_a_nested_table_cell_stays_escaped() -> None:
+    body = "- item\n\n  | a \\| b | c |\n  | --- | --- |\n  | 1 | 2 |\n"
+    doc = seed_doc_from_markdown(body)
+    table = list(_root(doc).children[0].children[0].children)[1]
+    assert serialize_row(list(table.children)[0]) == "| a \\| b | c |\n"
+    assert reconstruct_body(doc) == body
+
+
 def test_code_block_language_and_content_stored_without_fence_syntax() -> None:
     doc = seed_doc_from_markdown("```python\nx = 1\ny = 2\n```\n")
     root = _root(doc)
@@ -634,11 +723,9 @@ def test_escaped_block_start_markers_inside_list_item_stay_literal() -> None:
     # call _serialize_inline_children directly, bypassing
     # _escape_block_start_ambiguity entirely — a list item or blockquote's
     # own first line is just as much a fresh block-start position as the
-    # top of the document. Without the fix, these reactivate as a nested
-    # list/blockquote; a nested heading attempt doesn't just misparse, it
-    # crashes outright (_build_block_sequence has no heading support at
-    # all), since escaping is also what prevents ever attempting that
-    # parse in the first place.
+    # top of the document. Without the escaping, each of these reactivates
+    # as a real nested list/heading/break — the literal text the author
+    # typed silently becomes a different block.
     cases = [
         "- \\- nested item text\n",
         "- \\# nested heading text\n",
@@ -693,10 +780,8 @@ def test_escaped_block_start_marker_on_a_later_soft_break_line() -> None:
     # doubly so once a list item's continuation indent or a blockquote's
     # per-line "> " prefix (_serialize_blockquote adds that to *every*
     # line, including a paragraph's internal soft breaks) gets added on
-    # top. The "#" case is the sharpest: reactivating it doesn't just
-    # misparse, it crashes outright the next time the checkpointed body is
-    # seeded (_build_block_sequence has no heading support inside a list
-    # item/blockquote at all).
+    # top. Reactivating any of these turns text the author typed literally
+    # into a different block on the next seed of the checkpointed body.
     cases = [
         "first line\n\\# second line\n",
         "first line\n\\- second line\n",
@@ -707,8 +792,6 @@ def test_escaped_block_start_marker_on_a_later_soft_break_line() -> None:
     for raw in cases:
         once = reconstruct_body(seed_doc_from_markdown(raw))
         assert once == raw, f"expected stable round-trip for {raw!r}, got {once!r}"
-        # The real regression: seeding the checkpointed output a second
-        # time must not raise (it did, for "#", before this fix).
         twice = reconstruct_body(seed_doc_from_markdown(once))
         assert twice == once
 
@@ -731,9 +814,6 @@ def test_escaped_setext_underline_on_a_later_line_stays_literal() -> None:
     for raw in cases:
         once = reconstruct_body(seed_doc_from_markdown(raw))
         assert once == raw, f"expected stable round-trip for {raw!r}, got {once!r}"
-        # Confirms no crash on re-seed for the nested cases (same failure
-        # mode as the "#" case: _build_block_sequence has no heading
-        # support inside a list item/blockquote at all).
         twice = reconstruct_body(seed_doc_from_markdown(once))
         assert twice == once
 
@@ -774,8 +854,7 @@ def test_paragraph_reactivates_as_table_without_escaping() -> None:
     # is escaped as a thematic break, which also blocks the delimiter-row
     # read, coincidentally but correctly).
     assert tags == ["paragraph", "paragraph"], (
-        f"expected two paragraphs, no table reactivation, "
-        f"got tags={tags} for body={once!r}"
+        f"expected two paragraphs, no table reactivation, got tags={tags} for body={once!r}"
     )
 
 
@@ -786,8 +865,7 @@ def test_table_delimiter_row_escaping_is_stable() -> None:
         twice = reconstruct_body(seed_doc_from_markdown(once))
         assert once == twice
         tags = [
-            c.tag
-            for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
+            c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
         ]
         assert tags == ["paragraph", "paragraph"]
 
@@ -803,7 +881,9 @@ def test_paragraph_line_of_tildes_does_not_reactivate_as_a_fence() -> None:
     once = reconstruct_body(doc)
     twice = reconstruct_body(seed_doc_from_markdown(once))
     assert once == twice
-    tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
+    tags = [
+        c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
+    ]
     # Every newline is its own block boundary now - three lines, three
     # paragraphs, none of them reactivating as a fence.
     assert tags == ["paragraph", "paragraph", "paragraph"]
@@ -816,7 +896,9 @@ def test_paragraph_line_of_backticks_does_not_reactivate_as_a_fence() -> None:
     # relying on that being obvious from reading _serialize_inline_text alone.
     doc = _build_live_paragraph("some text:\n```\nmore text")
     once = reconstruct_body(doc)
-    tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
+    tags = [
+        c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
+    ]
     assert tags == ["paragraph", "paragraph", "paragraph"]
 
 
@@ -911,7 +993,9 @@ def test_indented_continuation_line_stays_safe_without_escaping() -> None:
     doc = _build_live_paragraph(text)
     once = reconstruct_body(doc)
     assert once == text + "\n"
-    tags = [c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children]
+    tags = [
+        c.tag for c in seed_doc_from_markdown(once).get(ROOT_XML_KEY, type=XmlFragment).children
+    ]
     # Every newline is its own block boundary now - the continuation line
     # becomes its own paragraph. It stays safe without any backslash escape
     # (there's nothing to escape - the ambiguity is 4+ leading columns of

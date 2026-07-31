@@ -27,13 +27,20 @@ padding, and still achieves the byte-stability goal for every row that isn't
 touched — cells aren't decomposed or individually editable. Thematic break
 and html block stay opaque verbatim, tagged ``_raw="1"``.
 
+A list item or blockquote holds a sequence of these same blocks — not just
+paragraphs and nested lists, but a code block, heading, thematic break or
+table too, since CommonMark nests all of them and a code block inside a
+bullet is ordinary on a docs page. The nested forms are built from tokens
+rather than source slices, so two of them normalize (a thematic break to
+``---``, a table's cell padding to one space) — see ``_build_block_sequence``.
+
 Unrecognized inline constructs (anything this module doesn't have an
 explicit encoder for) raise ``NotImplementedError`` rather than
 silently drop or mis-serialize content — the byte-stability
 requirement this whole engine exists for is only meaningful if failures are
-loud, never silent. Same for a list item that isn't a clean sequence of
-paragraph/list/blockquote children (e.g. a list item containing a table) —
-unsupported, raises rather than mis-encodes.
+loud, never silent. Same for any block construct nested in a list item or
+blockquote that has no branch in ``_build_block_sequence`` — unsupported,
+raises rather than mis-encodes.
 """
 
 from __future__ import annotations
@@ -363,9 +370,7 @@ def _serialize_inline_text(xt: XmlText) -> str:
         target = [_mark_key(m, attrs) for m in _NESTING_MARK_ORDER if m in attrs]
         common = 0
         while (
-            common < len(open_keys)
-            and common < len(target)
-            and open_keys[common] == target[common]
+            common < len(open_keys) and common < len(target) and open_keys[common] == target[common]
         ):
             common += 1
         out = _close_after(out, reversed(open_keys[common:]))
@@ -374,9 +379,7 @@ def _serialize_inline_text(xt: XmlText) -> str:
         # escapes inside them, so escaping here would corrupt the code's
         # actual text (a literal backslash would become part of the
         # visible content).
-        rendered = (
-            _wrap_code_run(text) if "code" in attrs else _escape_inline_text(text)
-        )
+        rendered = _wrap_code_run(text) if "code" in attrs else _escape_inline_text(text)
         opening = "".join(_open_delim(key) for key in target[common:])
         if opening:
             # An opener must be followed by non-whitespace, so any leading
@@ -551,12 +554,26 @@ def _build_paragraph_from_inline(inline_token: Any) -> tuple[XmlElement, list[An
 def _build_block_sequence(
     tokens: list[Any], start: int, end: int
 ) -> tuple[list[XmlElement], list[Any]]:
-    """Build a sequence of paragraph/list/blockquote child elements from a
-    flat markdown-it token range ``[start, end)`` — used for list-item and
-    blockquote content, recursing into ``_build_list``/``_build_blockquote``
-    for nested containers. This is what lets a list item contain multiple
-    paragraphs or a nested list, and a blockquote contain multiple
-    paragraphs or a list, with the same code path either way."""
+    """Build a sequence of child block elements from a flat markdown-it token
+    range ``[start, end)`` — used for list-item and blockquote content,
+    recursing into ``_build_list``/``_build_blockquote`` for nested
+    containers. This is what lets a list item contain multiple paragraphs or
+    a nested list, and a blockquote contain multiple paragraphs or a list,
+    with the same code path either way.
+
+    Every block construct CommonMark can nest here has a branch, so the set
+    matches ``serialize_block``'s (the inverse direction) rather than being a
+    subset of it: a page is only openable in the live editor if this function
+    can represent all of it, and a code block or heading inside a bullet is
+    ordinary markdown. Unlike the top-level path, nested constructs are built
+    from tokens alone, never from a source slice: the same token ``.map``
+    line numbers address the *undecorated* source, so inside a blockquote a
+    slice would carry the ``> `` prefixes along with the content. That costs
+    verbatim fidelity for the two constructs the top level stores as opaque
+    source text — a nested thematic break normalizes to ``---`` and a nested
+    table's cells are re-emitted with single-space padding — the same
+    correct-not-byte-identical tradeoff ``_serialize_list`` already makes for
+    a touched list."""
     children: list[XmlElement] = []
     finishers: list[Any] = []
     i = start
@@ -580,6 +597,27 @@ def _build_block_sequence(
             el, bq_finishers = _build_blockquote(tokens, i, close_idx + 1)
             children.append(el)
             finishers.extend(bq_finishers)
+            i = close_idx + 1
+            continue
+        if t.type in ("fence", "code_block"):
+            children.append(_code_block_from_token(t, {}))
+            i += 1
+            continue
+        if t.type == "heading_open":
+            el, heading_finishers = _element_from_segments(
+                "heading", {"level": str(int(t.tag[1:]))}, _inline_runs(tokens[i + 1])
+            )
+            children.append(el)
+            finishers.extend(heading_finishers)
+            i += 3  # heading_open, inline, heading_close
+            continue
+        if t.type == "hr":
+            children.append(_thematic_break_element({}))
+            i += 1
+            continue
+        if t.type == "table_open":
+            close_idx = _matching_close(tokens, i, "table_close")
+            children.append(_build_nested_table(tokens, i, close_idx + 1))
             i = close_idx + 1
             continue
         raise NotImplementedError(f"unsupported nested block construct: {t.type!r}")
@@ -656,11 +694,7 @@ def _build_list(
             first_text = tokens[item_start + 1].children[0]
             first_text.content = first_text.content[match.end() :]
             item_children, item_finishers = _build_block_sequence(tokens, item_start, item_end)
-            items.append(
-                XmlElement(
-                    "taskItem", {"checked": checked}, contents=item_children
-                )
-            )
+            items.append(XmlElement("taskItem", {"checked": checked}, contents=item_children))
         else:
             item_children, item_finishers = _build_block_sequence(tokens, item_start, item_end)
             items.append(XmlElement("listItem", {}, contents=item_children))
@@ -676,10 +710,89 @@ def _build_blockquote(
     return XmlElement("blockquote", dict(extra_attrs or {}), contents=children), finishers
 
 
-def _build_code_block(raw: str, attrs: dict[str, str]) -> XmlElement:
-    tok = next(t for t in gfm_parser().parse(raw) if t.type in ("fence", "code_block"))
+def _code_block_from_token(tok: Any, attrs: dict[str, str]) -> XmlElement:
+    """An already-tokenized code block as a ``codeBlock`` element. The token
+    carries the content already stripped of whichever syntax produced it —
+    the fence lines, or an indented block's 4-column indent — so this works
+    the same for a top-level block and one nested in a list item, where no
+    source slice is available (see ``_build_block_sequence``)."""
     language = tok.info.strip() if tok.type == "fence" else ""
     return XmlElement("codeBlock", {**attrs, "language": language}, contents=[XmlText(tok.content)])
+
+
+def _build_code_block(raw: str, attrs: dict[str, str]) -> XmlElement:
+    tok = next(t for t in gfm_parser().parse(raw) if t.type in ("fence", "code_block"))
+    return _code_block_from_token(tok, attrs)
+
+
+def _thematic_break_element(attrs: dict[str, str]) -> XmlElement:
+    """A thematic break as an opaque verbatim block holding the canonical
+    ``---`` spelling. The top-level path keeps the source's own spelling
+    (``***``, ``___``, a longer dash run) by storing its raw slice; a nested
+    one has no slice to store, and a thematic break carries no content, so
+    every spelling is the same block."""
+    return XmlElement(
+        BlockKind.THEMATIC_BREAK.value, {**attrs, _RAW_ATTR: "1"}, contents=[XmlText("---\n")]
+    )
+
+
+# GFM delimiter-row cell per column alignment, keyed by the ``style``
+# attribute markdown-it-py puts on a ``th``/``td`` token. A column with no
+# alignment gets no style attribute at all.
+_ALIGNMENT_DELIMITERS = {
+    "text-align:left": ":---",
+    "text-align:center": ":---:",
+    "text-align:right": "---:",
+}
+
+
+def _table_row_line(cells: list[str]) -> str:
+    return "| " + " | ".join(cells) + " |\n"
+
+
+def _build_nested_table(tokens: list[Any], start: int, end: int) -> XmlElement:
+    """A table nested in a list item or blockquote, as the same row-level
+    ``table`` element the top-level path builds.
+
+    Rows are re-emitted from their cells with single-space padding rather
+    than sliced verbatim out of the source (which would carry a blockquote's
+    ``> `` prefixes — see ``_build_block_sequence``), so a nested table's
+    original column padding is not preserved. Column alignment is, via the
+    delimiter row this reconstructs from the cells' own style attributes.
+
+    Rows carry no ``_rowId``: those ids are positional within a *top-level*
+    block (``<block_id>:r<n>``), and a nested table has no block id of its
+    own to derive them from. Only ``find_by_row_id`` — the targeted
+    single-row splice path — needs them, and it looks at top-level tables
+    only; a touched nested table reserializes through its whole enclosing
+    block instead.
+    """
+    rows: list[list[str]] = []
+    alignments: list[str] = []
+    for i in range(start, end):
+        t = tokens[i]
+        if t.type == "tr_open":
+            rows.append([])
+            continue
+        if t.type in ("th_open", "td_open"):
+            # A literal "|" in cell text arrives here with its source
+            # backslash already consumed by the table tokenizer; re-emitting
+            # it bare would split the cell in two on the next parse.
+            content = tokens[i + 1].content.replace("|", "\\|")
+            rows[-1].append(content)
+            if t.type == "th_open":
+                alignments.append(str((t.attrs or {}).get("style", "")))
+    header, *body_rows = rows
+    delimiter = [_ALIGNMENT_DELIMITERS.get(style, "---") for style in alignments]
+    children = [
+        XmlElement("tableRow", {}, contents=[XmlText(_table_row_line(header))]),
+        XmlElement("tableSeparator", {}, contents=[XmlText(_table_row_line(delimiter))]),
+        *(
+            XmlElement("tableRow", {}, contents=[XmlText(_table_row_line(row))])
+            for row in body_rows
+        ),
+    ]
+    return XmlElement("table", {}, contents=children)
 
 
 def _build_heading(raw: str, attrs: dict[str, str]) -> tuple[XmlElement, list[Any]]:
@@ -835,25 +948,20 @@ def serialize_row(row: XmlElement) -> str:
 
 
 def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
-    """Inverse of ``_build_block_sequence``: paragraph/list/blockquote
-    children joined by blank lines, with every line after the very first
-    indented by ``indent`` so continuation lines / nested constructs align
-    under the parent marker or blockquote ``>``."""
-    parts: list[str] = []
-    for child in children:
-        if child.tag == "paragraph":
-            # Same block-start ambiguity as a top-level paragraph
-            # (serialize_block) — a list item or blockquote's own first
-            # line is just as much a fresh block-start position as the
-            # top of the document, so a literal leading "-"/">"/"#"/"---"
-            # needs the same escaping, not just the top-level case.
-            parts.append(_serialize_paragraph_text(list(child.children)))
-        elif child.tag in ("bulletList", "orderedList", "taskList"):
-            parts.append(_serialize_list(child).rstrip("\n"))
-        elif child.tag == "blockquote":
-            parts.append(_serialize_blockquote(child).rstrip("\n"))
-        else:
-            raise NotImplementedError(f"unsupported nested block in sequence: tag={child.tag!r}")
+    """Inverse of ``_build_block_sequence``: block children joined by blank
+    lines, with every line after the very first indented by ``indent`` so
+    continuation lines / nested constructs align under the parent marker or
+    blockquote ``>``.
+
+    Each child goes through ``serialize_block``, the same function the top
+    level uses, so the two directions can't drift apart into a nested
+    construct that seeds but won't serialize. That includes a paragraph's
+    block-start escaping: a list item or blockquote's own first line is just
+    as much a fresh block-start position as the top of the document, so a
+    literal leading ``-``/``>``/``#``/``---`` needs the same escaping there.
+    Each block's own trailing newline is dropped here because the blank-line
+    join below supplies the separation instead."""
+    parts = [serialize_block(child).rstrip("\n") for child in children]
     combined = "\n\n".join(parts)
     lines = combined.split("\n")
     indented = [lines[0]] + [(indent + line if line else line) for line in lines[1:]]
@@ -879,11 +987,21 @@ def _serialize_list(node: XmlElement) -> str:
         if is_task:
             checked = _is_checked(dict(item.attributes).get("checked"))
             marker = f"- [{'x' if checked else ' '}] "
-        elif ordered:
-            marker = f"{start + idx}. "
+            # A task item's continuation indent is the width of "- " alone,
+            # not of the whole marker: `gfm_parser()` runs no task-list
+            # plugin, so "[x] " is the first paragraph's own text (see
+            # `_list_item_task_marker`) and CommonMark puts the item's
+            # content column right after the bullet. Indenting the item's
+            # later blocks under the checkbox instead put them 4 columns
+            # past that content column — an indented code block on the next
+            # parse, which is a live round trip: a task item with a nested
+            # list or a second paragraph got rewritten into code the first
+            # time anything on the page was checkpointed.
+            indent = " " * len("- ")
         else:
-            marker = "- "
-        body = _serialize_block_sequence(list(item.children), " " * len(marker))  # type: ignore[arg-type]
+            marker = f"{start + idx}. " if ordered else "- "
+            indent = " " * len(marker)
+        body = _serialize_block_sequence(list(item.children), indent)  # type: ignore[arg-type]
         lines.append(marker + body)
     return "\n\n".join(lines) + "\n"
 
