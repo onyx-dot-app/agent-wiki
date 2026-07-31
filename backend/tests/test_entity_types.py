@@ -95,10 +95,12 @@ class TestSplitByFrequency:
         split = split_by_frequency(referents)
         assert [r.canonical for r in split["ambient"]] == ["Home"]
 
-    def test_one_offs_are_dropped(self) -> None:
+    def test_a_single_sighting_still_evidences_its_kind(self) -> None:
+        """No minimum-sightings filter: we derive KINDS, not entities. One sighting of a
+        company is weak evidence about that company and good evidence that `organization`
+        is a type. The evidence question belongs at the type level (apply_floor)."""
         split = split_by_frequency([self._referent("Once", 1), self._referent("Twice", 2)])
-        assert [r.canonical for r in split["oneoff"]] == ["Once"]
-        assert [r.canonical for r in split["kept"]] == ["Twice"]
+        assert {r.canonical for r in split["kept"]} == {"Once", "Twice"}
 
     def test_every_referent_lands_in_exactly_one_bucket(self) -> None:
         referents = [self._referent(f"r{i}", i % 9 + 1) for i in range(40)]

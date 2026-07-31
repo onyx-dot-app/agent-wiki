@@ -10,7 +10,6 @@ So derive it. Two things make that possible without asking anyone anything:
 
     home entities   a referent named on nearly every page carries no discriminative signal
                     (the corpus is *about* it). That is document frequency, not judgment.
-    recurrence      "a real kind, not a one-off" is a document count.
 
 The pipeline reads only the wiki — never an incoming document — because a taxonomy has to
 describe the corpus it will be applied to:
@@ -19,7 +18,7 @@ describe the corpus it will be applied to:
                  answer; we want the referents the corpus actually contains.
     2. FOLD      merge spellings of one thing ("Jira"/"JIRA", "Scania"/"Scania AB").
                  LEXICAL, not semantic — see fold() for why embeddings fail here.
-    3. FILTER    drop ambient referents and one-offs by document frequency.
+    3. FILTER    set aside ambient referents by document frequency.
     4. GROUP     cluster survivors by kind — this one IS semantic.
     5. NAME      one call per group: name the kind from its observed instances.
     6. MERGE     one call over the whole taxonomy; per-group naming cannot generalise.
@@ -62,7 +61,6 @@ log = logging.getLogger(__name__)
 # the parent brand. Measured against the distribution instead, the home entity is a clear
 # outlier and the same parameter works at either size.
 AMBIENT_MULTIPLE = 3.0  # ambient when document frequency exceeds this * the 99th percentile
-MIN_DOCS = 2  # a referent on one page is a one-off, not a recurring kind
 GROUP_SIMILARITY = 0.35  # cosine floor for "same kind of thing"
 MIN_TYPE_REFERENTS = 3  # a category needs this many distinct members to exist
 MIN_TYPE_DOCS = 2  # ...spread over at least this many pages
@@ -435,7 +433,15 @@ def fold(mentions: list[Mention]) -> list[Referent]:
 
 
 def split_by_frequency(referents: list[Referent]) -> dict[str, list[Referent]]:
-    """Ambient / one-off / kept, by document frequency against the distribution."""
+    """Ambient / kept, by document frequency against the distribution.
+
+    There is deliberately no minimum-sightings filter. Dropping referents seen once would
+    answer "is this entity real enough to track?" — a sensible question when deciding what to
+    KEY facts by, and the wrong one here. We are deriving KINDS, and a referent seen once
+    still evidences its kind: one sighting of a company is weak evidence about that company
+    and perfectly good evidence that `organization` is a type. The evidence question belongs
+    at the type level, where apply_floor() asks it.
+    """
     dfs = sorted((r.n_docs for r in referents), reverse=True)
     # Index 1 at minimum: with few referents int(n * 0.01) is 0, which would make the
     # reference the maximum itself and the cut 3x the very referent being tested — so
@@ -444,8 +450,7 @@ def split_by_frequency(referents: list[Referent]) -> dict[str, list[Referent]]:
     ambient_cut = max(2, int(p99 * AMBIENT_MULTIPLE))
     return {
         "ambient": [r for r in referents if r.n_docs >= ambient_cut],
-        "oneoff": [r for r in referents if r.n_docs < MIN_DOCS],
-        "kept": [r for r in referents if MIN_DOCS <= r.n_docs < ambient_cut],
+        "kept": [r for r in referents if r.n_docs < ambient_cut],
     }
 
 
@@ -575,7 +580,6 @@ def derive(
             "model": model or "(default)",
             "embedding_model": embeddings.model_name(),
             "ambient_multiple": AMBIENT_MULTIPLE,
-            "min_docs": MIN_DOCS,
             "group_similarity": GROUP_SIMILARITY,
             "min_type_referents": MIN_TYPE_REFERENTS,
             "min_type_docs": MIN_TYPE_DOCS,
@@ -587,7 +591,6 @@ def derive(
             "n_artifacts_dropped": sum(artifacts.values()),
             "artifacts_by_reason": dict(artifacts),
             "n_ambient": len(split["ambient"]),
-            "n_oneoff": len(split["oneoff"]),
             "n_kept": len(kept),
             "n_groups": len(groups),
             "n_types_named": len(collapsed),
