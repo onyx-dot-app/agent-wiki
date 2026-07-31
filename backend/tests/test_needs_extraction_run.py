@@ -80,6 +80,45 @@ class TestFirstRun:
         assert stored.needs[0]["need_name"] == "deal status"
         assert stored.needs[0]["entities"][0]["entity_type"] == "organization"
 
+    def test_records_the_model_by_name_not_as_a_blank(self, tmp_repo, llm, monkeypatch) -> None:
+        """Both callers use the deployment default, so if the model were stored unresolved every
+        row would hold "". The guard would then compare "" to "" after an admin switched models
+        and conclude nothing changed, silently keeping needs written by the old one."""
+        from app.llm import settings as llm_settings
+
+        monkeypatch.setattr(
+            needs, "get_llm_settings", lambda: llm_settings.LLMSettings(model="gpt-5.5")
+        )
+        _page("a.md")
+
+        needs.run_extraction()
+
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.model == "gpt-5.5"
+
+    def test_switching_the_deployment_model_re_extracts(self, tmp_repo, llm, monkeypatch) -> None:
+        """The case "let's change the model later" — it has to invalidate."""
+        from app.llm import settings as llm_settings
+
+        monkeypatch.setattr(
+            needs, "get_llm_settings", lambda: llm_settings.LLMSettings(model="gpt-5.5")
+        )
+        _page("a.md")
+        needs.run_extraction()
+        llm.clear()
+
+        monkeypatch.setattr(
+            needs, "get_llm_settings", lambda: llm_settings.LLMSettings(model="claude-opus-4-7")
+        )
+        counts = needs.run_extraction()
+
+        assert len(llm) == 1
+        assert counts["extracted"] == 1
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.model == "claude-opus-4-7"
+
     def test_records_the_active_taxonomy_on_every_page(self, tmp_repo, llm) -> None:
         """Need extraction is the first real consumer of the derived taxonomy, so the link
         back to it has to be written — it is what makes the type labels resolvable later."""

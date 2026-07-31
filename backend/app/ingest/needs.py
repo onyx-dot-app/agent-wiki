@@ -37,6 +37,7 @@ from app.db import page_needs
 from app.ingest import entity_types
 from app.llm import client
 from app.llm.prompts import load_prompt
+from app.llm.settings import get as get_llm_settings
 
 log = logging.getLogger(__name__)
 
@@ -319,10 +320,18 @@ def run_extraction(
     The entity-type menu is read ONCE per run and its taxonomy id stored with every need set,
     so a later re-derivation that renames a type leaves these mentions resolvable.
     """
+    # Resolve the model to a NAME once, rather than storing "" for "whatever the default was".
+    # Both callers use the deployment default, so an unresolved model would make every row's
+    # model column empty — and the staleness guard would then compare "" to "" and conclude
+    # nothing changed after an admin switched models, silently keeping needs written by the old
+    # one. Resolved once per run for the same reason the taxonomy id is: a switch landing
+    # mid-run must not leave one batch labelled two ways.
+    model = model or get_llm_settings().model
     entity_type_taxonomy_id = entity_types.active_entity_type_taxonomy_id()
     type_defs = entity_types.load_taxonomy(entity_type_taxonomy_id)
     log.info(
-        "needs: extracting with %d entity type(s) from taxonomy %s",
+        "needs: extracting with model %r and %d entity type(s) from taxonomy %s",
+        model or "(unconfigured)",
         len(type_defs),
         entity_type_taxonomy_id if entity_type_taxonomy_id is not None else "(fallback)",
     )
