@@ -128,13 +128,41 @@
 }
 
 /* Lists. */
-.editor-prose ul {
-  list-style: disc;
-  padding-left: 1.5rem;
+/* Markers are flex children, not native `::marker`s, so every list aligns its
+   marker the way the task list already does. A native marker sits on the first
+   line box's baseline, which a tall image pushes to the bottom of the image. */
+.editor-prose ul,
+.editor-prose ol {
+  list-style: none;
+  padding-left: 0.5rem;
 }
 .editor-prose ol {
-  list-style: decimal;
-  padding-left: 1.5rem;
+  counter-reset: editor-ol;
+}
+.editor-prose ul > li,
+.editor-prose ol > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.editor-prose ol > li {
+  counter-increment: editor-ol;
+}
+.editor-prose ul:not([data-type="taskList"]) > li::before {
+  content: "•";
+  flex: none;
+  line-height: 1.5rem;
+}
+.editor-prose ol > li::before {
+  content: counter(editor-ol) ".";
+  flex: none;
+  line-height: 1.5rem;
+}
+/* The content beside a marker owns the remaining width, so a long line wraps
+   instead of forcing the row wider than the column. */
+.editor-prose ul > li > *,
+.editor-prose ol > li > * {
+  min-width: 0;
 }
 .editor-prose ul[data-type="taskList"] {
   list-style: none;
