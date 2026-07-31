@@ -240,6 +240,7 @@ def complete(
     tool_calls: list[ToolCall] = []
     stop_reason = ""
     usage = Usage()
+    saw_terminal = False
     for ev in stream(messages, model=model, tools=tools, max_tokens=max_tokens):
         t = ev["type"]
         if t == "text_delta":
@@ -249,8 +250,24 @@ def complete(
                 ToolCall(id=ev["id"], name=ev["name"], arguments=ev["arguments"])
             )
         elif t == "done":
+            saw_terminal = True
             stop_reason = ev["stop_reason"]
             usage = Usage(**ev["usage"])
+    if not saw_terminal:
+        # A stream that ends with no terminal event delivered an answer nobody said was
+        # finished — a dropped connection, or a provider status this layer doesn't translate.
+        # Returning it with an empty ``stop_reason`` presents it as a normal result, which is
+        # how truncated entity-type extractions read as "the model emitted bad JSON".
+        # Reported as "incomplete" so callers that already test for truncation catch this too
+        # rather than having to know one more sentinel.
+        stop_reason = "incomplete"
+        log.warning(
+            "llm stream ended with no terminal event (model=%s, %d char(s) of text, %d tool "
+            "call(s)) — reporting the response as incomplete",
+            model or "(default)",
+            sum(len(part) for part in text_parts),
+            len(tool_calls),
+        )
     return CompletionResult(
         text="".join(text_parts),
         tool_calls=tool_calls,

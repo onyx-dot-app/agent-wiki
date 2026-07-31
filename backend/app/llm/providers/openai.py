@@ -152,7 +152,15 @@ class OpenAIProvider:
                             "name": rec["name"],
                             "arguments": safe_json_loads(rec["args_buf"]),
                         }
-                elif etype == "response.completed":
+                # EVERY terminal status, not just success. A run that hits
+                # ``max_output_tokens`` ends with ``response.incomplete``; a server-side failure
+                # ends with ``response.failed``. Handling only ``response.completed`` meant those
+                # two yielded no terminal event at all, so ``client.complete`` returned the
+                # partial text with an empty ``stop_reason`` and zero usage — a truncated answer
+                # indistinguishable from a whole one, and no exception raised. That is how
+                # entity-type extraction silently lost every large page: the model emitted valid
+                # JSON, was cut off mid-list, and the caller saw only "malformed JSON".
+                elif etype in ("response.completed", "response.incomplete", "response.failed"):
                     resp = event.response
                     usage = getattr(resp, "usage", None)
                     in_tok = getattr(usage, "input_tokens", 0) if usage else 0
@@ -165,10 +173,16 @@ class OpenAIProvider:
                     in_details = getattr(usage, "input_tokens_details", None) if usage else None
                     cached_tok = getattr(in_details, "cached_tokens", 0) if in_details else 0
                     status = getattr(resp, "status", "") or ""
-                    log.info(
-                        "llm done provider=openai model=%s status=%s tokens=%d/%d cached=%d",
+                    # Why it stopped, when the API says: "max_output_tokens" or "content_filter".
+                    # Worth logging because the fix differs — a bigger cap versus a changed prompt.
+                    incomplete = getattr(resp, "incomplete_details", None)
+                    reason = getattr(incomplete, "reason", "") or ""
+                    log_at = log.info if status == "completed" else log.warning
+                    log_at(
+                        "llm done provider=openai model=%s status=%s%s tokens=%d/%d cached=%d",
                         model,
-                        status,
+                        status or "(none)",
+                        f" reason={reason}" if reason else "",
                         in_tok,
                         out_tok,
                         cached_tok or 0,

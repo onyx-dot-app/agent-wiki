@@ -184,6 +184,22 @@ def _o_completed(*, status="completed", input_tokens=10, output_tokens=20, cache
     )
 
 
+def _o_terminal(etype, *, status, reason="", input_tokens=10, output_tokens=20, cached=0):
+    """A terminal Responses event of any kind — ``response.incomplete`` / ``response.failed``
+    carry the same payload shape as ``response.completed``, only a different status."""
+    response = SimpleNamespace(
+        status=status,
+        usage=SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            input_tokens_details=SimpleNamespace(cached_tokens=cached),
+        ),
+    )
+    if reason:
+        response.incomplete_details = SimpleNamespace(reason=reason)
+    return SimpleNamespace(type=etype, response=response)
+
+
 def _o_tool_call_events(*, item_id, call_id, name, arg_chunks):
     events = [
         SimpleNamespace(
@@ -890,3 +906,79 @@ def test_openai_usage_splits_cached_and_uncached(configure_openai, fake_openai):
     assert out.usage.input_tokens == 100
     assert out.usage.cached_input_tokens == 80
     assert out.usage.uncached_input_tokens == 20
+
+
+# --------------------------------------------------------------------------- #
+# Truncated / abnormal responses
+#
+# A response cut short at ``max_output_tokens`` ends with ``response.incomplete``, not
+# ``response.completed``. Handling only the latter returned the partial text with an empty
+# stop_reason and zero usage — indistinguishable from a whole answer, and no exception — which is
+# how entity-type extraction silently lost every large wiki page. Verified against the live API:
+# the SDK's final event was ``response.incomplete`` while the caller saw stop_reason=''.
+# --------------------------------------------------------------------------- #
+
+
+def test_openai_reports_a_truncated_response_as_incomplete(configure_openai, fake_openai):
+    fake_openai(
+        [
+            _o_text_delta('{"referents":[{"name":"Acme"}'),
+            _o_terminal("response.incomplete", status="incomplete", reason="max_output_tokens"),
+        ]
+    )
+
+    result = llm_client.complete([{"role": "user", "content": "extract"}])
+
+    assert result.stop_reason == "incomplete"
+    assert result.text == '{"referents":[{"name":"Acme"}'
+
+
+def test_openai_reports_usage_for_a_truncated_response(configure_openai, fake_openai):
+    """Usage is on the terminal event whatever its status, so dropping the event also lost the
+    token counts — which is what made a truncated call look like it had never happened."""
+    fake_openai(
+        [
+            _o_text_delta("partial"),
+            _o_terminal(
+                "response.incomplete", status="incomplete", input_tokens=51000, output_tokens=4096
+            ),
+        ]
+    )
+
+    result = llm_client.complete([{"role": "user", "content": "extract"}])
+
+    assert result.usage.input_tokens == 51000
+    assert result.usage.output_tokens == 4096
+
+
+def test_openai_reports_a_failed_response(configure_openai, fake_openai):
+    fake_openai([_o_text_delta("half"), _o_terminal("response.failed", status="failed")])
+
+    result = llm_client.complete([{"role": "user", "content": "extract"}])
+
+    assert result.stop_reason == "failed"
+
+
+def test_openai_still_reports_a_completed_response(configure_openai, fake_openai):
+    """The success path must be untouched by widening the terminal branch."""
+    fake_openai([_o_text_delta("done"), _o_completed()])
+
+    result = llm_client.complete([{"role": "user", "content": "hi"}])
+
+    assert result.stop_reason == "completed"
+    assert result.usage.input_tokens == 10
+
+
+def test_a_stream_with_no_terminal_event_is_reported_incomplete(
+    configure_openai, fake_openai, caplog
+):
+    """The safety net under the provider fix: a dropped connection, or any future status this
+    layer does not translate, must not present partial text as a finished answer."""
+    fake_openai([_o_text_delta("cut off here")])
+
+    with caplog.at_level("WARNING"):
+        result = llm_client.complete([{"role": "user", "content": "extract"}])
+
+    assert result.stop_reason == "incomplete"
+    assert result.text == "cut off here"
+    assert any("no terminal event" in r.getMessage() for r in caplog.records)
