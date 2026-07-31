@@ -1,5 +1,30 @@
-import { apiFetch } from "./api";
+import { ApiError, apiFetch } from "./api";
 import type { CommentThreadView, CommentView } from "@/types";
+
+/** What to show a person when a comment action fails.
+
+ * Allowlisted by status rather than by inspecting the text: a server body can
+ * be a validation dump naming internal files, or HTML from a proxy, and
+ * neither belongs on screen. */
+export function commentErrorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    switch (e.status) {
+      case 400:
+        return "That selection cannot be commented on.";
+      case 403:
+        return "You do not have permission to comment here.";
+      case 404:
+        return "That page or comment no longer exists.";
+      case 409:
+        return "The page changed. Reload and try again.";
+      case 413:
+        return "That comment is too long.";
+      case 429:
+        return "Too many requests. Wait a moment and try again.";
+    }
+  }
+  return "Could not save that comment. Try again.";
+}
 
 /** List a page's comments, grouped into threads (root + replies). */
 export async function listComments(path: string): Promise<CommentThreadView[]> {

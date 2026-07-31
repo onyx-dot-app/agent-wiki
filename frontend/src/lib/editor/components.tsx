@@ -3,7 +3,6 @@
 /** Tiptap-based live editor. Replaces `frontend/src/lib/editor/` (the
  * CodeMirror/OT-era editor, deleted once this cutover lands). */
 import { posToDOMRect } from "@tiptap/core";
-import type { Node as PMNode } from "@tiptap/pm/model";
 import { EditorContent, useEditor } from "@tiptap/react";
 import {
   forwardRef,
@@ -23,7 +22,11 @@ import {
 import type { CoeditPeer } from "@/lib/editor/hooks";
 import { colorFor } from "@/lib/editor/presence";
 import type { CoeditParticipant } from "@/lib/editor/svc";
-import { pmPosToTextOffset, textOffsetToPmPos } from "@/lib/editor/textOffsets";
+import {
+  leafText,
+  pmPosToTextOffset,
+  textOffsetToPmPos,
+} from "@/lib/editor/textOffsets";
 import { opaqueId } from "@/lib/editor/ids";
 import type {
   AnchoredHighlightTarget,
@@ -31,16 +34,6 @@ import type {
   CommentDraft,
   TiptapEditorProps,
 } from "@/lib/editor/types";
-
-/** Text a leaf contributes to a comment's quote. A leaf holds no text, so an
- * image-only selection would quote nothing, and the server re-anchors by
- * searching the markdown source for the quote. Its markdown is what is there. */
-function leafQuotedText(leaf: PMNode): string {
-  if (leaf.type.name !== "image") return "";
-  const alt = (leaf.attrs.alt as string) ?? "";
-  const src = (leaf.attrs.src as string) ?? "";
-  return `![${alt}](${src})`;
-}
 
 /** Highlight ids whose spans contain a collapsed caret or intersect a
  * selection, half-open at span ends so a caret just past a span misses —
@@ -200,12 +193,7 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
             const quotedText =
               from === to
                 ? ""
-                : editor.state.doc.textBetween(
-                    from,
-                    to,
-                    "\n\n",
-                    leafQuotedText,
-                  );
+                : editor.state.doc.textBetween(from, to, "\n\n", leafText);
             // A quote is what the server re-anchors by, so a selection holding
             // no quotable content offers nothing to comment on.
             if (!quotedText) {

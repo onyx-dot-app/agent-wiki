@@ -64,7 +64,11 @@ import {
 import { apiFetch } from "@/lib/api";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
-import { createComment, listComments } from "@/lib/comments";
+import {
+  commentErrorMessage,
+  createComment,
+  listComments,
+} from "@/lib/comments";
 import type { CommentDraft, CommentHighlightTarget } from "@/lib/editor/types";
 import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
@@ -528,7 +532,7 @@ export function FileView({ path }: FileViewProps) {
         await refreshComments();
         return true;
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Comment action failed");
+        toast.error(commentErrorMessage(e));
         return false;
       } finally {
         setMarginBusy(false);

@@ -9,10 +9,9 @@ import {
 } from "@onyx-ai/opal/components";
 import { Section } from "@onyx-ai/opal/layouts";
 
-import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/hooks/useToast";
-import { createComment } from "@/lib/comments";
+import { commentErrorMessage, createComment } from "@/lib/comments";
 import type { CoeditorHandle, CommentDraft } from "@/lib/editor/types";
 import { useIsMobile } from "@/lib/viewport";
 import type { CommentThreadView } from "@/types";
@@ -64,21 +63,6 @@ function threadHaystack(t: CommentThreadView): string {
  * search row. Orphaned and resolved threads appear only in list mode.
  * Mobile always lists, the sheet covers the doc the cards would track.
  */
-/** What to show a person when a comment action fails. A server validation
- * dump names internal files and helps nobody, so anything unrecognized becomes
- * a plain sentence and the detail stays in the network tab. */
-function commentErrorMessage(e: unknown): string {
-  if (e instanceof ApiError) {
-    if (e.status === 403) return "You do not have permission to comment here.";
-    if (e.status === 404) return "That page or comment no longer exists.";
-    if (e.status === 409) return "The page changed. Reload and try again.";
-    if (e.status < 500 && !/\n|{|validation error/i.test(e.message)) {
-      return e.message;
-    }
-  }
-  return "Could not save that comment. Try again.";
-}
-
 export function CommentsPanel({
   path,
   headSha,

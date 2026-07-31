@@ -302,17 +302,22 @@
   position: relative;
   margin-left: -1px;
   margin-right: -1px;
+  /* The bar is the ::before, not this element's own border: an inline element
+     takes the line box's height, which an inline-block image stretches to the
+     image. yCursorPlugin sets border-color inline per user, so that stays here
+     for the ::before to inherit. */
+  border-left: 0 solid;
+  z-index: 1; /* the image is positioned and would paint over the caret */
+}
+.editor-prose .ProseMirror-yjs-cursor::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  /* Fixed to the prose line-height rather than an em, which would scale with a
+     heading's font size and resize the line as a peer moves through it. */
+  height: 1.5rem;
   border-left: 2px solid;
-  border-left-style: solid;
-  /* Sized to the text line, not the line box. An inline-block image makes the
-     box as tall as the image, which otherwise stretches the caret to match and
-     makes it jump between lines. */
-  display: inline-block;
-  height: 1.2em;
-  vertical-align: text-bottom;
-  /* Above the image, which is a positioned inline-block and would paint over
-     a caret sitting beside it. */
-  z-index: 1;
+  border-color: inherit;
 }
 .editor-prose .ProseMirror-yjs-cursor div {
   position: absolute;
