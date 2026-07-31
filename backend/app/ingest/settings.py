@@ -32,10 +32,12 @@ class IngestSettings(BaseModel):
     # referent: its name is on nearly every page, so it distinguishes nothing. A setting
     # rather than derived output — an admin knows it on day one, long before a corpus is big
     # enough for any statistical signal, and a re-derivation must not overwrite it.
-    organization_name: str | None
+    # Default None so existing construction sites (and tests) stay valid: an unset
+    # organisation is the normal state, not an omission a caller has to declare.
+    organization_name: str | None = None
     # "admin" | "inferred" | None. Gates inference: see the model for why the source, not the
     # value's nullness, decides whether a derivation may write.
-    organization_name_source: str | None
+    organization_name_source: str | None = None
     # Auto-update health knobs (see "Taming Bad-Behaved Wikis"): the default
     # per-page warning threshold owners can override, and a hard cap above which
     # a page's ingestion auto-update is turned off. 0 = off.
