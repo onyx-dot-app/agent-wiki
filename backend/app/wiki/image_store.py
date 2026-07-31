@@ -8,7 +8,7 @@ import uuid
 from pydantic import BaseModel
 from sqlalchemy import delete as sqla_delete
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import defer
+from sqlalchemy.orm import Session, defer
 
 from app.db.models import CoeditSession, Image, WikiDocId
 from app.wiki.coedit import SessionStatus
@@ -37,8 +37,7 @@ class ImageSweepRow(BaseModel):
 
 
 def serving_url(image_id: str) -> str:
-    """The app URL pages embed for an image. Also the sweep's reference needle,
-    so a bare 16-hex coincidence in page text never counts as a reference."""
+    """The app URL pages embed for an image."""
     return f"/api/wiki/images/{image_id}"
 
 
@@ -152,18 +151,12 @@ def totals() -> tuple[int, int]:
 
 
 def delete_if_anchor_idle(image_id: str) -> bool:
-    """Delete the image unless its anchor page has a live co-edit session, in
-    one transaction.
+    """Delete the image unless its anchor page has a live co-edit session.
 
-    Anchor-scoped rather than buffer-scoped: a Yjs buffer holds no
-    server-readable text, so an open session is the only signal that a draft
-    may reference the image. A session that opens after this transaction
-    commits produces a draft referencing an already-deleted URL, an end state
-    reachable with no race at all (a draft can paste any dead URL at any
-    moment), so no boundary is pretended here. What the transaction does
-    guarantee: the check and the delete are atomic, so no session visible at
-    delete time is ever lost. The git-side scan is the caller's job (it holds
-    the commit lock across this call). Returns True only when a row was deleted.
+    A Yjs buffer holds no server-readable text, so an open session is the only
+    signal a draft may reference the image. At READ COMMITTED each statement
+    takes its own snapshot, so the guarantee is only that no session visible at
+    check time is lost. Returns True only when a row was deleted.
     """
     with session() as s:
         being_edited = s.scalar(
@@ -179,20 +172,19 @@ def delete_if_anchor_idle(image_id: str) -> bool:
         )
         if being_edited:
             return False
-        stmt = (
-            sqla_delete(Image)
-            .where(Image.id == image_id)
-            .execution_options(synchronize_session=False)
-        )
-        return execute_dml(s, stmt) > 0
+        return _delete_row(s, image_id)
+
+
+def _delete_row(s: Session, image_id: str) -> bool:
+    # Statement delete so the blob column is never fetched just to drop the row.
+    stmt = (
+        sqla_delete(Image)
+        .where(Image.id == image_id)
+        .execution_options(synchronize_session=False)
+    )
+    return execute_dml(s, stmt) > 0
 
 
 def delete(image_id: str) -> bool:
-    # Statement delete so the blob column is never fetched just to drop the row.
     with session() as s:
-        stmt = (
-            sqla_delete(Image)
-            .where(Image.id == image_id)
-            .execution_options(synchronize_session=False)
-        )
-        return execute_dml(s, stmt) > 0
+        return _delete_row(s, image_id)

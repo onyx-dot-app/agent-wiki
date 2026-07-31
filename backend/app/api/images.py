@@ -21,14 +21,13 @@ async def upload_image(
     filename: str | None = None,
     user: User = Depends(require_user),
 ) -> UploadImageResponse:
-    # Cross-site POSTs arrive without the session cookie (SameSite=lax, app/main.py), so require_user rejects them.
+    # Session-cookie auth only, so a cross-site POST carries no credential.
     try:
         anchor = image_upload.validate_anchor(path)
     except image_upload.ImageUploadError as e:
         raise HTTPException(status_code=e.status, detail=e.message) from e
 
-    # Streamed rather than handed to the shared path whole, so an oversized
-    # body is refused mid-flight instead of after it is all in memory.
+    # Cap enforced while streaming so an oversized body never fully buffers.
     buf = bytearray()
     async for chunk in request.stream():
         if len(buf) + len(chunk) > image_upload.UPLOAD_CAP_BYTES:

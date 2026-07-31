@@ -1,7 +1,7 @@
 """Handler for the `upload_image` tool. Spec lives in `upload_image.json`.
 
-Shares `app/wiki/image_upload.py` with the HTTP route, so an agent upload gets
-the same anchor, permission and format rules the editor's paste/drop path does.
+Ingest goes through `app/wiki/image_upload.py`, so an agent upload is bound by
+the same anchor, permission and format rules as any other.
 """
 
 from __future__ import annotations

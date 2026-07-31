@@ -41,6 +41,8 @@ interface CommandItem {
   title: string;
   icon: IconFunctionComponent;
   run: (editor: Editor, range: Range) => void;
+  /** Omitted means always offered. */
+  available?: (editor: Editor) => boolean;
 }
 
 const COMMANDS: CommandItem[] = [
@@ -137,6 +139,9 @@ const COMMANDS: CommandItem[] = [
   {
     title: "Image",
     icon: SvgImage,
+    // A view with no page path cannot upload, so the picker would discard the
+    // file it collected.
+    available: (editor) => canUploadImages(editor.view),
     run: (editor, range) => {
       // Close the menu first: the OS dialog steals focus, and the leftover
       // "/image" text would otherwise survive in the doc behind it.
@@ -147,11 +152,7 @@ const COMMANDS: CommandItem[] = [
 ];
 
 function filterCommands(query: string, editor: Editor): CommandItem[] {
-  // A view with no page path cannot upload, so offering Image would open a
-  // picker that silently discards the file.
-  const available = canUploadImages(editor.view)
-    ? COMMANDS
-    : COMMANDS.filter((c) => c.title !== "Image");
+  const available = COMMANDS.filter((c) => c.available?.(editor) ?? true);
   const q = query.trim().toLowerCase();
   if (!q) return available;
   return available.filter((c) => c.title.toLowerCase().includes(q));

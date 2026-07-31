@@ -569,12 +569,10 @@ def grep_working_tree_url_bounded(needles: Iterable[str]) -> set[str]:
     """Search the working tree, INCLUDING ``.trash/``, for URL needles that
     must not be followed by another URL-path character.
 
-    The boundary keeps a needle from matching inside a longer URL (a hex
-    tail, a ``.png`` suffix, a deeper path segment), all of which resolve to
-    something else. Unlike ``list_paths`` (which filters ``TRASH_PREFIX``),
-    git grep applies no ``.trash/`` exclusion, so a reference inside a
-    trashed page still counts. Only the image sweep should rely on that
-    bypass.
+    The boundary keeps a needle from matching inside a longer URL (a hex tail,
+    a ``.png`` suffix, a deeper path segment), all of which resolve elsewhere.
+    No ``.trash/`` exclusion is applied, so a reference inside a trashed page
+    still counts.
     """
     wanted = {needle for needle in needles if needle}
     if not wanted:

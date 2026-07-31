@@ -1,17 +1,13 @@
-/** Editor-side image support: an upload plugin (paste/drop an image file,
- * show a placeholder while it uploads, swap in the real node) and a
- * resizable NodeView for the `image` node defined in `blocks.ts`.
+/** Editor-side image support: an upload plugin (paste/drop a file, hold a
+ * placeholder, swap in the node) and a resizable NodeView for `blocks.ts`'s
+ * `image` node.
  *
- * Width is never a schema attr (the backend codec would drop an unknown
- * attr on the Yjs round trip). It lives only as an opaque `#w=<int>`
- * fragment inside the node's `src`, which the codec keeps verbatim -
- * `parseImageWidth`/`withImageWidth` are the sole readers/writers of that
- * fragment, and a resize dispatches exactly one `src`-rewriting transaction.
+ * Width lives as an opaque `#w=<int>` fragment on `src`, read and written only
+ * through `parseImageWidth`/`withImageWidth`, because the codec keeps a src
+ * verbatim but drops schema attrs it does not know.
  *
- * The NodeView is raw token-styled DOM, not a React component: this editor
- * keeps NodeView DOM React-free (no React roots inside ProseMirror-managed
- * DOM), so the sanctioned form is plain DOM pulling Opal tokens through CSS
- * classes (see `src/app/css/editor.css`).
+ * NodeView DOM stays React-free, so it is plain DOM pulling Opal tokens through
+ * the classes in `src/app/css/editor.css`.
  */
 import { Extension } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
@@ -50,9 +46,8 @@ export function canUploadImages(view: EditorView): boolean {
   return uploaders.has(view);
 }
 
-/** Width an inserted image lands on, in px. Capped rather than fixed so a
- * small icon is never upscaled, and a screenshot arrives readable instead of
- * filling the column. Resizing from here is one drag. */
+/** Width an inserted image lands on, in px. A cap, so a small icon is never
+ * upscaled and a screenshot arrives readable rather than filling the column. */
 const INSERT_MAX_WIDTH = 225;
 
 /** Natural width of an image file, or null when it cannot be decoded (a

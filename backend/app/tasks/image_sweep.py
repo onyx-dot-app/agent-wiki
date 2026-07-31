@@ -45,23 +45,18 @@ def _editing_doc_ids() -> set[str]:
     return set(doc_ids.ids_for_paths(list(paths)).values()) if paths else set()
 
 
-def _referenced(
-    rows: list[image_store.ImageSweepRow], url_by_id: dict[str, str]
-) -> set[str]:
+def _referenced(rows: list[image_store.ImageSweepRow]) -> set[str]:
     """Ids whose serving URL is in the working tree, or whose anchor page is
-    being edited.
-
-    The tree scan is URL-bounded so a longer URL sharing this one's prefix
-    never counts. Drafts are covered by the anchor instead of by their text: a
-    live buffer is a Yjs document with no server-readable text, so an open
-    session on the anchor page is the only signal that a draft may reference it.
+    being edited. A live Yjs buffer has no server-readable text, so the open
+    session stands in for its draft's references.
     """
-    matched_urls = wiki_git.grep_working_tree_url_bounded(list(url_by_id.values()))
+    urls = {row.id: image_store.serving_url(row.id) for row in rows}
+    matched = wiki_git.grep_working_tree_url_bounded(urls.values())
     editing = _editing_doc_ids()
     return {
         row.id
         for row in rows
-        if url_by_id[row.id] in matched_urls or row.anchor_doc_id in editing
+        if urls[row.id] in matched or row.anchor_doc_id in editing
     }
 
 
@@ -82,8 +77,7 @@ def sweep_wiki_images() -> None:
             log.info("image sweep: scanned=0 referenced=0 flagged=0 cleared=0 deleted=0")
             return
 
-        url_by_id = {c.id: image_store.serving_url(c.id) for c in candidates}
-        referenced_ids = _referenced(candidates, url_by_id)
+        referenced_ids = _referenced(candidates)
 
         now = datetime.now(timezone.utc)
         # 0 disables deletion, matching the trash-purge retention contract.
@@ -109,15 +103,12 @@ def sweep_wiki_images() -> None:
             if unreferenced_since is None or not deletion_enabled:
                 continue
             if now - unreferenced_since > timedelta(days=_DEREFERENCE_RETENTION_DAYS):
-                # The commit lock serializes this re-check + delete against every
-                # page writer, so no commit can add a reference in between. A
-                # reference that landed since the batch scan clears the flag.
-                # One bad row must not abort the rest of the sweep.
+                # The commit lock serializes this re-check + delete against
+                # every page writer, so no commit can slip a reference in
+                # between.
                 try:
                     with wiki_git.commit_lock():
-                        if candidate.id in _referenced(
-                            [candidate], {candidate.id: url_by_id[candidate.id]}
-                        ):
+                        if candidate.id in _referenced([candidate]):
                             image_store.set_unreferenced_since(candidate.id, None)
                             cleared += 1
                             continue

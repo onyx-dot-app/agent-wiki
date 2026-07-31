@@ -23,7 +23,7 @@ from app.wiki import coedit, doc_ids, git as wiki_git, image_store, trash
 
 from tests._auth import login_fastapi
 
-_TS_FORMAT = "%Y-%m-%d %H:%M:%S"
+from app.tasks.image_sweep import _TEXT_TIMESTAMP_FORMAT as _TS_FORMAT
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 
@@ -41,7 +41,7 @@ def _put_image(path: str) -> str:
 
 
 def _body_with_image(image_id: str) -> str:
-    return f"# Page\n![x](/api/wiki/images/{image_id})\n"
+    return f"# Page\n![x]({image_store.serving_url(image_id)})\n"
 
 
 def _image_row(image_id: str) -> image_store.ImageSweepRow | None:
@@ -58,11 +58,6 @@ def _set_created_at(image_id: str, value: str) -> None:
         row.created_at = value
 
 
-def _set_unreferenced_since(image_id: str, value: str | None) -> None:
-    with session() as s:
-        row = s.get(Image, image_id)
-        assert row is not None
-        row.unreferenced_since = value
 
 
 def _run_sweep() -> None:
@@ -82,7 +77,7 @@ def test_never_referenced_image_is_flagged_after_grace_then_deleted_after_retent
     assert flagged is not None
     assert flagged.unreferenced_since is not None
 
-    _set_unreferenced_since(
+    image_store.set_unreferenced_since(
         image_id,
         _timestamp_ago(timedelta(days=TRASH_RETENTION_DAYS + 1)),
     )
@@ -98,7 +93,7 @@ def test_session_on_another_page_does_not_keep_image_live(tmp_repo) -> None:
     # keep every orphan in the wiki alive.
     image_id = _put_image("guides/anchored.md")
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
-    _set_unreferenced_since(image_id, _timestamp_ago(timedelta(days=31)))
+    image_store.set_unreferenced_since(image_id, _timestamp_ago(timedelta(days=31)))
     coedit.open_session("guides/elsewhere.md", base_sha=None)
 
     _run_sweep()
@@ -243,7 +238,7 @@ def test_dereference_flag_is_cleared_when_reference_returns(tmp_repo) -> None:
 def test_dereference_retention_deletes_old_flagged_image(tmp_repo) -> None:
     image_id = _put_image("guides/delete-me.md")
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
-    _set_unreferenced_since(
+    image_store.set_unreferenced_since(
         image_id,
         _timestamp_ago(timedelta(days=TRASH_RETENTION_DAYS + 1)),
     )
@@ -268,7 +263,7 @@ def test_metrics_refresh_and_upload_rejections_are_counted(tmp_repo) -> None:
     kept_image_id = _put_image("guides/metrics-keep.md")
     deleted_image_id = _put_image("guides/metrics-delete.md")
     _set_created_at(deleted_image_id, _timestamp_ago(timedelta(hours=25)))
-    _set_unreferenced_since(
+    image_store.set_unreferenced_since(
         deleted_image_id,
         _timestamp_ago(timedelta(days=TRASH_RETENTION_DAYS + 1)),
     )

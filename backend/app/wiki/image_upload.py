@@ -1,8 +1,8 @@
-"""Anchor-checked image ingest, shared by the HTTP upload route and the agent
-tool so both enforce the same rules on the same order of operations.
+"""Anchor-checked image ingest.
 
-The caller supplies bytes and an anchor page; everything that decides whether
-those bytes may become an image lives here.
+The caller supplies bytes and an anchor page. Everything deciding whether those
+bytes may become an image lives here, so every entry point enforces one set of
+rules in one order.
 """
 
 from __future__ import annotations
