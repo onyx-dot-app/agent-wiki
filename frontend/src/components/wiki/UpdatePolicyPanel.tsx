@@ -109,8 +109,13 @@ export function UpdatePolicyPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Live health poll backs the history card. A failure never blocks the
-  // policy card, null just hides the history card.
-  const { health, refresh: refreshHealth } = useUpdateHealth(path);
+  // policy card, null just hides the history card. Pages only: the card's
+  // whole job is reading a 24h count against a threshold and a cap, and both
+  // of those are per-page. A folder's count is its subtree's, so measuring it
+  // against a single page's cap says nothing — see the card below.
+  const { health, refresh: refreshHealth } = useUpdateHealth(
+    kind === "page" ? path : null,
+  );
   const { user } = useAuth();
 
   // Drop the previous scope's unsaved editor state and stale save error.
@@ -416,7 +421,13 @@ export function UpdatePolicyPanel({
               </div>
             </Section>
 
-            {health !== null && (
+            {/* Page-only. There is no folder-level alert threshold or
+                auto-edit limit for the bar to plot a count against, and the
+                folder surfaces pass no history expander or total-edit count
+                either, so on a folder this card is a bare number with nothing
+                to read it against. `health` is already null there (the poll is
+                skipped); the explicit check keeps the intent at the card. */}
+            {kind === "page" && health !== null && (
               <Section
                 justifyContent="start"
                 alignItems="stretch"
