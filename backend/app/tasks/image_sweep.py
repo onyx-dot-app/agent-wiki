@@ -123,16 +123,18 @@ def sweep_wiki_images() -> None:
             if unreferenced_since is None or not deletion_enabled:
                 continue
             if now - unreferenced_since > timedelta(days=_DEREFERENCE_RETENTION_DAYS):
-                # The commit lock serializes this re-check + delete against
-                # every page writer, so no commit can slip a reference in
-                # between.
+                # The commit lock holds off every page writer across this
+                # re-scan and delete. Live drafts are not under it, so a
+                # citation added in the gap loses.
                 try:
                     with wiki_git.commit_lock():
                         if candidate.id in _referenced([candidate]):
                             image_store.set_unreferenced_since(candidate.id, None)
                             cleared += 1
                             continue
-                        if image_store.delete_if_anchor_idle(candidate.id):
+                        if image_store.delete_if_still_flagged(
+                            candidate.id, candidate.unreferenced_since
+                        ):
                             deleted += 1
                 except Exception:
                     log.exception("image sweep: delete failed for %s", candidate.id)

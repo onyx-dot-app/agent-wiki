@@ -8,10 +8,9 @@ import uuid
 from pydantic import BaseModel
 from sqlalchemy import delete as sqla_delete
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session, defer
+from sqlalchemy.orm import defer
 
-from app.db.models import CoeditSession, Image, WikiDocId
-from app.wiki.coedit import SessionStatus
+from app.db.models import Image
 from app.db.session import execute_dml, session
 
 
@@ -150,41 +149,29 @@ def totals() -> tuple[int, int]:
         return int(count), int(total_bytes)
 
 
-def delete_if_anchor_idle(image_id: str) -> bool:
-    """Delete the image unless its anchor page has a live co-edit session.
+def delete_if_still_flagged(image_id: str, flagged_at: str) -> bool:
+    """Delete the image only while it carries the exact flag the caller saw.
 
-    A Yjs buffer holds no server-readable text, so an open session is the only
-    signal a draft may reference the image. At READ COMMITTED each statement
-    takes its own snapshot, so the guarantee is only that no session visible at
-    check time is lost. Returns True only when a row was deleted.
+    Compare-and-delete in one statement, so anything that cleared or refreshed
+    ``unreferenced_since`` in the meantime wins and the row survives. Whether
+    the image is still cited is the caller's question, answered against the
+    working tree and live drafts. Returns True only when a row was deleted.
     """
     with session() as s:
-        being_edited = s.scalar(
-            select(func.count())
-            .select_from(Image)
-            .join(WikiDocId, WikiDocId.id == Image.anchor_doc_id)
-            .join(CoeditSession, CoeditSession.path == WikiDocId.path)
-            .where(
-                Image.id == image_id,
-                WikiDocId.deleted_at.is_(None),
-                CoeditSession.status == SessionStatus.ACTIVE.value,
-            )
+        stmt = (
+            sqla_delete(Image)
+            .where(Image.id == image_id, Image.unreferenced_since == flagged_at)
+            .execution_options(synchronize_session=False)
         )
-        if being_edited:
-            return False
-        return _delete_row(s, image_id)
-
-
-def _delete_row(s: Session, image_id: str) -> bool:
-    # Statement delete so the blob column is never fetched just to drop the row.
-    stmt = (
-        sqla_delete(Image)
-        .where(Image.id == image_id)
-        .execution_options(synchronize_session=False)
-    )
-    return execute_dml(s, stmt) > 0
+        return execute_dml(s, stmt) > 0
 
 
 def delete(image_id: str) -> bool:
+    # Statement delete so the blob column is never fetched just to drop the row.
     with session() as s:
-        return _delete_row(s, image_id)
+        stmt = (
+            sqla_delete(Image)
+            .where(Image.id == image_id)
+            .execution_options(synchronize_session=False)
+        )
+        return execute_dml(s, stmt) > 0
