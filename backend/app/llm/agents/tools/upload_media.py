@@ -1,6 +1,6 @@
-"""Handler for the `upload_image` tool. Spec lives in `upload_image.json`.
+"""Handler for the `upload_media` tool. Spec lives in `upload_media.json`.
 
-Ingest goes through `app/wiki/image_upload.py`, so an agent upload is bound by
+Ingest goes through `app/wiki/media_upload.py`, so an agent upload is bound by
 the same anchor, permission and format rules as any other.
 """
 
@@ -12,7 +12,7 @@ from typing import Any
 
 from app.auth import PermissionDenied, current_user
 from app.llm.agents.tools.errors import ToolError
-from app.wiki import image_upload
+from app.wiki import media_upload
 
 
 def handle(args: dict[str, Any]) -> Any:
@@ -31,7 +31,7 @@ def handle(args: dict[str, Any]) -> Any:
 
         # Base64 costs 4 bytes per 3 encoded, so the cap is checkable before
         # the argument is expanded into bytes.
-        if len(encoded) > (image_upload.UPLOAD_CAP_BYTES + 2) // 3 * 4:
+        if len(encoded) > (media_upload.UPLOAD_CAP_BYTES + 2) // 3 * 4:
             raise ToolError("image exceeds 10 MiB limit")
 
         try:
@@ -41,8 +41,8 @@ def handle(args: dict[str, Any]) -> Any:
         except (binascii.Error, ValueError) as exc:
             raise ToolError(f"data_base64 is not valid base64: {exc}") from exc
 
-        anchor = image_upload.validate_anchor(path)
-        result = image_upload.store(
+        anchor = media_upload.validate_anchor(path)
+        result = media_upload.store(
             data=data,
             anchor=anchor,
             filename=alt_text if isinstance(alt_text, str) else None,
@@ -55,7 +55,7 @@ def handle(args: dict[str, Any]) -> Any:
         }
     except PermissionDenied as exc:
         return {"error": str(exc)}
-    except image_upload.ImageUploadError as exc:
+    except media_upload.MediaUploadError as exc:
         return {"error": exc.message}
     except ToolError as exc:
         return {"error": str(exc)}

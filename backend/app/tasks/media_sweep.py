@@ -1,6 +1,6 @@
-"""Daily retention sweep for unreferenced wiki images.
+"""Daily retention sweep for unreferenced wiki media.
 
-Images live in Postgres, so dereferenced blobs need a periodic sweep to keep
+Media lives in Postgres, so dereferenced blobs need a periodic sweep to keep
 storage bounded without touching the wiki commit path.
 """
 from __future__ import annotations
@@ -10,14 +10,14 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from app.metrics import (
-    wiki_image_sweep_deleted_total,
-    wiki_images_bytes_total,
-    wiki_images_total,
+    wiki_media_sweep_deleted_total,
+    wiki_media_bytes_total,
+    wiki_media_total,
 )
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
 from app.tasks.trash_purge import TRASH_RETENTION_DAYS
-from app.wiki import coedit, coedit_live, git as wiki_git, image_store
+from app.wiki import coedit, coedit_live, git as wiki_git, media_store
 
 log = logging.getLogger(__name__)
 
@@ -62,14 +62,14 @@ def _cited_in(body: str, url: str) -> bool:
     return False
 
 
-def _referenced(rows: list[image_store.ImageSweepRow]) -> set[str]:
+def _referenced(rows: list[media_store.MediaSweepRow]) -> set[str]:
     """Ids whose serving URL appears in the working tree or in a live draft.
 
     Drafts are read rather than approximated by their anchor: an image can be
     pasted into any page, so the page holding it is not necessarily the one it
     was uploaded against.
     """
-    urls = {row.id: image_store.serving_url(row.id) for row in rows}
+    urls = {row.id: media_store.serving_url(row.id) for row in rows}
     matched = wiki_git.grep_working_tree_url_bounded(urls.values())
     drafts = _draft_bodies()
     return {
@@ -81,18 +81,18 @@ def _referenced(rows: list[image_store.ImageSweepRow]) -> set[str]:
 
 
 def _refresh_gauges() -> None:
-    count, total_bytes = image_store.totals()
-    wiki_images_total.set(count)
-    wiki_images_bytes_total.set(total_bytes)
+    count, total_bytes = media_store.totals()
+    wiki_media_total.set(count)
+    wiki_media_bytes_total.set(total_bytes)
 
 
 # 12:00 UTC == 04:00 PST (UTC-8). The scheduler evaluates cron in UTC and does
 # not follow DST, so this lands at 04:00 Pacific in winter and 05:00 in summer.
 @lightweight_maintenance_queue.periodic_task(crontab(hour="12", minute="0"))
-def sweep_wiki_images() -> None:
+def sweep_wiki_media() -> None:
     deleted = 0
     try:
-        candidates = image_store.list_for_sweep()
+        candidates = media_store.list_for_sweep()
         if not candidates:
             log.info("image sweep: scanned=0 referenced=0 flagged=0 cleared=0 deleted=0")
             return
@@ -108,14 +108,14 @@ def sweep_wiki_images() -> None:
         for candidate in candidates:
             if candidate.id in referenced_ids:
                 if candidate.unreferenced_since is not None:
-                    image_store.set_unreferenced_since(candidate.id, None)
+                    media_store.set_unreferenced_since(candidate.id, None)
                     cleared += 1
                 continue
 
             if candidate.unreferenced_since is None:
                 created_at = _parse(candidate.created_at)
                 if created_at is not None and now - created_at > _CREATION_GRACE:
-                    image_store.set_unreferenced_since(candidate.id, now_text)
+                    media_store.set_unreferenced_since(candidate.id, now_text)
                     flagged += 1
                 continue
 
@@ -129,10 +129,10 @@ def sweep_wiki_images() -> None:
                 try:
                     with wiki_git.commit_lock():
                         if candidate.id in _referenced([candidate]):
-                            image_store.set_unreferenced_since(candidate.id, None)
+                            media_store.set_unreferenced_since(candidate.id, None)
                             cleared += 1
                             continue
-                        if image_store.delete_if_still_flagged(
+                        if media_store.delete_if_still_flagged(
                             candidate.id, candidate.unreferenced_since
                         ):
                             deleted += 1
@@ -140,7 +140,7 @@ def sweep_wiki_images() -> None:
                     log.exception("image sweep: delete failed for %s", candidate.id)
 
         if deleted:
-            wiki_image_sweep_deleted_total.inc(deleted)
+            wiki_media_sweep_deleted_total.inc(deleted)
         log.info(
             "image sweep: scanned=%d referenced=%d flagged=%d cleared=%d deleted=%d",
             len(candidates),

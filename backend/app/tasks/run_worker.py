@@ -48,7 +48,7 @@ _TASK_MODULES = (
     "app.tasks.craft",
     "app.tasks.wiki_update",
     "app.tasks.expire_launch_artifacts",
-    "app.tasks.image_sweep",
+    "app.tasks.media_sweep",
     "app.tasks.ingest_eval_retention",
     "app.tasks.mcp_session_cleanup",
     "app.tasks.notify_emails",

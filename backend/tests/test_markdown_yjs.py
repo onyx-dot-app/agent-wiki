@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from pycrdt import Doc, XmlElement, XmlFragment, XmlText
@@ -93,7 +94,7 @@ def test_reconstruct_body_round_trips_bold_italic_code_link() -> None:
 
 
 def test_bare_image_round_trips_exactly() -> None:
-    body = "![alt text](https://x.example/img.png)\n"
+    body = "![alt text](/api/wiki/media/abc123)\n"
     doc = seed_doc_from_markdown(body)
     assert reconstruct_body(doc) == body
 
@@ -201,7 +202,7 @@ def test_image_is_a_sibling_leaf_with_expected_attributes() -> None:
     }
 
 
-def test_untitled_image_has_no_title_attribute_and_titled_image_stores_unescaped_title() -> None:
+def test_untitled_image_has_no_title_attribute_and_titled_media_stores_unescaped_title() -> None:
     untitled = seed_doc_from_markdown("![alt](s.png)\n")
     untitled_image = _root(untitled).children[0].children[0]
     assert isinstance(untitled_image, XmlElement)
@@ -1213,3 +1214,57 @@ def test_image_alt_with_a_newline_still_serializes_as_an_image() -> None:
     reparsed = _root(again).children[0].children[0]
     assert isinstance(reparsed, XmlElement)
     assert reparsed.tag == "image"
+
+
+def _find_images(doc: Doc) -> list[XmlElement]:
+    found: list[XmlElement] = []
+
+    def walk(node: Any) -> None:
+        children = getattr(node, "children", None)
+        for child in list(children or []):
+            if isinstance(child, XmlElement):
+                if child.tag == "image":
+                    found.append(child)
+                walk(child)
+
+    walk(_root(doc))
+    return found
+
+
+def test_same_origin_image_srcs_survive_and_foreign_ones_do_not() -> None:
+    # A foreign src makes every reader's browser announce itself to that host,
+    # so it must not reach committed markdown from either direction. Relative
+    # paths resolve here and are ordinary content.
+    for body in (
+        "![a](/api/wiki/media/abc123#w=225)\n",
+        "![a](s.png)\n",
+        "![a](docs/diagram.png)\n",
+    ):
+        assert reconstruct_body(seed_doc_from_markdown(body)) == body
+
+    for body in (
+        "before ![x](https://evil.example.com/t.png) after\n",
+        "![x](//evil.example.com/t.png)\n",
+        "![x](http://evil.example.com/t.png)\n",
+        "![x](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)\n",
+    ):
+        doc = seed_doc_from_markdown(body)
+        # No image element means nothing a renderer would fetch. A data: URI
+        # never gets that far: markdown-it's link validator rejects it, so it
+        # stays inert text.
+        assert not _find_images(doc)
+        out = reconstruct_body(doc)
+        assert "evil.example.com" not in out
+        assert not _find_images(seed_doc_from_markdown(out))
+
+
+def test_a_foreign_src_set_on_a_live_node_is_not_serialized() -> None:
+    # A collaborator's document can hold any src, so serialization enforces the
+    # rule too, not only the parse side.
+    doc = seed_doc_from_markdown("![a](/api/wiki/media/abc123)\n")
+    image = _root(doc).children[0].children[0]
+    assert isinstance(image, XmlElement)
+    with doc.transaction():
+        image.attributes["src"] = "https://evil.example.com/t.png"  # pyright: ignore[reportArgumentType]
+
+    assert "evil.example.com" not in reconstruct_body(doc)

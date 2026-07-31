@@ -46,7 +46,7 @@ import {
 } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { Plugin, TextSelection, type Transaction } from "@tiptap/pm/state";
-import { isManagedImageSrc } from "./images";
+import { isSameOriginSrc } from "./media";
 
 /** Internal bookkeeping attrs never rendered into the DOM (`rendered:
  * false`) — they exist purely for the Yjs XML round trip, not for display
@@ -766,7 +766,7 @@ export const Image = Node.create({
         // would put a third-party URL in the shared document that every reader
         // then fetches, and that breaks for good once the source moves.
         getAttrs: (element) =>
-          isManagedImageSrc((element as HTMLElement).getAttribute("src") ?? "")
+          isSameOriginSrc((element as HTMLElement).getAttribute("src") ?? "")
             ? null
             : false,
       },

@@ -9,11 +9,11 @@ from fastapi.testclient import TestClient
 
 from app.auth import users as users_repo
 from app.main import create_app
-from app.db.models import Image
-from app.wiki import acl, doc_ids, image_store
+from app.db.models import Media
+from app.wiki import acl, doc_ids, media_store
 from app.wiki import git as wiki_git
 from tests._seed import count_rows
-from app.wiki.image_store import sniff_image_type
+from app.wiki.media_store import sniff_media_type
 from tests._auth import login_fastapi
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -37,12 +37,12 @@ def test_upload_400_for_folder_and_non_page_anchors(client: TestClient) -> None:
     wiki_git.commit_file("guides/.gitkeep", "", "seed")
     for bad in ("guides", "guides/.gitkeep"):
         resp = client.post(
-            f"/api/wiki/images?path={bad}",
+            f"/api/wiki/media?path={bad}",
             content=PNG_BYTES,
             headers={"content-type": "image/png"},
         )
         assert resp.status_code == 400
-    assert count_rows(Image) == 0
+    assert count_rows(Media) == 0
 
 
 def test_upload_404_for_formerly_existing_deleted_page(client: TestClient) -> None:
@@ -53,12 +53,12 @@ def test_upload_404_for_formerly_existing_deleted_page(client: TestClient) -> No
     wiki_git.commit_file("guides/gone.md", "# Gone\n", "seed")
     wiki_git.delete_path("guides/gone.md", "remove")
     resp = client.post(
-        "/api/wiki/images?path=guides/gone.md",
+        "/api/wiki/media?path=guides/gone.md",
         content=PNG_BYTES,
         headers={"content-type": "image/png"},
     )
     assert resp.status_code == 404
-    assert count_rows(Image) == 0
+    assert count_rows(Media) == 0
 
 
 def test_upload_cleans_up_when_page_vanishes_mid_upload(
@@ -75,21 +75,21 @@ def test_upload_cleans_up_when_page_vanishes_mid_upload(
         calls["n"] += 1
         return False if calls["n"] > 1 else real(rel_path)
 
-    monkeypatch.setattr("app.wiki.image_upload.wiki_git.exists_at_head", racing)
+    monkeypatch.setattr("app.wiki.media_upload.wiki_git.exists_at_head", racing)
     resp = client.post(
-        "/api/wiki/images?path=guides/setup.md",
+        "/api/wiki/media?path=guides/setup.md",
         content=PNG_BYTES,
         headers={"content-type": "image/png"},
     )
     assert resp.status_code == 404
-    assert count_rows(Image) == 0
+    assert count_rows(Media) == 0
 
 
 def test_upload_404_for_nonexistent_anchor_page(client: TestClient) -> None:
     uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
     login_fastapi(client, uid)
     resp = client.post(
-        "/api/wiki/images?path=nope/missing.md",
+        "/api/wiki/media?path=nope/missing.md",
         content=PNG_BYTES,
         headers={"content-type": "image/png"},
     )
@@ -105,16 +105,16 @@ def _make_private(path: str, owner_uid: str) -> None:
             acl.revoke(grant["id"])
 
 
-def test_sniff_image_type_detects_supported_magic_bytes() -> None:
-    assert sniff_image_type(PNG_BYTES) == "image/png"
-    assert sniff_image_type(JPEG_BYTES) == "image/jpeg"
-    assert sniff_image_type(GIF_BYTES) == "image/gif"
-    assert sniff_image_type(WEBP_BYTES) == "image/webp"
+def test_sniff_media_type_detects_supported_magic_bytes() -> None:
+    assert sniff_media_type(PNG_BYTES) == "image/png"
+    assert sniff_media_type(JPEG_BYTES) == "image/jpeg"
+    assert sniff_media_type(GIF_BYTES) == "image/gif"
+    assert sniff_media_type(WEBP_BYTES) == "image/webp"
 
 
-def test_sniff_image_type_rejects_unknown_and_too_short() -> None:
-    assert sniff_image_type(b"not an image") is None
-    assert sniff_image_type(b"RIFF") is None
+def test_sniff_media_type_rejects_unknown_and_too_short() -> None:
+    assert sniff_media_type(b"not an image") is None
+    assert sniff_media_type(b"RIFF") is None
 
 
 def test_upload_ignores_a_mislabelled_content_type(client: TestClient) -> None:
@@ -124,7 +124,7 @@ def test_upload_ignores_a_mislabelled_content_type(client: TestClient) -> None:
     login_fastapi(client, uid)
 
     resp = client.post(
-        "/api/wiki/images?path=guides/setup.md",
+        "/api/wiki/media?path=guides/setup.md",
         content=PNG_BYTES,
         headers={"Content-Type": "image/jpeg"},
     )
@@ -138,7 +138,7 @@ def test_upload_without_a_content_type_still_sniffs(client: TestClient) -> None:
     uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
     login_fastapi(client, uid)
 
-    resp = client.post("/api/wiki/images?path=guides/setup.md", content=PNG_BYTES)
+    resp = client.post("/api/wiki/media?path=guides/setup.md", content=PNG_BYTES)
 
     assert resp.status_code == 200
     served = client.get(resp.json()["url"])
@@ -150,26 +150,26 @@ def test_upload_rejects_oversize_body(client: TestClient) -> None:
     login_fastapi(client, uid)
 
     resp = client.post(
-        "/api/wiki/images?path=guides/setup.md",
+        "/api/wiki/media?path=guides/setup.md",
         content=b"\x89PNG\r\n\x1a\n" + b"\x00" * (10 * 1024 * 1024 + 1),
         headers={"Content-Type": "image/png"},
     )
 
     assert resp.status_code == 413
-    assert resp.json() == {"error": "image exceeds 10 MiB limit"}
+    assert resp.json() == {"error": "file exceeds 10 MiB limit"}
 
 
-def test_image_store_round_trip(tmp_db) -> None:
+def test_media_store_round_trip(tmp_db) -> None:
     uid = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
 
-    image_id = image_store.put(
+    image_id = media_store.put(
         data=PNG_BYTES,
         content_type="image/png",
         anchor_doc_id="doc-1",
         uploaded_by=uid,
     )
 
-    rec = image_store.get(image_id)
+    rec = media_store.get(image_id)
     assert rec is not None
     assert rec.data == PNG_BYTES
     assert rec.sha256 == hashlib.sha256(PNG_BYTES).hexdigest()
@@ -177,15 +177,15 @@ def test_image_store_round_trip(tmp_db) -> None:
     assert rec.anchor_doc_id == "doc-1"
     assert rec.uploaded_by == uid
 
-    meta = image_store.stat(image_id)
+    meta = media_store.stat(image_id)
     assert meta is not None
     assert meta.id == image_id
     assert meta.sha256 == rec.sha256
     assert meta.size_bytes == len(PNG_BYTES)
     assert not hasattr(meta, "data")
 
-    assert image_store.delete(image_id) is True
-    assert image_store.get(image_id) is None
+    assert media_store.delete(image_id) is True
+    assert media_store.get(image_id) is None
 
 
 def test_upload_and_serve_round_trip(client: TestClient) -> None:
@@ -193,7 +193,7 @@ def test_upload_and_serve_round_trip(client: TestClient) -> None:
     login_fastapi(client, uid)
 
     upload = client.post(
-        "/api/wiki/images?path=guides/setup.md&filename=logo.png",
+        "/api/wiki/media?path=guides/setup.md&filename=logo.png",
         content=PNG_BYTES,
         headers={"Content-Type": "image/png"},
     )
@@ -201,7 +201,7 @@ def test_upload_and_serve_round_trip(client: TestClient) -> None:
     assert upload.status_code == 200
     payload = upload.json()
     assert payload["id"]
-    assert payload["url"] == f"/api/wiki/images/{payload['id']}"
+    assert payload["url"] == f"/api/wiki/media/{payload['id']}"
     assert payload["markdown"] == f"![logo.png]({payload['url']})"
 
     served = client.get(payload["url"])
@@ -221,7 +221,7 @@ def test_upload_is_403_without_write_permission(client: TestClient) -> None:
     login_fastapi(client, denied_uid)
 
     resp = client.post(
-        "/api/wiki/images?path=priv/secret.md",
+        "/api/wiki/media?path=priv/secret.md",
         content=PNG_BYTES,
         headers={"Content-Type": "image/png"},
     )
@@ -236,7 +236,7 @@ def test_serve_is_403_without_read_permission(client: TestClient) -> None:
     login_fastapi(client, owner_uid)
 
     upload = client.post(
-        "/api/wiki/images?path=priv/secret.md",
+        "/api/wiki/media?path=priv/secret.md",
         content=PNG_BYTES,
         headers={"Content-Type": "image/png"},
     )
@@ -253,7 +253,7 @@ def test_serve_unknown_image_is_404(client: TestClient) -> None:
     uid = users_repo.create(email="admin@x.com", password="hunter2-x", name="Admin")
     login_fastapi(client, uid)
 
-    resp = client.get("/api/wiki/images/doesnotexist")
+    resp = client.get("/api/wiki/media/doesnotexist")
 
     assert resp.status_code == 404
     assert resp.json() == {"error": "not found"}
@@ -264,7 +264,7 @@ def test_serve_tombstoned_anchor_is_404(client: TestClient) -> None:
     login_fastapi(client, uid)
 
     upload = client.post(
-        "/api/wiki/images?path=guides/setup.md",
+        "/api/wiki/media?path=guides/setup.md",
         content=PNG_BYTES,
         headers={"Content-Type": "image/png"},
     )
@@ -283,7 +283,7 @@ def test_serve_returns_304_for_matching_etag(client: TestClient) -> None:
     login_fastapi(client, uid)
 
     upload = client.post(
-        "/api/wiki/images?path=guides/setup.md",
+        "/api/wiki/media?path=guides/setup.md",
         content=PNG_BYTES,
         headers={"Content-Type": "image/png"},
     )
@@ -304,7 +304,7 @@ def test_serve_returns_304_for_matching_etag(client: TestClient) -> None:
 
 def test_unauthenticated_upload_is_401(client: TestClient) -> None:
     resp = client.post(
-        "/api/wiki/images?path=guides/setup.md",
+        "/api/wiki/media?path=guides/setup.md",
         content=PNG_BYTES,
         headers={"Content-Type": "image/png"},
     )
@@ -317,7 +317,7 @@ def test_unauthenticated_serve_is_401(client: TestClient) -> None:
     owner_uid = users_repo.create(email="owner@x.com", password="hunter2-x", name="Owner")
     login_fastapi(client, owner_uid)
     upload = client.post(
-        "/api/wiki/images?path=guides/setup.md",
+        "/api/wiki/media?path=guides/setup.md",
         content=PNG_BYTES,
         headers={"Content-Type": "image/png"},
     )

@@ -1,0 +1,22 @@
+{
+  "name": "upload_media",
+  "description": "Upload a media file and get the markdown that embeds it. The file is anchored to a wiki page, so upload it to the page you are about to put it on, then insert the returned `markdown` with edit_doc/write_doc — uploading alone does not change the page. Supply the bytes base64-encoded. PNG, JPEG, GIF and WebP are accepted, up to 10 MiB.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Wiki-relative path of the page the file belongs to (e.g. `guides/setup.md`). Must be an existing `.md` page. No leading slash, no `..`."
+      },
+      "data_base64": {
+        "type": "string",
+        "description": "The file's bytes, base64-encoded. The format is detected from the bytes, so the file's extension does not matter."
+      },
+      "alt_text": {
+        "type": "string",
+        "description": "Alt text for the embed, used as the markdown link text. Describe what it shows."
+      }
+    },
+    "required": ["path", "data_base64"]
+  }
+}

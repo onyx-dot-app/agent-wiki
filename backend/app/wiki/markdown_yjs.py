@@ -45,6 +45,7 @@ from typing import Any, Literal
 from pycrdt import Doc, XmlElement, XmlFragment, XmlText
 from pydantic import BaseModel, ConfigDict
 
+from app.wiki import media_store
 from app.wiki.markdown_blocks import BlockKind, BlockRange, gfm_parser, top_level_block_ranges
 
 # Root-fragment key. Must match the frontend's Collaboration extension
@@ -137,8 +138,12 @@ def _inline_runs(inline_token: Any) -> list[_Segment]:
             _flush_text()
             segments.append(("hardbreak", None, None, None))
         elif child.type == "image":
-            _flush_text()
-            segments.append(("image", None, None, _image_attrs(child)))
+            attrs = _image_attrs(child)
+            # A third-party src is dropped rather than carried, so it never
+            # round-trips back out to a reader's browser.
+            if media_store.is_same_origin_src(attrs.get("src", "")):
+                _flush_text()
+                segments.append(("image", None, None, attrs))
         elif child.type == "text":
             _emit(child.content, active)
         elif child.type == "softbreak":
@@ -414,6 +419,10 @@ def _image_destination(src: str) -> str:
 
 def _serialize_image(node: XmlElement) -> str:
     attrs = dict(node.attributes)
+    # A collaborator's document can hold any src, so the origin rule applies on
+    # the way out too, not only where markdown is parsed.
+    if not media_store.is_same_origin_src(attrs.get("src", "")):
+        return ""
     src = _image_destination(attrs.get("src", ""))
     # A label cannot span lines and still parse as an image, and a live
     # session can set an alt from a filename that carries one.

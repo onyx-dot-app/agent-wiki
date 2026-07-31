@@ -60,7 +60,7 @@ export interface TiptapEditorProps {
   /** Placeholder text shown on an empty document. */
   placeholder?: string;
   /** The wiki page path this editor is editing, used to scope image uploads
-   * (`POST /api/wiki/images?path=...`). Omitted by the scaffold/multi-client
+   * (`POST /api/wiki/media?path=...`). Omitted by the scaffold/multi-client
    * verification harness, which has no real page - image paste/drop then
    * falls through to default handling instead of uploading. */
   pagePath?: string;

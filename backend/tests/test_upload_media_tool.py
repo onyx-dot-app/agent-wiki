@@ -1,4 +1,4 @@
-"""Tests for the `upload_image` agent/MCP tool.
+"""Tests for the `upload_media` agent/MCP tool.
 
 Guards the contract an agent depends on: bytes in, embeddable markdown out,
 anchored to a page the agent's user may write, and exposed over MCP.
@@ -12,7 +12,7 @@ from typing import Any
 from app.auth import User, set_current_user
 from app.llm.agents.tools import dispatch as registry_dispatch
 from app.mcp_server.tools import MCP_ALLOWED_TOOLS, list_for_mcp
-from app.wiki import acl, image_store
+from app.wiki import acl, media_store
 from app.wiki import git as wiki_git
 from tests._seed import seed_user
 
@@ -21,7 +21,7 @@ JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 16
 
 
 def _upload(**args: Any) -> dict[str, Any]:
-    return registry_dispatch("upload_image", args)
+    return registry_dispatch("upload_media", args)
 
 
 def _as_user(uid: str = "u1", email: str = "a@x.com"):
@@ -41,7 +41,7 @@ def test_upload_returns_embeddable_markdown(tmp_repo):
 
     assert "error" not in out
     assert out["markdown"] == f"![a diagram]({out['url']})"
-    stored = image_store.stat(out["url"].rsplit("/", 1)[-1])
+    stored = media_store.stat(out["url"].rsplit("/", 1)[-1])
     assert stored is not None and stored.content_type == "image/png"
 
 
@@ -57,7 +57,7 @@ def test_upload_types_from_bytes_not_the_alt_text(tmp_repo):
             alt_text="shot.png",
         )
 
-    stored = image_store.stat(out["url"].rsplit("/", 1)[-1])
+    stored = media_store.stat(out["url"].rsplit("/", 1)[-1])
     assert stored is not None and stored.content_type == "image/jpeg"
 
 
@@ -74,7 +74,7 @@ def test_upload_rejects_a_page_the_user_cannot_write(tmp_repo):
         )
 
     assert "error" in out
-    assert image_store.totals()[0] == 0  # nothing stored
+    assert media_store.totals()[0] == 0  # nothing stored
 
 
 def test_upload_rejects_a_missing_anchor_page(tmp_repo):
@@ -87,7 +87,7 @@ def test_upload_rejects_a_missing_anchor_page(tmp_repo):
         )
 
     assert out["error"] == "anchor page not found"
-    assert image_store.totals()[0] == 0
+    assert media_store.totals()[0] == 0
 
 
 def test_upload_rejects_a_folder_anchor(tmp_repo):
@@ -113,14 +113,14 @@ def test_upload_rejects_non_image_and_bad_base64(tmp_repo):
         )
         bad_encoding = _upload(path="guides/setup.md", data_base64="not base64!!")
 
-    assert not_an_image["error"] == "unsupported image type"
+    assert not_an_image["error"] == "unsupported media type"
     assert "not valid base64" in bad_encoding["error"]
-    assert image_store.totals()[0] == 0
+    assert media_store.totals()[0] == 0
 
 
 def test_tool_is_exposed_over_mcp():
-    assert "upload_image" in MCP_ALLOWED_TOOLS
+    assert "upload_media" in MCP_ALLOWED_TOOLS
     listed = {t["name"]: t for t in list_for_mcp()}
-    assert "upload_image" in listed
-    schema = listed["upload_image"]["inputSchema"]
+    assert "upload_media" in listed
+    schema = listed["upload_media"]["inputSchema"]
     assert set(schema["required"]) == {"path", "data_base64"}

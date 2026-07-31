@@ -1,9 +1,9 @@
-"""images
+"""media
 
-Adds ``images``: binary wiki image blobs anchored to stable doc ids, with the
-retention state the sweep flags them by.
+Adds ``media``: binary wiki media blobs (image, video, gif) anchored to stable
+doc ids, with the retention state the sweep flags them by.
 
-Revision ID: b6f1d94ac370
+Revision ID: c8a4e7d2f6b1
 Revises: 4a01439ee668
 Create Date: 2026-07-30 19:45:00.000000+00:00
 """
@@ -15,7 +15,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "b6f1d94ac370"
+revision: str = "c8a4e7d2f6b1"
 down_revision: str | None = "4a01439ee668"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -26,10 +26,10 @@ def upgrade() -> None:
     # models, which already carry this table.
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    if inspector.has_table("images"):
+    if inspector.has_table("media"):
         return
     op.create_table(
-        "images",
+        "media",
         sa.Column("id", sa.Text(), nullable=False),
         sa.Column("sha256", sa.Text(), nullable=False),
         sa.Column("content_type", sa.Text(), nullable=False),
@@ -47,9 +47,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["uploaded_by"], ["users.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("idx_images_anchor_doc_id", "images", ["anchor_doc_id"])
+    op.create_index("idx_media_anchor_doc_id", "media", ["anchor_doc_id"])
 
 
 def downgrade() -> None:
-    op.drop_index("idx_images_anchor_doc_id", table_name="images")
-    op.drop_table("images")
+    op.drop_index("idx_media_anchor_doc_id", table_name="media")
+    op.drop_table("media")

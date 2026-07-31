@@ -2,9 +2,8 @@
  * placeholder, swap in the node) and a resizable NodeView for `blocks.ts`'s
  * `image` node.
  *
- * Width lives as an opaque `#w=<int>` fragment on `src`, read and written only
- * through `parseImageWidth`/`withImageWidth`, because the codec keeps a src
- * verbatim but drops schema attrs it does not know.
+ * Sizing and the same-origin rule live in `media.ts`, shared with the media
+ * types that come next.
  *
  * NodeView DOM stays React-free, so it is plain DOM pulling Opal tokens through
  * the classes in `src/app/css/editor.css`.
@@ -17,6 +16,12 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { EditorView, NodeView } from "@tiptap/pm/view";
 import { ApiError, apiUpload } from "@/lib/api";
 import { toast } from "@/hooks/useToast";
+import {
+  isSameOriginSrc,
+  parseMediaWidth,
+  srcWithoutFragment,
+  withMediaWidth,
+} from "./media";
 
 /** Per-view uploader, registered by the upload plugin so surfaces outside it
  * (the slash menu's Image entry) reach the same upload path instead of
@@ -68,46 +73,6 @@ const MIN_IMAGE_WIDTH = 80;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(value, Math.max(min, max)));
-}
-
-function stripFragment(src: string): string {
-  const hash = src.indexOf("#");
-  return hash === -1 ? src : src.slice(0, hash);
-}
-
-/** Images this wiki serves, matching `image_store.serving_url`. */
-const MANAGED_IMAGE_SRC = /^\/api\/wiki\/images\/[0-9a-f]+$/i;
-
-/** Whether `src` is one this wiki serves. A node's attrs arrive from any
- * collaborator's document and from page markdown, so a foreign src must never
- * become a request. */
-export function isManagedImageSrc(src: string): boolean {
-  return MANAGED_IMAGE_SRC.test(stripFragment(src));
-}
-
-/** Read the opaque `w=<int>` width hint the backend keeps inside an image
- * src's URL fragment. Returns null when there is no integer width there. */
-export function parseImageWidth(src: string): number | null {
-  const hash = src.indexOf("#");
-  if (hash === -1) return null;
-  for (const part of src.slice(hash + 1).split("&")) {
-    const match = /^w=(\d+)$/.exec(part);
-    if (match) return Number.parseInt(match[1]!, 10);
-  }
-  return null;
-}
-
-/** Return `src` with its `#w=<int>` fragment set to `width`, replacing any
- * existing width token and preserving every other fragment part. */
-export function withImageWidth(src: string, width: number): string {
-  const base = stripFragment(src);
-  const hash = src.indexOf("#");
-  const fragment = hash === -1 ? "" : src.slice(hash + 1);
-  const parts = fragment
-    .split("&")
-    .filter((part) => part.length > 0 && !/^w=\d+$/.test(part));
-  parts.push(`w=${width}`);
-  return `${base}#${parts.join("&")}`;
 }
 
 /** Renders an `image` node as a token-styled wrapper + img, with corner and
@@ -169,20 +134,20 @@ class ImageNodeView implements NodeView {
     } else {
       this.img.removeAttribute("title");
     }
-    const nextBase = stripFragment(src);
+    const nextBase = srcWithoutFragment(src);
     if (this.loadedBase !== nextBase) {
       this.loadedBase = nextBase;
       this.clearBroken();
       // Enforced here because this is where a src becomes a request, and a
       // node's attrs can arrive from any collaborator or from page markdown.
-      if (isManagedImageSrc(nextBase)) {
+      if (isSameOriginSrc(nextBase)) {
         this.img.src = nextBase;
       } else {
         this.img.removeAttribute("src");
         this.markBroken("External image blocked");
       }
     }
-    const width = parseImageWidth(src);
+    const width = parseMediaWidth(src);
     if (width != null) this.img.style.width = `${width}px`;
     else this.img.style.removeProperty("width");
   }
@@ -262,7 +227,7 @@ class ImageNodeView implements NodeView {
     const pos = this.getPos();
     if (typeof pos !== "number") return;
     const current = this.node.attrs.src as string;
-    const next = withImageWidth(current, width);
+    const next = withMediaWidth(current, width);
     if (next === current) return;
     this.view.dispatch(this.view.state.tr.setNodeAttribute(pos, "src", next));
   }
@@ -380,7 +345,7 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
     // Navigating away destroys the view mid-upload, and dispatching on a
     // destroyed view throws. Split handlers keep a failed insert off the toast.
     Promise.all([
-      apiUpload<UploadResponse>(`/wiki/images?${query}`, file, file.type),
+      apiUpload<UploadResponse>(`/wiki/media?${query}`, file, file.type),
       naturalWidthOf(file),
     ]).then(
       ([res, natural]) => {
@@ -389,7 +354,7 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
         if (at == null) return; // the target was deleted mid-upload - drop it
         const width = Math.min(natural ?? INSERT_MAX_WIDTH, INSERT_MAX_WIDTH);
         const node = imageType.create({
-          src: withImageWidth(res.url, width),
+          src: withMediaWidth(res.url, width),
           alt: file.name,
           title: null,
         });

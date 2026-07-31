@@ -1363,10 +1363,10 @@ class WikiDocId(Base):
     )
 
 
-class Image(Base):
-    """Binary image blob anchored to a wiki page's stable doc id."""
+class Media(Base):
+    """Binary media blob (image, video, gif) anchored to a page's stable doc id."""
 
-    __tablename__ = "images"
+    __tablename__ = "media"
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     sha256: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1382,7 +1382,7 @@ class Image(Base):
     )
     unreferenced_since: Mapped[str | None] = mapped_column(Text)
 
-    __table_args__ = (Index("idx_images_anchor_doc_id", "anchor_doc_id"),)
+    __table_args__ = (Index("idx_media_anchor_doc_id", "anchor_doc_id"),)
 
 
 # --------------------------------------------------------------------------- #
