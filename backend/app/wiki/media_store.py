@@ -43,16 +43,17 @@ def serving_url(media_id: str) -> str:
 def is_same_origin_src(src: str) -> bool:
     """Whether ``src`` loads from this origin.
 
-    A scheme (``https:``, ``data:``) or a protocol-relative ``//`` prefix points
-    somewhere this app does not serve, so every reader's browser would announce
-    itself to that host. Relative paths and this app's own routes resolve here
-    and are left alone. Supporting external sources needs a proxy that re-serves
-    them from this origin.
+    Anything that resolves to another host makes every reader's browser
+    announce itself there, so only relative references survive. Backslashes are
+    folded first: for http(s) the URL spec treats them as separators, so
+    ``\\\\host``, ``\\/host`` and ``/\\host`` all reach a foreign origin.
+    Supporting external sources needs a proxy that re-serves from this origin.
     """
-    trimmed = src.strip()
-    if not trimmed or trimmed.startswith("//"):
+    candidate = src.strip().replace("\\", "/")
+    if not candidate or candidate.startswith("//"):
         return False
-    return ":" not in trimmed.split("/", 1)[0]
+    # A colon before the first slash is a scheme (https:, data:, javascript:).
+    return ":" not in candidate.split("/", 1)[0]
 
 
 class _Magic(BaseModel):

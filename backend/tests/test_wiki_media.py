@@ -329,3 +329,27 @@ def test_unauthenticated_serve_is_401(client: TestClient) -> None:
 
     assert resp.status_code == 401
     assert resp.json() == {"error": "missing bearer token"}
+
+
+def test_backslash_forms_are_not_same_origin() -> None:
+    # For http(s) the URL spec treats a backslash as a separator, so these all
+    # reach a foreign host and would disclose every reader's IP.
+    for src in (
+        "\\\\evil.example.com/x.png",
+        "\\/evil.example.com/x.png",
+        "/\\evil.example.com/x.png",
+        "//evil.example.com/x.png",
+        "https://evil.example.com/x.png",
+        "data:image/svg+xml,x",
+        "javascript:alert(1)",
+        "",
+    ):
+        assert not media_store.is_same_origin_src(src), src
+
+    for src in (
+        "/api/wiki/media/abc123",
+        "/api/wiki/media/abc123#w=225",
+        "s.png",
+        "docs/diagram.png",
+    ):
+        assert media_store.is_same_origin_src(src), src

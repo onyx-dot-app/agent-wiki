@@ -7,13 +7,22 @@ function stripFragment(src: string): string {
   return hash === -1 ? src : src.slice(0, hash);
 }
 
-/** Whether `src` loads from this origin, mirroring
- * `media_store.is_same_origin_src`. Attrs arrive from any collaborator, so a
- * scheme or `//` must never become a request. */
+/** A base that exists only to resolve against. Any origin works, since the
+ * question is whether `src` escapes whatever base it is resolved from. */
+const RESOLUTION_BASE = "http://same-origin.invalid";
+
+/** Whether `src` stays on the origin it resolves from, mirroring
+ * `media_store.is_same_origin_src`. Resolved rather than inspected, because
+ * the parser is what decides the request the browser makes. */
 export function isSameOriginSrc(src: string): boolean {
-  const trimmed = stripFragment(src).trim();
-  if (!trimmed || trimmed.startsWith("//")) return false;
-  return !trimmed.split("/", 1)[0]!.includes(":");
+  const candidate = stripFragment(src).trim();
+  // An empty reference resolves to the base itself, which would pass.
+  if (!candidate) return false;
+  try {
+    return new URL(candidate, RESOLUTION_BASE).origin === RESOLUTION_BASE;
+  } catch {
+    return false;
+  }
 }
 
 /** The src with its fragment removed, which is what actually gets requested. */
