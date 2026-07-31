@@ -148,6 +148,38 @@ def test_confirmed_stray_emits_a_move_draft(monkeypatch, tmp_repo):
     assert meta is not None and draft.premise == meta[0]
 
 
+def test_prompt_tree_holds_pages_only(monkeypatch, tmp_repo):
+    """The scope carries `.gitkeep` markers and folder-scoped trigger YAMLs for
+    the folder detectors' benefit. They are not content the model can reason
+    about, and a marker-only folder is not even a destination this detector
+    would accept (`_folders` counts pages), so showing them offered options the
+    guards then reject."""
+    _seed_home()
+    _backdated_commit("stray.md", _BODY)
+    calls = _script(
+        monkeypatch,
+        _finish({"path": "stray.md", "dest_folder": "Runbooks", "evidence": "x"}),
+    )
+
+    _MisplacedPageDetector().detect(
+        _scope(
+            "stray.md",
+            "Runbooks/restore.md",
+            "Runbooks/rotate.md",
+            "Empty Folder/.gitkeep",
+            "Runbooks/.trigger_abc.yaml",
+        )
+    )
+
+    prompt = "".join(
+        str(m.get("content", "")) for m in calls[0] if m.get("role") == "user"
+    )
+    assert "Runbooks/restore.md" in prompt  # folders with pages still show
+    assert ".gitkeep" not in prompt
+    assert ".trigger_abc.yaml" not in prompt
+    assert "Empty Folder" not in prompt  # marker-only folder: not a destination
+
+
 def test_invented_destination_is_dropped(monkeypatch, tmp_repo):
     _seed_home()
     _backdated_commit("stray.md", _BODY)

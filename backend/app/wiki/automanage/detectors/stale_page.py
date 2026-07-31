@@ -127,7 +127,13 @@ class _StalePageDetector:
     def _agent_pass(
         self, scope: Scope, candidates: list[str]
     ) -> list[dict[str, str]]:
-        tree = "\n".join(sorted(p for p in scope.paths))
+        # Pages only. The scope also carries the `.gitkeep` markers that
+        # materialize folders and any `.trigger_*.yaml` — the folder
+        # detectors need those, but they are not content the model can
+        # reason about, and on a real wiki they were a quarter of every
+        # tree it read. Folders holding pages still appear, since a page
+        # path carries its prefix.
+        tree = "\n".join(sorted(p for p in scope.paths if is_page(p)))
         ages: list[str] = []
         for p in candidates:
             meta = git.last_commit_meta_for_path(p)
