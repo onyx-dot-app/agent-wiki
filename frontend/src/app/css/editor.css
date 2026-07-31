@@ -142,7 +142,7 @@
 .editor-prose ul > li,
 .editor-prose ol > li {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 0.5rem;
 }
 .editor-prose ol > li {
@@ -179,7 +179,7 @@
    TaskItem renders that and nothing else, no `data-type`. */
 .editor-prose ul[data-type="taskList"] > li[data-checked] {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 0.5rem;
 }
 /* A plain item in a task list. The list itself is `list-style: none` for the
@@ -372,9 +372,9 @@
   display: inline-block;
   max-width: 100%;
   line-height: 0;
-  /* Top, matching the task-list line. Bottom-aligning drops the image below
-     the text baseline, so a line mixing both reads as two different lines. */
-  vertical-align: top;
+  /* Baseline, so an image sits on the same line as the text and markers beside
+     it rather than defining its own alignment. */
+  vertical-align: baseline;
 }
 .editor-prose .editor-image-img {
   display: block;
@@ -444,7 +444,7 @@
   display: inline-block;
   width: 140px;
   height: 100px;
-  vertical-align: bottom;
+  vertical-align: baseline;
   border-radius: var(--radius-08);
   background: var(--background-tint-02);
   animation: editor-image-pulse 1.2s ease-in-out infinite;
