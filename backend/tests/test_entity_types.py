@@ -13,12 +13,10 @@ from app.ingest.entity_types import (
     OTHER_TYPE,
     EntityType,
     Mention,
-    Referent,
     apply_floor,
     fold,
     is_corpus_artifact,
     normalize_surface,
-    split_by_frequency,
 )
 
 
@@ -67,8 +65,8 @@ class TestFold:
         assert folded[0].canonical == "Jira"  # most frequent spelling wins
 
     def test_fold_precedes_counting(self) -> None:
-        """Why fold() runs before split_by_frequency: unfolded, this entity appears on one
-        page per spelling and would be discarded as a one-off."""
+        """Folding is what makes document frequency mean anything: unfolded, this entity
+        looks like three referents on one page each rather than one on three."""
         mentions = [
             Mention(surface=s, page=p)
             for s, p in (("Acme", "a.md"), ("ACME", "b.md"), ("Acme Inc", "c.md"))
@@ -81,31 +79,6 @@ class TestFold:
             [Mention(surface="Zendesk", page="a.md"), Mention(surface="Freshdesk", page="a.md")]
         )
         assert len(folded) == 2
-
-
-class TestSplitByFrequency:
-    def _referent(self, name: str, n_pages: int) -> Referent:
-        return Referent(canonical=name, pages={f"p{i}.md" for i in range(n_pages)})
-
-    def test_isolates_the_ambient_referent(self) -> None:
-        """The home entity is derived, not declared: it is the document-frequency outlier."""
-        referents = [self._referent("Home", 80)] + [
-            self._referent(f"other{i}", 3) for i in range(60)
-        ]
-        split = split_by_frequency(referents)
-        assert [r.canonical for r in split["ambient"]] == ["Home"]
-
-    def test_a_single_sighting_still_evidences_its_kind(self) -> None:
-        """No minimum-sightings filter: we derive KINDS, not entities. One sighting of a
-        company is weak evidence about that company and good evidence that `organization`
-        is a type. The evidence question belongs at the type level (apply_floor)."""
-        split = split_by_frequency([self._referent("Once", 1), self._referent("Twice", 2)])
-        assert {r.canonical for r in split["kept"]} == {"Once", "Twice"}
-
-    def test_every_referent_lands_in_exactly_one_bucket(self) -> None:
-        referents = [self._referent(f"r{i}", i % 9 + 1) for i in range(40)]
-        split = split_by_frequency(referents)
-        assert sum(len(v) for v in split.values()) == len(referents)
 
 
 class TestApplyFloor:

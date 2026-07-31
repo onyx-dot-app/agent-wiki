@@ -6,23 +6,32 @@ the obvious way to get one is for someone to write it down. That does not surviv
 with customers: nobody arriving with a wiki is going to author a type list first, and a list
 written for one deployment is wrong for the next.
 
-So derive it. Two things make that possible without asking anyone anything:
-
-    home entities   a referent named on nearly every page carries no discriminative signal
-                    (the corpus is *about* it). That is document frequency, not judgment.
-
-The pipeline reads only the wiki — never an incoming document — because a taxonomy has to
+So derive it from the pages themselves. The pipeline reads only the wiki — never an incoming document — because a taxonomy has to
 describe the corpus it will be applied to:
 
     1. EXTRACT   per page, whole page, with NO type menu. Supplying one would presuppose the
                  answer; we want the referents the corpus actually contains.
     2. FOLD      merge spellings of one thing ("Jira"/"JIRA", "Scania"/"Scania AB").
                  LEXICAL, not semantic — see fold() for why embeddings fail here.
-    3. FILTER    set aside ambient referents by document frequency.
-    4. GROUP     cluster survivors by kind — this one IS semantic.
+    3. DROP      corpus artifacts: page titles and code symbols are things the wiki is MADE
+                 OF, not things it tracks.
+    4. GROUP     cluster referents by kind — this one IS semantic.
     5. NAME      one call per group: name the kind from its observed instances.
     6. MERGE     one call over the whole taxonomy; per-group naming cannot generalise.
     7. FLOOR     types with too little support fold into ``other``. Deterministic.
+
+Note what is NOT filtered: nothing is excluded for being too common or too rare. Both were
+tried and both were wrong. Excluding ubiquitous referents starved the taxonomy of real
+members — a tool named on every page is still a tool. Excluding single sightings answered
+"is this entity real?" when the question here is "what kinds exist?", and dropped two thirds
+of the evidence. The only evidence test that belongs is at the TYPE level, in apply_floor().
+
+Home entities — the organization a wiki is written BY, whose name therefore carries no
+discriminative signal — are a real and separate need, consumed by the extraction prompt.
+Document frequency is the wrong instrument for it: it conflates "whose wiki is this" with
+"what gets mentioned a lot", and on a small corpus the two are indistinguishable. That
+signal wants asking each page directly and taking a vote; until then ``load_taxonomy``
+returns no home entities rather than a guess.
 
 Deliberately NOT solved here: exact entity resolution to canonical ids. Types need
 approximate counts, not identities — and once types exist, resolution gets easier because
@@ -55,19 +64,17 @@ from app.wiki import filesystem, git as wiki_git
 log = logging.getLogger(__name__)
 
 # --- thresholds -------------------------------------------------------------------------
-# All distributional or count-based rather than fractions of the corpus. A fraction does not
-# survive a change of scale: on a small wiki almost everything recurring clears 40% of pages,
-# and on a large one nothing does, because a big corpus has whole areas that never mention
-# the parent brand. Measured against the distribution instead, the home entity is a clear
-# outlier and the same parameter works at either size.
-AMBIENT_MULTIPLE = 3.0  # ambient when document frequency exceeds this * the 99th percentile
+# Absolute counts, and they do not scale: 3 referents out of 2,000 is meaningful, 3 out of
+# 50,000 is not. Fractions of the corpus fail the other way (on a small wiki everything
+# recurring clears them). Both want expressing against the observed distribution instead —
+# they are stated as counts for now because the corpus sizes they have been checked against
+# are narrow.
 GROUP_SIMILARITY = 0.35  # cosine floor for "same kind of thing"
 MIN_TYPE_REFERENTS = 3  # a category needs this many distinct members to exist
 MIN_TYPE_DOCS = 2  # ...spread over at least this many pages
 OTHER_TYPE = "other"
 
-MAX_NAMING_GROUPS = 200  # cost guard; groups beyond this fold into `other`
-MERGE_ROUNDS = 3
+MERGE_ROUNDS = 3  # merge exits on convergence; this only bounds the loop
 
 # Fallback when no derived artifact is present, so a deployment that has never run the
 # derivation still has something usable. Intentionally generic: these are the types that
@@ -432,28 +439,6 @@ def fold(mentions: list[Mention]) -> list[Referent]:
     return referents
 
 
-def split_by_frequency(referents: list[Referent]) -> dict[str, list[Referent]]:
-    """Ambient / kept, by document frequency against the distribution.
-
-    There is deliberately no minimum-sightings filter. Dropping referents seen once would
-    answer "is this entity real enough to track?" — a sensible question when deciding what to
-    KEY facts by, and the wrong one here. We are deriving KINDS, and a referent seen once
-    still evidences its kind: one sighting of a company is weak evidence about that company
-    and perfectly good evidence that `organization` is a type. The evidence question belongs
-    at the type level, where apply_floor() asks it.
-    """
-    dfs = sorted((r.n_docs for r in referents), reverse=True)
-    # Index 1 at minimum: with few referents int(n * 0.01) is 0, which would make the
-    # reference the maximum itself and the cut 3x the very referent being tested — so
-    # nothing is ever ambient. The reference must never be the item under test.
-    p99 = dfs[min(len(dfs) - 1, max(1, int(len(dfs) * 0.01)))] if len(dfs) > 1 else 1
-    ambient_cut = max(2, int(p99 * AMBIENT_MULTIPLE))
-    return {
-        "ambient": [r for r in referents if r.n_docs >= ambient_cut],
-        "kept": [r for r in referents if r.n_docs < ambient_cut],
-    }
-
-
 def apply_floor(types: list[EntityType]) -> list[EntityType]:
     """Fold under-supported types into ``other``.
 
@@ -509,8 +494,10 @@ def load_taxonomy(path: str | None) -> tuple[dict[str, str], frozenset[str]]:
         name, definition = entry.get("name"), entry.get("definition")
         if isinstance(name, str) and isinstance(definition, str) and name and definition:
             defs[name] = definition
+    # Home entities are not derived here — see the module docstring. The field is read so a
+    # future producer (a per-page vote) can populate it without changing this reader.
     stats = cast(dict[str, Any], payload.get("stats") or {})
-    home = frozenset(str(a) for a in cast(list[Any], stats.get("ambient") or []))
+    home = frozenset(str(a) for a in cast(list[Any], stats.get("home_entities") or []))
     return (defs or dict(DEFAULT_TYPES)), home
 
 
@@ -538,25 +525,29 @@ def derive(
         else:
             surviving.append(r)
 
-    split = split_by_frequency(surviving)
-    kept = split["kept"]
-    if not kept:
-        raise RuntimeError("no referents survived filtering; corpus may be too small")
+    if not surviving:
+        raise RuntimeError("no referents found; corpus may be too small")
 
-    texts = [f"{r.canonical} -- {'; '.join(r.roles[:3])}" if r.roles else r.canonical for r in kept]
+    texts = [
+        f"{r.canonical} -- {'; '.join(r.roles[:3])}" if r.roles else r.canonical for r in surviving
+    ]
     vectors = embeddings.embed_texts(texts)
     if vectors is None:
         raise RuntimeError("embeddings unavailable; cannot group referents")
     unit = [_normalize(v) for v in vectors]
-    order = sorted(range(len(kept)), key=lambda i: -kept[i].n_docs)
-    groups = [[kept[i] for i in g] for g in _leader_cluster(unit, order, GROUP_SIMILARITY)]
+    order = sorted(range(len(surviving)), key=lambda i: -surviving[i].n_docs)
+    groups = [[surviving[i] for i in g] for g in _leader_cluster(unit, order, GROUP_SIMILARITY)]
     groups.sort(key=len, reverse=True)
 
+    # Every group is named. There is no cap: naming cost is proportional to the corpus, which
+    # is known before the run starts, and a cap that silently drops groups would report full
+    # coverage while typing only part of the wiki.
+    log.info("entity_types: naming %d group(s)", len(groups))
     named: list[EntityType] = []
-    for n, group in enumerate(groups[:MAX_NAMING_GROUPS], start=1):
+    for n, group in enumerate(groups, start=1):
         named.extend(name_group(group, model=model))
         if progress:
-            progress("name", n, min(len(groups), MAX_NAMING_GROUPS))
+            progress("name", n, len(groups))
 
     # Types the LLM named identically across groups are one type.
     collapsed: OrderedDict[str, EntityType] = OrderedDict()
@@ -579,7 +570,6 @@ def derive(
         "provenance": {
             "model": model or "(default)",
             "embedding_model": embeddings.model_name(),
-            "ambient_multiple": AMBIENT_MULTIPLE,
             "group_similarity": GROUP_SIMILARITY,
             "min_type_referents": MIN_TYPE_REFERENTS,
             "min_type_docs": MIN_TYPE_DOCS,
@@ -590,13 +580,11 @@ def derive(
             "n_referents": len(referents),
             "n_artifacts_dropped": sum(artifacts.values()),
             "artifacts_by_reason": dict(artifacts),
-            "n_ambient": len(split["ambient"]),
-            "n_kept": len(kept),
+            "n_typed": len(surviving),
             "n_groups": len(groups),
             "n_types_named": len(collapsed),
             "n_types_merged": len(merged),
             "n_types": len(final),
-            "ambient": [r.canonical for r in split["ambient"][:20]],
         },
         "entity_types": [t.to_json() for t in final],
     }
@@ -622,12 +610,11 @@ def run_derivation(
 
     stats = artifact["stats"]
     log.info(
-        "entity_types: %d mention(s) -> %d referent(s) -> %d kept -> %d type(s); ambient=%s",
+        "entity_types: %d mention(s) -> %d referent(s) -> %d typed -> %d type(s)",
         stats["n_mentions"],
         stats["n_referents"],
-        stats["n_kept"],
+        stats["n_typed"],
         stats["n_types"],
-        ", ".join(stats["ambient"]) or "(none)",
     )
     store_taxonomy(artifact)
     return artifact
