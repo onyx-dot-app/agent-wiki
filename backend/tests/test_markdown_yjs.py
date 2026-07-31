@@ -367,6 +367,30 @@ def test_mixed_task_and_plain_items_stays_plain_bullet_list() -> None:
     assert [i.tag for i in lst.children] == ["listItem", "listItem"]
 
 
+def test_mixed_list_keeps_its_checkbox_markers() -> None:
+    """The marker text a mixed list can't promote to a taskItem still has to
+    come back out as a marker: escaping it ("\\[x\\]") is a content edit that
+    no longer reads as a checkbox to anything, here or downstream."""
+    body = "- [x] marked\n\n- unmarked\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    assert once == body
+    assert once == reconstruct_body(seed_doc_from_markdown(once))
+
+
+def test_ordered_list_keeps_its_checkbox_markers() -> None:
+    body = "1. [ ] marked\n\n2. unmarked\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    assert once == body
+
+
+def test_only_a_leading_marker_escapes_differently_from_other_brackets() -> None:
+    """The exemption is positional — a bracket run anywhere else in the item,
+    including one that would re-parse as a link, still escapes."""
+    body = "- text \\[x\\] mid\n\n- \\[see\\](/a) not a link\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    assert once == body
+
+
 def test_task_list_reserialization_is_content_correct_and_idempotent() -> None:
     body = "- [ ] buy milk\n- [x] walk dog\n"
     once = reconstruct_body(seed_doc_from_markdown(body))
