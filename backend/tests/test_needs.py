@@ -28,6 +28,7 @@ def _need(**overrides) -> dict:
         "need_name": "deal status and blockers",
         "need_kind": "entity_status",
         "description": "current status, blockers, and contact",
+        "detail_level": "one status line + a short blockers list",
         "current_content": "Status: negotiation. Blocker: security review.",
         "focus": "specific",
     }
@@ -52,14 +53,22 @@ class TestBuildPrompt:
         assert "- aircraft_model: A named aircraft type." in prompt
         assert "organization" not in prompt
 
+    def test_does_not_cap_how_many_entities_a_need_may_have(self) -> None:
+        """The prompt used to hint "usually 0-3", which suppresses entities on exactly the pages
+        that name many — a tracker with a row per customer is about every one of them."""
+        prompt = needs.build_prompt(TYPE_DEFS)
+
+        assert "0-3" not in prompt
+        assert "EVERY one the need is about" in prompt
+
 
 class TestParseNeed:
     def test_parses_a_well_formed_need(self) -> None:
-        need = needs.parse_need(_need(cadence="weekly"), "needs[0]", TYPE_DEFS)
+        need = needs.parse_need(_need(), "needs[0]", TYPE_DEFS)
 
         assert need.need_name == "deal status and blockers"
         assert need.need_kind is NeedKind.ENTITY_STATUS
-        assert need.cadence == "weekly"
+        assert need.detail_level == "one status line + a short blockers list"
         assert need.focus is Focus.SPECIFIC
 
     def test_rejects_a_need_kind_off_the_closed_list(self) -> None:
@@ -82,9 +91,14 @@ class TestParseNeed:
     def test_generic_focus_survives(self) -> None:
         assert needs.parse_need(_need(focus="generic"), "n", TYPE_DEFS).focus is Focus.GENERIC
 
-    def test_empty_cadence_is_none_not_empty_string(self) -> None:
-        """A timeline need's cadence is read as "is there one?", so "" must not answer yes."""
-        assert needs.parse_need(_need(cadence=""), "n", TYPE_DEFS).cadence is None
+    def test_ignores_fields_the_schema_no_longer_carries(self) -> None:
+        """``cadence`` was dropped: it was populated on 9-18% of needs, missed 30/43 timelines
+        on a weaker model, leaked onto kinds where it means nothing, and restated
+        ``detail_level`` in prose. A stale key in a response must not break parsing."""
+        need = needs.parse_need(_need(cadence="weekly"), "n", TYPE_DEFS)
+
+        assert need.need_name == "deal status and blockers"
+        assert not hasattr(need, "cadence")
 
     def test_the_model_itself_refuses_an_invalid_kind(self) -> None:
         """The enum is the guarantee, not just the parser: nothing can construct a need whose

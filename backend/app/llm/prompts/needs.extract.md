@@ -4,7 +4,7 @@ Name each need with a need_name: a short label for THIS tracked facet, as this p
 
 Classify each need's kind — EXACTLY ONE of:
   - timeline      : the page logs things over time (weekly progress, updates this week).
-                    Infer the CADENCE and what a single entry is.
+                    Record what a single entry looks like in detail_level.
   - entity_status : the page maintains the current status/state of something.
   - reference     : relatively static reference information.
   - other         : none of the above.
@@ -20,7 +20,7 @@ For current_content, LIST THE ACTUAL TRACKED CONTENT: the concrete facts, values
   - COMPACT applies to WORDING ONLY, never to coverage: terse "key: value" lines or short bullets, no prose, no filler, hedging, or commentary — every token carries a fact.
   - Therefore current_content SCALES WITH THE PAGE. A long page tracking many entities must produce a correspondingly long current_content. A short current_content for a long page means you have summarized instead of extracted — go back and enumerate.
 
-ALSO, for each need, list the real-world ENTITIES the need is ABOUT (its hard referents — usually 0-3; a need about no hard referent gets an empty list).
+ALSO, for each need, list the real-world ENTITIES the need is ABOUT (its hard referents). List EVERY one the need is about, however many that is — a per-customer tracker names every customer it tracks. A need about no hard referent gets an empty list.
 
 ENTITY_TYPES
 
@@ -39,7 +39,6 @@ OUTPUT: a single JSON object, no prose:
       "need_kind": "entity_status",
       "description": "current deal status, open blockers, and primary contact",
       "detail_level": "one status line + a short blockers list",
-      "cadence": null,
       "current_content": "Status: negotiation. Blocker: security review. Contact: J. Doe.",
       "entities": [{"canonical_name": "Acme", "entity_type": "<one of the types listed above>", "primary": true}],
       "focus": "specific"

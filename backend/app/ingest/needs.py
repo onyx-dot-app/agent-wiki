@@ -1,8 +1,8 @@
 """Infer each wiki page's INFORMATION NEEDS — what it keeps track of, and how closely.
 
 A need is not a fact on the page. It is a statement of what the page maintains: a stable
-spec (``description``, ``detail_level``, ``cadence``) plus a snapshot of the state it
-currently holds (``current_content``). One page yields a handful, typically 1-5.
+spec (``description``, ``detail_level``) plus a snapshot of the state it currently holds
+(``current_content``). One page yields a handful, typically 1-5.
 
 Why that framing pays: a page tracking "current deal status and blockers" has a need whose
 *shape* is stable even as its content churns. An incoming document can then be judged against
@@ -50,7 +50,7 @@ class NeedKind(str, Enum):
     not a lossy label but a need nothing knows how to apply.
     """
 
-    # The page logs things over time; carries a cadence.
+    # The page logs things over time.
     TIMELINE = "timeline"
     # The page maintains the current state of something.
     ENTITY_STATUS = "entity_status"
@@ -112,7 +112,6 @@ class InformationNeed(BaseModel):
     need_kind: NeedKind
     description: str
     detail_level: str = ""
-    cadence: str | None = None
     # The state the page holds right now — what an incoming document gets diffed against. A
     # description of what the page *tracks* is therefore a failure, not a shorter answer.
     current_content: str = ""
@@ -205,13 +204,11 @@ def parse_need(obj: object, ctx: str, type_defs: dict[str, str]) -> InformationN
     except ValueError:
         focus = DEFAULT_FOCUS
 
-    cadence = entry.get("cadence")
     return InformationNeed(
         need_name=need_name,
         need_kind=need_kind,
         description=description,
         detail_level=str(entry.get("detail_level") or "").strip(),
-        cadence=(str(cadence).strip() if cadence not in (None, "") else None),
         current_content=str(entry.get("current_content") or "").strip(),
         entities=_parse_entities(entry.get("entities"), type_defs),
         focus=focus,
