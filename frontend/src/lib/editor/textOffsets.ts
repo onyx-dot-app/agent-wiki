@@ -35,33 +35,26 @@
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
-/** The plain-text projection offsets are counted in. */
+/** Text a leaf contributes, so it occupies offsets rather than collapsing to
+ * nothing. The src must stay in step with `comment_anchor._project_media`,
+ * which reduces the source the same way. */
+function leafText(leaf: PMNode): string {
+  if (leaf.type.name !== "image") return "";
+  return (leaf.attrs.src as string | null) ?? "";
+}
+
+/** The plain-text projection offsets and comment quotes are counted in. */
 export function docTextBetween(
   editor: Editor,
   from: number,
   to: number,
 ): string {
-  return editor.state.doc.textBetween(from, to, "\n\n");
+  return editor.state.doc.textBetween(from, to, "\n\n", leafText);
 }
 
 export function pmPosToTextOffset(editor: Editor, pos: number): number {
   const clamped = Math.max(0, Math.min(pos, editor.state.doc.content.size));
   return docTextBetween(editor, 0, clamped).length;
-}
-
-/** What the server re-anchors a comment by, searched for literally in the
- * markdown source. Text when there is any, since the source carries it
- * verbatim, and otherwise a src, which it carries inside the image syntax. */
-export function commentQuote(editor: Editor, from: number, to: number): string {
-  const text = docTextBetween(editor, from, to);
-  if (text.trim()) return text;
-  let src = "";
-  editor.state.doc.nodesBetween(from, to, (node: PMNode) => {
-    if (!src && node.type.name === "image") {
-      src = (node.attrs.src as string | null) ?? "";
-    }
-  });
-  return src;
 }
 
 /** Inverse of `pmPosToTextOffset`, via binary search rather than a

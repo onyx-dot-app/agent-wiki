@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from app.wiki import comment_anchor
-from app.wiki.comment_anchor import remap_range
+from app.wiki.comment_anchor import remap_range, resolve_exact_span
 
 
 def _slice(new_body: str, result: tuple[int, int] | None) -> str:
@@ -358,3 +358,65 @@ def test_replace_run_similarity_computed_once_per_body_pair(monkeypatch):
     results = [remap_range(old, new, s, e, diff=diff) for s, e in spans]
     assert all(r is not None for r in results)
     assert len(constructions) == 1  # the shared run's ratio ran exactly once
+
+
+# resolve_exact_span: a quote carrying an image's src anchors on the whole
+# `![…](…)`, and a quote without media searches exactly as before.
+
+_IMG = "![shot.png](/api/wiki/media/abc123)"
+_BODY = f"intro\n\ntest {_IMG} tail\n"
+
+
+def test_quote_spanning_text_and_image_covers_the_whole_image():
+    quote = "test /api/wiki/media/abc123"
+    start, end = resolve_exact_span(_BODY, 7, 7 + len(quote), quote)
+    assert _BODY[start:end] == f"test {_IMG}"
+
+
+def test_image_only_quote_covers_syntax_not_just_the_src():
+    quote = "/api/wiki/media/abc123"
+    start, end = resolve_exact_span(_BODY, 12, 12 + len(quote), quote)
+    assert _BODY[start:end] == _IMG
+
+
+def test_quote_ending_at_an_image_keeps_the_closing_paren():
+    quote = "test /api/wiki/media/abc123"
+    _, end = resolve_exact_span(_BODY, 7, 7 + len(quote), quote)
+    assert _BODY[end - 1] == ")"
+
+
+def test_text_quote_beside_an_image_is_unaffected():
+    start, end = resolve_exact_span(_BODY, 0, 5, "intro")
+    assert (start, end) == (0, 5)
+
+
+def test_trailing_text_after_an_image_maps_past_the_syntax():
+    start, end = resolve_exact_span(_BODY, 30, 34, "tail")
+    assert _BODY[start:end] == "tail"
+
+
+def test_angle_bracketed_destination_is_projected():
+    body = "see ![a](</media/x y.png>) here"
+    quote = "see /media/x y.png"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "see ![a](</media/x y.png>)"
+
+
+def test_image_with_title_is_projected():
+    body = 'see ![a](/media/x.png "a title") here'
+    quote = "see /media/x.png"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == 'see ![a](/media/x.png "a title")'
+
+
+def test_body_without_media_still_picks_nearest_occurrence():
+    body = "alpha beta alpha beta"
+    assert resolve_exact_span(body, 11, 16, "alpha") == (11, 16)
+
+
+def test_quote_absent_from_body_returns_the_estimate():
+    assert resolve_exact_span(_BODY, 3, 9, "nowhere") == (3, 9)
+
+
+def test_empty_quote_returns_the_estimate():
+    assert resolve_exact_span(_BODY, 3, 9, "") == (3, 9)

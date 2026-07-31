@@ -329,6 +329,87 @@ def _snap_to_words(body: str, start: int, end: int) -> tuple[int, int]:
     return start, end
 
 
+# `![alt](dest)`, optionally <>-wrapped with a title. An image this misses stays
+# literal, degrading to the raw search rather than to a wrong span.
+_IMAGE_RE = re.compile(
+    r"!\[(?:\\.|[^\]\\])*\]\(\s*(?:<(?P<angle>(?:\\.|[^<>\\])*)>|(?P<bare>[^\s()]*))"
+    r"(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*\)"
+)
+
+
+def _project_media(body: str) -> tuple[str, list[tuple[int, int, int, int]]]:
+    """``body`` with each image reduced to its destination, plus a segment map.
+
+    The editor's plain-text projection gives an image its src and nothing else,
+    so a quote spanning text *and* an image only ever matches once the body is
+    reduced the same way. Segments are ``(proj_start, proj_end, body_start,
+    body_end)`` covering the body end to end; a segment is 1:1 exactly when its
+    two lengths agree, which is what lets the mapping below tell a literal run
+    from a collapsed image without a flag.
+    """
+    parts: list[str] = []
+    segments: list[tuple[int, int, int, int]] = []
+    proj = 0
+    last = 0
+    for m in _IMAGE_RE.finditer(body):
+        if m.start() > last:
+            literal = body[last : m.start()]
+            parts.append(literal)
+            segments.append((proj, proj + len(literal), last, m.start()))
+            proj += len(literal)
+        dest = m.group("angle") if m.group("angle") is not None else m.group("bare")
+        parts.append(dest)
+        segments.append((proj, proj + len(dest), m.start(), m.end()))
+        proj += len(dest)
+        last = m.end()
+    if last < len(body):
+        literal = body[last:]
+        parts.append(literal)
+        segments.append((proj, proj + len(literal), last, len(body)))
+    return "".join(parts), segments
+
+
+def _map_start(
+    segments: Sequence[tuple[int, int, int, int]], pos: int, body_len: int
+) -> int:
+    """Projection offset to body offset, opening edge. A position landing inside
+    a collapsed image takes the whole image, so the highlight starts at its
+    ``!`` rather than part-way through the source."""
+    for proj_start, proj_end, body_start, body_end in segments:
+        if proj_start <= pos < proj_end:
+            if proj_end - proj_start == body_end - body_start:
+                return body_start + (pos - proj_start)
+            return body_start
+    return body_len
+
+
+def _map_end(
+    segments: Sequence[tuple[int, int, int, int]], pos: int, body_len: int
+) -> int:
+    """Projection offset to body offset, closing edge. Exclusive, so a position
+    at the end of a collapsed image takes the image's closing paren."""
+    if pos <= 0:
+        return 0
+    for proj_start, proj_end, body_start, body_end in segments:
+        if proj_start < pos <= proj_end:
+            if proj_end - proj_start == body_end - body_start:
+                return body_start + (pos - proj_start)
+            return body_end
+    return body_len
+
+
+def _nearest_occurrence(haystack: str, needle: str, near: int) -> int | None:
+    """Start of the occurrence closest to ``near``, or None when absent."""
+    starts: list[int] = []
+    idx = haystack.find(needle)
+    while idx != -1:
+        starts.append(idx)
+        idx = haystack.find(needle, idx + 1)
+    if not starts:
+        return None
+    return min(starts, key=lambda s: abs(s - near))
+
+
 def resolve_exact_span(
     body: str, approx_start: int, approx_end: int, quoted_text: str
 ) -> tuple[int, int]:
@@ -344,6 +425,12 @@ def resolve_exact_span(
     with no fuzzy matching, so an already-wrong starting span only ever
     compounds through every future remap.
 
+    A quote covering an image carries that image's src and none of the syntax
+    around it, so the body is matched in its media projection first and the hit
+    mapped back — that is what lets such a span cover the whole ``![…](…)``
+    rather than the text beside it. Bodies without images project to themselves
+    and take the raw search directly.
+
     Returns the approximate span unchanged if ``quoted_text`` is empty, or
     isn't found anywhere in ``body`` at all (nothing to correct against —
     never worse than the caller's own estimate). When ``quoted_text``
@@ -355,14 +442,17 @@ def resolve_exact_span(
         return approx_start, approx_end
     if body[approx_start:approx_end] == quoted_text:
         return approx_start, approx_end  # already exact — no syntax preceded it
-    starts: list[int] = []
-    idx = body.find(quoted_text)
-    while idx != -1:
-        starts.append(idx)
-        idx = body.find(quoted_text, idx + 1)
-    if not starts:
+    projected, segments = _project_media(body)
+    if projected != body:
+        hit = _nearest_occurrence(projected, quoted_text, approx_start)
+        if hit is not None:
+            return (
+                _map_start(segments, hit, len(body)),
+                _map_end(segments, hit + len(quoted_text), len(body)),
+            )
+    best = _nearest_occurrence(body, quoted_text, approx_start)
+    if best is None:
         return approx_start, approx_end
-    best = min(starts, key=lambda s: abs(s - approx_start))
     return best, best + len(quoted_text)
 
 
