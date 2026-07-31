@@ -20,6 +20,7 @@ from app.tasks.image_sweep import sweep_wiki_images
 from app.tasks.queues import lightweight_maintenance_queue
 from app.tasks.trash_purge import TRASH_RETENTION_DAYS
 from app.wiki import coedit, doc_ids, git as wiki_git, image_store, trash
+from app.wiki.markdown_yjs import seed_doc_from_markdown
 
 from tests._auth import login_fastapi
 
@@ -60,6 +61,14 @@ def _set_created_at(image_id: str, value: str) -> None:
 
 
 
+def _open_draft_citing(path: str, image_id: str) -> None:
+    """Open a live session on ``path`` whose draft cites ``image_id``."""
+    body = _body_with_image(image_id)
+    sess = coedit.open_session(path, base_sha=None)
+    doc = seed_doc_from_markdown(body)
+    assert coedit.set_initial_snapshot(sess.id, doc.get_update(), body)
+
+
 def _run_sweep() -> None:
     with lightweight_maintenance_queue.immediate_mode():
         sweep_wiki_images()
@@ -89,8 +98,8 @@ def test_never_referenced_image_is_flagged_after_grace_then_deleted_after_retent
 
 
 def test_session_on_another_page_does_not_keep_image_live(tmp_repo) -> None:
-    # Draft protection is anchor-scoped, so one open session elsewhere must not
-    # keep every orphan in the wiki alive.
+    # A session whose draft does not cite the image must not keep it alive,
+    # or any one open editor would pin every orphan in the wiki.
     image_id = _put_image("guides/anchored.md")
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
     image_store.set_unreferenced_since(image_id, _timestamp_ago(timedelta(days=31)))
@@ -178,13 +187,13 @@ def test_committed_page_reference_keeps_image_live(tmp_repo) -> None:
     assert row.unreferenced_since is None
 
 
-def test_open_session_on_the_anchor_page_keeps_image_live(tmp_repo) -> None:
-    # A live buffer is a Yjs document with no server-readable text, so the open
-    # session on the anchor page is what protects an image only a draft cites.
+def test_draft_on_the_anchor_page_keeps_image_live(tmp_repo) -> None:
+    # An uncommitted draft citing the image is the only thing keeping it
+    # reachable, and no working-tree scan can see it.
     path = "drafts/live.md"
     image_id = _put_image(path)
     _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
-    coedit.open_session(path, base_sha=None)
+    _open_draft_citing(path, image_id)
 
     _run_sweep()
 
@@ -292,3 +301,19 @@ def test_metrics_refresh_and_upload_rejections_are_counted(tmp_repo) -> None:
     assert wiki_image_upload_rejected_total.labels(reason="too_large")._value.get() == (
         rejected_before + 1
     )
+
+
+def test_draft_on_another_page_keeps_a_pasted_image_live(tmp_repo) -> None:
+    # An image is reachable from any page it was pasted into, not only the one
+    # it was uploaded against, so the anchor cannot stand in for its citations.
+    image_id = _put_image("guides/anchored.md")
+    _set_created_at(image_id, _timestamp_ago(timedelta(hours=25)))
+    image_store.set_unreferenced_since(image_id, _timestamp_ago(timedelta(days=31)))
+    _open_draft_citing("guides/elsewhere.md", image_id)
+
+    _run_sweep()
+
+    row = _image_row(image_id)
+    assert row is not None
+    assert row.unreferenced_since is None
+    assert image_store.stat(image_id) is not None

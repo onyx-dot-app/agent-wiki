@@ -565,6 +565,11 @@ def list_paths(prefix: str = "") -> list[str]:
     return [p for p in out.split("\0") if p and not p.startswith(TRASH_PREFIX)]
 
 
+#: Characters that continue a URL path. A needle followed by one of these is a
+#: match inside a longer URL, which resolves elsewhere.
+URL_TAIL_CHARS = "A-Za-z0-9._~%/-"
+
+
 def grep_working_tree_url_bounded(needles: Iterable[str]) -> set[str]:
     """Search the working tree, INCLUDING ``.trash/``, for URL needles that
     must not be followed by another URL-path character.
@@ -578,7 +583,9 @@ def grep_working_tree_url_bounded(needles: Iterable[str]) -> set[str]:
     if not wanted:
         return set()
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=True) as f:
-        f.write("\n".join(f"{needle}([^A-Za-z0-9._~%/-]|$)" for needle in wanted))
+        f.write(
+            "\n".join(f"{needle}([^{URL_TAIL_CHARS}]|$)" for needle in wanted)
+        )
         f.flush()
         res = _run(
             ["grep", "--no-color", "-I", "-E", "-f", f.name, "-o", "-h"],

@@ -6,6 +6,7 @@ storage bounded without touching the wiki commit path.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from app.metrics import (
@@ -16,7 +17,7 @@ from app.metrics import (
 from app.tasks.queue import crontab
 from app.tasks.queues import lightweight_maintenance_queue
 from app.tasks.trash_purge import TRASH_RETENTION_DAYS
-from app.wiki import coedit, doc_ids, git as wiki_git, image_store
+from app.wiki import coedit, coedit_live, git as wiki_git, image_store
 
 log = logging.getLogger(__name__)
 
@@ -39,24 +40,43 @@ def _parse(ts: str | None) -> datetime | None:
         return None
 
 
-def _editing_doc_ids() -> set[str]:
-    """Doc ids of pages with a live co-edit session."""
-    paths = coedit.active_session_paths()
-    return set(doc_ids.ids_for_paths(list(paths)).values()) if paths else set()
+_URL_TAIL = re.compile(f"[{wiki_git.URL_TAIL_CHARS}]")
+
+
+def _draft_bodies() -> list[str]:
+    """Markdown of every live co-edit buffer. A draft holds references no
+    working-tree scan can see, on whatever page it was pasted into."""
+    bodies = (coedit_live.read_body(sid) for sid in coedit.active_session_ids())
+    return [body for body in bodies if body]
+
+
+def _cited_in(body: str, url: str) -> bool:
+    """Whether ``body`` cites ``url`` and not a longer URL sharing its prefix,
+    the same boundary the working-tree scan applies."""
+    start = 0
+    while (found := body.find(url, start)) != -1:
+        after = body[found + len(url) : found + len(url) + 1]
+        if not after or not _URL_TAIL.match(after):
+            return True
+        start = found + 1
+    return False
 
 
 def _referenced(rows: list[image_store.ImageSweepRow]) -> set[str]:
-    """Ids whose serving URL is in the working tree, or whose anchor page is
-    being edited. A live Yjs buffer has no server-readable text, so the open
-    session stands in for its draft's references.
+    """Ids whose serving URL appears in the working tree or in a live draft.
+
+    Drafts are read rather than approximated by their anchor: an image can be
+    pasted into any page, so the page holding it is not necessarily the one it
+    was uploaded against.
     """
     urls = {row.id: image_store.serving_url(row.id) for row in rows}
     matched = wiki_git.grep_working_tree_url_bounded(urls.values())
-    editing = _editing_doc_ids()
+    drafts = _draft_bodies()
     return {
         row.id
         for row in rows
-        if urls[row.id] in matched or row.anchor_doc_id in editing
+        if urls[row.id] in matched
+        or any(_cited_in(body, urls[row.id]) for body in drafts)
     }
 
 
