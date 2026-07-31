@@ -1018,6 +1018,16 @@ def _serialize_list(node: XmlElement) -> str:
             # (the item renders identically either way). Bare, it re-parses to
             # exactly the text it was serialized from, so the round trip stays
             # byte-stable *and* the marker survives.
+            #
+            # This also normalizes a marker the source deliberately escaped,
+            # and can't do otherwise: markdown-it resolves "\[x\]" to the text
+            # "[x]" before this codec sees a token, so by here the two
+            # spellings are one string and one of them has to be picked for
+            # both. Live is the same choice `_build_list` makes on the other
+            # side of the fork — a list whose items *all* carry an escaped
+            # marker promotes to real taskItems — so the two paths agree
+            # rather than making escaping mean opposite things in a mixed
+            # list and a uniform one.
             body = _ESCAPED_TASK_MARKER_RE.sub(r"[\1]\2", body, count=1)
         lines.append(marker + body)
     return "\n\n".join(lines) + "\n"

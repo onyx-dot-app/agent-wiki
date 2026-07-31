@@ -391,6 +391,28 @@ def test_only_a_leading_marker_escapes_differently_from_other_brackets() -> None
     assert once == body
 
 
+def test_a_uniform_list_of_escaped_markers_promotes_to_task_items() -> None:
+    """markdown-it resolves "\\[x\\]" to the text "[x]" before the codec sees a
+    token, so an escaped marker and a live one are the same string by the time
+    promotion is decided, and an all-escaped list becomes real taskItems.
+    Pinned because it's what makes the serializer's choice below consistent
+    rather than arbitrary."""
+    doc = seed_doc_from_markdown("- \\[x\\] a\n\n- \\[x\\] b\n")
+    lst = _root(doc).children[0]
+    assert lst.tag == "taskList"
+    assert [i.tag for i in lst.children] == ["taskItem", "taskItem"]
+
+
+def test_an_escaped_marker_in_a_mixed_list_normalizes_to_a_live_one() -> None:
+    """Same erasure one fork over: the item stays a plain listItem, and its
+    text is indistinguishable from an item that was written "[x]" bare, so
+    both serialize to the live marker. A single normalization pass — the
+    output is then stable."""
+    once = reconstruct_body(seed_doc_from_markdown("- \\[x\\] a\n\n- plain\n"))
+    assert once == "- [x] a\n\n- plain\n"
+    assert once == reconstruct_body(seed_doc_from_markdown(once))
+
+
 def test_task_list_reserialization_is_content_correct_and_idempotent() -> None:
     body = "- [ ] buy milk\n- [x] walk dog\n"
     once = reconstruct_body(seed_doc_from_markdown(body))
