@@ -82,6 +82,17 @@ log = logging.getLogger(__name__)
 GROUP_SIMILARITY = 0.45
 MERGE_ROUNDS = 3  # merge exits on convergence; this only bounds the loop
 
+# Output cap, well above the client's 4096 default. Extraction lists every referent on a page, so
+# the response scales with the page — and on a 205k-char page it overflowed 4096, which cut the
+# JSON off mid-list. Every one of the eight largest pages in a real 147-page wiki failed that way,
+# contributing zero referents each. The cap costs nothing when unused, since billing follows
+# tokens generated. It is a ceiling, not a guarantee: a page can still overflow it, which is why
+# ``_complete_json`` now reports truncation instead of mistaking it for malformed JSON.
+MAX_OUTPUT_TOKENS = 16384
+
+# Retries on MALFORMED output only. Truncation is deterministic, so it is never retried.
+_JSON_RETRIES = 1
+
 # Fallback when no derived artifact is present, so a deployment that has never run the
 # derivation still has something usable. Intentionally generic: these are the types that
 # recur across corpora, not a customer's.
@@ -253,33 +264,102 @@ def _leader_cluster(
 
 
 # --- LLM steps --------------------------------------------------------------------------
-def _complete_json(system: str, user: str, *, model: str | None) -> dict[str, Any] | None:
+def _is_truncated(stop_reason: str) -> bool:
+    """Whether a response was cut short rather than finished.
+
+    Each provider passes its own vocabulary through: "max_tokens" (anthropic, bedrock, and
+    gemini's MAX_TOKENS), "length" (ollama, custom), and "incomplete" — what the OpenAI Responses
+    API reports via status, and what ``client.complete`` reports when a stream ends with no
+    terminal event at all.
+    """
+    lowered = stop_reason.lower()
+    return any(token in lowered for token in ("max_token", "length", "incomplete"))
+
+
+def _complete_json(
+    system: str, user: str, *, model: str | None, ctx: str = ""
+) -> dict[str, Any] | None:
     """One completion parsed as a JSON object. Returns None rather than raising — a single
-    failed page or group must not abort a corpus-wide derivation."""
-    try:
-        result = client.complete(
-            [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            model=model,
+    failed page or group must not abort a corpus-wide derivation.
+
+    ``ctx`` names what was being extracted (a page path, a group) so a failure is attributable.
+    Without it the log said only "unparseable JSON (N chars)", which cannot be acted on: it
+    identifies neither the page nor the reason.
+
+    Retries once on malformed JSON, feeding the error back — but NOT on truncation, which is
+    deterministic. A retry there pays for the same overflowing response twice and needs a bigger
+    cap, not a re-prompt.
+    """
+    label = ctx or "(unknown)"
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    last_error: str | None = None
+
+    for attempt in range(_JSON_RETRIES + 1):
+        convo = (
+            messages
+            if last_error is None
+            else [
+                *messages[:-1],
+                {
+                    "role": "user",
+                    "content": (
+                        f"{user}\n\nYOUR PREVIOUS OUTPUT WAS REJECTED: {last_error}\n"
+                        "Return corrected JSON."
+                    ),
+                },
+            ]
         )
-    except Exception:
-        log.warning("entity_types: completion failed", exc_info=True)
-        return None
-    text = (result.text or "").strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end <= start:
-        return None
-    try:
-        parsed = cast(object, json.loads(text[start : end + 1]))
-    except json.JSONDecodeError:
-        log.warning("entity_types: unparseable JSON (%d chars)", len(text))
-        return None
-    return cast(dict[str, Any], parsed) if isinstance(parsed, dict) else None
+        try:
+            result = client.complete(convo, model=model, max_tokens=MAX_OUTPUT_TOKENS)
+        except Exception:
+            log.warning("entity_types: completion failed for %s", label, exc_info=True)
+            return None
+
+        text = (result.text or "").strip()
+        if _is_truncated(result.stop_reason):
+            # Distinct from a parse failure because the fix is distinct: raise the cap (or split
+            # the input), rather than ask again. Returning here also spares the retry, which
+            # would truncate identically.
+            log.warning(
+                "entity_types: response for %s was cut off at the %d-token output cap "
+                "(stop_reason=%r, %d chars) — its referents are incomplete and were dropped",
+                label,
+                MAX_OUTPUT_TOKENS,
+                result.stop_reason,
+                len(text),
+            )
+            return None
+
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end <= start:
+            last_error = "response was not a JSON object"
+        else:
+            try:
+                parsed = cast(object, json.loads(text[start : end + 1]))
+            except json.JSONDecodeError as exc:
+                last_error = f"invalid JSON ({exc.msg})"
+            else:
+                if isinstance(parsed, dict):
+                    return cast(dict[str, Any], parsed)
+                last_error = "top-level JSON value was not an object"
+
+        if attempt == _JSON_RETRIES:
+            log.warning(
+                "entity_types: giving up on %s after %d attempt(s) — %s (%d chars)",
+                label,
+                attempt + 1,
+                last_error,
+                len(text),
+            )
+    return None
 
 
 def extract_page(path: str, body: str, *, model: str | None = None) -> list[Mention]:
     """Open extraction over one whole page. No type menu — see module docstring."""
     system = load_prompt("entity_types.extract")
-    data = _complete_json(system, f"path:\n{path}\ncontent:\n{body}", model=model)
+    data = _complete_json(
+        system, f"path:\n{path}\ncontent:\n{body}", model=model, ctx=path
+    )
     if not data or not isinstance(data.get("referents"), list):
         return []
     out: list[Mention] = []
@@ -318,7 +398,12 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
         + f"  (on {r.n_docs} page{'s' if r.n_docs != 1 else ''})"
         for i, r in enumerate(group, start=1)
     )
-    data = _complete_json(system, f"Referents in this group:\n\n{listing}", model=model)
+    data = _complete_json(
+        system,
+        f"Referents in this group:\n\n{listing}",
+        model=model,
+        ctx=f"naming a group of {len(group)} referent(s)",
+    )
 
     # The prompt requires a partition: every member in exactly one type. Enforce it. A
     # response that omits members would silently drop referents, and one that repeats them
@@ -397,7 +482,12 @@ def _merge_once(types: list[EntityType], *, model: str | None) -> list[EntityTyp
         f"     e.g. {', '.join(t.examples[:5])}"
         for i, t in enumerate(types, start=1)
     )
-    data = _complete_json(system, f"Derived types to consolidate:\n\n{listing}", model=model)
+    data = _complete_json(
+        system,
+        f"Derived types to consolidate:\n\n{listing}",
+        model=model,
+        ctx=f"merging {len(types)} type(s)",
+    )
     raw = (data or {}).get("types")
     if not isinstance(raw, list) or not raw:
         return types
