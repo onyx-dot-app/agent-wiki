@@ -160,6 +160,13 @@ class OpenAIProvider:
                 # indistinguishable from a whole one, and no exception raised. That is how
                 # entity-type extraction silently lost every large page: the model emitted valid
                 # JSON, was cut off mid-list, and the caller saw only "malformed JSON".
+                #
+                # The two are NOT handled alike. An incomplete response is a real, usable answer
+                # that stopped early, so it is returned with its status for the caller to judge.
+                # A failed one is an upstream error, and returning its partial text — even
+                # labelled — would let a caller persist a broken turn as a finished one, since
+                # nothing downstream inspects ``stop_reason``. So that one raises, like every
+                # other provider error here.
                 elif etype in ("response.completed", "response.incomplete", "response.failed"):
                     resp = event.response
                     usage = getattr(resp, "usage", None)
@@ -177,6 +184,22 @@ class OpenAIProvider:
                     # Worth logging because the fix differs — a bigger cap versus a changed prompt.
                     incomplete = getattr(resp, "incomplete_details", None)
                     reason = getattr(incomplete, "reason", "") or ""
+                    if etype == "response.failed" or status == "failed":
+                        err = getattr(resp, "error", None)
+                        detail = str(getattr(err, "message", "") or "").strip()
+                        log.error(
+                            "llm failed provider=openai model=%s tokens=%d/%d detail=%s",
+                            model,
+                            in_tok,
+                            out_tok,
+                            detail or "(none given)",
+                        )
+                        raise LLMError(
+                            "provider",
+                            f"OpenAI reported the response failed: {detail}"
+                            if detail
+                            else "OpenAI reported the response failed.",
+                        )
                     log_at = log.info if status == "completed" else log.warning
                     log_at(
                         "llm done provider=openai model=%s status=%s%s tokens=%d/%d cached=%d",

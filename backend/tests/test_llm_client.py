@@ -951,12 +951,43 @@ def test_openai_reports_usage_for_a_truncated_response(configure_openai, fake_op
     assert result.usage.output_tokens == 4096
 
 
-def test_openai_reports_a_failed_response(configure_openai, fake_openai):
+def test_openai_raises_on_a_failed_response(configure_openai, fake_openai):
+    """A failure is not a short answer. Returning its partial text — even labelled "failed" —
+    would let a caller persist a broken turn as a finished one, because nothing downstream
+    inspects ``stop_reason``. So it raises, like every other provider error."""
     fake_openai([_o_text_delta("half"), _o_terminal("response.failed", status="failed")])
+
+    with pytest.raises(LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "extract"}])
+
+    assert excinfo.value.code == "provider"
+
+
+def test_openai_failure_message_carries_the_provider_detail(configure_openai, fake_openai):
+    event = _o_terminal("response.failed", status="failed")
+    event.response.error = SimpleNamespace(message="upstream capacity exceeded")
+    fake_openai([_o_text_delta("half"), event])
+
+    with pytest.raises(LLMError) as excinfo:
+        llm_client.complete([{"role": "user", "content": "extract"}])
+
+    assert "upstream capacity exceeded" in excinfo.value.message
+
+
+def test_a_truncated_response_is_not_treated_as_a_failure(configure_openai, fake_openai):
+    """The distinction the two branches turn on: an incomplete answer is real and usable, so it
+    comes back rather than raising."""
+    fake_openai(
+        [
+            _o_text_delta("usable partial"),
+            _o_terminal("response.incomplete", status="incomplete", reason="max_output_tokens"),
+        ]
+    )
 
     result = llm_client.complete([{"role": "user", "content": "extract"}])
 
-    assert result.stop_reason == "failed"
+    assert result.text == "usable partial"
+    assert result.stop_reason == "incomplete"
 
 
 def test_openai_still_reports_a_completed_response(configure_openai, fake_openai):
