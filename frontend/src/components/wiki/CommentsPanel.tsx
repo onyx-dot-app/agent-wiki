@@ -11,7 +11,11 @@ import { Section } from "@onyx-ai/opal/layouts";
 
 import { useAuth } from "@/lib/auth";
 import { toast } from "@/hooks/useToast";
-import { commentErrorMessage, createComment } from "@/lib/comments";
+import {
+  NO_HEAD_SHA_MESSAGE,
+  commentErrorMessage,
+  createComment,
+} from "@/lib/comments";
 import type { CoeditorHandle, CommentDraft } from "@/lib/editor/types";
 import { useIsMobile } from "@/lib/viewport";
 import type { CommentThreadView } from "@/types";
@@ -159,7 +163,7 @@ export function CommentsPanel({
   const submitDraft = async (body: string) => {
     if (!draft) return;
     if (!headSha) {
-      toast.error("Page version unknown. Reload and try again.");
+      toast.error(NO_HEAD_SHA_MESSAGE);
       return;
     }
     const ok = await run(() =>

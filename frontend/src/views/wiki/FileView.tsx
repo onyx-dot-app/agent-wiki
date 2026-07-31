@@ -65,6 +65,7 @@ import { apiFetch } from "@/lib/api";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
 import {
+  NO_HEAD_SHA_MESSAGE,
   commentErrorMessage,
   createComment,
   listComments,
@@ -546,7 +547,7 @@ export function FileView({ path }: FileViewProps) {
       const draft = commentDraft;
       if (!draft) return;
       if (!headSha) {
-        toast.error("Page version unknown, reload and retry");
+        toast.error(NO_HEAD_SHA_MESSAGE);
         return;
       }
       const ok = await runMargin(() =>

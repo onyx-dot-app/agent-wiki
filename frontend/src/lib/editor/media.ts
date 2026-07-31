@@ -8,12 +8,11 @@ function stripFragment(src: string): string {
 }
 
 /** Largest upload the server stores, mirroring `media_upload.UPLOAD_CAP_BYTES`.
- * Enforced here too because a proxy in front of the app answers an oversized
- * body first, with an HTML page carrying no message this client can show. */
+ * Checked here so an oversized file is refused at once, not after the upload. */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-/** How that cap reads to a person. */
-export const MAX_UPLOAD_LABEL = "10 MB";
+/** How that cap reads to a person, in the server's own units. */
+export const MAX_UPLOAD_LABEL = "10 MiB";
 
 /** A base that exists only to resolve against. Any origin works, since the
  * question is whether `src` escapes whatever base it is resolved from. */

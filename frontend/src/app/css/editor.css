@@ -127,42 +127,16 @@
   color: var(--text-03);
 }
 
-/* Lists. */
-/* Markers are flex children, not native `::marker`s, so every list aligns its
-   marker the way the task list already does. A native marker sits on the first
-   line box's baseline, which a tall image pushes to the bottom of the image. */
-.editor-prose ul,
-.editor-prose ol {
-  list-style: none;
-  padding-left: 0.5rem;
+/* Lists. Native markers, so a nested list stays a block below its parent and an
+   ordered list keeps its `start`. Both depend on the item remaining a
+   `list-item`, which is why the marker is not a flex child here. */
+.editor-prose ul {
+  list-style: disc;
+  padding-left: 1.5rem;
 }
 .editor-prose ol {
-  counter-reset: editor-ol;
-}
-.editor-prose ul > li,
-.editor-prose ol > li {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-.editor-prose ol > li {
-  counter-increment: editor-ol;
-}
-.editor-prose ul:not([data-type="taskList"]) > li::before {
-  content: "•";
-  flex: none;
-  line-height: 1.5rem;
-}
-.editor-prose ol > li::before {
-  content: counter(editor-ol) ".";
-  flex: none;
-  line-height: 1.5rem;
-}
-/* The content beside a marker owns the remaining width, so a long line wraps
-   instead of forcing the row wider than the column. */
-.editor-prose ul > li > *,
-.editor-prose ol > li > * {
-  min-width: 0;
+  list-style: decimal;
+  padding-left: 1.5rem;
 }
 .editor-prose ul[data-type="taskList"] {
   list-style: none;
@@ -330,23 +304,20 @@
   position: relative;
   margin-left: -1px;
   margin-right: -1px;
-  /* The bar is the ::before, not this element's own border: an inline element
-     takes the line box's height, which an inline-block image stretches to the
-     image. yCursorPlugin sets border-color inline per user, so that stays here
-     for the ::before to inherit. */
-  border-left: 0 solid;
+  /* The bar is the ::before because this element's height follows the line box,
+     which an image stretches. The per-user color lands inline here, so the
+     ::before inherits it. */
   z-index: 1; /* the image is positioned and would paint over the caret */
 }
 .editor-prose .ProseMirror-yjs-cursor::before {
   content: "";
   position: absolute;
   top: 0;
-  /* Tracks font size, which is what the browser's own caret does (measured 21px
-     at 16px text, 41.5px at 32px). Line-height would misfit headings, whose
-     line-height here is smaller than their font size. */
+  /* Font-relative, matching the browser's own caret. The fixed 1.5rem
+     line-height would undersize it in h1 and h2. */
   height: 1.3em;
   border-left: 2px solid;
-  border-color: inherit;
+  border-left-color: inherit;
 }
 .editor-prose .ProseMirror-yjs-cursor div {
   position: absolute;
@@ -363,10 +334,8 @@
   opacity: 0.3;
 }
 
-/* Chrome's UA styles make a draggable element unselectable, so a selection
-   covering media highlights the text around it and leaves the media untinted.
-   prosemirror-view ships this override; its stylesheet is not loaded here.
-   Keyed off the attributes, so any later draggable node view inherits it. */
+/* Chrome's UA stylesheet makes a draggable element unselectable, so a selection
+   covering media would leave it untinted. */
 .editor-prose [draggable][contenteditable="false"] {
   user-select: text;
 }
@@ -381,8 +350,7 @@
   display: inline-block;
   max-width: 100%;
   line-height: 0;
-  /* Baseline, so an image sits on the same line as the text and markers beside
-     it rather than defining its own alignment. */
+  /* Sits on the text baseline, like the text and markers beside it. */
   vertical-align: baseline;
 }
 .editor-prose .editor-image-img {

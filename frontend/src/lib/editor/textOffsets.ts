@@ -30,25 +30,34 @@
  * `hello **world**`) matches nothing in the body, and `resolve_exact_span`
  * falls back to this mapper's own estimate. Selections without formatting
  * inside them are corrected exactly; selections across a bold/italic/code run
- * are not. Closing it needs either a markdown serializer here (mirroring
- * `app/wiki/markdown_yjs.py`, which is also what a precise offset mapper
- * needs) or delimiter-insensitive matching in `comment_anchor.py`. Neither is
- * attempted here.
+ * are not. A selection holding an image misses too when the codec respells its
+ * src, which it does for cross-origin, escaped and percent-encoded srcs.
  */
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
 /** Text a leaf contributes, so it occupies offsets instead of collapsing to
- * nothing. An image gives its src, which the codec carries into the markdown
- * source verbatim, so that same string locates it there. */
-export function leafText(leaf: PMNode): string {
+ * nothing. An image gives its src, which usually reaches the markdown source
+ * unchanged. A cross-origin or respelled src does not, and a quote holding one
+ * falls back to the estimated span. */
+function leafText(leaf: PMNode): string {
   if (leaf.type.name !== "image") return "";
   return (leaf.attrs.src as string | null) ?? "";
 }
 
+/** The plain-text projection offsets are counted in. Comment quotes are built
+ * from it too, so a quote always describes the string the offsets measure. */
+export function docTextBetween(
+  editor: Editor,
+  from: number,
+  to: number,
+): string {
+  return editor.state.doc.textBetween(from, to, "\n\n", leafText);
+}
+
 export function pmPosToTextOffset(editor: Editor, pos: number): number {
   const clamped = Math.max(0, Math.min(pos, editor.state.doc.content.size));
-  return editor.state.doc.textBetween(0, clamped, "\n\n", leafText).length;
+  return docTextBetween(editor, 0, clamped).length;
 }
 
 /** Inverse of `pmPosToTextOffset`, via binary search rather than a

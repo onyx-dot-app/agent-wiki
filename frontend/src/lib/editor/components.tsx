@@ -23,7 +23,7 @@ import type { CoeditPeer } from "@/lib/editor/hooks";
 import { colorFor } from "@/lib/editor/presence";
 import type { CoeditParticipant } from "@/lib/editor/svc";
 import {
-  leafText,
+  docTextBetween,
   pmPosToTextOffset,
   textOffsetToPmPos,
 } from "@/lib/editor/textOffsets";
@@ -190,13 +190,10 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
           lastSelectionForComment.current = selKey;
           const cb = onSelectionForCommentRef.current;
           if (cb) {
-            const quotedText =
-              from === to
-                ? ""
-                : editor.state.doc.textBetween(from, to, "\n\n", leafText);
-            // A quote is what the server re-anchors by, so a selection holding
-            // no quotable content offers nothing to comment on.
-            if (!quotedText) {
+            const quotedText = docTextBetween(editor, from, to);
+            // A quote is what the server re-anchors by, and block separators
+            // alone match anywhere, so neither is something to comment on.
+            if (!quotedText.trim()) {
               cb(null, null);
             } else {
               const draft: CommentDraft = {

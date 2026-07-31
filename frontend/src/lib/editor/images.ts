@@ -335,8 +335,6 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
   const startUpload = (view: EditorView, file: File, rawPos: number): void => {
     const imageType = view.state.schema.nodes.image;
     if (!imageType) return;
-    // Refused before the bytes leave the browser: a proxy rejects an oversized
-    // body first, and its reply carries no message worth showing.
     if (file.size > MAX_UPLOAD_BYTES) {
       toast.error(`${file.name} is larger than ${MAX_UPLOAD_LABEL}.`);
       return;
