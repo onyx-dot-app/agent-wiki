@@ -14,6 +14,7 @@ import json
 import pytest
 
 from app.ingest import needs
+from app.ingest.needs import Focus, NeedKind
 from app.llm.client import CompletionResult
 
 TYPE_DEFS = {
@@ -57,9 +58,9 @@ class TestParseNeed:
         need = needs.parse_need(_need(cadence="weekly"), "needs[0]", TYPE_DEFS)
 
         assert need.aspect_name == "deal status and blockers"
-        assert need.need_kind == "entity_status"
+        assert need.need_kind is NeedKind.ENTITY_STATUS
         assert need.cadence == "weekly"
-        assert need.focus == "specific"
+        assert need.focus is Focus.SPECIFIC
 
     def test_rejects_a_need_kind_off_the_closed_list(self) -> None:
         """Upstream left this open-vocabulary, which let a model put an entity TYPE here."""
@@ -75,15 +76,33 @@ class TestParseNeed:
     def test_an_unusable_focus_falls_back_to_specific(self) -> None:
         """The fail-safe direction: admitting an entity a page never asked for is worse than
         omitting one, so absence must not mean "open"."""
-        assert needs.parse_need(_need(focus="broad"), "n", TYPE_DEFS).focus == "specific"
-        assert needs.parse_need(_need(focus=None), "n", TYPE_DEFS).focus == "specific"
+        assert needs.parse_need(_need(focus="broad"), "n", TYPE_DEFS).focus is Focus.SPECIFIC
+        assert needs.parse_need(_need(focus=None), "n", TYPE_DEFS).focus is Focus.SPECIFIC
 
     def test_generic_focus_survives(self) -> None:
-        assert needs.parse_need(_need(focus="generic"), "n", TYPE_DEFS).focus == "generic"
+        assert needs.parse_need(_need(focus="generic"), "n", TYPE_DEFS).focus is Focus.GENERIC
 
     def test_empty_cadence_is_none_not_empty_string(self) -> None:
         """A timeline need's cadence is read as "is there one?", so "" must not answer yes."""
         assert needs.parse_need(_need(cadence=""), "n", TYPE_DEFS).cadence is None
+
+    def test_the_model_itself_refuses_an_invalid_kind(self) -> None:
+        """The enum is the guarantee, not just the parser: nothing can construct a need whose
+        kind nothing downstream knows how to apply."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            needs.InformationNeed(aspect_name="a", need_kind="organization", description="d")
+
+    def test_serializes_to_plain_json_strings(self) -> None:
+        """What lands in JSONB. A str-subclass enum would round-trip anyway, but the stored shape
+        should not depend on that."""
+        need = needs.parse_need(_need(focus="generic"), "n", TYPE_DEFS)
+
+        dumped = need.model_dump(mode="json")
+        assert dumped["need_kind"] == "entity_status"
+        assert dumped["focus"] == "generic"
+        assert json.loads(json.dumps(dumped))["need_kind"] == "entity_status"
 
 
 class TestParseEntities:
@@ -172,7 +191,7 @@ class TestExtractPage:
 
         out = needs.extract_page("a.md", "body", type_defs=TYPE_DEFS)
 
-        assert [n.need_kind for n in out] == ["entity_status", "timeline"]
+        assert [n.need_kind for n in out] == [NeedKind.ENTITY_STATUS, NeedKind.TIMELINE]
 
     def test_tolerates_prose_around_the_json(self, monkeypatch) -> None:
         self._stub(monkeypatch, "Here you go:\n" + json.dumps({"needs": [_need()]}) + "\nDone.")

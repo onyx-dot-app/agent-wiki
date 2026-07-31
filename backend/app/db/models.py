@@ -2056,9 +2056,24 @@ class EntityTaxonomy(Base):
 class PageNeeds(Base):
     """What one wiki page keeps track of — its information needs.
 
-    Path-keyed and current-valued, unlike ``entity_taxonomies``: a page's needs describe that
-    page as it is now, so re-extracting replaces them. There is nothing to orphan, because
-    nothing keys facts by a need.
+    Current-valued, unlike ``entity_taxonomies``: a page's needs describe that page as it is
+    now, so re-extracting replaces them. There is nothing to orphan, because nothing keys
+    facts by a need.
+
+    Keyed by ``doc_id``, not path. Extraction costs an LLM call per page, and ``wiki_doc_ids``
+    re-keys its path in place on a move — so a rename keeps its needs instead of presenting as
+    a new page whose needs must be bought again and an old path to prune. Deliberately unlike
+    ``PageEmbedding``, which is path-keyed; that difference is affordable there and is not here.
+
+    There is no ``path`` column on purpose. After a move the row is intentionally NOT stale, so
+    a denormalized path would never be refreshed — it would go stale on the first rename and
+    stay that way. The live path comes from ``wiki_doc_ids`` instead.
+
+    Together those two choices mean this table needs no wiki lifecycle hook. A move re-keys the
+    doc-id row, so the joined path follows it and the needs stay valid. A delete tombstones that
+    row, and reads exclude tombstoned pages (``page_needs.load_all``) — so a trashed page's needs
+    stop being visible at once rather than at the next extraction, while the row itself survives
+    long enough for a restore to get them back for free.
 
     ``content_sha256`` / ``model`` / ``taxonomy_id`` together are the re-extract guard, and
     all three belong in it. The hash catches an edited page; ``model`` catches a model change,
@@ -2069,9 +2084,12 @@ class PageNeeds(Base):
 
     __tablename__ = "page_needs"
 
-    # Wiki-relative page path — the natural key, following page moves/deletes like other
-    # path-keyed live rows (see ``PageEmbedding``).
-    path: Mapped[str] = mapped_column(Text, primary_key=True)
+    # The page's stable identity. CASCADE is a formality — deletes tombstone the row rather
+    # than dropping it (see ``WikiDocId``), so this cannot orphan; it states the intent for the
+    # case where an id genuinely goes away, since needs are meaningless without the page.
+    doc_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("wiki_doc_ids.id", ondelete="CASCADE"), primary_key=True
+    )
     # sha256 of the page body extracted from.
     content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
     # The completion model used. Empty string means "the deployment default", which is what

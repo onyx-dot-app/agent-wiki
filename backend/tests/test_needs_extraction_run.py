@@ -174,6 +174,24 @@ class TestIncremental:
         assert stored.taxonomy_id == second
         assert counts["skipped"] == 0
 
+    def test_a_rename_costs_nothing(self, tmp_repo, llm) -> None:
+        """The reason needs key on the doc id: a reorganization changed no content, so it must
+        not be billed. Path-keyed this would be one call per moved page plus a prune."""
+        from app.wiki import doc_ids
+
+        _page("old.md")
+        needs.run_extraction()
+        llm.clear()
+
+        _sha, moves = wiki_git.move_path("old.md", "sub/new.md", "rename")
+        doc_ids.on_path_moved(moves)
+
+        counts = needs.run_extraction()
+
+        assert llm == []
+        assert counts["skipped"] == 1
+        assert [row.path for row in page_needs.load_all()] == ["sub/new.md"]
+
     def test_force_re_extracts_an_unchanged_wiki(self, tmp_repo, llm) -> None:
         """What a prompt change requires: stored needs are only comparable to each other when
         they came from the same prompt, and the prompt is not part of the guard."""
@@ -256,6 +274,39 @@ class TestBookkeeping:
 
         assert counts["pages"] == 1
         assert [row.path for row in page_needs.load_all()] == ["keep/a.md"]
+
+    def test_a_prefixed_run_does_not_prune_outside_its_scope(self, tmp_repo, llm) -> None:
+        """A scoped run only knows about its own scope, so everything else must be left alone.
+        Pruning it would discard needs that cost an LLM call each, and silently: nothing
+        downstream can tell "never extracted" from "wrongly pruned"."""
+        _page("keep/a.md")
+        _page("other/b.md")
+        needs.run_extraction()
+        assert len(page_needs.load_all()) == 2
+
+        needs.run_extraction(prefix="keep")
+
+        assert sorted(row.path for row in page_needs.load_all()) == ["keep/a.md", "other/b.md"]
+
+    def test_a_prefixed_run_still_prunes_inside_its_scope(self, tmp_repo, llm) -> None:
+        _page("keep/a.md")
+        _page("keep/gone.md")
+        needs.run_extraction(prefix="keep")
+
+        wiki_git.delete_path("keep/gone.md", "remove")
+        needs.run_extraction(prefix="keep")
+
+        assert [row.path for row in page_needs.load_all()] == ["keep/a.md"]
+
+    def test_scoping_is_a_path_boundary_not_a_string_prefix(self, tmp_repo, llm) -> None:
+        """Scoping to "team" must not sweep "teamwork.md"."""
+        _page("team/a.md")
+        _page("teamwork.md")
+        needs.run_extraction()
+
+        needs.run_extraction(prefix="team")
+
+        assert sorted(row.path for row in page_needs.load_all()) == ["team/a.md", "teamwork.md"]
 
     def test_an_empty_wiki_is_not_an_error(self, tmp_repo, llm) -> None:
         counts = needs.run_extraction()

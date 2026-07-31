@@ -17,9 +17,9 @@ Naming, deliberately: the label a page can produce is an ASPECT — "training da
 topic, and no single page can know that; deriving the topic means comparing needs across
 pages. So this step names only what it can see, and calls it what it is.
 
-Per page, and incremental: a need set is keyed by path and guarded by a content hash, so an
-unchanged page is not re-extracted. A re-run after one edit costs one call — unlike the
-corpus-wide taxonomy, which is all-or-nothing.
+Per page, and incremental: a need set is keyed by the page's stable doc id and guarded by a
+content hash, so neither an unchanged page nor a renamed one is re-extracted. A re-run after one
+edit costs one call — unlike the corpus-wide taxonomy, which is all-or-nothing.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from enum import Enum
 from typing import Any, cast
 
 from pydantic import BaseModel, Field
@@ -38,14 +39,39 @@ from app.llm.prompts import load_prompt
 
 log = logging.getLogger(__name__)
 
-# The archetypes the prompt offers. Upstream left this open-vocabulary, which let a model put
-# an entity-TYPE value in this field; the prompt now closes the list and this rejects the rest.
-NEED_KINDS = ("timeline", "entity_status", "reference", "other")
-# "specific" = the page's entity set is CLOSED; "generic" = OPEN, new instances are admitted.
-FOCUS_KINDS = ("specific", "generic")
-# An unset focus reads as "specific" — the fail-safe. Admitting an entity a page never asked
+
+class NeedKind(str, Enum):
+    """How a page holds what it tracks.
+
+    A closed set, and that is the point: upstream left this open-vocabulary, which let a model
+    answer with an entity TYPE instead of an archetype. Downstream behaviour branches on it —
+    a timeline appends an entry, an entity_status replaces a cell — so an unrecognized value is
+    not a lossy label but a need nothing knows how to apply.
+    """
+
+    # The page logs things over time; carries a cadence.
+    TIMELINE = "timeline"
+    # The page maintains the current state of something.
+    ENTITY_STATUS = "entity_status"
+    # Relatively static reference information.
+    REFERENCE = "reference"
+    OTHER = "other"
+
+
+class Focus(str, Enum):
+    """Whether a need's entity set is closed or open."""
+
+    # This page is about these particular entities and only these — a single customer's account
+    # page. A new entity is not admitted.
+    SPECIFIC = "specific"
+    # The page tracks a CLASS of thing and its entities are current instances — a deal tracker
+    # with a row per customer. New instances should be added.
+    GENERIC = "generic"
+
+
+# An unusable focus reads as SPECIFIC — the fail-safe. Admitting an entity a page never asked
 # for is worse than omitting one, so absence must not mean "open".
-DEFAULT_FOCUS = "specific"
+DEFAULT_FOCUS = Focus.SPECIFIC
 
 MAX_VALIDATION_RETRIES = 1
 
@@ -81,7 +107,7 @@ class InformationNeed(BaseModel):
 
     # What THIS page tracks, as this page frames it. An aspect, not a topic.
     aspect_name: str
-    need_kind: str
+    need_kind: NeedKind
     description: str
     detail_level: str = ""
     cadence: str | None = None
@@ -89,9 +115,9 @@ class InformationNeed(BaseModel):
     # description of what the page *tracks* is therefore a failure, not a shorter answer.
     current_content: str = ""
     entities: list[EntityMention] = Field(default_factory=list)
-    # Whether the page's entity set is closed ("specific") or open ("generic"). Governs
-    # whether a document naming a NEW entity may extend this need.
-    focus: str = DEFAULT_FOCUS
+    # Whether the page's entity set is closed or open. Governs whether a document naming a NEW
+    # entity may extend this need.
+    focus: Focus = DEFAULT_FOCUS
 
     @property
     def primary_entity(self) -> EntityMention | None:
@@ -163,12 +189,18 @@ def parse_need(obj: object, ctx: str, type_defs: dict[str, str]) -> InformationN
     if not description:
         raise SchemaError(f"{ctx}.description is required")
 
-    need_kind = str(entry.get("need_kind") or "").strip().lower()
-    if need_kind not in NEED_KINDS:
-        raise SchemaError(f"{ctx}.need_kind is {need_kind!r}; use one of: {', '.join(NEED_KINDS)}")
+    raw_kind = str(entry.get("need_kind") or "").strip().lower()
+    try:
+        need_kind = NeedKind(raw_kind)
+    except ValueError:
+        valid = ", ".join(k.value for k in NeedKind)
+        raise SchemaError(f"{ctx}.need_kind is {raw_kind!r}; use one of: {valid}") from None
 
-    focus = str(entry.get("focus") or "").strip().lower()
-    if focus not in FOCUS_KINDS:
+    # Unlike need_kind, an unusable focus is defaulted rather than rejected: it narrows what the
+    # need may absorb, so getting it wrong costs a missed entity, not a misapplied fact.
+    try:
+        focus = Focus(str(entry.get("focus") or "").strip().lower())
+    except ValueError:
         focus = DEFAULT_FOCUS
 
     cadence = entry.get("cadence")
@@ -271,9 +303,11 @@ def run_extraction(
 ) -> dict[str, int]:
     """Extract needs for every page whose inputs have changed. Returns counts.
 
-    Incremental: an unchanged page is skipped, so a re-run after one edit costs one call.
-    ``force`` re-extracts everything, which is what a prompt change requires — stored needs
-    are only comparable to each other when they came from the same prompt.
+    Incremental: an unchanged page is skipped, so a re-run after one edit costs one call. A
+    renamed page is also skipped — needs are keyed by the page's stable doc id, so a
+    reorganization that changed no content costs nothing. ``force`` re-extracts everything,
+    which is what a prompt change requires: stored needs are only comparable to each other when
+    they came from the same prompt, and the prompt is not part of the guard.
 
     The entity-type menu is read ONCE per run and its taxonomy id stored with every need set,
     so a later re-derivation that renames a type leaves these mentions resolvable.
@@ -312,7 +346,7 @@ def run_extraction(
         page_needs.store(
             path,
             body=by_path[path],
-            needs=[need.model_dump() for need in needs],
+            needs=[need.model_dump(mode="json") for need in needs],
             model=model,
             taxonomy_id=taxonomy_id,
         )
@@ -321,7 +355,9 @@ def run_extraction(
         if progress:
             progress(n, len(stale))
 
-    page_needs.prune(set(by_path))
+    # Scoped to the prefix walked: ``by_path`` only describes that scope, so an unscoped prune
+    # would read every page outside it as deleted.
+    page_needs.prune(set(by_path), prefix=prefix)
     log.info(
         "needs: %d need(s) from %d page(s); %d unchanged, %d yielded nothing",
         counts["needs"],

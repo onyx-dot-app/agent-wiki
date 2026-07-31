@@ -1,6 +1,11 @@
 """page_needs
 
-Adds ``page_needs``: per-page information needs, path-keyed and current-valued.
+Adds ``page_needs``: per-page information needs, keyed by ``wiki_doc_ids.id``.
+
+Keyed by doc id rather than path because extraction costs an LLM call per page and a move
+re-keys the doc-id row in place — so a rename keeps its needs instead of looking like a new page
+to buy and an old path to prune. No ``path`` column: after a move the row is intentionally not
+stale, so a denormalized path would never be refreshed.
 
 Current-valued rather than append-only (unlike ``entity_taxonomies``) because a page's needs
 describe that page as it is now, and nothing keys facts by a need — so a re-extraction has
@@ -35,7 +40,7 @@ def upgrade() -> None:
         return
     op.create_table(
         "page_needs",
-        sa.Column("path", sa.Text(), nullable=False),
+        sa.Column("doc_id", sa.Text(), nullable=False),
         sa.Column("content_sha256", sa.Text(), nullable=False),
         sa.Column("model", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.Column("taxonomy_id", sa.Integer(), nullable=True),
@@ -47,7 +52,8 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(["taxonomy_id"], ["entity_taxonomies.id"], ondelete="SET NULL"),
-        sa.PrimaryKeyConstraint("path"),
+        sa.ForeignKeyConstraint(["doc_id"], ["wiki_doc_ids.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("doc_id"),
     )
 
 
