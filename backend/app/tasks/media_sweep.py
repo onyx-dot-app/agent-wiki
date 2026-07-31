@@ -128,23 +128,22 @@ def sweep_wiki_media() -> None:
             if unreferenced_since is None or not deletion_enabled:
                 continue
             if now - unreferenced_since > timedelta(days=_DEREFERENCE_RETENTION_DAYS):
-                # The commit lock holds off page writers across the re-scan and
-                # delete. Drafts are not under it, so their versions bracket the
-                # scan instead: any edit in the gap defers to the next sweep.
+                # The commit lock holds off page writers. Drafts are not under
+                # it, so the delete carries their fingerprint as a condition and
+                # decides both in one snapshot.
                 try:
                     with wiki_git.commit_lock():
-                        before = coedit.active_session_versions()
+                        drafts = coedit.active_draft_fingerprint()
                         if candidate.id in _referenced([candidate]):
                             media_store.set_unreferenced_since(candidate.id, None)
                             cleared += 1
                             continue
-                        if coedit.active_session_versions() != before:
-                            deferred += 1
-                            continue
                         if media_store.delete_if_still_flagged(
-                            candidate.id, candidate.unreferenced_since
+                            candidate.id, candidate.unreferenced_since, drafts
                         ):
                             deleted += 1
+                        else:
+                            deferred += 1
                 except Exception:
                     log.exception("media sweep: delete failed for %s", candidate.id)
 

@@ -34,7 +34,8 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import Text as SAText, cast, delete, func, literal, or_, select, update
+from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -185,6 +186,31 @@ def active_session_versions() -> dict[int, int]:
             )
         ).all()
         return {session_id: seq for session_id, seq in rows}
+
+
+def active_draft_fingerprint_expr():
+    """One value summarizing every live draft's version, as a subquery.
+
+    Embedded in a caller's statement so its check and its write share a single
+    snapshot. Two reads differing means some draft opened, closed or advanced.
+    """
+    pair = cast(CoeditSession.id, SAText) + literal(":") + cast(CoeditSession.ydoc_seq, SAText)
+    return (
+        select(
+            func.coalesce(
+                func.string_agg(pair, aggregate_order_by(literal(","), CoeditSession.id)),
+                literal(""),
+            )
+        )
+        .where(CoeditSession.status == SessionStatus.ACTIVE.value)
+        .scalar_subquery()
+    )
+
+
+def active_draft_fingerprint() -> str:
+    """The same value as a plain read, for a caller that needs it up front."""
+    with session() as s:
+        return s.scalar(select(active_draft_fingerprint_expr())) or ""
 
 
 def get_session(session_id: int) -> SessionRow | None:
