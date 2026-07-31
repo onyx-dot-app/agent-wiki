@@ -25,7 +25,7 @@ TYPE_DEFS = {
 
 def _need(**overrides) -> dict:
     base = {
-        "aspect_name": "deal status and blockers",
+        "need_name": "deal status and blockers",
         "need_kind": "entity_status",
         "description": "current status, blockers, and contact",
         "current_content": "Status: negotiation. Blocker: security review.",
@@ -57,7 +57,7 @@ class TestParseNeed:
     def test_parses_a_well_formed_need(self) -> None:
         need = needs.parse_need(_need(cadence="weekly"), "needs[0]", TYPE_DEFS)
 
-        assert need.aspect_name == "deal status and blockers"
+        assert need.need_name == "deal status and blockers"
         assert need.need_kind is NeedKind.ENTITY_STATUS
         assert need.cadence == "weekly"
         assert need.focus is Focus.SPECIFIC
@@ -67,9 +67,9 @@ class TestParseNeed:
         with pytest.raises(needs.SchemaError, match="need_kind"):
             needs.parse_need(_need(need_kind="organization"), "needs[0]", TYPE_DEFS)
 
-    def test_requires_an_aspect_name_and_a_description(self) -> None:
-        with pytest.raises(needs.SchemaError, match="aspect_name"):
-            needs.parse_need(_need(aspect_name="  "), "needs[0]", TYPE_DEFS)
+    def test_requires_a_need_name_and_a_description(self) -> None:
+        with pytest.raises(needs.SchemaError, match="need_name"):
+            needs.parse_need(_need(need_name="  "), "needs[0]", TYPE_DEFS)
         with pytest.raises(needs.SchemaError, match="description"):
             needs.parse_need(_need(description=""), "needs[0]", TYPE_DEFS)
 
@@ -92,7 +92,7 @@ class TestParseNeed:
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            needs.InformationNeed(aspect_name="a", need_kind="organization", description="d")
+            needs.InformationNeed(need_name="a", need_kind="organization", description="d")
 
     def test_serializes_to_plain_json_strings(self) -> None:
         """What lands in JSONB. A str-subclass enum would round-trip anyway, but the stored shape
@@ -222,7 +222,7 @@ class TestExtractPage:
     def test_a_partial_response_yields_no_half_page(self, monkeypatch) -> None:
         """A page's needs are returned atomically, so a retry cannot append to a half-built
         list — one good need plus one bad one must not become one stored need."""
-        self._stub(monkeypatch, json.dumps({"needs": [_need(), _need(aspect_name="")]}))
+        self._stub(monkeypatch, json.dumps({"needs": [_need(), _need(need_name="")]}))
 
         assert needs.extract_page("a.md", "body", type_defs=TYPE_DEFS) == []
 
@@ -280,7 +280,7 @@ class TestOutputCap:
         not be logged as a parse failure."""
 
         def fake_complete(messages, **kwargs):
-            return CompletionResult(text='{"needs": [{"aspect', stop_reason="max_tokens")
+            return CompletionResult(text='{"needs": [{"need_', stop_reason="max_tokens")
 
         monkeypatch.setattr(needs.client, "complete", fake_complete)
         with caplog.at_level("WARNING"):

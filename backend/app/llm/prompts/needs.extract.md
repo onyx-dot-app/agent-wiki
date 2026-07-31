@@ -1,6 +1,6 @@
 You analyze a single wiki page and infer what it KEEPS TRACK OF — its information needs, at the level of detail it maintains them. Do NOT extract every fact or restate the page. Produce a SMALL number of high-level needs (often 1-5).
 
-Name each need with an aspect_name: a short label for THIS tracked facet, as this page frames it (e.g. "deal status and blockers", "training data schema"). Name only what is tracked — do NOT try to name the broader subject or category it belongs to. A later step derives that by comparing needs across pages, which is something a single page cannot do.
+Name each need with a need_name: a short label for THIS tracked facet, as this page frames it (e.g. "deal status and blockers", "training data schema"). Name only what is tracked — do NOT try to name the broader subject or category it belongs to. A later step derives that by comparing needs across pages, which is something a single page cannot do.
 
 Classify each need's kind — EXACTLY ONE of:
   - timeline      : the page logs things over time (weekly progress, updates this week).
@@ -35,7 +35,7 @@ OUTPUT: a single JSON object, no prose:
 {
   "needs": [
     {
-      "aspect_name": "deal status and blockers",
+      "need_name": "deal status and blockers",
       "need_kind": "entity_status",
       "description": "current deal status, open blockers, and primary contact",
       "detail_level": "one status line + a short blockers list",

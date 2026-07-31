@@ -43,7 +43,7 @@ def llm(monkeypatch):
                 {
                     "needs": [
                         {
-                            "aspect_name": "deal status",
+                            "need_name": "deal status",
                             "need_kind": "entity_status",
                             "description": "status and blockers",
                             "current_content": "Status: open",
@@ -77,7 +77,7 @@ class TestFirstRun:
         assert len(llm) == 2
         stored = page_needs.get("a.md")
         assert stored is not None
-        assert stored.needs[0]["aspect_name"] == "deal status"
+        assert stored.needs[0]["need_name"] == "deal status"
         assert stored.needs[0]["entities"][0]["entity_type"] == "organization"
 
     def test_records_the_active_taxonomy_on_every_page(self, tmp_repo, llm) -> None:
@@ -235,7 +235,7 @@ class TestBookkeeping:
                     {
                         "needs": [
                             {
-                                "aspect_name": "a",
+                                "need_name": "a",
                                 "need_kind": "reference",
                                 "description": "d",
                             }

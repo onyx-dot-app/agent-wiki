@@ -12,10 +12,11 @@ Each need also carries the ENTITIES it is about, typed from the derived taxonomy
 (``app.ingest.entity_types``), and a ``focus`` saying whether the page's entity set is closed
 or open. See ``InformationNeed`` for why both matter.
 
-Naming, deliberately: the label a page can produce is an ASPECT — "training data schema",
-"deal status" — not a topic. Seven needs naming facets of one model are seven aspects of ONE
-topic, and no single page can know that; deriving the topic means comparing needs across
-pages. So this step names only what it can see, and calls it what it is.
+Naming, deliberately: a need is PRE-consolidation, so its label names the NEED — "training
+data schema", "deal status" — never a topic. Seven needs naming facets of one model belong to
+ONE topic, and no single page can know that; deriving the topic means comparing needs across
+pages, and the naming step there is what turns a need into an aspect of a topic. So this step
+names only what it can see, and the stored key says so rather than pretending otherwise.
 
 Per page, and incremental: a need set is keyed by the page's stable doc id and guarded by a
 content hash, so neither an unchanged page nor a renamed one is re-extracted. A re-run after one
@@ -105,8 +106,9 @@ class EntityMention(BaseModel):
 class InformationNeed(BaseModel):
     """One information need of one page."""
 
-    # What THIS page tracks, as this page frames it. An aspect, not a topic.
-    aspect_name: str
+    # What THIS page tracks, as this page frames it. A need, not a topic — and not yet an
+    # aspect either, which is what consolidation makes of it.
+    need_name: str
     need_kind: NeedKind
     description: str
     detail_level: str = ""
@@ -182,9 +184,9 @@ def parse_need(obj: object, ctx: str, type_defs: dict[str, str]) -> InformationN
         raise SchemaError(f"{ctx} must be an object")
     entry = cast(dict[str, Any], obj)
 
-    aspect_name = str(entry.get("aspect_name") or "").strip()
-    if not aspect_name:
-        raise SchemaError(f"{ctx}.aspect_name is required")
+    need_name = str(entry.get("need_name") or "").strip()
+    if not need_name:
+        raise SchemaError(f"{ctx}.need_name is required")
     description = str(entry.get("description") or "").strip()
     if not description:
         raise SchemaError(f"{ctx}.description is required")
@@ -205,7 +207,7 @@ def parse_need(obj: object, ctx: str, type_defs: dict[str, str]) -> InformationN
 
     cadence = entry.get("cadence")
     return InformationNeed(
-        aspect_name=aspect_name,
+        need_name=need_name,
         need_kind=need_kind,
         description=description,
         detail_level=str(entry.get("detail_level") or "").strip(),

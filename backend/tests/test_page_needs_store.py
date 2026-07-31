@@ -26,7 +26,7 @@ def _page(path: str, body: str = "# P\n\nbody\n") -> None:
 
 NEEDS = [
     {
-        "aspect_name": "deal status",
+        "need_name": "deal status",
         "need_kind": "entity_status",
         "description": "status and blockers",
         "entities": [{"canonical_name": "Acme", "entity_type": "organization", "primary": True}],
@@ -50,7 +50,7 @@ class TestStoreAndGet:
 
         row = page_needs.get("a.md")
         assert row is not None
-        assert row.needs[0]["aspect_name"] == "deal status"
+        assert row.needs[0]["need_name"] == "deal status"
         assert row.needs[0]["entities"][0]["primary"] is True
         assert row.model == "gpt-5"
 
@@ -206,7 +206,7 @@ class TestDocIdKey:
         assert doc_ids.id_for_path("new.md") == doc_id
         row = page_needs.get("new.md")
         assert row is not None
-        assert row.needs[0]["aspect_name"] == "deal status"
+        assert row.needs[0]["need_name"] == "deal status"
         # ...and the page is not stale, so the rename costs no LLM call.
         assert page_needs.stale_paths([("new.md", "body")], model="m") == []
 
@@ -231,7 +231,7 @@ class TestDocIdKey:
 
         row = page_needs.get_by_doc_id(doc_id)
         assert row is not None
-        assert row.needs[0]["aspect_name"] == "deal status"
+        assert row.needs[0]["need_name"] == "deal status"
 
     def test_a_renamed_page_is_not_pruned(self, tmp_repo) -> None:
         _page("old.md", "body")
@@ -319,7 +319,7 @@ class TestLifecycle:
         row = page_needs.get("a.md")
         assert row is not None
         assert row.doc_id == doc_id
-        assert row.needs[0]["aspect_name"] == "deal status"
+        assert row.needs[0]["need_name"] == "deal status"
         assert page_needs.stale_paths([("a.md", "body")], model="m") == []
 
     def test_needs_stay_readable_by_id_while_trashed(self, tmp_repo) -> None:
@@ -351,7 +351,7 @@ class TestTaxonomyLink:
         row = page_needs.get("a.md")
         assert row is not None
         assert row.taxonomy_id is None
-        assert row.needs[0]["aspect_name"] == "deal status"
+        assert row.needs[0]["need_name"] == "deal status"
 
     def test_needs_orphaned_by_a_deleted_taxonomy_are_stale(self, tmp_repo) -> None:
         """The recovery path: a NULL link can no longer match a live taxonomy, so the next
