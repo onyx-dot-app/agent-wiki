@@ -133,10 +133,10 @@ ingest_llm_calls_per_doc = Histogram(
     buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
 )
 
-ingest_queue_depth = Gauge(
-    "ingest_queue_depth",
-    "Current number of pending tasks in the documents queue",
-)
+# ingest_queue_depth is exported by _TaskQueueCollector below — sampled at
+# scrape time so it stays truthful while the worker is stalled or freshly
+# restarted (a handler-set gauge freezes at its last write and resets to 0 on
+# every worker boot, which is how a fully stalled queue once read as 0).
 
 # --------------------------------------------------------------------------- #
 # Wiki media                                                                 #
@@ -232,19 +232,34 @@ class _TaskQueueCollector:
             "Pending messages (ready + delayed) per task queue",
             labels=["queue"],
         )
+        in_flight = GaugeMetricFamily(
+            "task_queue_in_flight",
+            "Delivered-but-unacked messages per task queue (stuck deliveries show here)",
+            labels=["queue"],
+        )
         age = GaugeMetricFamily(
             "task_queue_oldest_age_seconds",
             "Age of the oldest ready message per task queue (0 when empty)",
             labels=["queue"],
         )
+        ingest_depth = GaugeMetricFamily(
+            "ingest_queue_depth",
+            "Current number of pending tasks in the documents queue",
+        )
         for name, q in QUEUES.items():
             try:
-                depth.add_metric([name], q.depth().pending)
+                d = q.depth()
+                depth.add_metric([name], d.pending)
+                in_flight.add_metric([name], d.in_flight)
                 age.add_metric([name], q.oldest_age_seconds() or 0.0)
+                if name == "documents":
+                    ingest_depth.add_metric([], d.pending)
             except Exception:
                 log.warning("metrics: queue stats failed for %s", name, exc_info=True)
         yield depth
+        yield in_flight
         yield age
+        yield ingest_depth
 
 
 REGISTRY.register(_TaskQueueCollector())

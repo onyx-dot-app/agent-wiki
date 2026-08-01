@@ -93,7 +93,12 @@ def test_task_queue_collector_labels_every_queue(monkeypatch):
     monkeypatch.setattr(queue_mod, "get_redis", lambda: fake)
 
     families = {f.name: f for f in metrics._TaskQueueCollector().collect()}
-    assert set(families) == {"task_queue_depth", "task_queue_oldest_age_seconds"}
+    assert set(families) == {
+        "task_queue_depth",
+        "task_queue_in_flight",
+        "task_queue_oldest_age_seconds",
+        "ingest_queue_depth",
+    }
 
     depth = families["task_queue_depth"]
     seen = {s.labels["queue"] for s in depth.samples}
