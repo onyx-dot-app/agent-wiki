@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.wiki import comment_anchor
 from app.wiki.comment_anchor import remap_range
 
 
@@ -227,3 +228,56 @@ def test_disjoint_full_rewrite_orphans():
     new = "keep )))))))))) keep"
     s, e = old.index("[["), old.index("[[") + 10
     assert remap_range(old, new, s, e) is None
+
+
+# --------------------------------------------------------------------------- #
+# body_diff precomputation + cost caps                                        #
+# --------------------------------------------------------------------------- #
+
+
+def test_precomputed_diff_matches_per_call_results():
+    old = "\n".join(f"line {i} stays the same" for i in range(30))
+    new = old.replace("line 7 stays", "line 7 mostly stays").replace(
+        "line 21 stays the same", "entirely new text here"
+    )
+    diff = comment_anchor.body_diff(old, new)
+    spans = [
+        (0, 10),
+        (old.index("line 7"), old.index("line 7") + len("line 7 stays")),
+        (old.index("line 21"), old.index("line 21") + len("line 21 stays the same")),
+        (len(old) - 15, len(old)),
+    ]
+    for s, e in spans:
+        assert remap_range(old, new, s, e, diff=diff) == remap_range(old, new, s, e)
+
+
+def test_multiline_edit_keeps_unchanged_line_anchor_exact():
+    old = "alpha\nbravo target words\ncharlie\n"
+    new = "alpha\nbravo target words\nCHARLIE REWRITTEN\n"
+    s = old.index("target")
+    assert remap_range(old, new, s, s + len("target words")) == (s, s + len("target words"))
+
+
+def test_over_cap_hunk_degrades_to_coarse_replace(monkeypatch):
+    monkeypatch.setattr(comment_anchor, "_MAX_HUNK_CHAR_PRODUCT", 4)
+    old = "stable\nthe quick brown fox\nstable2\n"
+    new = "stable\nthe quick red fox\nstable2\n"
+    s = old.index("quick")
+    # Under the cap the whole changed line stays one coarse replace opcode, so a
+    # span inside it collapses and orphans instead of fine-aligning.
+    assert remap_range(old, new, s, s + len("quick brown fox")) is None
+    # Anchors on unchanged lines are unaffected by the cap.
+    assert remap_range(old, new, 0, len("stable")) == (0, len("stable"))
+
+
+def test_over_cap_token_diff_skips_survival_guard(monkeypatch):
+    monkeypatch.setattr(comment_anchor, "_MAX_TOKEN_PRODUCT", 1)
+    old = "alpha\nthe quick brown fox\nomega\n"
+    new = "alpha\nthe quick red fox\nomega\n"
+    diff = comment_anchor.body_diff(old, new)
+    assert diff.token_opcodes is None
+    # Endpoint mapping still works; the guard is bypassed rather than orphaning.
+    s = old.index("quick")
+    result = remap_range(old, new, s, s + len("quick brown fox"), diff=diff)
+    assert result is not None
+    assert new[result[0] : result[1]] == "quick red fox"
