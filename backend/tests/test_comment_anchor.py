@@ -281,3 +281,54 @@ def test_over_cap_token_diff_skips_survival_guard(monkeypatch):
     result = remap_range(old, new, s, s + len("quick brown fox"), diff=diff)
     assert result is not None
     assert new[result[0] : result[1]] == "quick red fox"
+
+
+def test_append_only_edit_maps_all_anchors_exactly():
+    # Common-suffix/prefix trim: appending at the bottom must leave every
+    # existing anchor at its exact old offsets, at any page size.
+    old = "\n".join(f"- item {i} with some text" for i in range(500)) + "\n"
+    new = old + "- appended row\n"
+    diff = comment_anchor.body_diff(old, new)
+    for i in (0, 250, 499):  # word-aligned spans so _snap_to_words is a no-op
+        s = old.index(f"- item {i} with")
+        e = s + len(f"- item {i} with some text")
+        assert remap_range(old, new, s, e, diff=diff) == (s, e)
+
+
+def test_anchor_after_edited_line_shifts_by_exact_delta():
+    lines = [f"line {i} content here\n" for i in range(50)]
+    old = "".join(lines)
+    edited = lines.copy()
+    edited[10] = "line 10 content here plus an insertion\n"
+    new = "".join(edited)
+    delta = len(edited[10]) - len(lines[10])
+    s = old.index("line 40")
+    e = s + len("line 40 content")
+    assert remap_range(old, new, s, e) == (s + delta, e + delta)
+
+
+def test_over_cap_line_diff_falls_back_to_one_hunk(monkeypatch):
+    monkeypatch.setattr(comment_anchor, "_MAX_LINE_PRODUCT", 1)
+    # Prefix/suffix lines are trimmed before the cap applies, so anchors there
+    # stay exact even when the middle is treated as a single hunk.
+    old = "stable head\nAAA one\nBBB two\nstable tail\n"
+    new = "stable head\nCCC uno\nDDD dos\nstable tail\n"
+    assert remap_range(old, new, 0, len("stable head")) == (0, len("stable head"))
+    s = old.index("stable tail")
+    s_new = new.index("stable tail")
+    assert remap_range(old, new, s, s + 6) == (s_new, s_new + 6)
+    # The middle collapses through the coarse hunk and orphans.
+    assert remap_range(old, new, old.index("AAA"), old.index("AAA") + 7) is None
+
+
+def test_huge_replaced_run_gets_no_partial_credit(monkeypatch):
+    # An in-place-edited token run over the ratio cap must score zero credit
+    # (orphan) instead of running a quadratic similarity pass.
+    old = "prefix stays. weekly rotation. suffix stays."
+    new = "prefix stays. biweekly rotation. suffix stays."
+    s, e = old.index("weekly"), old.index("weekly") + len("weekly")
+    # Control: under the normal cap the in-place edit earns partial credit.
+    assert remap_range(old, new, s, e) is not None
+    # The same edit with its run over the cap earns nothing and orphans.
+    monkeypatch.setattr(comment_anchor, "_MAX_RUN_RATIO_PRODUCT", 10)
+    assert remap_range(old, new, s, e) is None

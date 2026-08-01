@@ -62,10 +62,21 @@ _TOKEN_RE = re.compile(r"\s+|\S+")
 # instead (endpoints collapse to the hunk edges — the same outcome as a full
 # rewrite of that hunk). 4M ≈ a 2000x2000-char hunk ≈ ~0.1s of diffing.
 _MAX_HUNK_CHAR_PRODUCT = 4_000_000
+# Guard for the middle line diff after common prefix/suffix trimming. Lines are
+# normally high-entropy so line matching is fast, but a body made of thousands
+# of duplicate lines (blank lines, repeated bullets) gives every line a long
+# match chain and line matching itself goes quadratic. Above the cap the whole
+# middle becomes one hunk, and _MAX_HUNK_CHAR_PRODUCT decides fine vs coarse.
+_MAX_LINE_PRODUCT = 4_000_000
 # Same guard for the whole-body token diff that scores span survival. Above the
 # cap the survival guard is skipped (spans are kept on the strength of the
 # endpoint mapping alone); ~10k tokens per side is far past any page we host.
 _MAX_TOKEN_PRODUCT = 100_000_000
+# Guard for the char-level ratio() that credits an in-place-edited token run.
+# Partial credit exists for typo-scale edits; a run this large is a wholesale
+# rewrite, so it gets no credit instead of a quadratic similarity pass (long
+# URLs / data URIs / generated blobs are single tokens and can be huge).
+_MAX_RUN_RATIO_PRODUCT = 4_000_000
 
 # Endpoint association: +1 sticks to following content, -1 to preceding.
 _START = 1
@@ -108,22 +119,53 @@ def _char_opcodes(old_body: str, new_body: str) -> list[_Opcode]:
     """Character-coordinate opcodes for old→new, via a line-level pre-pass.
 
     A raw character-level ``SequenceMatcher`` over two whole bodies is
-    quadratic in body length. Lines are high-entropy elements, so the line
-    diff stays fast at any body size; character precision is only needed
-    *inside* changed hunks, which ordinary edits keep small. Equal lines map
-    positions exactly, so anchors in unchanged text get identical results to
-    the whole-body character diff. The returned opcodes tile
+    quadratic in body length. Common prefix/suffix lines are trimmed first in
+    linear time — an ordinary edit or append touches a small middle, so its
+    cost no longer scales with page size at all. The middle is line-diffed
+    (guarded by ``_MAX_LINE_PRODUCT`` for degenerate duplicate-heavy bodies);
+    character precision is only applied *inside* changed hunks. Equal lines
+    map positions exactly, so anchors in unchanged text get identical results
+    to the whole-body character diff. The returned opcodes tile
     ``[0, len(old_body)]`` × ``[0, len(new_body)]`` exactly like
     ``SequenceMatcher.get_opcodes()``.
     """
     old_lines = old_body.splitlines(keepends=True)
     new_lines = new_body.splitlines(keepends=True)
-    line_ops = SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes()
+    n_old, n_new = len(old_lines), len(new_lines)
+
+    # Linear trim: common prefix and suffix lines need no matching at all.
+    pre = 0
+    while pre < n_old and pre < n_new and old_lines[pre] == new_lines[pre]:
+        pre += 1
+    suf = 0
+    while (
+        suf < n_old - pre and suf < n_new - pre
+        and old_lines[n_old - 1 - suf] == new_lines[n_new - 1 - suf]
+    ):
+        suf += 1
+    mid_old = old_lines[pre:n_old - suf]
+    mid_new = new_lines[pre:n_new - suf]
+    pre_chars = sum(len(line) for line in old_lines[:pre])
+    suf_chars = sum(len(line) for line in old_lines[n_old - suf:])
+
     out: list[_Opcode] = []
-    i_char = j_char = 0  # running char offsets; line opcodes tile in order
+    if pre_chars:
+        out.append(("equal", 0, pre_chars, 0, pre_chars))
+    if len(mid_old) * len(mid_new) > _MAX_LINE_PRODUCT:
+        log.warning(
+            "line diff over cap (%d x %d lines) — treating middle as one hunk",
+            len(mid_old), len(mid_new),
+        )
+        line_ops: list[_Opcode] = [("replace", 0, len(mid_old), 0, len(mid_new))]
+    else:
+        line_ops = cast(
+            "list[_Opcode]",
+            SequenceMatcher(None, mid_old, mid_new, autojunk=False).get_opcodes(),
+        )
+    i_char = j_char = pre_chars  # running char offsets; line opcodes tile in order
     for tag, i1, i2, j1, j2 in line_ops:
-        a_len = sum(len(line) for line in old_lines[i1:i2])
-        b_len = sum(len(line) for line in new_lines[j1:j2])
+        a_len = sum(len(line) for line in mid_old[i1:i2])
+        b_len = sum(len(line) for line in mid_new[j1:j2])
         if tag == "replace":
             if a_len * b_len > _MAX_HUNK_CHAR_PRODUCT:
                 log.warning(
@@ -146,6 +188,12 @@ def _char_opcodes(old_body: str, new_body: str) -> list[_Opcode]:
             out.append((tag, i_char, i_char + a_len, j_char, j_char + b_len))
         i_char += a_len
         j_char += b_len
+    if suf_chars:
+        out.append((
+            "equal",
+            len(old_body) - suf_chars, len(old_body),
+            len(new_body) - suf_chars, len(new_body),
+        ))
     return out
 
 
@@ -239,6 +287,8 @@ def _word_preserved_fraction(diff: BodyDiff, new_body_len: int, new_start: int, 
         else:  # replace — credit the in-place edit by how similar the runs are
             old_run = "".join(diff.old_tokens[i1:i2])
             new_run = "".join(diff.new_tokens[j1:j2])
+            if len(old_run) * len(new_run) > _MAX_RUN_RATIO_PRODUCT:
+                continue  # wholesale rewrite, not an in-place edit — no credit
             similarity = SequenceMatcher(None, old_run, new_run, autojunk=False).ratio()
             kept += similarity * overlap
     return kept / span
