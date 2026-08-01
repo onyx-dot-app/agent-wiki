@@ -458,3 +458,27 @@ def test_alignment_prefers_leaving_the_estimate_when_a_char_is_missing():
     # "xyz" never appears, so no alignment can cover the whole quote.
     body = "some ordinary prose here"
     assert resolve_exact_span(body, 2, 8, "some xyz") == (2, 8)
+
+
+def test_repeated_formatted_text_anchors_nearest_the_estimate():
+    body = "a **bold** run here. filler filler filler. a **bold** run here."
+    quote = "a bold run"
+    second = body.rindex("a **bold** run")
+    start, end = resolve_exact_span(body, second, second + len(quote), quote)
+    assert (start, end) == (second, second + len("a **bold** run"))
+
+
+def test_repeated_formatted_text_still_finds_the_first_when_that_is_nearest():
+    body = "a **bold** run here. filler filler filler. a **bold** run here."
+    quote = "a bold run"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert (start, end) == (0, len("a **bold** run"))
+
+
+def test_repeated_media_anchors_nearest_the_estimate():
+    body = "x ![a](/m/1) y and later x ![a](/m/1) y"
+    quote = "x /m/1 y"
+    second = body.rindex("x ![a](/m/1) y")
+    start, end = resolve_exact_span(body, second, second + len(quote), quote)
+    assert body[start:end] == "x ![a](/m/1) y"
+    assert start == second

@@ -403,28 +403,43 @@ def _map_end(
     return body_len
 
 
-def _subsequence_span(haystack: str, needle: str) -> tuple[int, int] | None:
-    """Span of ``haystack`` holding every character of ``needle`` in order, or
-    None when the alignment is unconvincing.
+def _subsequence_end(haystack: str, needle: str, start: int, limit: int) -> int | None:
+    """Exclusive end of the shortest run from ``start`` holding all of
+    ``needle`` in order, or None if it needs more than ``limit`` characters.
+    Taking each character at its earliest position is what makes it shortest."""
+    stop = min(len(haystack), start + limit)
+    consumed = 0
+    pos = start
+    while pos < stop and consumed < len(needle):
+        if haystack[pos] == needle[consumed]:
+            consumed += 1
+        pos += 1
+    return pos if consumed == len(needle) else None
+
+
+def _subsequence_span(haystack: str, needle: str, near: int) -> tuple[int, int] | None:
+    """Span of ``haystack`` holding every character of ``needle`` in order,
+    closest to ``near``, or None when no alignment is convincing.
 
     A quote drops inline syntax the source keeps (``**bold**`` reaches the
     editor as ``bold``), so it survives as a subsequence of its own source with
     the delimiters interleaved. Requiring *every* character to align, inside a
     region not much longer than the quote, is what separates that from a
-    scatter of coincidental letters across unrelated text.
+    scatter of coincidental letters across unrelated text. Repeated text makes
+    several alignments valid, so the estimate breaks the tie the same way it
+    does for an exact match.
     """
-    blocks = [
-        b
-        for b in SequenceMatcher(None, haystack, needle, autojunk=False).get_matching_blocks()
-        if b.size
-    ]
-    if not blocks or sum(b.size for b in blocks) != len(needle):
+    if not needle:
         return None
-    start = blocks[0].a
-    end = blocks[-1].a + blocks[-1].size
-    if end - start > 2 * len(needle) + _SUBSEQUENCE_SLACK:
-        return None
-    return start, end
+    limit = 2 * len(needle) + _SUBSEQUENCE_SLACK
+    best: tuple[int, int] | None = None
+    start = haystack.find(needle[0])
+    while start != -1:
+        end = _subsequence_end(haystack, needle, start, limit)
+        if end is not None and (best is None or abs(start - near) < abs(best[0] - near)):
+            best = (start, end)
+        start = haystack.find(needle[0], start + 1)
+    return best
 
 
 def _nearest_occurrence(haystack: str, needle: str, near: int) -> int | None:
@@ -486,7 +501,7 @@ def resolve_exact_span(
     best = _nearest_occurrence(body, quoted_text, approx_start)
     if best is not None:
         return best, best + len(quoted_text)
-    aligned = _subsequence_span(projected, quoted_text)
+    aligned = _subsequence_span(projected, quoted_text, approx_start)
     if aligned is not None:
         return (
             _map_start(segments, aligned[0], len(body)),
