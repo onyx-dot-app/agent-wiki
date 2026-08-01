@@ -379,14 +379,17 @@ def test_image_only_quote_covers_syntax_not_just_the_src():
     assert _BODY[start:end] == _IMG
 
 
-def test_quote_ending_at_an_image_keeps_the_closing_paren():
-    quote = "test /api/wiki/media/abc123"
-    _, end = resolve_exact_span(_BODY, 7, 7 + len(quote), quote)
-    assert _BODY[end - 1] == ")"
+def test_quote_ending_inside_an_image_src_takes_the_whole_image():
+    # The end lands strictly inside the collapsed image, which is the arm
+    # `_map_end` exists for.
+    quote = "test /api/wiki/media/abc"
+    start, end = resolve_exact_span(_BODY, 7, 7 + len(quote), quote)
+    assert _BODY[start:end] == f"test {_IMG}"
 
 
 def test_text_quote_beside_an_image_is_unaffected():
-    start, end = resolve_exact_span(_BODY, 0, 5, "intro")
+    # Offset so the equality fast path cannot answer it.
+    start, end = resolve_exact_span(_BODY, 0, 4, "intro")
     assert (start, end) == (0, 5)
 
 
@@ -396,10 +399,26 @@ def test_trailing_text_after_an_image_maps_past_the_syntax():
 
 
 def test_angle_bracketed_destination_is_projected():
+    # The quote carries the editor's src, which is markdown-it's normalized
+    # link, so a space in the source reaches the backend percent-encoded.
     body = "see ![a](</media/x y.png>) here"
-    quote = "see /media/x y.png"
+    quote = "see /media/x%20y.png"
     start, end = resolve_exact_span(body, 0, len(quote), quote)
     assert body[start:end] == "see ![a](</media/x y.png>)"
+
+
+def test_non_ascii_destination_is_projected():
+    body = "a ![i](/media/café.png) b"
+    quote = "a /media/caf%C3%A9.png"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "a ![i](/media/café.png)"
+
+
+def test_nested_parens_in_a_destination_are_projected():
+    body = "test ![a](/m/x(1).png) tail"
+    quote = "test /m/x(1).png"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "test ![a](/m/x(1).png)"
 
 
 def test_image_with_title_is_projected():
@@ -411,7 +430,7 @@ def test_image_with_title_is_projected():
 
 def test_body_without_media_still_picks_nearest_occurrence():
     body = "alpha beta alpha beta"
-    assert resolve_exact_span(body, 11, 16, "alpha") == (11, 16)
+    assert resolve_exact_span(body, 10, 15, "alpha") == (11, 16)
 
 
 def test_quote_absent_from_body_returns_the_estimate():
@@ -448,10 +467,18 @@ def test_quote_with_both_formatting_and_media_anchors_on_the_source():
 
 
 def test_scattered_characters_do_not_count_as_an_alignment():
-    # Every character of the quote exists in order but spread across the whole
-    # body. That is coincidence, not dropped syntax, so keep the estimate.
-    body = "a" * 400 + "zz"
-    assert resolve_exact_span(body, 0, 5, "aaaaa zzz") == (0, 5)
+    # Every character is present in order, but only across a run far longer
+    # than the quote. That is coincidence, not dropped syntax, so keep the
+    # estimate rather than anchoring across the whole line.
+    body = "a...b...c...d...e...f...g...h...i...j... and more"
+    assert resolve_exact_span(body, 0, 10, "abcdefghij") == (0, 10)
+
+
+def test_dropped_syntax_within_the_limit_still_aligns():
+    # Same shape, tight enough to be inline syntax rather than a scatter.
+    body = "a.b.c.d.e.f.g.h.i.j. and more prose"
+    start, end = resolve_exact_span(body, 0, 10, "abcdefghij")
+    assert body[start:end] == "a.b.c.d.e.f.g.h.i.j"
 
 
 def test_alignment_prefers_leaving_the_estimate_when_a_char_is_missing():
@@ -482,3 +509,20 @@ def test_repeated_media_anchors_nearest_the_estimate():
     start, end = resolve_exact_span(body, second, second + len(quote), quote)
     assert body[start:end] == "x ![a](/m/1) y"
     assert start == second
+
+
+def test_image_syntax_in_a_code_fence_falls_back_to_the_raw_search():
+    # The projection collapses this like a real image, so only the raw tier can
+    # place a quote of the literal source.
+    body = "intro\n\n```\n![a](/m/1)\n```\n\ntail"
+    quote = "![a](/m/1)"
+    at = body.index(quote)
+    start, end = resolve_exact_span(body, at - 1, at - 1 + len(quote), quote)
+    assert body[start:end] == quote
+
+
+def test_alignment_prefers_the_tightest_span_over_the_nearest_start():
+    body = "a filler filler a **bold** run"
+    quote = "a bold run"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "a **bold** run"

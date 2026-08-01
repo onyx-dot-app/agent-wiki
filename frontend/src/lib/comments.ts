@@ -1,9 +1,9 @@
 import { ApiError, apiFetch } from "./api";
 import type { CommentThreadView, CommentView } from "@/types";
 
-/** What to show a person when a comment action fails. Mapped by status, not by
- * the server's text: a 400 carries the raw validation dump. Wording stays
- * action-neutral, since every comment mutation reports through here. */
+/** What to show a person when a comment action fails. Keyed on status because
+ * the server's text can be a raw pydantic dump. Action-neutral wording, so it
+ * fits any comment mutation. */
 export function commentErrorMessage(e: unknown): string {
   if (e instanceof ApiError) {
     switch (e.status) {
@@ -15,12 +15,8 @@ export function commentErrorMessage(e: unknown): string {
         return "You do not have permission to do that.";
       case 404:
         return "That page or comment no longer exists.";
-      case 409:
-        return "The page changed. Reload and try again.";
       case 413:
         return "That comment is too long.";
-      case 429:
-        return "Too many requests. Wait a moment and try again.";
     }
   }
   return "That did not go through. Try again.";

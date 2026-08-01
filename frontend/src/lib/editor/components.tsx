@@ -191,8 +191,8 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
           const cb = onSelectionForCommentRef.current;
           if (cb) {
             const quotedText = docTextBetween(editor, from, to);
-            // A quote is what the server re-anchors by, and block separators
-            // alone match anywhere, so neither is something to comment on.
+            // The server re-anchors by the quote, and a whitespace-only quote
+            // matches anywhere.
             if (!quotedText.trim()) {
               cb(null, null);
             } else {

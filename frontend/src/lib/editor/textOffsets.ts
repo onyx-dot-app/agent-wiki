@@ -24,16 +24,15 @@
  * quoted text — so this mapper only has to get the creation-time request into
  * the right neighborhood.
  *
- * The quote is plain text, so it never matches a source carrying inline syntax
- * literally. `resolve_exact_span` aligns it as a subsequence to close that, and
- * this estimate stands only when that alignment is refused.
+ * `resolve_exact_span` recovers a quote from the media projection or as a
+ * subsequence. Both still refuse one crossing blocks, or whose link URL dwarfs
+ * it, and this estimate is what gets stored then.
  */
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
 
-/** Text a leaf contributes, so it occupies offsets rather than collapsing to
- * nothing. The src must stay in step with `comment_anchor._project_media`,
- * which reduces the source the same way. */
+/** An image occupies offsets by its src, so a quote covering one matches the
+ * body only where `comment_anchor._project_media` reduces to the same string. */
 function leafText(leaf: PMNode): string {
   if (leaf.type.name !== "image") return "";
   return (leaf.attrs.src as string | null) ?? "";

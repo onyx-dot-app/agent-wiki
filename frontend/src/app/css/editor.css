@@ -302,8 +302,6 @@
    small name tag above it. */
 .editor-prose .ProseMirror-yjs-cursor {
   position: relative;
-  margin-left: -1px;
-  margin-right: -1px;
   /* The bar is the ::before because this element's height follows the line box,
      which an image stretches. The per-user color lands inline here, so the
      ::before inherits it. */
@@ -313,8 +311,9 @@
   content: "";
   position: absolute;
   top: 0;
-  /* Font-relative, matching the browser's own caret. The fixed 1.5rem
-     line-height would undersize it in h1 and h2. */
+  left: -1px;
+  /* Font-relative so the caret tracks whatever type size it sits in, which the
+     prose line-height alone does not. */
   height: 1.3em;
   border-left: 2px solid;
   border-left-color: inherit;
@@ -334,8 +333,8 @@
   opacity: 0.3;
 }
 
-/* Chrome's UA stylesheet makes a draggable element unselectable, so a selection
-   covering media would leave it untinted. */
+/* A draggable node is not user-selectable by default, so a selection covering
+   media would leave it untinted. */
 .editor-prose [draggable][contenteditable="false"] {
   user-select: text;
 }
@@ -350,7 +349,6 @@
   display: inline-block;
   max-width: 100%;
   line-height: 0;
-  /* Sits on the text baseline, like the text and markers beside it. */
   vertical-align: baseline;
 }
 .editor-prose .editor-image-img {
