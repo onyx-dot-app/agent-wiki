@@ -1,7 +1,6 @@
 import type { AnyExtension } from "@tiptap/core";
 import { Collaboration } from "@tiptap/extension-collaboration";
 import { TaskItem } from "@tiptap/extension-task-item";
-import { TaskList } from "@tiptap/extension-task-list";
 import { Placeholder } from "@tiptap/extensions";
 import { StarterKit } from "@tiptap/starter-kit";
 import type { Awareness } from "y-protocols/awareness";
@@ -13,6 +12,7 @@ import {
   Image,
   InlineCode,
   MarkdownLink,
+  MixedTaskList,
   OtherBlock,
   Table,
   TableRow,
@@ -63,7 +63,7 @@ export function tiptapExtensions(
       // reconcile it against, so it's just a wrong extra block.
       trailingNode: false,
     }),
-    TaskList,
+    MixedTaskList,
     TaskItem.configure({ nested: true }),
     TaskItemBackspace,
     BlockIdentity,

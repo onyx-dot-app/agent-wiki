@@ -140,16 +140,27 @@
   list-style: none;
   padding-left: 0;
 }
-/* Direct children only. A task item's own `li` is a flex row so the checkbox
-   sits beside its content, but a plain `li` renders as `<li><p>text</p><ul>
-   …</ul></li>` — flexed, its paragraph and its nested list become two
-   side-by-side columns instead of a list under a line of text. A descendant
-   selector hits every nested plain item under a task list, which on a page
-   that mixes the two is most of the page. */
-.editor-prose ul[data-type="taskList"] > li {
+/* Task items only, and direct children only. The flex row is what puts the
+   checkbox beside its content, so it belongs to `taskItem` rather than to
+   anything sitting in a task list: a plain `li` renders as
+   `<li><p>text</p><ul>…</ul></li>`, and flexed, its paragraph and its nested
+   list become two side-by-side columns instead of a list under a line of
+   text. A task list can now hold both kinds (see `MixedTaskList`), and a
+   descendant selector would additionally hit every nested plain item further
+   down. `data-checked` is what marks a task item in the DOM — the installed
+   TaskItem renders that and nothing else, no `data-type`. */
+.editor-prose ul[data-type="taskList"] > li[data-checked] {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
+}
+/* A plain item in a task list. The list itself is `list-style: none` for the
+   checkbox rows, so this restores an ordinary bullet, and the indent puts its
+   text on the same column as a task item's (checkbox 1rem + 0.5rem gap) so a
+   mixed list reads as one list rather than two interleaved ones. */
+.editor-prose ul[data-type="taskList"] > li:not([data-checked]) {
+  list-style: disc;
+  margin-left: 1.5rem;
 }
 /* A nested task list carries no bullet or marker to sit under, so without an
    indent of its own it starts at the parent's text column and the nesting
