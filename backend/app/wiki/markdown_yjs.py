@@ -672,13 +672,13 @@ def _build_list(
             continue
         raise NotImplementedError(f"unexpected token inside list: {t.type!r}")
 
-    # A bullet list becomes a task list as soon as *any* item carries a
-    # checkbox marker, and the unmarked items ride along as plain listItems —
-    # which is how GFM reads it, and what the editor's widened `taskList`
-    # holds (see `MixedTaskList`). Requiring every item to be marked instead
-    # demoted the whole list to a bulletList over one unmarked entry, so every
-    # "[ ] "/"[x] " in it rendered as literal text; on a list mixing tasks with
-    # section labels ("Phase 2") that is the common case, not a rare one.
+    # A bullet list is a task list when at least one item carries a checkbox
+    # marker. Marked items become taskItem children, with the marker consumed
+    # into the `checked` attribute; unmarked items stay plain listItem
+    # children of that same taskList, markers being the only thing that
+    # distinguishes the two. GFM lets a list mix them, and the editor's
+    # taskList schema holds both (`MixedTaskList`). An ordered list is never
+    # a task list.
     task_matches = (
         None if ordered else [_list_item_task_marker(tokens, s, e) for s, e in item_ranges]
     )

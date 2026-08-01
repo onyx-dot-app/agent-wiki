@@ -357,9 +357,7 @@ def test_task_list_structure_and_checked_attribute() -> None:
 
 def test_mixed_task_and_plain_items_becomes_a_task_list() -> None:
     """One marker is enough to make the list a taskList; the unmarked items
-    ride along as plain listItems. That mix is what GFM reads and what the
-    editor's widened taskList holds, so the marker stays a checkbox instead
-    of decaying to literal text over an unmarked sibling."""
+    are plain listItems in that same list."""
     doc = seed_doc_from_markdown("- [ ] marked\n- unmarked\n")
     root = _root(doc)
     lst = root.children[0]
