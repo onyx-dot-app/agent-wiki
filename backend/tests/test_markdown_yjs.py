@@ -355,16 +355,39 @@ def test_task_list_structure_and_checked_attribute() -> None:
     assert items[0].children[0].children[0].to_py() == "todo"
 
 
-def test_mixed_task_and_plain_items_stays_plain_bullet_list() -> None:
-    """A taskList schema requires uniformly-taskItem children — a list
-    where only some items carry a checkbox marker can't become one, so it
-    stays a plain bulletList (the marker text is then literal, same as
-    pre-checkbox-support behavior)."""
+def test_mixed_task_and_plain_items_becomes_a_task_list() -> None:
+    """One marker is enough to make the list a taskList; the unmarked items
+    ride along as plain listItems. That mix is what GFM reads and what the
+    editor's widened taskList holds, so the marker stays a checkbox instead
+    of decaying to literal text over an unmarked sibling."""
     doc = seed_doc_from_markdown("- [ ] marked\n- unmarked\n")
     root = _root(doc)
     lst = root.children[0]
+    assert lst.tag == "taskList"
+    assert [i.tag for i in lst.children] == ["taskItem", "listItem"]
+    # The marker is consumed for the task item and left alone for the plain
+    # one — a listItem's text is its own content, markers and all.
+    assert lst.children[0].children[0].children[0].to_py() == "marked"
+    assert lst.children[1].children[0].children[0].to_py() == "unmarked"
+
+
+def test_a_list_with_no_markers_stays_a_bullet_list() -> None:
+    doc = seed_doc_from_markdown("- one\n- two\n")
+    lst = _root(doc).children[0]
     assert lst.tag == "bulletList"
     assert [i.tag for i in lst.children] == ["listItem", "listItem"]
+
+
+def test_mixed_list_round_trips_byte_identically() -> None:
+    """The serializer picks the marker per item rather than per list, so a
+    mixed list survives a round trip unchanged in both directions."""
+    for body in (
+        "- [x] marked\n\n- unmarked\n",
+        "- [x] top\n\n- mid\n\n  - [ ] nested\n\n  - also plain\n",
+    ):
+        once = reconstruct_body(seed_doc_from_markdown(body))
+        assert once == body
+        assert once == reconstruct_body(seed_doc_from_markdown(once))
 
 
 def test_mixed_list_keeps_its_checkbox_markers() -> None:

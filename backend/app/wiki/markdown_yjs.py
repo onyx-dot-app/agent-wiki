@@ -12,10 +12,11 @@ sibling ``XmlElement``, not to a text mark, since a break is a node boundary,
 not formatting), ``bulletList``/``orderedList``/``listItem`` (arbitrarily
 nested — CommonMark's own grammar is already recursive here, so supporting
 depth costs about the same as supporting one level), ``taskList``/
-``taskItem`` (a GFM checkbox list — a plain bullet list whose items *all*
-start with a ``[ ]``/``[x]`` marker; a mixed list stays a regular
-``bulletList`` since a taskList's children must be uniformly taskItems — see
-``_build_list``), ``blockquote`` (a sequence of paragraph/list/blockquote
+``taskItem`` (a GFM checkbox list — a bullet list where *at least one* item
+starts with a ``[ ]``/``[x]`` marker; items without one stay plain
+``listItem`` children of the same ``taskList``, since GFM lets a list mix the
+two and the editor's schema holds that mix — see ``_build_list``),
+``blockquote`` (a sequence of paragraph/list/blockquote
 children, so multi-paragraph quotes and quotes containing lists work), and
 ``codeBlock`` (a ``language`` attribute + plain text content, fence syntax
 stripped — not stored as opaque markup). Tables get row-level structure
@@ -671,15 +672,17 @@ def _build_list(
             continue
         raise NotImplementedError(f"unexpected token inside list: {t.type!r}")
 
-    # A bullet list becomes a task list only when *every* item carries a
-    # checkbox marker — a taskList schema requires uniform taskItem
-    # children, so a mixed list (some items marked, some not) can't become
-    # one; it stays a plain bulletList with the literal "[ ] "/"[x] " text
-    # visible.
+    # A bullet list becomes a task list as soon as *any* item carries a
+    # checkbox marker, and the unmarked items ride along as plain listItems —
+    # which is how GFM reads it, and what the editor's widened `taskList`
+    # holds (see `MixedTaskList`). Requiring every item to be marked instead
+    # demoted the whole list to a bulletList over one unmarked entry, so every
+    # "[ ] "/"[x] " in it rendered as literal text; on a list mixing tasks with
+    # section labels ("Phase 2") that is the common case, not a rare one.
     task_matches = (
         None if ordered else [_list_item_task_marker(tokens, s, e) for s, e in item_ranges]
     )
-    is_task_list = bool(item_ranges) and task_matches is not None and all(task_matches)
+    is_task_list = bool(item_ranges) and task_matches is not None and any(task_matches)
 
     attrs = dict(extra_attrs or {})
     if is_task_list:
@@ -692,9 +695,8 @@ def _build_list(
     items: list[XmlElement] = []
     finishers: list[Any] = []
     for idx, (item_start, item_end) in enumerate(item_ranges):
-        if is_task_list:
-            match = task_matches[idx]  # type: ignore[index]
-            assert match is not None
+        match = task_matches[idx] if is_task_list else None  # type: ignore[index]
+        if match is not None:
             checked = match.group(1).lower() == "x"
             first_text = tokens[item_start + 1].children[0]
             first_text.content = first_text.content[match.end() :]
@@ -984,11 +986,13 @@ def _serialize_list(node: XmlElement) -> str:
     (``markdown_splice.py``), which never calls this serializer at all.
     """
     ordered = node.tag == "orderedList"
-    is_task = node.tag == "taskList"
     attrs = dict(node.attributes)
     start = int(attrs.get("start", "1")) if ordered else 1
     lines: list[str] = []
     for idx, item in enumerate(node.children):
+        # Per item, not per list: a taskList holds plain listItems alongside
+        # taskItems (see `_build_list`), and each one carries its own marker.
+        is_task = item.tag == "taskItem"
         if is_task:
             checked = _is_checked(dict(item.attributes).get("checked"))
             marker = f"- [{'x' if checked else ' '}] "
@@ -1009,9 +1013,9 @@ def _serialize_list(node: XmlElement) -> str:
         body = _serialize_block_sequence(list(item.children), indent)  # type: ignore[arg-type]
         if not is_task:
             # A literal "[x] " opening a plain list item is a checkbox marker
-            # the parse declined to promote — the list is mixed (a taskList's
-            # children must be uniformly taskItems, see `_build_list`) or it's
-            # ordered — not decorative text. `_escape_inline_text` escapes every
+            # the parse declined to promote — the item is in an ordered list,
+            # which is never promoted (see `_build_list`) — not decorative
+            # text. `_escape_inline_text` escapes every
             # "["/"]" it sees, which here would rewrite a marker that GFM
             # readers and a later uniform version of this same list still act on
             # into permanently inert text, an edit nothing in the editor shows
