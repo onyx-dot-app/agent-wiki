@@ -46,6 +46,7 @@ import {
 } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { Plugin, TextSelection, type Transaction } from "@tiptap/pm/state";
+import { TaskList } from "@tiptap/extension-task-list";
 import { isSameOriginSrc } from "./media";
 
 /** Internal bookkeeping attrs never rendered into the DOM (`rendered:
@@ -225,6 +226,33 @@ export const HeadingBackspace = Extension.create({
  * the well-tested primitive for exactly this "exit the list" operation,
  * and it's available as a core command regardless of whether `ListKeymap`
  * is installed. */
+/** `taskList` widened to hold plain `listItem`s alongside `taskItem`s.
+ *
+ * GFM lets a single list mix checkbox and non-checkbox items freely — a TODO
+ * page where some bullets are tasks and some are section labels ("Phase 2",
+ * "@ mention someone") is the ordinary case, not an edge one. Tiptap's stock
+ * `taskList` is `taskItem+`, which cannot represent that, so the backend codec
+ * has to demote any mixed list to a plain `bulletList` and every `[x]` in it
+ * renders as literal text instead of a checkbox (see `_build_list`'s uniformity
+ * rule).
+ *
+ * The item types already coexist cleanly: `listItem` and `taskItem` both hold
+ * `paragraph block*`, so nesting, lifting and splitting behave the same in
+ * either, and `prosemirror-schema-list`'s commands operate on whichever type
+ * they're given. The only thing the stock spec adds is the uniformity
+ * constraint itself.
+ *
+ * The rendered `li` carries `data-checked` on task items and no attributes at
+ * all on plain ones, which is what the stylesheet keys the checkbox row off —
+ * a plain item in a task list gets an ordinary bullet, aligned to the same
+ * text column so a mixed list reads as one list rather than two interleaved
+ * ones. */
+export const MixedTaskList = TaskList.extend({
+  content() {
+    return `(${this.options.itemTypeName}|listItem)+`;
+  },
+});
+
 export const TaskItemBackspace = Extension.create({
   name: "taskItemBackspace",
   priority: 200,
