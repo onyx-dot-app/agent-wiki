@@ -71,6 +71,12 @@ _MAX_RETRIES = 3
 # handing it to a fourth consumer would just wedge that one too.
 _MAX_DELIVERIES = 3
 _RECLAIM_BATCH = 10             # stale entries adopted per idle reclaim pass
+# Reclaim fires at vt * factor, not vt itself. Reclaiming an entry whose
+# consumer is merely *slow* (not dead) runs it twice, and several handlers have
+# non-idempotent side effects (trigger notifications, wiki commits) — so the
+# reclaim horizon sits well past any handler's legitimate runtime while still
+# recovering orphans within minutes. 3 x 300s = 15 min.
+_RECLAIM_IDLE_FACTOR = 3
 _RETRY_BASE_SECONDS = 30
 _RETRY_MAX_SECONDS = 600
 _LEADER_RETRY_SECONDS = 30
@@ -632,16 +638,19 @@ def _reclaim_stale(
     all future consumers. Runs only when this consumer is idle, so a busy
     single-consumer queue never steals its own in-flight work.
 
-    Reclaim makes delivery at-least-once: a handler that outlives ``vt_seconds``
-    while another consumer is idle can run twice. Entries delivered more than
+    Reclaim makes delivery at-least-once: a handler still running past the
+    reclaim horizon (``vt_seconds * _RECLAIM_IDLE_FACTOR``) while another
+    consumer is idle runs twice. Entries delivered more than
     ``_MAX_DELIVERIES`` times are dropped as poison rather than wedging every
-    successive consumer.
+    successive consumer. Never raises — this runs on the consumer thread's
+    idle path, outside the message-handling guard.
     """
     sk = _stream_key(queue.name)
     try:
         resp = r.xautoclaim(
             sk, "workers", consumer_name,
-            min_idle_time=vt_seconds * 1000, start_id="0-0", count=_RECLAIM_BATCH,
+            min_idle_time=vt_seconds * _RECLAIM_IDLE_FACTOR * 1000,
+            start_id="0-0", count=_RECLAIM_BATCH,
         )
     except Exception:
         log.exception("queue %s: xautoclaim failed", queue.name)
@@ -653,32 +662,31 @@ def _reclaim_stale(
     except (IndexError, TypeError):
         return
     for stream_entry_id, fields in messages:
-        if fields is None:
-            continue  # entry was XDELed while still pending — nothing to run
-        delivered = 1
         try:
+            if fields is None:
+                continue  # entry was XDELed while still pending — nothing to run
+            delivered = 1
             info = r.xpending_range(
                 sk, "workers", min=stream_entry_id, max=stream_entry_id, count=1,
             )
             if info:
                 delivered = int(info[0].get("times_delivered", 1))
-        except Exception:
-            log.warning("queue %s: xpending_range failed for %s", queue.name, stream_entry_id)
-        if delivered > _MAX_DELIVERIES:
-            log.warning(
-                "queue %s: entry %s delivered %d times without completing — dropping as poison",
+            if delivered > _MAX_DELIVERIES:
+                log.warning(
+                    "queue %s: entry %s delivered %d times without completing — dropping as poison",
+                    queue.name, stream_entry_id, delivered,
+                )
+                r.xack(sk, "workers", stream_entry_id)
+                r.xdel(sk, stream_entry_id)
+                continue
+            log.info(
+                "queue %s: reclaimed stale entry %s (delivery %d)",
                 queue.name, stream_entry_id, delivered,
             )
-            r.xack(sk, "workers", stream_entry_id)
-            r.xdel(sk, stream_entry_id)
-            continue
-        log.info(
-            "queue %s: reclaimed stale entry %s (delivery %d)",
-            queue.name, stream_entry_id, delivered,
-        )
-        try:
             _handle_entry(queue, stream_entry_id, fields, r, max_retries)
         except Exception:
+            # One bad entry (or a Redis hiccup on its ack/delete) must not
+            # abort the remaining claims or escape to kill the consumer.
             log.exception("queue %s: reclaimed entry %s failed", queue.name, stream_entry_id)
 
 
