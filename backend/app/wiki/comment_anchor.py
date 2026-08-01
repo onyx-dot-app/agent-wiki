@@ -90,6 +90,11 @@ _END = -1
 # anchors.
 _MIN_PRESERVED = 0.5
 
+# Characters of inline syntax a subsequence alignment may span beyond the quote
+# itself, on top of doubling it. Generous enough for stacked marks on a short
+# quote, tight enough that a scattered match is rejected.
+_SUBSEQUENCE_SLACK = 16
+
 # (tag, i1, i2, j1, j2) as returned by SequenceMatcher.get_opcodes().
 _Opcode = tuple[str, int, int, int, int]
 
@@ -398,6 +403,30 @@ def _map_end(
     return body_len
 
 
+def _subsequence_span(haystack: str, needle: str) -> tuple[int, int] | None:
+    """Span of ``haystack`` holding every character of ``needle`` in order, or
+    None when the alignment is unconvincing.
+
+    A quote drops inline syntax the source keeps (``**bold**`` reaches the
+    editor as ``bold``), so it survives as a subsequence of its own source with
+    the delimiters interleaved. Requiring *every* character to align, inside a
+    region not much longer than the quote, is what separates that from a
+    scatter of coincidental letters across unrelated text.
+    """
+    blocks = [
+        b
+        for b in SequenceMatcher(None, haystack, needle, autojunk=False).get_matching_blocks()
+        if b.size
+    ]
+    if not blocks or sum(b.size for b in blocks) != len(needle):
+        return None
+    start = blocks[0].a
+    end = blocks[-1].a + blocks[-1].size
+    if end - start > 2 * len(needle) + _SUBSEQUENCE_SLACK:
+        return None
+    return start, end
+
+
 def _nearest_occurrence(haystack: str, needle: str, near: int) -> int | None:
     """Start of the occurrence closest to ``near``, or None when absent."""
     starts: list[int] = []
@@ -431,6 +460,10 @@ def resolve_exact_span(
     rather than the text beside it. Bodies without images project to themselves
     and take the raw search directly.
 
+    A quote also drops inline syntax the source keeps, so one that matches
+    nowhere literally is aligned as a subsequence before giving up. That is
+    what anchors a selection crossing a bold or code run.
+
     Returns the approximate span unchanged if ``quoted_text`` is empty, or
     isn't found anywhere in ``body`` at all (nothing to correct against —
     never worse than the caller's own estimate). When ``quoted_text``
@@ -451,9 +484,15 @@ def resolve_exact_span(
                 _map_end(segments, hit + len(quoted_text), len(body)),
             )
     best = _nearest_occurrence(body, quoted_text, approx_start)
-    if best is None:
-        return approx_start, approx_end
-    return best, best + len(quoted_text)
+    if best is not None:
+        return best, best + len(quoted_text)
+    aligned = _subsequence_span(projected, quoted_text)
+    if aligned is not None:
+        return (
+            _map_start(segments, aligned[0], len(body)),
+            _map_end(segments, aligned[1], len(body)),
+        )
+    return approx_start, approx_end
 
 
 def remap_range(

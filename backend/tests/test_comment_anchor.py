@@ -420,3 +420,41 @@ def test_quote_absent_from_body_returns_the_estimate():
 
 def test_empty_quote_returns_the_estimate():
     assert resolve_exact_span(_BODY, 3, 9, "") == (3, 9)
+
+
+# A quote drops inline syntax the source keeps, so it survives only as a
+# subsequence of its own source. These pin that alignment and its guard.
+
+
+def test_quote_across_a_bold_run_anchors_on_the_source():
+    body = "a **bold** run here"
+    quote = "a bold run"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "a **bold** run"
+
+
+def test_quote_across_a_code_span_anchors_on_the_source():
+    body = "use `code` inline"
+    quote = "use code inline"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "use `code` inline"
+
+
+def test_quote_with_both_formatting_and_media_anchors_on_the_source():
+    body = "see **bold** ![a](/api/wiki/media/x1) tail"
+    quote = "see bold /api/wiki/media/x1"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "see **bold** ![a](/api/wiki/media/x1)"
+
+
+def test_scattered_characters_do_not_count_as_an_alignment():
+    # Every character of the quote exists in order but spread across the whole
+    # body. That is coincidence, not dropped syntax, so keep the estimate.
+    body = "a" * 400 + "zz"
+    assert resolve_exact_span(body, 0, 5, "aaaaa zzz") == (0, 5)
+
+
+def test_alignment_prefers_leaving_the_estimate_when_a_char_is_missing():
+    # "xyz" never appears, so no alignment can cover the whole quote.
+    body = "some ordinary prose here"
+    assert resolve_exact_span(body, 2, 8, "some xyz") == (2, 8)

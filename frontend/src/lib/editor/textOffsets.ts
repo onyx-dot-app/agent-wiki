@@ -24,13 +24,9 @@
  * quoted text — so this mapper only has to get the creation-time request into
  * the right neighborhood.
  *
- * That correction has a gap worth knowing about, because it is the one case
- * where a *wrong span gets stored*: the quote we send is plain text, so a
- * selection containing inline formatting ("hello world" over a source
- * `hello **world**`) matches nothing in the body, and `resolve_exact_span`
- * falls back to this mapper's own estimate. Selections without formatting
- * inside them are corrected exactly; selections across a bold/italic/code run
- * are not.
+ * The quote is plain text, so it never matches a source carrying inline syntax
+ * literally. `resolve_exact_span` aligns it as a subsequence to close that, and
+ * this estimate stands only when that alignment is refused.
  */
 import type { Editor } from "@tiptap/core";
 import type { Node as PMNode } from "@tiptap/pm/model";
