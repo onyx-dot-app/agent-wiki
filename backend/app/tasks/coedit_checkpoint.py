@@ -45,6 +45,13 @@ _MAX_INTERVAL_SECONDS = 900
 # Four missed 15-second heartbeats distinguish a departed participant from
 # ordinary event-loop lag.
 _PARTICIPANT_STALE_SECONDS = 60
+# How long a closed viewer session stays purgeable-exempt. A reconnecting
+# client adopts its old row's Yjs lineage, and only a row that still exists
+# can be adopted, so this has to outlast a reconnect by a wide margin — the
+# client retries every ~3s, but a suspended laptop resumes far later. Held
+# well above that; the newest closed row per path is kept regardless of age,
+# so this window only bounds how long the *older* ones linger.
+_VIEWER_SESSION_RETAIN_SECONDS = 3600
 
 
 @coedit_queue.task()
@@ -108,6 +115,8 @@ def scan_coedit_checkpoints() -> None:
     abandoned = coedit.close_abandoned_sessions()
     if abandoned:
         log.info("coedit presence scan: closed %d abandoned session(s)", len(abandoned))
-    purged = coedit.purge_viewer_sessions()
+    purged = coedit.purge_viewer_sessions(
+        retain_seconds=_VIEWER_SESSION_RETAIN_SECONDS
+    )
     if purged:
         log.info("coedit checkpoint scan: purged %d viewer-only session(s)", purged)
