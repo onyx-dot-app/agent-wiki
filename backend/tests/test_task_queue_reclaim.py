@@ -188,3 +188,64 @@ def test_poison_drop_ordering_and_partial_failure_leaves_no_zombie():
     _reclaim_stale(q, "worker-x", r, vt_seconds=300, max_retries=3)  # contained
     assert ("xdel", "1-0") in r.ops  # stream entry removed despite the ack failure
     assert r.deleted == ["1-0"]
+
+
+def test_failed_handler_persists_retry_before_dropping_entry():
+    # Retry-copy persistence must precede the drop: if the drop half-fails
+    # after XDEL, the already-persisted retry is what keeps the task alive.
+    calls: list[str] = []
+    q = _queue_with_handler(calls)
+
+    def _boom():
+        raise RuntimeError("handler failed")
+
+    q.handlers["boom"] = _boom
+
+    class _OrderedRetry(_OpOrderRedis):
+        def incr(self, key):
+            self.ops.append(("incr", key))
+            return 1
+
+        def hset(self, key, field, value):
+            self.ops.append(("hset", field))
+            return 1
+
+        def zadd(self, key, mapping):
+            self.ops.append(("zadd", next(iter(mapping))))
+            return 1
+
+    r = _OrderedRetry(claimed=[("1-0", _payload("boom"))], delivered={"1-0": 1})
+    _reclaim_stale(q, "worker-x", r, vt_seconds=300, max_retries=3)
+    names = [op for op, _ in r.ops]
+    assert names.index("zadd") < names.index("xdel")  # retry persisted first
+
+
+def test_retry_survives_ack_failure_after_delete():
+    # The reported loss scenario: handler fails, XDEL succeeds, XACK raises.
+    # The retry copy must already be in the delay structures.
+    q = TaskQueue(name="reclaimq", max_size=10)
+
+    def _boom():
+        raise RuntimeError("handler failed")
+
+    q.handlers["boom"] = _boom
+    persisted: list[str] = []
+
+    class _AckBoomAfterDel(_OpOrderRedis):
+        def incr(self, key):
+            return 7
+
+        def hset(self, key, field, value):
+            persisted.append(field)
+            return 1
+
+        def zadd(self, key, mapping):
+            return 1
+
+        def xack(self, key, group, entry_id):
+            raise RuntimeError("redis down")
+
+    r = _AckBoomAfterDel(claimed=[("1-0", _payload("boom"))], delivered={"1-0": 1})
+    _reclaim_stale(q, "worker-x", r, vt_seconds=300, max_retries=3)  # contained
+    assert persisted == ["7"]  # the retry body exists despite the failed ack
+    assert ("xdel", "1-0") in r.ops

@@ -737,8 +737,11 @@ def _process_one(
             "queue %s: task %s failed (entry=%s retry=%d)",
             queue.name, task_name, stream_entry_id, retry_count,
         )
-        # Drop the entry, then re-enqueue a fresh copy if retries remain.
-        _drop_entry(queue, r, stream_entry_id)
+        # Persist the retry copy BEFORE dropping the entry. If any step after
+        # the persist fails partway, the original entry is still (or again)
+        # deliverable and the worst case is a duplicate retry, bounded by the
+        # delivery cap — whereas drop-then-persist failing between the two
+        # would leave no copy anywhere and lose the task outright.
         if retry_count < max_retries:
             backoff = _retry_backoff_seconds(retry_count + 1)
             log.info(
@@ -757,6 +760,7 @@ def _process_one(
                 "queue %s: task %s exceeded %d retries — dropping entry %s",
                 queue.name, task_name, max_retries, stream_entry_id,
             )
+        _drop_entry(queue, r, stream_entry_id)
         return
 
     _drop_entry(queue, r, stream_entry_id)
