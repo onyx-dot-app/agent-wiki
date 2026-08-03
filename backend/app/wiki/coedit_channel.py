@@ -157,11 +157,27 @@ def _deliver_local(coedit_session_id: int, frame: ControlFrame) -> None:
             (_queues.get(cid), _notifiers.get(cid))
             for cid in _conns_by_session.get(coedit_session_id, ())
         ]
+    delivered = 0
     for q, notify in targets:
         if q is None or notify is None:
             continue
         q.put_nowait(frame)
         notify()
+        delivered += 1
+    # A process with no connection for this session is the normal case for a
+    # task worker (it publishes; the socket lives in the web process, reached
+    # via the bus), so this is not an error on its own. It is logged because a
+    # frame delivered to nobody *anywhere* is otherwise invisible: a
+    # checkpoint ack that never lands leaves the client's save promise pending,
+    # and until this line there was no trace to distinguish "never published"
+    # from "published, never delivered".
+    log.info(
+        "coedit control frame %s session=%s delivered=%d of %d local conn(s)",
+        frame.get("type", "?"),
+        coedit_session_id,
+        delivered,
+        len(targets),
+    )
 
 
 def _deliver_local_bytes(

@@ -22,6 +22,28 @@ import {
   handleMessage,
 } from "@/lib/editor/yProtocol";
 
+/** How long to wait for a `checkpoint_result` before giving up on that save.
+ *
+ * A checkpoint is normally tens to low-hundreds of milliseconds, so this only
+ * ever fires on something genuinely wrong. It is sized off the two legitimately
+ * slow paths so it can't fire on a save that is merely working hard: the
+ * server's `_CHECKPOINT_LOCK_TIMEOUT_MS` (30s — how long a duplicate checkpoint
+ * waits for the one in progress), plus room for the AI merge that resolves an
+ * overlap with an agent commit, which the backend measures in seconds. Move the
+ * two together if either changes.
+ *
+ * Without a deadline the promise settles only on the ack or on `onclose`, so an
+ * ack that is published but never delivered left it pending forever — and since
+ * `hooks.ts` holds `saveInFlight` across the await, that silently stopped the
+ * tab autosaving for the rest of the connection while showing "Saving…".
+ */
+const CHECKPOINT_TIMEOUT_MS = 60_000;
+
+/** Marks the timeout rejection so `hooks.ts` can budget its retries
+ * separately: this failure costs a full minute, unlike "not connected", which
+ * fails instantly and is what the 10-attempt budget was written for. */
+export const CHECKPOINT_TIMED_OUT = "checkpoint timed out";
+
 export interface CoeditParticipant {
   user_id: string;
   user_display: string;
@@ -268,7 +290,22 @@ export function checkpointSession(connectionId: number): Promise<void> {
   }
   const requestId = opaqueId();
   return new Promise<void>((resolve, reject) => {
-    entry.pendingCheckpoints.set(requestId, { resolve, reject });
+    const timer = setTimeout(() => {
+      // Drop the correlation first: a late ack must not settle a promise this
+      // has already rejected, and leaving the entry would leak one per save.
+      entry.pendingCheckpoints.delete(requestId);
+      reject(new ApiError(0, CHECKPOINT_TIMED_OUT));
+    }, CHECKPOINT_TIMEOUT_MS);
+    entry.pendingCheckpoints.set(requestId, {
+      resolve: () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      reject: (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    });
     entry.ws.send(
       JSON.stringify({ type: "checkpoint", request_id: requestId }),
     );

@@ -37,6 +37,7 @@ import * as Y from "yjs";
 import { ApiError } from "@/lib/api";
 import { opaqueId } from "@/lib/editor/ids";
 import {
+  CHECKPOINT_TIMED_OUT,
   checkpointSession,
   closeSession,
   connectSession,
@@ -72,6 +73,18 @@ const STREAM_RECONNECT_MS = 3000;
  * outlasts a reconnect; past that the indicator should stay honest. */
 const SAVE_RETRY_MS = 3000;
 const SAVE_RETRY_LIMIT = 10;
+/** Timeouts get their own, much smaller budget.
+ *
+ * `SAVE_RETRY_LIMIT` above is sized for a failure that returns *instantly*
+ * ("not connected" during a reconnect), where 10 × 3s is a sensible 30-second
+ * window. A `CHECKPOINT_TIMED_OUT` costs a full minute per attempt, so reusing
+ * that budget would mean ~11 minutes of alternating "Saving…"/"Couldn't save".
+ * One retry bounds it to about two minutes and then leaves an honest error.
+ *
+ * Giving up is safe, not lossy: the edits are already in `coedit_updates`, and
+ * the server's periodic scan commits a dirty session on its own (5-min idle /
+ * 15-min overdue). The retry only controls how fast the *indicator* recovers. */
+const SAVE_TIMEOUT_RETRY_LIMIT = 1;
 
 export interface CoeditPeer {
   user_id: string;
@@ -251,6 +264,9 @@ export function useCoeditSession(opts: {
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRetries = useRef(0);
+  // Counted apart from saveRetries: a timeout and a "not connected" cost two
+  // very different amounts of wall-clock, so they can't share a budget.
+  const saveTimeouts = useRef(0);
   // Guards against overlapping saves — a retry firing while an autosave is
   // still in flight, or the reverse. Coalescing is safe rather than lossy: a
   // checkpoint commits whatever the document currently holds, not a snapshot
@@ -264,14 +280,19 @@ export function useCoeditSession(opts: {
   // not the one captured when the failure happened.
   const checkpointRef = useRef<(() => Promise<void>) | null>(null);
 
-  const armSaveRetry = useCallback(() => {
-    if (saveRetries.current >= SAVE_RETRY_LIMIT) return;
-    saveRetries.current += 1;
+  /** Returns whether a retry was actually armed, so the caller can say so
+   * without promising one the budget won't allow. */
+  const armSaveRetry = useCallback((timedOut = false): boolean => {
+    const used = timedOut ? saveTimeouts : saveRetries;
+    const limit = timedOut ? SAVE_TIMEOUT_RETRY_LIMIT : SAVE_RETRY_LIMIT;
+    if (used.current >= limit) return false;
+    used.current += 1;
     if (saveRetryTimer.current) clearTimeout(saveRetryTimer.current);
     saveRetryTimer.current = setTimeout(() => {
       saveRetryTimer.current = null;
       void checkpointRef.current?.();
     }, SAVE_RETRY_MS);
+    return true;
   }, []);
 
   const sessionId = useRef<number | null>(null);
@@ -317,6 +338,7 @@ export function useCoeditSession(opts: {
     try {
       await checkpointSession(cid);
       saveRetries.current = 0;
+      saveTimeouts.current = 0;
       setSaveError(null);
       setSaveStatus("saved");
     } catch (e) {
@@ -325,13 +347,25 @@ export function useCoeditSession(opts: {
       // and a stack in the console is what makes an intermittent report
       // actionable.
       console.warn("[coedit] save failed", e);
-      setSaveError(reason);
-      setSaveStatus("error");
+      const timedOut = reason === CHECKPOINT_TIMED_OUT;
       // A permission failure is the only terminal one — retrying it just
       // repeats the refusal. Everything else means "no socket right now", which
       // the reconnect loop is already fixing.
       const terminal = reason.toLowerCase().includes("forbidden");
-      if (!terminal) armSaveRetry();
+      const retrying = !terminal && armSaveRetry(timedOut);
+      // A timeout means the ack never came back, which says nothing about
+      // whether the commit happened — the server may well have committed and
+      // only the reply gone missing. So don't claim the save failed, and once
+      // the budget is spent, say what actually happens next: the server's
+      // periodic scan commits a dirty session without the client's help.
+      setSaveError(
+        !timedOut
+          ? reason
+          : retrying
+            ? "Couldn't confirm this save — retrying."
+            : "Couldn't confirm this save. The server will commit it shortly.",
+      );
+      setSaveStatus("error");
     } finally {
       saveInFlight.current = false;
     }
