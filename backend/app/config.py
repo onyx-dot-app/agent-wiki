@@ -82,6 +82,10 @@ class Config(BaseModel):
     # call can carry ~47k input tokens, and this pool sits inside a queue task, so the real
     # concurrency is the queue's own worker count multiplied by this. Lower it on a lower tier.
     entity_type_derive_workers: int = 8
+    # How many need-extraction LLM calls run at once. Separate from the derivation's knob because
+    # the token profile differs: a need response enumerates a page's tracked entries, so it is far
+    # larger than a referent list, and an operator may want the two rates set differently.
+    need_extract_workers: int = 8
 
     # Relevance filter (drops irrelevant candidate pages before the LLM reconcile).
     # Empty model path => cosine cold-start filter; a path to an exported two-tower
@@ -214,6 +218,7 @@ def load_config() -> Config:
         ingest_irrelevant_stop_n=_positive_int("INGEST_IRRELEVANT_STOP_N", 2),
         ingest_embed_model=os.environ.get("INGEST_EMBED_MODEL", "text-embedding-3-small"),
         entity_type_derive_workers=_positive_int("ENTITY_TYPE_DERIVE_WORKERS", 8),
+        need_extract_workers=_positive_int("NEED_EXTRACT_WORKERS", 8),
         ingest_relevance_two_tower_model_path=os.environ.get("INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH", ""),
         # Cosine cold-start default: the study's 85%-filter operating point.
         ingest_relevance_cosine_threshold=_nonneg_float(

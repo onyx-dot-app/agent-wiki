@@ -372,3 +372,151 @@ class TestBookkeeping:
 
         assert counts == {"pages": 0, "extracted": 0, "skipped": 0, "needs": 0, "empty": 0}
         assert llm == []
+
+
+class TestParallelAndModel:
+    """Extraction runs concurrently, and each page is durable as soon as it finishes."""
+
+    def test_pages_extract_concurrently(self, tmp_repo, monkeypatch) -> None:
+        import threading
+        import time
+
+        in_flight = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def slow(messages, **kwargs):
+            nonlocal in_flight, peak
+            with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            time.sleep(0.05)
+            with lock:
+                in_flight -= 1
+            return CompletionResult(text=json.dumps({"needs": []}))
+
+        monkeypatch.setattr(needs.client, "complete", slow)
+        for i in range(12):
+            _page(f"p{i}.md")
+
+        needs.run_extraction()
+
+        assert peak > 1
+        assert peak <= needs._workers()
+
+    def test_concurrency_is_bounded(self, tmp_repo, monkeypatch) -> None:
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(needs, "CONFIG", SimpleNamespace(need_extract_workers=2))
+        import threading
+        import time
+
+        in_flight = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def slow(messages, **kwargs):
+            nonlocal in_flight, peak
+            with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            time.sleep(0.03)
+            with lock:
+                in_flight -= 1
+            return CompletionResult(text=json.dumps({"needs": []}))
+
+        monkeypatch.setattr(needs.client, "complete", slow)
+        for i in range(10):
+            _page(f"p{i}.md")
+
+        needs.run_extraction()
+
+        assert peak == 2
+
+    def test_every_page_is_stored_not_just_counted(self, tmp_repo, llm) -> None:
+        """Each page is written inside its own worker, so an interrupted run resumes instead of
+        losing everything — the failure that cost the taxonomy derivation 105 pages."""
+        for i in range(6):
+            _page(f"p{i}.md")
+
+        counts = needs.run_extraction()
+
+        assert counts["extracted"] == 6
+        assert len(page_needs.load_all()) == 6
+
+    def test_one_unstorable_page_does_not_abort_the_rest(self, tmp_repo, llm, monkeypatch) -> None:
+        real_store = page_needs.store
+
+        def flaky(path, **kwargs):
+            if path == "p2.md":
+                raise RuntimeError("db hiccup")
+            return real_store(path, **kwargs)
+
+        monkeypatch.setattr(needs.page_needs, "store", flaky)
+        for i in range(5):
+            _page(f"p{i}.md")
+
+        counts = needs.run_extraction()
+
+        assert counts["extracted"] == 4
+        assert sorted(r.path for r in page_needs.load_all()) == [
+            "p0.md",
+            "p1.md",
+            "p3.md",
+            "p4.md",
+        ]
+
+    def test_uses_the_ingestion_model(self, tmp_repo, llm, monkeypatch) -> None:
+        from app.llm import settings as llm_settings
+
+        monkeypatch.setattr(
+            needs,
+            "get_llm_settings",
+            lambda: llm_settings.LLMSettings(model="main", ingest_selector_model="ingest-cheap"),
+        )
+        _page("a.md")
+
+        needs.run_extraction()
+
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.model == "ingest-cheap"
+
+    def test_falls_back_to_the_main_model_by_name(self, tmp_repo, llm, monkeypatch) -> None:
+        """Never "" — the staleness guard compares this column, so an empty value would make a
+        later model switch invisible."""
+        from app.llm import settings as llm_settings
+
+        monkeypatch.setattr(
+            needs,
+            "get_llm_settings",
+            lambda: llm_settings.LLMSettings(model="main", ingest_selector_model=""),
+        )
+        _page("a.md")
+
+        needs.run_extraction()
+
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.model == "main"
+
+    def test_an_extraction_failure_is_not_reported_as_a_storage_failure(
+        self, tmp_repo, llm, monkeypatch, caplog
+    ) -> None:
+        """The two stages fail for different reasons and need different fixes, so a shared
+        handler that always blamed storage would send an operator to the database for a fault in
+        the model call."""
+
+        def boom(path, body, *, type_defs, model=None):
+            raise RuntimeError("unexpected")
+
+        monkeypatch.setattr(needs, "extract_page", boom)
+        _page("a.md")
+
+        with caplog.at_level("WARNING"):
+            counts = needs.run_extraction()
+
+        messages = " ".join(r.getMessage() for r in caplog.records)
+        assert counts["extracted"] == 0
+        assert "extracting needs failed for a.md" in messages
+        assert "storing" not in messages
