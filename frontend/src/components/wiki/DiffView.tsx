@@ -10,6 +10,10 @@ import {
 } from "react";
 
 import type { FileDiffResponse } from "@/lib/wiki/types";
+import {
+  EdgeScrollbar,
+  useElementScrollTarget,
+} from "@/components/wiki/EdgeScrollbar";
 
 import { DiffHunk } from "./DiffHunk";
 import { annotateHunks } from "./diffEntries";
@@ -66,6 +70,7 @@ export function DiffView({ data }: { data: FileDiffResponse }) {
   const [navTop, setNavTop] = useState<number | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<HTMLDivElement>(null);
+  const scrollTarget = useElementScrollTarget(bodyRef);
   const currentRef = useRef(0);
 
   const { perHunk, total } = useMemo(() => annotateHunks(data.hunks), [data]);
@@ -173,6 +178,12 @@ export function DiffView({ data }: { data: FileDiffResponse }) {
           </div>
         )}
       </div>
+      {/* Same thumb as the live editor (the body's native bar is hidden in
+          the module CSS) — one scroll indicator across doc surfaces. */}
+      <EdgeScrollbar
+        targetRef={scrollTarget}
+        className="absolute inset-y-1 right-0 w-3"
+      />
       {total > 0 ? (
         <ChangeNavigator
           current={current}

@@ -49,6 +49,10 @@ import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { StartNewPage } from "@/components/wiki/StartNewPage";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { DocPanel, type DocPanelTab } from "@/components/wiki/DocPanel";
+import {
+  EdgeScrollbar,
+  useElementScrollTarget,
+} from "@/components/wiki/EdgeScrollbar";
 import { SuggestionsCard } from "@/components/wiki/SuggestionsCard";
 import { WatchingPanel } from "@/components/wiki/WatchingPanel";
 import {
@@ -595,16 +599,26 @@ function Explorer({ dir }: ExplorerProps) {
   );
 
   const parentDir = dir.split("/").slice(0, -1).join("/");
+  const dirScrollRef = useRef<HTMLDivElement>(null);
+  const dirScrollTarget = useElementScrollTarget(dirScrollRef);
   const cycleSort = () =>
     setSort((s) => SORT_ORDER[(SORT_ORDER.indexOf(s) + 1) % SORT_ORDER.length]);
   const sortLabel = SORT_LABEL[sort];
 
   return (
-    <main className="flex h-full min-h-0">
+    <main className="relative flex h-full min-h-0">
       {host?.el && createPortal(headerActions, host.el)}
 
+      {/* Same thumb as the doc surfaces; the scroller's native bar is
+          hidden (scroll-y-hidden). Panels portal outside this main, so the
+          right edge is always free for the track. */}
+      <EdgeScrollbar
+        targetRef={dirScrollTarget}
+        className="absolute inset-y-1 right-0 z-10 w-3"
+      />
       <div
-        className={`min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+        ref={dirScrollRef}
+        className={`scroll-y-hidden min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
       >
         {/* Desktop docks the editor inside the Watching tab; the modal is
             the mobile path only. */}

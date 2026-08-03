@@ -1,10 +1,14 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import {
+  EdgeScrollbar,
+  useElementScrollTarget,
+} from "@/components/wiki/EdgeScrollbar";
 import { remarkBareSpaceLinks } from "@/lib/remarkBareSpaceLinks";
 import useSWR from "swr";
 import {
@@ -32,6 +36,8 @@ import styles from "@/components/wiki/WikiHome.module.css";
 
 export function WikiHome() {
   const router = useRouter();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollTarget = useElementScrollTarget(scrollRef);
   const [aiPrompt, setAiPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -71,78 +77,86 @@ export function WikiHome() {
   }
 
   return (
-    <main className={styles.scroll}>
-      <div className={styles.column}>
-        {/* Hero */}
-        <div className={styles.hero}>
-          <span className={styles.heroMark}>
-            <SvgOnyxLogo size={32} />
-          </span>
-          <h1 className={styles.heroTitle}>Welcome to Onyx Wiki</h1>
-        </div>
-        <div className={styles.dividerWrap}>
-          <Divider />
-        </div>
-
-        <StartNewPage />
-
-        {/* Write with AI */}
-        <div className={styles.aiRow}>
-          <span className={styles.aiGutterIcon}>
-            {generating ? (
-              <LoadingSpinner size={18} />
-            ) : (
-              <SvgOnyxOctagon size={18} />
-            )}
-          </span>
-          <form className={styles.aiInputWrap} onSubmit={onAiSubmit}>
-            <InputTypeIn
-              value={aiPrompt}
-              onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="Start writing with AI…"
-              aria-label="Start writing with AI"
-              rightChildren={
-                <Button
-                  type="submit"
-                  size="sm"
-                  prominence="tertiary"
-                  icon={SvgArrowUp}
-                  disabled={!aiPrompt.trim() || generating}
-                  aria-label="Start writing"
-                />
-              }
-            />
-          </form>
-        </div>
-        {aiError && <p className={styles.aiError}>{aiError}</p>}
-
-        <div className={styles.midDividerWrap}>
-          <Divider />
-        </div>
-
-        {/* Recent Pages */}
-        <div className={styles.sectionHeader}>
-          <span className={styles.secHeadLg}>Recent Pages</span>
-        </div>
-        {recent.length === 0 ? (
-          <p className={styles.empty}>
-            No pages yet. Create one to get started.
-          </p>
-        ) : (
-          <div className={styles.recentGrid}>
-            {recent.map((p) => (
-              <div key={p.path} className={styles.recentCell}>
-                <RecentCard
-                  page={p}
-                  onClick={() =>
-                    router.push(p.id ? wikiHref(p.id) : wikiPath(p.path))
-                  }
-                />
-              </div>
-            ))}
+    <main className={styles.view}>
+      <div className={styles.scroll} ref={scrollRef}>
+        <div className={styles.column}>
+          {/* Hero */}
+          <div className={styles.hero}>
+            <span className={styles.heroMark}>
+              <SvgOnyxLogo size={32} />
+            </span>
+            <h1 className={styles.heroTitle}>Welcome to Onyx Wiki</h1>
           </div>
-        )}
+          <div className={styles.dividerWrap}>
+            <Divider />
+          </div>
+
+          <StartNewPage />
+
+          {/* Write with AI */}
+          <div className={styles.aiRow}>
+            <span className={styles.aiGutterIcon}>
+              {generating ? (
+                <LoadingSpinner size={18} />
+              ) : (
+                <SvgOnyxOctagon size={18} />
+              )}
+            </span>
+            <form className={styles.aiInputWrap} onSubmit={onAiSubmit}>
+              <InputTypeIn
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                placeholder="Start writing with AI…"
+                aria-label="Start writing with AI"
+                rightChildren={
+                  <Button
+                    type="submit"
+                    size="sm"
+                    prominence="tertiary"
+                    icon={SvgArrowUp}
+                    disabled={!aiPrompt.trim() || generating}
+                    aria-label="Start writing"
+                  />
+                }
+              />
+            </form>
+          </div>
+          {aiError && <p className={styles.aiError}>{aiError}</p>}
+
+          <div className={styles.midDividerWrap}>
+            <Divider />
+          </div>
+
+          {/* Recent Pages */}
+          <div className={styles.sectionHeader}>
+            <span className={styles.secHeadLg}>Recent Pages</span>
+          </div>
+          {recent.length === 0 ? (
+            <p className={styles.empty}>
+              No pages yet. Create one to get started.
+            </p>
+          ) : (
+            <div className={styles.recentGrid}>
+              {recent.map((p) => (
+                <div key={p.path} className={styles.recentCell}>
+                  <RecentCard
+                    page={p}
+                    onClick={() =>
+                      router.push(p.id ? wikiHref(p.id) : wikiPath(p.path))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+      {/* Same thumb as the doc surfaces — native bar hidden in the module
+          CSS, one scroll indicator everywhere. */}
+      <EdgeScrollbar
+        targetRef={scrollTarget}
+        className="absolute inset-y-1 right-0 w-3"
+      />
     </main>
   );
 }

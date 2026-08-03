@@ -12,10 +12,14 @@
 .body {
   overflow: auto;
   padding: 12px;
-  /* Keep the layout width identical whether or not the diff overflows.
-     Otherwise switching commits shifts content sideways as the scrollbar
-     appears/disappears (non-overlay scrollbars). */
-  scrollbar-gutter: stable;
+  /* Native scroll chrome hidden, same as the live editor's scroller —
+     EdgeScrollbar renders the thumb. Layout width never shifts with
+     overflow, so no scrollbar-gutter reservation is needed. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.body::-webkit-scrollbar {
+  display: none;
 }
 
 /* Drop the top margin on the first rendered child so the diff starts flush
