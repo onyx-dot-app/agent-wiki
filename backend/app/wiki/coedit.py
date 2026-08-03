@@ -859,18 +859,29 @@ def purge_viewer_sessions(*, retain_seconds: int, limit: int = 500) -> int:
     ``updated_at`` older than ``retain_seconds``
         ``close_session``/``close_abandoned_sessions`` both stamp it, so
         this is time since close.
-    not the newest closed row for its path
-        The one ``_reusable_closed_session`` orders to, kept regardless of
-        age so a reconnect after any delay still has a lineage to adopt.
-        Bounded at one row per page.
+    not the row ``_reusable_closed_session`` would pick for its path
+        Kept regardless of age, so a reconnect after any delay still has a
+        lineage to adopt. Bounded at one row per page.
+
+        This mirrors that function's predicate rather than taking the highest
+        id outright: a newer row that is dirty or has no snapshot is *not*
+        reusable, and protecting it would leave an older, eligible row exposed
+        to the age cutoff — deleting the very lineage a reconnect would have
+        adopted. Its ``base_sha == HEAD`` condition has no SQL equivalent
+        (HEAD is per-path git state), but it needs none here: a row's
+        ``base_sha`` is HEAD as of its creation or its last checkpoint, so of
+        two candidates the newer one's is never the staler, and the newest is
+        always the best available match.
     """
     cutoff = _iso(_now() - timedelta(seconds=retain_seconds))
     newest = aliased(CoeditSession)
-    newest_closed_for_path = (
+    reusable_for_path = (
         select(func.max(newest.id))
         .where(
             newest.path == CoeditSession.path,
             newest.status == SessionStatus.CLOSED.value,
+            newest.ydoc_snapshot.is_not(None),
+            newest.ydoc_seq == newest.ydoc_checkpointed_seq,
         )
         .correlate(CoeditSession)
         .scalar_subquery()
@@ -883,7 +894,10 @@ def purge_viewer_sessions(*, retain_seconds: int, limit: int = 500) -> int:
                 CoeditSession.ydoc_seq == 0,
                 CoeditSession.ydoc_checkpointed_seq == 0,
                 CoeditSession.updated_at <= cutoff,
-                CoeditSession.id != newest_closed_for_path,
+                or_(
+                    CoeditSession.id != reusable_for_path,
+                    reusable_for_path.is_(None),
+                ),
             )
             .limit(limit)
         ).all()

@@ -165,7 +165,14 @@ def _restated_base_blocks(doc: Doc, base_body: str) -> _Restatement:
     trusted to any particular shape. Two conditions keep it off legitimate
     edits:
 
-    the child's id isn't one ``base_body`` carries
+    the child carries an id at all
+        Freshly typed content carries none (see ``_duplicated_block_ids``),
+        while a foreign lineage's blocks come from a seeded or restamped doc
+        and always have one. So an id-less child is the user's own new
+        content and is never restatement — however much of the page it is,
+        and however exactly it repeats something already there. Five new
+        ``---`` rules or five repeated headings are ordinary editing.
+    the id isn't one ``base_body`` carries
         Those are emitted verbatim from ``base_body`` and are the copy being
         kept, not a duplicate of it.
     the base block it restates is still carried by some child
@@ -198,7 +205,7 @@ def _restated_base_blocks(doc: Doc, base_body: str) -> _Restatement:
         if not isinstance(child, XmlElement):
             continue
         block_id = dict(child.attributes).get(markdown_yjs.BLOCK_ID_ATTR)
-        if isinstance(block_id, str) and block_id in base_ids:
+        if not isinstance(block_id, str) or block_id in base_ids:
             continue
         text = markdown_yjs.serialize_block(child).strip()
         if not text:

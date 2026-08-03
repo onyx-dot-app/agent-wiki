@@ -414,14 +414,16 @@ def test_rename_path(users):
 
 
 def test_purge_viewer_sessions_deletes_only_closed_never_edited(users):
-    # Two viewer-only sessions on one path: opened, no updates, closed. Only
-    # the older is purgeable — the newest closed row per path is the one
+    # Two viewer-only sessions on one path: opened, seeded, no updates, closed.
+    # Only the older is purgeable — the newest is the row
     # _reusable_closed_session would reactivate.
     older = coedit.open_session("viewed.md", base_sha=None)
+    coedit.set_initial_snapshot(older.id, b"snap", "body")
     coedit.join(older.id, "usr_a")
     coedit.leave(older.id, "usr_a")
     coedit.close_session(older.id)
     newest = coedit.open_session("viewed.md", base_sha=None)
+    coedit.set_initial_snapshot(newest.id, b"snap", "body")
     coedit.close_session(newest.id)
 
     # Edited session: has an update, closed after checkpoint — must be
@@ -458,14 +460,42 @@ def test_purge_viewer_sessions_retains_recently_closed(users):
     assert coedit.get_session(newest.id) is not None
 
 
+def test_purge_viewer_sessions_protects_the_row_reuse_would_pick(users):
+    """Retention has to mirror ``_reusable_closed_session``, not just take the
+    highest id: a newer snapshotless row isn't reusable, and protecting it
+    instead would expose the older eligible row to the age cutoff — deleting
+    the lineage a reconnect would have adopted."""
+    reusable = coedit.open_session("viewed.md", base_sha=None)
+    coedit.set_initial_snapshot(reusable.id, b"snap", "body")
+    coedit.close_session(reusable.id)
+    # Newer, but never seeded — _reusable_closed_session skips it.
+    snapshotless = coedit.open_session("viewed.md", base_sha=None)
+    coedit.close_session(snapshotless.id)
+
+    assert coedit.purge_viewer_sessions(retain_seconds=0) == 1
+    assert coedit.get_session(reusable.id) is not None
+    assert coedit.get_session(snapshotless.id) is None
+
+
 def test_purge_viewer_sessions_keeps_newest_closed_row_however_old(users):
     """The reuse candidate is kept regardless of age: a client can reconnect
     long after closing (a suspended laptop), and one row per page is bounded."""
     only = coedit.open_session("viewed.md", base_sha=None)
+    coedit.set_initial_snapshot(only.id, b"snap", "body")
     coedit.close_session(only.id)
 
     assert coedit.purge_viewer_sessions(retain_seconds=0) == 0
     assert coedit.get_session(only.id) is not None
+
+
+def test_purge_viewer_sessions_purges_a_never_seeded_row(users):
+    """A row that never got a snapshot holds no lineage, so there is nothing
+    for a reconnect to adopt and nothing to protect."""
+    only = coedit.open_session("viewed.md", base_sha=None)
+    coedit.close_session(only.id)
+
+    assert coedit.purge_viewer_sessions(retain_seconds=0) == 1
+    assert coedit.get_session(only.id) is None
 
 
 def test_close_abandoned_sessions_closes_only_clean_empty_ones(users):

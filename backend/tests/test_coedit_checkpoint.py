@@ -774,6 +774,30 @@ def test_drop_restated_blocks_is_a_no_op_on_a_healthy_doc() -> None:
     assert reconstruct_body(doc) == body
 
 
+def test_drop_restated_blocks_never_touches_freshly_typed_blocks() -> None:
+    """Freshly typed blocks carry no ``_blockId``, and a foreign lineage's
+    always do — so an id-less child is the user's own content and is exempt
+    however much of the page it is. Repeating text already on the page at
+    scale (a run of identical rules, or headings) is ordinary editing, and
+    the count/fraction floors alone would not tell it apart from a collision.
+    """
+    from app.wiki.coedit_checkpoint import drop_restated_blocks
+    from app.wiki.markdown_yjs import ROOT_XML_KEY, reconstruct_body, seed_doc_from_markdown
+
+    base = "\n\n".join(f"para {i}" for i in range(8)) + "\n"
+    doc = seed_doc_from_markdown(base)
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    with doc.transaction():
+        for i in range(6):
+            root.children.append(
+                XmlElement("paragraph", {}, contents=[XmlText(f"para {i}")])
+            )
+
+    before = reconstruct_body(doc)
+    assert drop_restated_blocks(doc, base) == 0
+    assert reconstruct_body(doc) == before
+
+
 def test_drop_restated_blocks_leaves_a_few_repeated_lines_alone() -> None:
     """Retyping a line the page already has is something a person does; the
     floors keep the repair off it. Only a whole-page restatement clears them."""
