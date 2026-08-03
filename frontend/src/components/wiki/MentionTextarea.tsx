@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { activeMentionQuery } from "@/lib/commentMentions";
 import { displayName, initials, useUserSearch } from "@/lib/users";
@@ -35,6 +35,21 @@ export function MentionTextarea({
 
   const { users } = useUserSearch(query ?? "", query !== null);
   const open = query !== null && users.length > 0;
+
+  // A textarea does not grow with its content, so without this it stays at
+  // whatever height CSS gives it and long comments scroll inside one cramped
+  // line. Measuring needs the height released first: `scrollHeight` on an
+  // element already stretched by an inline height reports that height, so it
+  // could never shrink again after a delete. The floor and ceiling stay in CSS
+  // (`.comment-input textarea`) — `min-height` holds the field open at three
+  // lines while it's short, and `max-height` takes over once it's long enough
+  // to scroll, so neither bound has to be duplicated here as a magic number.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
 
   // Recompute the active `@query` from the current caret position.
   const sync = (v: string, caret: number) => {

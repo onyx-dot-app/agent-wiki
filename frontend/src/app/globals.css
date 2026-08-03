@@ -455,18 +455,26 @@ body {
    (566:19918), so the textarea itself goes chromeless. The wrapper owns
    the border, focus ring, and padding. */
 .comment-input textarea {
-  /* block, not inline: the inline baseline gap would grow the field past
-     the mock's 36px total height */
+  /* block, not inline: an inline baseline gap would add height the line-height
+     arithmetic below doesn't account for */
   display: block;
   border: none;
   background: transparent;
   box-shadow: none;
   outline: none;
   padding: 2px;
-  min-height: 24px;
   width: 100%;
   font-size: 14px;
   line-height: 20px;
+  /* Three lines open, so a comment starts with room to write in rather than a
+     single line that scrolls under itself. Both bounds are line-height
+     arithmetic: 3 lines + the 2px padding on each edge, and 12 lines the same
+     way. Between them MentionTextarea sets an inline height per keystroke; the
+     floor wins while that measurement is smaller, the ceiling wins once it's
+     larger and the field scrolls instead of growing without limit. */
+  min-height: calc(3 * 20px + 4px);
+  max-height: calc(12 * 20px + 4px);
+  overflow-y: auto;
   resize: none;
 }
 .comment-input textarea::placeholder {
