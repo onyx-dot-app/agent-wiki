@@ -46,6 +46,7 @@ import {
 } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { Plugin, TextSelection, type Transaction } from "@tiptap/pm/state";
+import { canJoin } from "@tiptap/pm/transform";
 import { TaskList } from "@tiptap/extension-task-list";
 import { isSameOriginSrc } from "./media";
 
@@ -80,6 +81,67 @@ export const BlockIdentity = Extension.create({
           _nl: hiddenAttr(),
         },
       },
+      {
+        // The codec's tight/loose list spacing (markdown_yjs.py) — declared
+        // here so a node rebuilt by the editor doesn't silently drop it,
+        // which would reflow the list loose on the next checkpoint.
+        types: ["bulletList", "orderedList", "taskList"],
+        attributes: {
+          tight: hiddenAttr(),
+        },
+      },
+    ];
+  },
+});
+
+/** Adjacent same-type lists are joined into one — markdown cannot express
+ * two lists back to back (a reparse reads them as a single list), so a doc
+ * holding that shape disagrees with every future parse of its own file.
+ *
+ * That disagreement is not cosmetic; it is the engine of a live-corruption
+ * loop. The checkpoint's `restamp_block_ids` maps blocks positionally
+ * against the file's parse, so one file block covering two doc nodes gets
+ * ONE id stamped onto both; `UniqueBlockIdentity` below then clears the
+ * second node's id (its invariant); a cleared id reads as freshly-typed
+ * content to `checkpoint_body`, which appends the node's serialization
+ * while the base's verbatim range still contains it — duplicating that
+ * fragment in the file, every checkpoint, forever (the restamp re-shares,
+ * the clear re-fires). Joining removes the shape both sides are fighting
+ * over, and the join itself marks the merged list as edited, so the next
+ * checkpoint re-serializes it from the document and heals any duplicates
+ * an earlier cycle already wrote into the file.
+ *
+ * One join per pass: ProseMirror re-runs `appendTransaction` over appended
+ * transactions, so a run of three adjacent lists converges in two passes
+ * without any position remapping here. */
+export const JoinAdjacentLists = Extension.create({
+  name: "joinAdjacentLists",
+  addProseMirrorPlugins() {
+    const listTypes = new Set(["bulletList", "orderedList", "taskList"]);
+    return [
+      new Plugin({
+        appendTransaction(transactions, _oldState, newState) {
+          if (!transactions.some((tr) => tr.docChanged)) return null;
+          let boundary: number | null = null;
+          let prevType: string | null = null;
+          let pos = 0;
+          newState.doc.forEach((node) => {
+            const type = node.type.name;
+            if (
+              boundary === null &&
+              prevType === type &&
+              listTypes.has(type) &&
+              canJoin(newState.doc, pos)
+            ) {
+              boundary = pos;
+            }
+            prevType = type;
+            pos += node.nodeSize;
+          });
+          if (boundary === null) return null;
+          return newState.tr.join(boundary);
+        },
+      }),
     ];
   },
 });
