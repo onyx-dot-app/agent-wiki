@@ -28,11 +28,13 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from typing import Any, cast
 
 from pydantic import BaseModel, Field
 
+from app.config import CONFIG
 from app.db import page_needs
 from app.ingest import entity_types
 from app.llm import client
@@ -86,6 +88,13 @@ MAX_VALIDATION_RETRIES = 1
 # measured worst case with headroom while staying inside current models' output limits; the cap
 # costs nothing when unused, since billing follows tokens generated.
 MAX_OUTPUT_TOKENS = 16384
+
+
+def _workers() -> int:
+    """Concurrent page extractions. Pages are independent and each is stored as it finishes, so
+    there is no ordering constraint and no barrier — unlike the taxonomy's grouping, where arrival
+    order changes the result. Set by ``NEED_EXTRACT_WORKERS``; never below 1."""
+    return max(1, CONFIG.need_extract_workers)
 
 
 class EntityMention(BaseModel):
@@ -320,13 +329,16 @@ def run_extraction(
     The entity-type menu is read ONCE per run and its taxonomy id stored with every need set,
     so a later re-derivation that renames a type leaves these mentions resolvable.
     """
-    # Resolve the model to a NAME once, rather than storing "" for "whatever the default was".
-    # Both callers use the deployment default, so an unresolved model would make every row's
-    # model column empty — and the staleness guard would then compare "" to "" and conclude
-    # nothing changed after an admin switched models, silently keeping needs written by the old
-    # one. Resolved once per run for the same reason the taxonomy id is: a switch landing
+    # Default to the admin's ingestion-pipeline model: this is ingest-side work, and it keeps
+    # needs on the same model the taxonomy they are labelled against was derived with.
+    #
+    # Resolved to a NAME, never left as None or "": the staleness guard compares this column, so
+    # an unresolved value would make every row's model empty, and a later model switch would then
+    # compare "" to "" and conclude nothing changed — silently keeping needs written by the old
+    # model. Resolved ONCE per run for the same reason the taxonomy id is: a switch landing
     # mid-run must not leave one batch labelled two ways.
-    model = model or get_llm_settings().model
+    settings = get_llm_settings()
+    model = model or settings.ingest_selector_model or settings.model
     entity_type_taxonomy_id = entity_types.active_entity_type_taxonomy_id()
     type_defs = entity_types.load_taxonomy(entity_type_taxonomy_id)
     log.info(
@@ -351,25 +363,46 @@ def run_extraction(
         "empty": 0,
     }
 
-    for n, path in enumerate(stale, start=1):
-        needs = extract_page(path, by_path[path], type_defs=type_defs, model=model)
-        if not needs:
-            # "empty", not "failed": a page that tracks nothing durable and a page the model
-            # could not parse both land here, and this layer cannot tell them apart —
-            # extract_page logs the ones that were real failures. Either way the empty result
-            # is STORED, which is what stops the page being re-extracted on every run.
-            counts["empty"] += 1
-        page_needs.store(
-            path,
-            body=by_path[path],
-            needs=[need.model_dump(mode="json") for need in needs],
-            model=model,
-            entity_type_taxonomy_id=entity_type_taxonomy_id,
-        )
-        counts["extracted"] += 1
-        counts["needs"] += len(needs)
-        if progress:
-            progress(n, len(stale))
+    def extract_and_store(path: str) -> int | None:
+        """One page, extracted and stored. ``None`` means it could not be stored.
+
+        The store stays INSIDE the worker rather than being collected for a single write at the
+        end: that is what makes an interrupted run resumable — every finished page is already
+        durable, and the content-hash guard skips it next time. The taxonomy derivation wrote once
+        at the end and lost 105 pages to a pod restart; this cannot.
+        """
+        try:
+            extracted = extract_page(path, by_path[path], type_defs=type_defs, model=model)
+            page_needs.store(
+                path,
+                body=by_path[path],
+                needs=[need.model_dump(mode="json") for need in extracted],
+                model=model,
+                entity_type_taxonomy_id=entity_type_taxonomy_id,
+            )
+            return len(extracted)
+        except Exception:
+            # One page must not abort the corpus — an exception escaping the pool would take
+            # every other page's paid-for work with it.
+            log.warning("needs: could not store needs for %s", path, exc_info=True)
+            return None
+
+    workers = min(_workers(), len(stale)) if stale else 1
+    log.info("needs: extracting %d page(s), %d at a time", len(stale), workers)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for n, result in enumerate(pool.map(extract_and_store, stale), start=1):
+            if result is None:
+                continue
+            counts["extracted"] += 1
+            counts["needs"] += result
+            if result == 0:
+                # "empty", not "failed": a page that tracks nothing durable and a page the model
+                # could not parse both land here, and this layer cannot tell them apart —
+                # extract_page logs the ones that were real failures. Either way the empty result
+                # is STORED, which is what stops the page being re-extracted on every run.
+                counts["empty"] += 1
+            if progress:
+                progress(n, len(stale))
 
     if pages:
         # Scoped to the prefix walked: ``by_path`` only describes that scope, so an unscoped
