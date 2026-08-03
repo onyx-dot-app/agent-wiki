@@ -593,6 +593,51 @@ class TestNamingPartialAcceptance:
 
         assert names[0] != names[1], names
 
+    def test_names_survive_truncation_of_long_canonicals(self, monkeypatch) -> None:
+        """A readable slug has to be cut somewhere, so two long names sharing a prefix would
+        collide on length alone. The digest is what keeps them apart."""
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+        shared = "x" * 80
+        first = entity_types.name_group(
+            [entity_types.Referent(canonical=shared + "alpha", pages={"a.md"})]
+        )
+        second = entity_types.name_group(
+            [entity_types.Referent(canonical=shared + "beta", pages={"b.md"})]
+        )
+
+        assert first[0].name != second[0].name
+
+    def test_names_distinguish_canonicals_that_differ_only_by_punctuation(
+        self, monkeypatch
+    ) -> None:
+        """Folding already merges these, so they should never be two referents — but the name
+        must not depend on that invariant holding."""
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+        first = entity_types.name_group(
+            [entity_types.Referent(canonical="Acme-Foo", pages={"a.md"})]
+        )
+        second = entity_types.name_group(
+            [entity_types.Referent(canonical="Acme Foo", pages={"b.md"})]
+        )
+
+        assert first[0].name != second[0].name
+
+    def test_the_same_member_set_names_deterministically(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+
+        def once():
+            return entity_types.name_group(
+                [entity_types.Referent(canonical="alpha", pages={"a.md"})]
+            )[0].name
+
+        assert once() == once()
+
     def test_a_whole_group_fallback_is_also_named_per_group(self, monkeypatch) -> None:
         from app.ingest import entity_types
 

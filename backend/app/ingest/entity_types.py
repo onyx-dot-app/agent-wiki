@@ -46,6 +46,7 @@ type list, the same degradation as the relevance scorer without its model file.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -415,15 +416,21 @@ def _member_indices(entry: dict[str, Any], upper: int) -> list[int]:
 
 
 def _placeholder_name(members: list[Referent]) -> str:
-    """A name unique to THESE members.
+    """A name unique to THIS member set.
 
     ``derive`` collapses types that share a name, on the premise that the model named them
-    identically. A placeholder does not carry that premise, so two groups each leaving one
-    unassigned member must not become one type with their referents and examples pooled.
-    Canonicals are distinct after folding, so the first member's is enough to keep them apart.
+    identically — which a placeholder does not carry. So the name must not be reachable by any
+    other set of members, or two groups' referents and examples get pooled into one type.
+
+    A digest over every member's canonical, rather than a readable slug alone: a slug has to be
+    truncated somewhere, and two long names sharing a prefix would then collide. The leading slug
+    is kept only so the name is legible to the merge step.
     """
-    slug = _TOKENS.sub("_", members[0].canonical.lower()).strip("_")
-    return f"unnamed_{slug or 'group'}"[:60]
+    digest = hashlib.sha256(
+        "\x1f".join(r.canonical for r in members).encode("utf-8")
+    ).hexdigest()[:10]
+    slug = _TOKENS.sub("_", members[0].canonical.lower()).strip("_")[:32]
+    return f"unnamed_{slug}_{digest}" if slug else f"unnamed_{digest}"
 
 
 def name_group(group: list[Referent], *, model: str | None = None) -> list[EntityType]:
