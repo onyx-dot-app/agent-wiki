@@ -665,3 +665,73 @@ class TestNamingPartialAcceptance:
         out = entity_types.name_group(self._group(6))
 
         assert sum(t.n_referents for t in out) == 6
+
+
+class TestMergeConvergence:
+    """The merge loop is the only stage that sees the whole taxonomy, so how far it runs decides
+    whether the result is a stable answer or wherever the round cap fell."""
+
+    @staticmethod
+    def _types(n: int):
+        from app.ingest.entity_types import EntityType
+
+        return [
+            EntityType(name=f"t{i}", definition="d", examples=[], n_referents=1, n_docs=1)
+            for i in range(n)
+        ]
+
+    def test_keeps_merging_while_the_count_falls(self, monkeypatch) -> None:
+        """Three rounds stopped mid-descent on a real corpus, leaving single-referent types the
+        prompt asks to fold."""
+        from app.ingest import entity_types
+
+        sizes = iter([40, 20, 10, 6, 5, 5])
+        monkeypatch.setattr(
+            entity_types, "_merge_once", lambda types, model=None: self._types(next(sizes))
+        )
+
+        out = entity_types.merge_types(self._types(80))
+
+        assert len(out) == 5
+
+    def test_stops_as_soon_as_a_round_collapses_nothing(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        calls = {"n": 0}
+
+        def once(types, model=None):
+            calls["n"] += 1
+            return self._types(len(types))
+
+        monkeypatch.setattr(entity_types, "_merge_once", once)
+        entity_types.merge_types(self._types(9))
+
+        assert calls["n"] == 1
+
+    def test_warns_when_the_cap_binds_instead_of_converging(self, monkeypatch, caplog) -> None:
+        """A capped run is not a converged one, and the difference was invisible before."""
+        from app.ingest import entity_types
+
+        monkeypatch.setattr(
+            entity_types, "_merge_once", lambda types, model=None: self._types(len(types) - 1)
+        )
+
+        with caplog.at_level("WARNING"):
+            entity_types.merge_types(self._types(100))
+
+        assert any("still collapsing" in r.getMessage() for r in caplog.records)
+
+    def test_reports_each_round(self, monkeypatch, caplog) -> None:
+        from app.ingest import entity_types
+
+        sizes = iter([30, 12, 12])
+        monkeypatch.setattr(
+            entity_types, "_merge_once", lambda types, model=None: self._types(next(sizes))
+        )
+
+        with caplog.at_level("INFO"):
+            entity_types.merge_types(self._types(50))
+
+        messages = " ".join(r.getMessage() for r in caplog.records)
+        assert "50 -> 30" in messages and "30 -> 12" in messages
+        assert "converged" in messages

@@ -87,7 +87,11 @@ _Result = TypeVar("_Result")
 # generic average as a group grows and then admits almost anything, so it tolerates far less
 # permissiveness than a linkage-based method at the "same" threshold.
 GROUP_SIMILARITY = 0.45
-MERGE_ROUNDS = 3  # merge exits on convergence; this only bounds the loop
+# Safety bound on the merge loop, which exits as soon as a round stops collapsing anything.
+# Three was too low to be that bound: naming emitted 204 candidate types on a real corpus and
+# the loop stopped mid-descent, leaving single-referent types the merge prompt explicitly asks
+# to fold. One round is one LLM call, so a generous cap costs nothing when convergence is early.
+MERGE_ROUNDS = 8
 
 # Output cap, well above the client's 4096 default. Extraction lists every referent on a page, so
 # the response scales with the page — and on a 205k-char page it overflowed 4096, which cut the
@@ -531,11 +535,25 @@ def merge_types(types: list[EntityType], *, model: str | None = None) -> list[En
     types must partition every index without slip, and a single conflict used to discard the
     entire response.
     """
-    for _ in range(MERGE_ROUNDS):
+    trace = [len(types)]
+    for round_n in range(1, MERGE_ROUNDS + 1):
         merged = _merge_once(types, model=model)
+        trace.append(len(merged))
+        log.info(
+            "entity_types: merge round %d: %d -> %d type(s)", round_n, len(types), len(merged)
+        )
         if len(merged) >= len(types):
+            log.info("entity_types: merge converged after %d round(s): %s", round_n, trace)
             return merged
         types = merged
+    # Distinguished from convergence because it means the taxonomy is still collapsing and the
+    # result is wherever the cap fell, not a stable answer.
+    log.warning(
+        "entity_types: merge hit the %d-round cap while still collapsing: %s — the taxonomy may "
+        "still be over-split",
+        MERGE_ROUNDS,
+        trace,
+    )
     return types
 
 
