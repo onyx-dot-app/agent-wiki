@@ -36,8 +36,30 @@ _PROVIDER_LABELS = {
 }
 
 _PROVIDER_DEFAULT_MODELS: dict[str, list[str]] = {
-    "anthropic": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6", "claude-haiku-4-5"],
-    "openai": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2"],
+    # `claude-fable-5` requires 30-day data retention — it is rejected outright
+    # for an org configured below that, so it is offered but not the default.
+    "anthropic": [
+        "claude-fable-5",
+        "claude-opus-5",
+        "claude-opus-4-8",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-haiku-4-5",
+    ],
+    # Explicit tier ids, not the bare `gpt-5.6` alias: an alias silently
+    # re-points to whatever Sol becomes, which would change a page's model
+    # under an admin who picked a specific one.
+    "openai": [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.4-nano",
+    ],
     "gemini": ["gemini-3.1-pro-preview", "gemini-3-flash-preview"],
     "ollama": ["llama3.1", "llama3.2", "mistral", "phi3", "qwen2.5", "deepseek-r1"],
     # Starting points only — admins set their account's exact model IDs (incl.

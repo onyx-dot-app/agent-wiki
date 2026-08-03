@@ -74,12 +74,24 @@ const PROVIDER_META: Record<Provider, ProviderMeta> = {
 
 const PROVIDER_MODELS: Record<Provider, string[]> = {
   anthropic: [
+    "claude-fable-5",
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
     "claude-sonnet-4-6",
     "claude-opus-4-7",
     "claude-opus-4-6",
     "claude-haiku-4-5",
   ],
-  openai: ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.2"],
+  openai: [
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+  ],
   gemini: ["gemini-3.1-pro-preview", "gemini-3-flash-preview"],
   ollama: ["llama3.1", "llama3.2", "mistral", "phi3", "qwen2.5", "deepseek-r1"],
   custom: [],
