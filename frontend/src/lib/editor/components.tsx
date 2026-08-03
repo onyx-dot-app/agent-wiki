@@ -20,7 +20,7 @@ import {
   sourceHighlights as sourceHighlightPlugin,
 } from "@/lib/editor/highlights";
 import type { CoeditPeer } from "@/lib/editor/hooks";
-import { colorFor } from "@/lib/editor/presence";
+import { sessionColorFor } from "@/lib/editor/identityColor";
 import type { CoeditParticipant } from "@/lib/editor/svc";
 import {
   docTextBetween,
@@ -102,7 +102,10 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
         // live cursor presence.
         id: localId,
         name: userDisplay ?? "Anonymous",
-        color: colorFor(localId),
+        // Per-session, not per-user: the same user's second tab is its own
+        // caret with its own colour (chips read this advertised colour back
+        // out of awareness, so both surfaces stay in agreement).
+        color: sessionColorFor(localId, awareness.clientID),
       });
     }, [awareness, localId, userDisplay]);
 

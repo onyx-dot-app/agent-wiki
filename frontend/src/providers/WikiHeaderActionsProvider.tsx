@@ -6,11 +6,10 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 // of duplicating it inside the scrollable content:
 //
 //   - header actions  → the single pinned header (`WikiHeader`)
-//   - agents bar      → a shrink-0 row between the header and main content
 //   - side panels     → a permanent right column (sibling of the main content)
 //
 // Each surface exposes a host DOM element through context; routes portal their
-// content into it (see `useHeaderActionsHost` / `useAgentsBarHost` /
+// content into it (see `useHeaderActionsHost` /
 // `useRightPanelHost`). A portal — rather than passing the nodes up as context
 // state — keeps the content re-rendering live with the route's own state
 // without bouncing updates back through the provider (which would loop).
@@ -23,7 +22,6 @@ interface ChromeHost {
 
 const HeaderActionsContext = createContext<ChromeHost | null>(null);
 const HeaderCrumbContext = createContext<ChromeHost | null>(null);
-const AgentsBarContext = createContext<ChromeHost | null>(null);
 const RightPanelContext = createContext<ChromeHost | null>(null);
 
 export function WikiHeaderActionsProvider({
@@ -33,18 +31,13 @@ export function WikiHeaderActionsProvider({
 }) {
   const [headerEl, setHeaderEl] = useState<HTMLElement | null>(null);
   const [crumbEl, setCrumbEl] = useState<HTMLElement | null>(null);
-  const [agentsEl, setAgentsEl] = useState<HTMLElement | null>(null);
   const [rightEl, setRightEl] = useState<HTMLElement | null>(null);
   return (
     <HeaderActionsContext.Provider value={{ el: headerEl, setEl: setHeaderEl }}>
       <HeaderCrumbContext.Provider value={{ el: crumbEl, setEl: setCrumbEl }}>
-        <AgentsBarContext.Provider value={{ el: agentsEl, setEl: setAgentsEl }}>
-          <RightPanelContext.Provider
-            value={{ el: rightEl, setEl: setRightEl }}
-          >
-            {children}
-          </RightPanelContext.Provider>
-        </AgentsBarContext.Provider>
+        <RightPanelContext.Provider value={{ el: rightEl, setEl: setRightEl }}>
+          {children}
+        </RightPanelContext.Provider>
       </HeaderCrumbContext.Provider>
     </HeaderActionsContext.Provider>
   );
@@ -59,11 +52,6 @@ export function useHeaderActionsHost(): ChromeHost | null {
  * Null outside the provider. */
 export function useHeaderCrumbHost(): ChromeHost | null {
   return useContext(HeaderCrumbContext);
-}
-
-/** Read the sub-header agents bar host. Null outside the provider. */
-export function useAgentsBarHost(): ChromeHost | null {
-  return useContext(AgentsBarContext);
 }
 
 /** Read the right-column panel host. Null outside the provider. */

@@ -24,20 +24,27 @@ import {
   PolicyPopover,
   type OpenUpdatesPanelOpts,
 } from "@/components/wiki/policyPanels";
-import { colorFor } from "@/lib/editor/identityColor";
 import { relativeTime } from "@/lib/users";
 import { fetchFileHistory } from "@/lib/wiki/svc";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
 import type { CommitInfo } from "@/lib/wiki/types";
 import { parseCommitAuthor, updateWarnLevel } from "@/lib/wiki/utils";
+import { colorFor } from "@/lib/editor/identityColor";
 import type { CoeditPeer } from "@/lib/editor/hooks";
 import type { CoeditParticipant } from "@/lib/editor/svc";
+import type { AgentSessionSummary } from "@/lib/launchers";
 import type { DocumentActivity } from "@/types";
 
-// Identity hues cycled per user. Semantic hues stay reserved: red/green/
-// orange for status, blue/amber/sky for selection. The mock's mint/coral/
-// violet have no Opal tokens, so the cycle substitutes shipped hues.
 const MAX_CHIPS = 5;
+
+/** Human label for a launcher tool id ("claude-code" → "Claude Code") —
+ * feeds `agentGlyph`, whose substring match already covers these ids. */
+function sessionToolLabel(toolId: string): string {
+  return toolId
+    .split(/[-_]/)
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
+}
 
 function agentGlyph(name: string | null): IconFunctionComponent | null {
   const key = name?.trim().toLowerCase();
@@ -49,6 +56,9 @@ function agentGlyph(name: string | null): IconFunctionComponent | null {
 }
 
 interface PresenceEntry {
+  /** Stable identity for hover/panel state — unique per *session*, not per
+   * user (`peer:<clientId>` / `session:<id>` / `user:<id>` / `agent:<id>`). */
+  key: string;
   userId: string;
   display: string;
   color: string;
@@ -57,6 +67,11 @@ interface PresenceEntry {
   agentName: string | null;
   /** Caret offset to scroll to when this entry is editing. */
   caretHead: number | null;
+  /** Set when this entry is one of my own launcher sessions — enables the
+   * card's close action. */
+  sessionId: string | null;
+  /** Deep link for the session (Onyx Craft "Open Craft"), when it has one. */
+  sessionUrl: string | null;
 }
 
 interface PresenceAvatarsProps {
@@ -67,7 +82,13 @@ interface PresenceAvatarsProps {
   peers: CoeditPeer[];
   typing: string[];
   myUserId: string | null;
+  myUserDisplay: string | null;
   agents: DocumentActivity[];
+  /** My own external agent sessions on this page (the sessions API is
+   * per-user), shown as my avatar badged with the tool. */
+  sessions: AgentSessionSummary[];
+  /** Closes one of my launcher sessions (presence-card action). */
+  onCloseSession?: (id: string) => void;
   /** Scrolls the doc to a live caret offset (card click, mock: "Click to
    * scroll to cursor"). */
   onScrollToOffset?: (offset: number) => void;
@@ -125,6 +146,8 @@ interface PresenceCardProps {
   commits: CommitInfo[];
   onScrollToOffset?: (offset: number) => void;
   onOpenCommit?: (sha: string) => void;
+  /** Closes the launcher session this entry represents (own sessions only). */
+  onClose?: () => void;
 }
 
 /** One user's card: identity, live state, and their recent edits on this
@@ -134,6 +157,7 @@ function PresenceCard({
   commits,
   onScrollToOffset,
   onOpenCommit,
+  onClose,
 }: PresenceCardProps) {
   const edits = commits.slice(0, 3);
   const scrollable = entry.editing && entry.caretHead !== null;
@@ -149,7 +173,7 @@ function PresenceCard({
       justifyContent="start"
       alignItems="stretch"
       height="fit"
-      data-presence-card={entry.userId}
+      data-presence-card={entry.key}
       className="w-full"
     >
       <Section
@@ -237,6 +261,39 @@ function PresenceCard({
           )}
         </Section>
       </Section>
+      {(onClose || entry.sessionUrl) && (
+        <Section
+          gap={0}
+          justifyContent="start"
+          alignItems="stretch"
+          height="fit"
+          className="mt-1"
+        >
+          {entry.sessionUrl && (
+            <LineItemButton
+              title="Open Craft"
+              sizePreset="secondary"
+              variant="body"
+              rightChildren={<SvgArrowUpRight size={12} className="mx-[2px]" />}
+              onClick={() =>
+                window.open(
+                  entry.sessionUrl as string,
+                  "_blank",
+                  "noopener,noreferrer",
+                )
+              }
+            />
+          )}
+          {onClose && (
+            <LineItemButton
+              title="Close agent session"
+              sizePreset="secondary"
+              variant="body"
+              onClick={onClose}
+            />
+          )}
+        </Section>
+      )}
       {edits.length > 0 && (
         <Section
           gap={0}
@@ -289,10 +346,11 @@ function PresenceCard({
 
 /**
  * The header's "who is on this page" cluster (mocks 2079:379824,
- * 2079:381324, 2079:383512, 1929:361938): every coedit participant as
- * overlapping colored chips, agents badged onto the user they act for,
- * a +N overflow, and the Auto slot controlling AI auto-edits. The
- * current user is never shown.
+ * 2079:381324, 2079:383512, 1929:361938): one overlapping colored chip per
+ * live session, agents badged onto the user they act for, a +N overflow,
+ * and the Auto slot controlling AI auto-edits. Only the current tab's own
+ * session is hidden — the current user's other tabs, launcher sessions,
+ * and agents all show, each session with its own color.
  */
 export function PresenceAvatars({
   path,
@@ -301,17 +359,94 @@ export function PresenceAvatars({
   peers,
   typing,
   myUserId,
+  myUserDisplay,
   agents,
+  sessions,
+  onCloseSession,
   onScrollToOffset,
   onOpenCommit,
   onOpenUpdatesPanel,
 }: PresenceAvatarsProps) {
   const entries = useMemo<PresenceEntry[]>(() => {
-    const editingIds = new Set<string>([
-      ...peers.map((p) => p.user_id),
-      ...typing,
-    ]);
-    const caretByUser = new Map(peers.map((p) => [p.user_id, p.head]));
+    // Session-granular roster: one chip per live connection, so the same
+    // user in two tabs is two chips with their own colors. The only session
+    // never shown is the one this tab *is* (`peers` already excludes it) —
+    // my other tabs, my launcher sessions, and my agents all render.
+    const roster: PresenceEntry[] = [];
+    // Colours come from `identityColor`: a live connection's chip shows the
+    // colour its caret advertises (per session, so a user's two tabs are two
+    // hues); anything without a caret keys on its own stable id.
+    const entry = (
+      key: string,
+      userId: string,
+      display: string,
+      color: string,
+      editing: boolean,
+      agentName: string | null,
+      caretHead: number | null,
+      session: AgentSessionSummary | null = null,
+    ): PresenceEntry => ({
+      key,
+      userId,
+      display,
+      color,
+      editing,
+      agentName,
+      caretHead,
+      sessionId: session?.id ?? null,
+      sessionUrl: session?.external_url ?? null,
+    });
+    const typingIds = new Set(typing);
+    const liveUsers = new Set<string>();
+    for (const p of peers) {
+      liveUsers.add(p.user_id);
+      roster.push(
+        entry(
+          `peer:${p.client_id}`,
+          p.user_id,
+          p.user_display,
+          p.color,
+          // Same reading as before the per-session split: a live connection
+          // counts as editing (a rendered caret IS the editing state).
+          true,
+          null,
+          p.head,
+        ),
+      );
+    }
+    // Participants with no live connection keep a single per-user chip, as
+    // viewers. Self is skipped: my participant row is this tab.
+    for (const p of participants) {
+      if (p.user_id === myUserId || liveUsers.has(p.user_id)) continue;
+      liveUsers.add(p.user_id);
+      roster.push(
+        entry(
+          `user:${p.user_id}`,
+          p.user_id,
+          p.user_display,
+          colorFor(p.user_id),
+          typingIds.has(p.user_id),
+          null,
+          null,
+        ),
+      );
+    }
+    // My launcher sessions (the sessions API is per-user): my avatar,
+    // badged with the tool, one chip per session.
+    for (const s of sessions) {
+      roster.push(
+        entry(
+          `session:${s.id}`,
+          myUserId ?? "",
+          myUserDisplay ?? "You",
+          colorFor(`session:${s.id}`),
+          s.status === "active",
+          sessionToolLabel(s.tool_id),
+          null,
+          s,
+        ),
+      );
+    }
     // One agent summary per user: a user can hold a row per agent, and any
     // writing agent outranks read rows for the badge and the state.
     const agentPresence = new Map<
@@ -329,45 +464,33 @@ export function PresenceAvatars({
         });
       }
     }
-    const entry = (
-      userId: string,
-      display: string,
-      i: number,
-      editing: boolean,
-      agentName: string | null,
-    ): PresenceEntry => ({
-      userId,
-      display,
-      color: colorFor(userId),
-      editing,
-      agentName,
-      caretHead: caretByUser.get(userId) ?? null,
-    });
-    const roster = participants
-      .filter((p) => p.user_id !== myUserId)
-      .map((p, i) => {
-        // A writing agent makes its user an editor even with an idle caret.
-        const presence = agentPresence.get(p.user_id);
-        return entry(
-          p.user_id,
-          p.user_display,
-          i,
-          editingIds.has(p.user_id) || !!presence?.writing,
-          presence?.agentName ?? null,
-        );
-      });
-    // Agents register as the user they act for, so a user whose agent is
-    // active stays in the stack even without a browser session.
-    const seated = new Set(roster.map((e) => e.userId));
+    // Agents register as the user they act for: badge the user's launcher
+    // chip when they have one (that chip usually *is* the agent), else
+    // their first chip, else seat them as their own chip — which is how my
+    // own agent shows while my tab's chip stays hidden.
     for (const [userId, p] of agentPresence) {
-      if (userId === myUserId || seated.has(userId)) continue;
-      seated.add(userId);
-      roster.push(
-        entry(userId, p.display, roster.length, p.writing, p.agentName),
-      );
+      const seat =
+        roster.find((e) => e.userId === userId && e.sessionId) ??
+        roster.find((e) => e.userId === userId);
+      if (seat) {
+        seat.agentName = seat.agentName ?? p.agentName;
+        seat.editing = seat.editing || p.writing;
+      } else {
+        roster.push(
+          entry(
+            `agent:${userId}`,
+            userId,
+            p.display,
+            colorFor(userId),
+            p.writing,
+            p.agentName,
+            null,
+          ),
+        );
+      }
     }
     return roster;
-  }, [participants, peers, typing, myUserId, agents]);
+  }, [participants, peers, typing, myUserId, myUserDisplay, agents, sessions]);
 
   const shown = entries.slice(0, MAX_CHIPS);
   const overflow = entries.slice(MAX_CHIPS);
@@ -377,7 +500,7 @@ export function PresenceAvatars({
   // whatever was open, so the card, Auto popover, and overflow list can
   // never stack (mocks show exactly one floating surface).
   const [openPanel, setOpenPanel] = useState<
-    | { kind: "card"; userId: string }
+    | { kind: "card"; entryKey: string }
     | { kind: "auto" }
     | { kind: "overflow" }
     | null
@@ -418,7 +541,7 @@ export function PresenceAvatars({
 
   const hovered =
     openPanel?.kind === "card"
-      ? entries.find((e) => e.userId === openPanel.userId)
+      ? entries.find((e) => e.key === openPanel.entryKey)
       : undefined;
   // A card whose user left the roster must not linger in state: the user
   // re-entering later would silently re-mount the panel with no hover.
@@ -477,7 +600,7 @@ export function PresenceAvatars({
           {[...shown].reverse().map((e) => (
             // Each slot is 20px wide holding a 24px chip, the 4px overlap.
             <Section
-              key={e.userId}
+              key={e.key}
               flexDirection="row"
               alignItems="center"
               justifyContent="center"
@@ -488,7 +611,7 @@ export function PresenceAvatars({
               className="relative"
               onPointerEnter={() => {
                 holdOpen();
-                setOpenPanel({ kind: "card", userId: e.userId });
+                setOpenPanel({ kind: "card", entryKey: e.key });
                 loadCommits();
               }}
               onPointerLeave={closeSoon}
@@ -561,6 +684,11 @@ export function PresenceAvatars({
             commits={commitsFor(hovered)}
             onScrollToOffset={onScrollToOffset}
             onOpenCommit={onOpenCommit}
+            onClose={
+              hovered.sessionId && onCloseSession
+                ? () => onCloseSession(hovered.sessionId as string)
+                : undefined
+            }
           />
         </AnchoredPanel>
       )}
@@ -577,11 +705,16 @@ export function PresenceAvatars({
           >
             {overflow.map((e) => (
               <PresenceCard
-                key={e.userId}
+                key={e.key}
                 entry={e}
                 commits={commitsFor(e)}
                 onScrollToOffset={onScrollToOffset}
                 onOpenCommit={onOpenCommit}
+                onClose={
+                  e.sessionId && onCloseSession
+                    ? () => onCloseSession(e.sessionId as string)
+                    : undefined
+                }
               />
             ))}
           </Section>

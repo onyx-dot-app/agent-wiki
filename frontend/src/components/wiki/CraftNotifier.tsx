@@ -11,7 +11,7 @@ import { useAgentSessions } from "@/lib/launchers";
  * Render-null. Watches the user's Craft sessions (the agent-sessions poll)
  * and fires a transient toast the moment one flips `provisioning → ready`
  * or `→ failed`. The durable, clickable "Open Craft" lives in the
- * notification bell + the page's active-agents bar; this is just the nudge.
+ * notification bell + the page's presence-avatar card; this is just the nudge.
  */
 export function CraftNotifier() {
   const { sessions, isLoading } = useAgentSessions();

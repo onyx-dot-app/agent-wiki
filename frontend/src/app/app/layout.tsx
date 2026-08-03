@@ -13,7 +13,6 @@ import { WikiItemActionsProvider } from "@/providers/WikiItemActionsProvider";
 import { LeftPanelProvider, useLeftPanel } from "@/providers/LeftPanelProvider";
 import {
   WikiHeaderActionsProvider,
-  useAgentsBarHost,
   useRightPanelHost,
 } from "@/providers/WikiHeaderActionsProvider";
 import { WikiTree } from "@/components/wiki/WikiTree";
@@ -107,11 +106,6 @@ function RightPanelHost() {
   );
 }
 
-function AgentsBarHost() {
-  const host = useAgentsBarHost();
-  return <div ref={host?.setEl} className="shrink-0" />;
-}
-
 // The user's persisted fold preference. Read only after mount: the server
 // renders unfolded, and folding post-hydration keeps server and client HTML
 // identical (reading localStorage during render caused hydration mismatches).
@@ -179,7 +173,6 @@ function AppContent({ children }: AppContentProps) {
               <WikiHeader />
             </RootLayout.Header>
           )}
-          {isOnWikiRoute && <AgentsBarHost />}
           <RootLayout.MainContent>{children}</RootLayout.MainContent>
         </RootLayout.App>
         <RightPanelHost />
