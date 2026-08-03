@@ -200,7 +200,7 @@ body {
    so this is invisible there). Still the native scrollbar, restyled — the
    `::-webkit-*` pair is the fallback for engines that don't honour the standard
    properties; where both are understood the standard ones win.
-   `.panel-anchored` hides this bar entirely in favour of EditorEdgeScrollbar
+   `.panel-anchored` hides this bar entirely in favour of EdgeScrollbar
    (see below). */
 .editor-prose::-webkit-scrollbar {
   width: 0.625rem;
@@ -209,7 +209,8 @@ body {
   background: transparent;
 }
 .editor-prose::-webkit-scrollbar-thumb {
-  background: var(--border-04);
+  /* Same light grey as EdgeScrollbar and the app-wide native theme. */
+  background: var(--alpha-grey-100-30);
   border-radius: var(--radius-04);
   /* Inset the thumb off both edges without shrinking the hit area. */
   border: 3px solid transparent;
@@ -218,7 +219,7 @@ body {
 .editor-prose {
   scrollbar-width: thin;
   /* thumb, then track */
-  scrollbar-color: var(--border-04) transparent;
+  scrollbar-color: var(--alpha-grey-100-30) transparent;
 }
 
 /* ── Doc panel tab transitions ────────────────────────────────────────────
