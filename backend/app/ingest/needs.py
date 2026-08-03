@@ -371,21 +371,31 @@ def run_extraction(
         durable, and the content-hash guard skips it next time. The taxonomy derivation wrote once
         at the end and lost 105 pages to a pod restart; this cannot.
         """
+        # Two boundaries, not one: an exception escaping the pool would take every other page's
+        # paid-for work with it, but a single handler would also report every failure as a storage
+        # failure and send an operator to the database when the fault was in the model call.
         try:
             extracted = extract_page(path, by_path[path], type_defs=type_defs, model=model)
+            payload = [need.model_dump(mode="json") for need in extracted]
+        except Exception:
+            # extract_page already absorbs a failed or unparseable completion and returns [], so
+            # reaching here means something unexpected — a serialization fault, or a bug.
+            log.warning("needs: extracting needs failed for %s", path, exc_info=True)
+            return None
+
+        try:
             page_needs.store(
                 path,
                 body=by_path[path],
-                needs=[need.model_dump(mode="json") for need in extracted],
+                needs=payload,
                 model=model,
                 entity_type_taxonomy_id=entity_type_taxonomy_id,
             )
-            return len(extracted)
         except Exception:
-            # One page must not abort the corpus — an exception escaping the pool would take
-            # every other page's paid-for work with it.
-            log.warning("needs: could not store needs for %s", path, exc_info=True)
+            log.warning("needs: storing needs failed for %s", path, exc_info=True)
             return None
+
+        return len(extracted)
 
     workers = min(_workers(), len(stale)) if stale else 1
     log.info("needs: extracting %d page(s), %d at a time", len(stale), workers)

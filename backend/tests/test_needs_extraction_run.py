@@ -499,3 +499,24 @@ class TestParallelAndModel:
         stored = page_needs.get("a.md")
         assert stored is not None
         assert stored.model == "main"
+
+    def test_an_extraction_failure_is_not_reported_as_a_storage_failure(
+        self, tmp_repo, llm, monkeypatch, caplog
+    ) -> None:
+        """The two stages fail for different reasons and need different fixes, so a shared
+        handler that always blamed storage would send an operator to the database for a fault in
+        the model call."""
+
+        def boom(path, body, *, type_defs, model=None):
+            raise RuntimeError("unexpected")
+
+        monkeypatch.setattr(needs, "extract_page", boom)
+        _page("a.md")
+
+        with caplog.at_level("WARNING"):
+            counts = needs.run_extraction()
+
+        messages = " ".join(r.getMessage() for r in caplog.records)
+        assert counts["extracted"] == 0
+        assert "extracting needs failed for a.md" in messages
+        assert "storing" not in messages
