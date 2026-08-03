@@ -738,3 +738,51 @@ def test_drop_duplicate_blocks_is_a_no_op_on_a_healthy_doc() -> None:
     doc = seed_doc_from_markdown(body)
     assert drop_duplicate_blocks(doc) == []
     assert reconstruct_body(doc) == body
+
+
+def test_drop_restated_blocks_catches_a_collision_the_id_check_cannot() -> None:
+    """A restamp renumbers a collided doc's children into distinct sequential
+    ids, which is what makes ``_duplicated_block_ids`` blind to it: every id is
+    unique, so the duplicate-id net sees a clean document while
+    ``checkpoint_body`` re-serializes the unknown half onto the end of the page.
+    """
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids, drop_restated_blocks
+    from app.wiki.markdown_splice import restamp_block_ids
+    from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
+
+    body = "\n\n".join(f"para {i}" for i in range(8)) + "\n"
+
+    doc = seed_doc_from_markdown(body)
+    doc.apply_update(seed_doc_from_markdown(body).get_update(doc.get_state()))
+    doubled = reconstruct_body(doc)
+    assert doubled == body + body
+
+    restamp_block_ids(doc, doubled)
+    assert _duplicated_block_ids(doc) == []
+
+    assert drop_restated_blocks(doc, body) == 8
+    assert reconstruct_body(doc) == body
+
+
+def test_drop_restated_blocks_is_a_no_op_on_a_healthy_doc() -> None:
+    from app.wiki.coedit_checkpoint import drop_restated_blocks
+    from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
+
+    body = "\n\n".join(f"para {i}" for i in range(20)) + "\n"
+    doc = seed_doc_from_markdown(body)
+    assert drop_restated_blocks(doc, body) == 0
+    assert reconstruct_body(doc) == body
+
+
+def test_drop_restated_blocks_leaves_a_few_repeated_lines_alone() -> None:
+    """Retyping a line the page already has is something a person does; the
+    floors keep the repair off it. Only a whole-page restatement clears them."""
+    from app.wiki.coedit_checkpoint import drop_restated_blocks
+    from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
+
+    base = "\n\n".join(["alpha", "beta", "gamma", "delta"]) + "\n"
+    # One block beyond what base_body knows, restating a line already on the
+    # page — the shape a collision has, at a scale editing reaches.
+    doc = seed_doc_from_markdown(base + "\nalpha\n")
+    assert drop_restated_blocks(doc, base) == 0
+    assert reconstruct_body(doc) == base + "\nalpha\n"

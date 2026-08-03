@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 
-from pycrdt import Doc, XmlFragment, create_update_message
+from pycrdt import Doc, XmlElement, XmlFragment, create_update_message
 from pydantic import BaseModel, ConfigDict
 
 from app.auth import User, set_current_user
@@ -37,7 +37,7 @@ from app.models.wiki import ChangeKind
 from app.wiki import coedit, coedit_channel, filesystem
 from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
-from app.wiki import markdown_splice, markdown_yjs
+from app.wiki import markdown_blocks, markdown_splice, markdown_yjs
 from app.wiki.markdown_splice import TouchedTracker
 
 log = logging.getLogger(__name__)
@@ -120,6 +120,126 @@ def drop_duplicate_blocks(doc: Doc) -> list[str]:
         for i in reversed(stale):
             del root.children[i]
     return dupes
+
+
+# A lineage collision restates most of the page; a person can legitimately
+# retype one line that already exists elsewhere on it. Both floors must clear
+# before anything is deleted, so the small, ordinary case is never touched.
+_RESTATED_MIN_BLOCKS = 5
+_RESTATED_MIN_FRACTION = 0.25
+
+
+class _Restatement(BaseModel):
+    """Where a doc restates the page back onto itself, as child indices.
+
+    ``restated`` is the duplicated content itself, and the only thing the
+    floors are measured against. ``fillers`` are the blank-line blocks the
+    duplicated copy brought with it — the codec makes every newline its own
+    top-level block, so a restated copy arrives interleaved with them.
+    Deleting content without them leaves a run of blank lines behind where the
+    copy was.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    restated: list[int]
+    fillers: list[int]
+
+    def drop_indices(self) -> list[int]:
+        return sorted(self.restated + self.fillers)
+
+
+def _restated_base_blocks(doc: Doc, base_body: str) -> _Restatement:
+    """Child indices holding a second copy of a base block already being
+    emitted by id, in document order.
+
+    Catches the lineage collision that ``_duplicated_block_ids`` cannot see.
+    That one keys on an id repeating *within* the doc, but a foreign lineage's
+    children need not repeat a base id to be duplicated into the page — any id
+    ``base_body`` doesn't know takes ``checkpoint_body``'s ``orig is None``
+    path and is re-serialized as though freshly typed, appended alongside the
+    base copy that is emitted verbatim. That is the 87-insertions/0-deletions
+    shape: nothing conflicts, so nothing dedupes.
+
+    The test is content, not ids, because the ids in this state can't be
+    trusted to any particular shape. Two conditions keep it off legitimate
+    edits:
+
+    the child's id isn't one ``base_body`` carries
+        Those are emitted verbatim from ``base_body`` and are the copy being
+        kept, not a duplicate of it.
+    the base block it restates is still carried by some child
+        So its content is definitely being emitted. Without this, a block the
+        user deleted and retyped identically would be read as a duplicate of a
+        copy that is no longer there, and dropping it would lose the text.
+    """
+    base_ranges = markdown_blocks.top_level_block_ranges(base_body)
+    base_ids = {b.block_id for b in base_ranges}
+    root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
+    children = list(root.children)
+
+    carried_ids: set[str] = set()
+    for child in children:
+        block_id = dict(getattr(child, "attributes", {})).get(markdown_yjs.BLOCK_ID_ATTR)
+        if isinstance(block_id, str):
+            carried_ids.add(block_id)
+
+    emitted_text: set[str] = set()
+    for b in base_ranges:
+        if b.block_id not in carried_ids:
+            continue
+        text = base_body[b.start : b.end].strip()
+        if text:
+            emitted_text.add(text)
+
+    restated: list[int] = []
+    foreign_blanks: list[int] = []
+    for i, child in enumerate(children):
+        if not isinstance(child, XmlElement):
+            continue
+        block_id = dict(child.attributes).get(markdown_yjs.BLOCK_ID_ATTR)
+        if isinstance(block_id, str) and block_id in base_ids:
+            continue
+        text = markdown_yjs.serialize_block(child).strip()
+        if not text:
+            foreign_blanks.append(i)
+        elif text in emitted_text:
+            restated.append(i)
+
+    # Only the blanks sitting within the restated run, so a blank line the
+    # user left elsewhere on the page is untouched.
+    if not restated:
+        return _Restatement(restated=[], fillers=[])
+    first, last = restated[0], restated[-1]
+    fillers = [i for i in foreign_blanks if first < i < last]
+    return _Restatement(restated=restated, fillers=fillers)
+
+
+def drop_restated_blocks(doc: Doc, base_body: str) -> int:
+    """Delete children that restate the page back onto itself; return how many.
+
+    Deleted rather than refused, for the same reason as
+    ``drop_duplicate_blocks``: the duplication is in the connected browsers'
+    documents too, and a Yjs delete addresses the items they hold, so the
+    checkpoint's broadcast converges them. Refusing would leave every client
+    holding it, to be re-sent on the next reconnect.
+
+    Both floors in ``_RESTATED_MIN_BLOCKS``/``_RESTATED_MIN_FRACTION`` must
+    clear. One or two restating blocks is something a person does; half the
+    page is not reachable by editing.
+    """
+    found = _restated_base_blocks(doc, base_body)
+    root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
+    total = len(root.children)
+    if len(found.restated) < _RESTATED_MIN_BLOCKS:
+        return 0
+    if len(found.restated) < total * _RESTATED_MIN_FRACTION:
+        return 0
+    # Descending, so each deletion can't shift the index of one still pending.
+    with doc.transaction():
+        for i in reversed(found.drop_indices()):
+            del root.children[i]
+    return len(found.restated)
 
 
 def _user(user_id: str) -> User | None:
@@ -312,6 +432,18 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 path,
                 session_id,
                 dupes,
+            )
+
+        restated = drop_restated_blocks(doc, base_body)
+        if restated:
+            log.error(
+                "coedit checkpoint: %s (session %s) held %d block(s) restating the "
+                "page back onto itself; dropped them and committing the repaired "
+                "document. Indicates a second Yjs lineage reached the doc — see "
+                "open_session's reuse rule and purge_viewer_sessions' retention.",
+                path,
+                session_id,
+                restated,
             )
 
         change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE

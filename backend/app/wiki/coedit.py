@@ -38,7 +38,7 @@ from sqlalchemy import Text as SAText, cast, delete, func, literal, or_, select,
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User
 from app.models.wiki import PathMove
@@ -835,18 +835,46 @@ def close_abandoned_sessions() -> list[int]:
         )
 
 
-def purge_viewer_sessions(limit: int = 500) -> int:
+def purge_viewer_sessions(*, retain_seconds: int, limit: int = 500) -> int:
     """Delete closed sessions that never received an update. Returns the count.
 
     With join-on-landing, every page view mints a session — a closed
     ``ydoc_seq == 0`` row carries no updates, no participants (removed on
-    leave; FK cascade catches stragglers), and nothing the update log or
-    checkpoint dedupe ever references, so it is pure dead weight. Runs
+    leave; FK cascade catches stragglers), so it is pure dead weight. Runs
     against *closed* rows only: deleting at the close point instead would
     race a concurrent join into an FK violation, while a closed session is a
     soft state joins already tolerate. Bounded so the periodic scan stays
     cheap; the backlog drains across successive runs.
+
+    Two conditions keep this off rows ``_reusable_closed_session`` still
+    needs. A deleted row cannot be reactivated, so purging one whose client
+    is about to reconnect forces ``open_session`` to seed a fresh
+    ``Doc()`` — a new Yjs lineage against the retained document the client
+    answers SYNC_STEP1 with, which is exactly the whole-page duplication
+    ``open_session`` describes. The scan closes and purges in the *same*
+    pass, so without these the window was the ~3s a client takes to
+    reconnect, and a "never edited" row is precisely a viewer's — someone
+    with the page merely open.
+
+    ``updated_at`` older than ``retain_seconds``
+        ``close_session``/``close_abandoned_sessions`` both stamp it, so
+        this is time since close.
+    not the newest closed row for its path
+        The one ``_reusable_closed_session`` orders to, kept regardless of
+        age so a reconnect after any delay still has a lineage to adopt.
+        Bounded at one row per page.
     """
+    cutoff = _iso(_now() - timedelta(seconds=retain_seconds))
+    newest = aliased(CoeditSession)
+    newest_closed_for_path = (
+        select(func.max(newest.id))
+        .where(
+            newest.path == CoeditSession.path,
+            newest.status == SessionStatus.CLOSED.value,
+        )
+        .correlate(CoeditSession)
+        .scalar_subquery()
+    )
     with session() as s:
         ids = s.scalars(
             select(CoeditSession.id)
@@ -854,6 +882,8 @@ def purge_viewer_sessions(limit: int = 500) -> int:
                 CoeditSession.status == SessionStatus.CLOSED.value,
                 CoeditSession.ydoc_seq == 0,
                 CoeditSession.ydoc_checkpointed_seq == 0,
+                CoeditSession.updated_at <= cutoff,
+                CoeditSession.id != newest_closed_for_path,
             )
             .limit(limit)
         ).all()

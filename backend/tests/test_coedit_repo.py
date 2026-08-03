@@ -414,11 +414,15 @@ def test_rename_path(users):
 
 
 def test_purge_viewer_sessions_deletes_only_closed_never_edited(users):
-    # Viewer-only session: opened, no updates, closed.
-    viewer_only = coedit.open_session("viewed.md", base_sha=None)
-    coedit.join(viewer_only.id, "usr_a")
-    coedit.leave(viewer_only.id, "usr_a")
-    coedit.close_session(viewer_only.id)
+    # Two viewer-only sessions on one path: opened, no updates, closed. Only
+    # the older is purgeable — the newest closed row per path is the one
+    # _reusable_closed_session would reactivate.
+    older = coedit.open_session("viewed.md", base_sha=None)
+    coedit.join(older.id, "usr_a")
+    coedit.leave(older.id, "usr_a")
+    coedit.close_session(older.id)
+    newest = coedit.open_session("viewed.md", base_sha=None)
+    coedit.close_session(newest.id)
 
     # Edited session: has an update, closed after checkpoint — must be
     # retained (ydoc_seq != 0, regardless of whether advance_checkpoint has
@@ -431,12 +435,37 @@ def test_purge_viewer_sessions_deletes_only_closed_never_edited(users):
     # Active viewer-only session: still occupied — must be retained.
     active = coedit.open_session("open.md", base_sha=None)
 
-    assert coedit.purge_viewer_sessions() == 1
-    assert coedit.get_session(viewer_only.id) is None
+    assert coedit.purge_viewer_sessions(retain_seconds=0) == 1
+    assert coedit.get_session(older.id) is None
+    assert coedit.get_session(newest.id) is not None
     assert coedit.get_session(edited.id) is not None
     assert coedit.get_session(active.id) is not None
     # Idempotent: nothing left to purge.
-    assert coedit.purge_viewer_sessions() == 0
+    assert coedit.purge_viewer_sessions(retain_seconds=0) == 0
+
+
+def test_purge_viewer_sessions_retains_recently_closed(users):
+    """A reconnecting client adopts its old row's Yjs lineage, so a row closed
+    moments ago has to survive — deleting it forces a fresh seed and the
+    retained document is then duplicated into the page."""
+    older = coedit.open_session("viewed.md", base_sha=None)
+    coedit.close_session(older.id)
+    newest = coedit.open_session("viewed.md", base_sha=None)
+    coedit.close_session(newest.id)
+
+    assert coedit.purge_viewer_sessions(retain_seconds=3600) == 0
+    assert coedit.get_session(older.id) is not None
+    assert coedit.get_session(newest.id) is not None
+
+
+def test_purge_viewer_sessions_keeps_newest_closed_row_however_old(users):
+    """The reuse candidate is kept regardless of age: a client can reconnect
+    long after closing (a suspended laptop), and one row per page is bounded."""
+    only = coedit.open_session("viewed.md", base_sha=None)
+    coedit.close_session(only.id)
+
+    assert coedit.purge_viewer_sessions(retain_seconds=0) == 0
+    assert coedit.get_session(only.id) is not None
 
 
 def test_close_abandoned_sessions_closes_only_clean_empty_ones(users):
