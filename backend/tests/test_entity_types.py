@@ -390,9 +390,9 @@ class TestDeriveWorkers:
 
 
 class TestDerivationTaskModel:
-    """The task can pin a model. This job does not need the deployment's strongest one — the
-    validated taxonomy for the reference wiki came from gpt-5.4-mini — and a less verbose model
-    is safer here, since truncation costs a page's referents outright."""
+    """Which model the derivation runs on. It defaults to the ingestion-pipeline model rather
+    than the main one: this job is ingest-side, and the validated 9-type taxonomy for the
+    reference wiki came from gpt-5.4-mini."""
 
     def test_the_model_reaches_run_derivation(self, monkeypatch) -> None:
         from app.ingest import entity_types as ingest_entity_types
@@ -423,20 +423,55 @@ class TestDerivationTaskModel:
 
         assert seen["model"] is None
 
-    def test_the_task_does_not_read_llm_settings(self) -> None:
-        """The model is passed in, never inferred from settings. Specifically it must not read
-        ``ingest_selector_model``: that field is EMPTY when the ingest pre-filter is off, so
-        deriving the taxonomy model from it would let an unrelated switch silently change which
-        model builds the taxonomy. Checked against imports rather than text, so a docstring that
-        explains the reasoning cannot satisfy it."""
-        import ast
-        import pathlib
+    @staticmethod
+    def _stub(monkeypatch, *, ingest_model: str) -> dict:
+        """Stub the derivation down to the one thing under test: which model it resolves."""
+        from app.ingest import entity_types
+        from app.llm import settings as llm_settings
 
-        tree = ast.parse(pathlib.Path("app/tasks/entity_types.py").read_text())
-        imported = {
-            alias.name if isinstance(node, ast.Import) else f"{node.module}.{alias.name}"
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for alias in node.names
+        seen: dict = {}
+        artifact = {
+            "entity_types": [{"name": "t", "definition": "d"}],
+            "stats": {"n_mentions": 1, "n_referents": 1, "n_typed": 1, "n_types": 1},
         }
-        assert not any("llm" in name for name in imported), imported
+        monkeypatch.setattr(
+            entity_types,
+            "get_llm_settings",
+            lambda: llm_settings.LLMSettings(model="main", ingest_selector_model=ingest_model),
+        )
+        monkeypatch.setattr(entity_types, "read_corpus", lambda prefix="": [("a.md", "body")])
+        monkeypatch.setattr(
+            entity_types,
+            "derive",
+            lambda pages, model=None: (seen.update(model=model), artifact)[1],
+        )
+        monkeypatch.setattr(entity_types, "store_taxonomy", lambda artifact, triggered_by=None: 1)
+        return seen
+
+    def test_defaults_to_the_ingestion_model(self, monkeypatch) -> None:
+        """The wiring that makes the option useful: with nothing passed, the admin's
+        ingestion-pipeline model is what runs."""
+        from app.ingest import entity_types
+
+        seen = self._stub(monkeypatch, ingest_model="ingest-cheap")
+        entity_types.run_derivation()
+
+        assert seen["model"] == "ingest-cheap"
+
+    def test_an_explicit_model_wins(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        seen = self._stub(monkeypatch, ingest_model="ingest-cheap")
+        entity_types.run_derivation(model="pinned")
+
+        assert seen["model"] == "pinned"
+
+    def test_no_ingestion_model_falls_back_to_the_deployment_default(self, monkeypatch) -> None:
+        """Unset means no cheaper model was nominated: pass None so client.complete resolves the
+        main model, rather than "" which would read as configured-but-blank."""
+        from app.ingest import entity_types
+
+        seen = self._stub(monkeypatch, ingest_model="")
+        entity_types.run_derivation()
+
+        assert seen["model"] is None

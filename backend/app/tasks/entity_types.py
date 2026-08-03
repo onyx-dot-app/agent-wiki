@@ -33,17 +33,8 @@ def derive_entity_types(
     ``triggered_by_user_id`` is the admin who asked (NULL for a system run),
     matching ``run_detection_sweep``.
 
-    ``model`` overrides the deployment default for this derivation only. Worth
-    having because this job does not need the deployment's strongest model: the
-    validated 9-type taxonomy for the reference wiki was produced by
-    ``gpt-5.4-mini``, which is cheaper, faster, and materially less verbose —
-    and verbosity is the risk here, since a stronger model came within 12% of
-    the output cap on one page and truncation costs that page's referents
-    entirely.
-
-    Deliberately NOT wired to ``ingest_selector_model``: an empty value there
-    means "skip the ingest pre-filter", so reusing it would let an admin turn
-    off that filter and silently change which model builds the taxonomy.
+    ``model`` overrides the default for this run. Unset, ``run_derivation``
+    uses the ingestion-pipeline model.
     """
     entity_types.run_derivation(
         triggered_by_user_id=triggered_by_user_id, model=model
