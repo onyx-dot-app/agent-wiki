@@ -538,6 +538,15 @@ def merge_types(types: list[EntityType], *, model: str | None = None) -> list[En
     trace = [len(types)]
     for round_n in range(1, MERGE_ROUNDS + 1):
         merged = _merge_once(types, model=model)
+        if merged is None:
+            log.warning(
+                "entity_types: merge round %d failed; stopping at %d type(s), NOT converged: %s "
+                "— the taxonomy may still be over-split",
+                round_n,
+                len(types),
+                trace,
+            )
+            return types
         trace.append(len(merged))
         log.info(
             "entity_types: merge round %d: %d -> %d type(s)", round_n, len(types), len(merged)
@@ -557,14 +566,18 @@ def merge_types(types: list[EntityType], *, model: str | None = None) -> list[En
     return types
 
 
-def _merge_once(types: list[EntityType], *, model: str | None) -> list[EntityType]:
+def _merge_once(types: list[EntityType], *, model: str | None) -> list[EntityType] | None:
+    """One consolidation pass. ``None`` means the round FAILED — a provider error, a truncated
+    response, or nothing usable parsed — as distinct from a round that ran and merged nothing.
+    Returning the input for both would let a failure read as convergence, and the taxonomy would
+    be persisted as a stable answer when it was only the point the failure happened."""
     if len(types) < 3:
         return types
     system = load_prompt("entity_types.merge")
     listing = "\n".join(
         f"[{i}] {t.name}  ({t.n_referents} referents, {t.n_docs} pages)\n"
         f"     {t.definition}\n"
-        f"     e.g. {', '.join(t.examples[:5])}"
+        f"     e.g. {', '.join(t.examples)}"
         for i, t in enumerate(types, start=1)
     )
     data = _complete_json(
@@ -575,7 +588,7 @@ def _merge_once(types: list[EntityType], *, model: str | None) -> list[EntityTyp
     )
     raw = (data or {}).get("types")
     if not isinstance(raw, list) or not raw:
-        return types
+        return None
 
     merged: list[EntityType] = []
     claimed: set[int] = set()
@@ -602,7 +615,7 @@ def _merge_once(types: list[EntityType], *, model: str | None) -> list[EntityTyp
             )
         )
     if not merged:
-        return types
+        return None
     # Anything the model left unassigned survives as its own type — never silently dropped.
     merged.extend(t for i, t in enumerate(types) if i not in claimed)
     return sorted(merged, key=lambda t: -t.n_referents)

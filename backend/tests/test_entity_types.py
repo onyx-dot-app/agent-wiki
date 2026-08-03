@@ -721,6 +721,36 @@ class TestMergeConvergence:
 
         assert any("still collapsing" in r.getMessage() for r in caplog.records)
 
+    def test_a_failed_round_does_not_report_convergence(self, monkeypatch, caplog) -> None:
+        """_merge_once returns None on a provider error or unusable response. Treating that as a
+        round that merged nothing would persist the partially merged taxonomy as a stable
+        answer — it is only the point the failure happened."""
+        from app.ingest import entity_types
+
+        results = iter([self._types(30), None])
+        monkeypatch.setattr(
+            entity_types, "_merge_once", lambda types, model=None: next(results)
+        )
+
+        with caplog.at_level("INFO"):
+            out = entity_types.merge_types(self._types(50))
+
+        messages = " ".join(r.getMessage() for r in caplog.records)
+        assert len(out) == 30  # keeps the progress the successful round made
+        assert "NOT converged" in messages
+        assert "converged after" not in messages
+
+    def test_too_few_types_to_merge_is_not_a_failure(self, monkeypatch, caplog) -> None:
+        """Fewer than three types cannot be consolidated further; that is a clean stop, not an
+        error, and must not warn."""
+        from app.ingest import entity_types
+
+        with caplog.at_level("WARNING"):
+            out = entity_types.merge_types(self._types(2))
+
+        assert len(out) == 2
+        assert not [r for r in caplog.records if "NOT converged" in r.getMessage()]
+
     def test_reports_each_round(self, monkeypatch, caplog) -> None:
         from app.ingest import entity_types
 
