@@ -621,10 +621,25 @@ def _handle_entry(
             "queue %s: malformed payload at %s — acking and skipping",
             queue.name, stream_entry_id,
         )
-        r.xack(_stream_key(queue.name), "workers", stream_entry_id)
-        r.xdel(_stream_key(queue.name), stream_entry_id)
+        _drop_entry(queue, r, stream_entry_id)
         return
     _process_one(queue, stream_entry_id, body, r, max_retries=max_retries)
+
+
+
+def _drop_entry(queue: TaskQueue, r: Any, stream_entry_id: str) -> None:
+    """Remove a finished (or discarded) entry: XDEL first, then XACK.
+
+    The failure modes between the two calls are asymmetric. Delete-then-ack
+    failing halfway leaves a dangling PEL reference to a deleted entry, which
+    the next XAUTOCLAIM pass cleans up (Redis returns such entries with no
+    fields; the reclaim loop skips them). Ack-then-delete failing halfway
+    leaves an acked entry in the stream forever — never deliverable again,
+    invisible to reclaim, but still counted by depth().ready and pinning
+    oldest_age_seconds(): a zombie backlog that cannot drain.
+    """
+    r.xdel(_stream_key(queue.name), stream_entry_id)
+    r.xack(_stream_key(queue.name), "workers", stream_entry_id)
 
 
 def _reclaim_stale(
@@ -676,8 +691,7 @@ def _reclaim_stale(
                     "queue %s: entry %s delivered %d times without completing — dropping as poison",
                     queue.name, stream_entry_id, delivered,
                 )
-                r.xack(sk, "workers", stream_entry_id)
-                r.xdel(sk, stream_entry_id)
+                _drop_entry(queue, r, stream_entry_id)
                 continue
             log.info(
                 "queue %s: reclaimed stale entry %s (delivery %d)",
@@ -709,8 +723,7 @@ def _process_one(
             "queue %s: no handler for task %r — discarding entry %s",
             queue.name, task_name, stream_entry_id,
         )
-        r.xack(_stream_key(queue.name), "workers", stream_entry_id)
-        r.xdel(_stream_key(queue.name), stream_entry_id)
+        _drop_entry(queue, r, stream_entry_id)
         return
 
     try:
@@ -724,9 +737,8 @@ def _process_one(
             "queue %s: task %s failed (entry=%s retry=%d)",
             queue.name, task_name, stream_entry_id, retry_count,
         )
-        # Ack first (remove from PEL), then re-enqueue if retries remain.
-        r.xack(_stream_key(queue.name), "workers", stream_entry_id)
-        r.xdel(_stream_key(queue.name), stream_entry_id)
+        # Drop the entry, then re-enqueue a fresh copy if retries remain.
+        _drop_entry(queue, r, stream_entry_id)
         if retry_count < max_retries:
             backoff = _retry_backoff_seconds(retry_count + 1)
             log.info(
@@ -747,8 +759,7 @@ def _process_one(
             )
         return
 
-    r.xack(_stream_key(queue.name), "workers", stream_entry_id)
-    r.xdel(_stream_key(queue.name), stream_entry_id)
+    _drop_entry(queue, r, stream_entry_id)
 
 
 # --------------------------------------------------------------------------- #

@@ -144,3 +144,47 @@ def test_handler_exception_does_not_abort_batch():
     assert calls == ["ran"]
     # the failing entry was acked+deleted by _process_one's retry path
     assert "1-0" in r.acked and "1-0" in r.deleted
+
+
+class _OpOrderRedis(_FakeRedis):
+    """Records the relative order of xdel/xack per entry."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ops: list[tuple[str, str]] = []
+
+    def xack(self, key, group, entry_id):
+        self.ops.append(("xack", entry_id))
+        return super().xack(key, group, entry_id)
+
+    def xdel(self, key, entry_id):
+        self.ops.append(("xdel", entry_id))
+        return super().xdel(key, entry_id)
+
+
+def test_drop_deletes_from_stream_before_acking():
+    # XDEL-then-XACK ordering: a failure between the calls must leave a
+    # dangling PEL ref (cleaned by the next reclaim pass), never an acked
+    # entry stranded in the stream where depth()/oldest_age count it forever.
+    calls: list[str] = []
+    q = _queue_with_handler(calls)
+    r = _OpOrderRedis(claimed=[("1-0", _payload("record"))], delivered={"1-0": 2})
+    _reclaim_stale(q, "worker-x", r, vt_seconds=300, max_retries=3)
+    assert r.ops == [("xdel", "1-0"), ("xack", "1-0")]
+
+
+def test_poison_drop_ordering_and_partial_failure_leaves_no_zombie():
+    # Even if XACK fails after XDEL succeeded, the entry is gone from the
+    # stream — the dangling PEL ref is the recoverable half.
+    q = _queue_with_handler([])
+    over = queue_mod._MAX_DELIVERIES + 1
+
+    class _AckAlwaysBoom(_OpOrderRedis):
+        def xack(self, key, group, entry_id):
+            self.ops.append(("xack", entry_id))
+            raise RuntimeError("redis down")
+
+    r = _AckAlwaysBoom(claimed=[("1-0", _payload("record"))], delivered={"1-0": over})
+    _reclaim_stale(q, "worker-x", r, vt_seconds=300, max_retries=3)  # contained
+    assert ("xdel", "1-0") in r.ops  # stream entry removed despite the ack failure
+    assert r.deleted == ["1-0"]
