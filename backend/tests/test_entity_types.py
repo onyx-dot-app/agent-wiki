@@ -478,10 +478,8 @@ class TestDerivationTaskModel:
 
 
 class TestNamingPartialAcceptance:
-    """Naming used to discard a whole response over one unassigned member. On the production
-    corpus that rejected the three LARGEST groups (261, 119 and 94 referents) — each for a single
-    uncovered member — and merge then had to place them from a placeholder with no definition,
-    which is how `organization` and `person` referents ended up inside `software`."""
+    """A partition violation costs only what is invalid: the named types survive, and uncovered or
+    double-claimed members are handled without discarding the response."""
 
     @staticmethod
     def _group(n: int):
@@ -498,12 +496,11 @@ class TestNamingPartialAcceptance:
 
         monkeypatch.setattr(entity_types, "_complete_json", lambda *a, **k: payload)
 
-    def test_one_uncovered_member_no_longer_discards_the_group(self, monkeypatch, caplog) -> None:
+    def test_one_uncovered_member_does_not_discard_the_group(self, monkeypatch, caplog) -> None:
         from app.ingest import entity_types
 
         group = self._group(10)
-        # Covers members 1-9 of 10, omitting the last — the shape seen in production.
-        # Indices are 1-based in the payload (see ``_member_indices``).
+        # Covers members 1-9 of 10. Indices are 1-based (see ``_member_indices``).
         self._stub(
             monkeypatch,
             {
@@ -520,10 +517,10 @@ class TestNamingPartialAcceptance:
         with caplog.at_level("WARNING"):
             out = entity_types.name_group(group)
 
-        assert [t.name for t in out] == ["organization", "unnamed_1"]
+        assert out[0].name == "organization"
         assert out[0].n_referents == 9
+        assert out[1].name.startswith("unnamed")
         assert out[1].n_referents == 1
-        assert not any(t.name.startswith("unnamed_10") for t in out)
 
     def test_a_full_partition_is_unchanged(self, monkeypatch) -> None:
         from app.ingest import entity_types
@@ -572,7 +569,38 @@ class TestNamingPartialAcceptance:
 
         out = entity_types.name_group(self._group(5))
 
-        assert [t.name for t in out] == ["unnamed_5"]
+        assert len(out) == 1
+        assert out[0].name.startswith("unnamed")
+        assert out[0].n_referents == 5
+
+    def test_remainders_from_different_groups_get_different_names(self, monkeypatch) -> None:
+        """``derive`` collapses types sharing a name, so identically-sized remainders from
+        unrelated groups would otherwise pool their referents and examples into one type."""
+        from app.ingest import entity_types
+
+        names = []
+        for offset in (0, 100):
+            group = [
+                entity_types.Referent(canonical=f"r{offset + i}", pages={f"p{i}.md"})
+                for i in range(3)
+            ]
+            self._stub(
+                monkeypatch,
+                {"types": [{"type_name": "person", "definition": "d", "member_indices": [1, 2]}]},
+            )
+            out = entity_types.name_group(group)
+            names.append([t.name for t in out if t.name.startswith("unnamed")])
+
+        assert names[0] != names[1], names
+
+    def test_a_whole_group_fallback_is_also_named_per_group(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+        first = entity_types.name_group([entity_types.Referent(canonical="alpha", pages={"a.md"})])
+        second = entity_types.name_group([entity_types.Referent(canonical="beta", pages={"b.md"})])
+
+        assert first[0].name != second[0].name
 
     def test_referent_counts_stay_exact(self, monkeypatch) -> None:
         """The counts are what a type's support is judged on downstream, so they must sum to the

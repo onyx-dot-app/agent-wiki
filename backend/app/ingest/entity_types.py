@@ -414,6 +414,18 @@ def _member_indices(entry: dict[str, Any], upper: int) -> list[int]:
     return out
 
 
+def _placeholder_name(members: list[Referent]) -> str:
+    """A name unique to THESE members.
+
+    ``derive`` collapses types that share a name, on the premise that the model named them
+    identically. A placeholder does not carry that premise, so two groups each leaving one
+    unassigned member must not become one type with their referents and examples pooled.
+    Canonicals are distinct after folding, so the first member's is enough to keep them apart.
+    """
+    slug = _TOKENS.sub("_", members[0].canonical.lower()).strip("_")
+    return f"unnamed_{slug or 'group'}"[:60]
+
+
 def name_group(group: list[Referent], *, model: str | None = None) -> list[EntityType]:
     """Name the kind a group shares. May split a group that turns out to be mixed."""
     system = load_prompt("entity_types.name")
@@ -431,12 +443,8 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
     )
 
     # The prompt requires a partition: every member in exactly one type. Both ways it can break
-    # are handled by taking what is valid rather than discarding the response, because
-    # all-or-nothing costs far more than the flaw it guards against — a group of 261 referents
-    # was rejected over ONE uncovered member, and the whole group then fell through to a
-    # placeholder that the merge step had to place from examples with no definition. Losing one
-    # referent's type beats losing the name of 260. (Same conclusion the merge step reached; see
-    # ``merge_types``.)
+    # take what is valid instead of discarding the response — losing one referent's type beats
+    # losing the name of the whole group. Same rule as ``merge_types``.
     out: list[EntityType] = []
     claimed: set[int] = set()
     for raw_entry in cast(list[Any], (data or {}).get("types") or []):
@@ -471,9 +479,8 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
             )
         )
 
-    # Members the response never assigned are carried as their own remainder rather than dropped
-    # silently. They stay visible to the merge step, which can place a handful from examples far
-    # better than it can place a whole group.
+    # Unassigned members are carried as their own remainder rather than dropped silently: merge
+    # places a handful from examples better than it places a whole group.
     uncovered = [i for i in range(len(group)) if i not in claimed]
     if out and uncovered:
         log.warning(
@@ -487,7 +494,7 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
         members = [group[i] for i in uncovered]
         out.append(
             EntityType(
-                name=f"unnamed_{len(uncovered)}",
+                name=_placeholder_name(members),
                 definition="(uncovered by naming)",
                 examples=[r.canonical for r in members[:8]],
                 n_referents=len(members),
@@ -499,7 +506,7 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
     # A group we could not name is still evidence; keep it visible rather than dropping it.
     return [
         EntityType(
-            name=f"unnamed_{len(group)}",
+            name=_placeholder_name(group),
             definition="(naming failed)",
             examples=[r.canonical for r in group[:8]],
             n_referents=len(group),
