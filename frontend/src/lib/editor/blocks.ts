@@ -111,9 +111,9 @@ export const BlockIdentity = Extension.create({
  * checkpoint re-serializes it from the document and heals any duplicates
  * an earlier cycle already wrote into the file.
  *
- * One join per pass: ProseMirror re-runs `appendTransaction` over appended
- * transactions, so a run of three adjacent lists converges in two passes
- * without any position remapping here. */
+ * Every boundary is joined in one appended transaction, later boundaries
+ * mapped through the earlier joins, so a run of any length converges in a
+ * single pass. */
 export const JoinAdjacentLists = Extension.create({
   name: "joinAdjacentLists",
   addProseMirrorPlugins() {
@@ -122,24 +122,27 @@ export const JoinAdjacentLists = Extension.create({
       new Plugin({
         appendTransaction(transactions, _oldState, newState) {
           if (!transactions.some((tr) => tr.docChanged)) return null;
-          let boundary: number | null = null;
+          const boundaries: number[] = [];
           let prevType: string | null = null;
           let pos = 0;
           newState.doc.forEach((node) => {
             const type = node.type.name;
             if (
-              boundary === null &&
               prevType === type &&
               listTypes.has(type) &&
               canJoin(newState.doc, pos)
             ) {
-              boundary = pos;
+              boundaries.push(pos);
             }
             prevType = type;
             pos += node.nodeSize;
           });
-          if (boundary === null) return null;
-          return newState.tr.join(boundary);
+          if (boundaries.length === 0) return null;
+          const tr = newState.tr;
+          for (const boundary of boundaries) {
+            tr.join(tr.mapping.map(boundary));
+          }
+          return tr;
         },
       }),
     ];

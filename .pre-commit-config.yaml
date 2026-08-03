@@ -66,6 +66,15 @@ repos:
         files: ^frontend/.*\.(ts|tsx)$
         pass_filenames: false
 
+      - id: vitest
+        name: vitest (frontend)
+        # Editor-behaviour tests (headless Tiptap) — sub-second suite, run
+        # whole on any frontend .ts/.tsx change like tsc above.
+        entry: bash -c 'cd frontend && bun run test'
+        language: system
+        files: ^frontend/.*\.(ts|tsx)$
+        pass_filenames: false
+
       - id: basedpyright
         name: basedpyright (backend)
         # basedpyright reads pyproject.toml for include/exclude — passing
