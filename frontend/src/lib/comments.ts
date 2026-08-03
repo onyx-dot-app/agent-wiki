@@ -1,5 +1,31 @@
-import { apiFetch } from "./api";
+import { ApiError, apiFetch } from "./api";
 import type { CommentThreadView, CommentView } from "@/types";
+
+/** What to show a person when a comment action fails. Keyed on status because
+ * the server's text can be a raw pydantic dump. Action-neutral wording, so it
+ * fits any comment mutation. */
+export function commentErrorMessage(e: unknown): string {
+  if (e instanceof ApiError) {
+    switch (e.status) {
+      case 400:
+        return "That comment could not be applied.";
+      case 401:
+        return "Your session expired. Sign in and try again.";
+      case 403:
+        return "You do not have permission to do that.";
+      case 404:
+        return "That page or comment no longer exists.";
+      case 413:
+        return "That comment is too long.";
+    }
+  }
+  return "That did not go through. Try again.";
+}
+
+/** Shown when a draft is submitted before the page's version is known, which is
+ * what anchors the comment to a revision. */
+export const NO_HEAD_SHA_MESSAGE =
+  "Page version unknown. Reload and try again.";
 
 /** List a page's comments, grouped into threads (root + replies). */
 export async function listComments(path: string): Promise<CommentThreadView[]> {

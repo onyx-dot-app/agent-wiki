@@ -24,22 +24,32 @@
  * quoted text — so this mapper only has to get the creation-time request into
  * the right neighborhood.
  *
- * That correction has a gap worth knowing about, because it is the one case
- * where a *wrong span gets stored*: the quote we send is plain text, so a
- * selection containing inline formatting ("hello world" over a source
- * `hello **world**`) matches nothing in the body, and `resolve_exact_span`
- * falls back to this mapper's own estimate. Selections without formatting
- * inside them are corrected exactly; selections across a bold/italic/code run
- * are not. Closing it needs either a markdown serializer here (mirroring
- * `app/wiki/markdown_yjs.py`, which is also what a precise offset mapper
- * needs) or delimiter-insensitive matching in `comment_anchor.py`. Neither is
- * attempted here.
+ * `resolve_exact_span` recovers a quote from the media projection or as a
+ * subsequence. Both still refuse one crossing blocks, or whose link URL dwarfs
+ * it, and this estimate is what gets stored then.
  */
 import type { Editor } from "@tiptap/core";
+import type { Node as PMNode } from "@tiptap/pm/model";
+
+/** An image occupies offsets by its src, so a quote covering one matches the
+ * body only where `comment_anchor._project_media` reduces to the same string. */
+function leafText(leaf: PMNode): string {
+  if (leaf.type.name !== "image") return "";
+  return (leaf.attrs.src as string | null) ?? "";
+}
+
+/** The plain-text projection offsets and comment quotes are counted in. */
+export function docTextBetween(
+  editor: Editor,
+  from: number,
+  to: number,
+): string {
+  return editor.state.doc.textBetween(from, to, "\n\n", leafText);
+}
 
 export function pmPosToTextOffset(editor: Editor, pos: number): number {
   const clamped = Math.max(0, Math.min(pos, editor.state.doc.content.size));
-  return editor.state.doc.textBetween(0, clamped, "\n\n").length;
+  return docTextBetween(editor, 0, clamped).length;
 }
 
 /** Inverse of `pmPosToTextOffset`, via binary search rather than a

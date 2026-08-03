@@ -22,7 +22,11 @@ import {
 import type { CoeditPeer } from "@/lib/editor/hooks";
 import { colorFor } from "@/lib/editor/presence";
 import type { CoeditParticipant } from "@/lib/editor/svc";
-import { pmPosToTextOffset, textOffsetToPmPos } from "@/lib/editor/textOffsets";
+import {
+  docTextBetween,
+  pmPosToTextOffset,
+  textOffsetToPmPos,
+} from "@/lib/editor/textOffsets";
 import { opaqueId } from "@/lib/editor/ids";
 import type {
   AnchoredHighlightTarget,
@@ -186,13 +190,16 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
           lastSelectionForComment.current = selKey;
           const cb = onSelectionForCommentRef.current;
           if (cb) {
-            if (from === to) {
+            const quotedText = docTextBetween(editor, from, to);
+            // The server re-anchors by the quote, and a whitespace-only quote
+            // matches anywhere.
+            if (!quotedText.trim()) {
               cb(null, null);
             } else {
               const draft: CommentDraft = {
                 startOffset: pmPosToTextOffset(editor, from),
                 endOffset: pmPosToTextOffset(editor, to),
-                quotedText: editor.state.doc.textBetween(from, to, "\n\n"),
+                quotedText,
               };
               const coords = editor.view.coordsAtPos(to);
               cb(draft, { x: coords.left, y: coords.top });

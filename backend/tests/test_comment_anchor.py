@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from app.wiki import comment_anchor
-from app.wiki.comment_anchor import remap_range
+from app.wiki.comment_anchor import remap_range, resolve_exact_span
 
 
 def _slice(new_body: str, result: tuple[int, int] | None) -> str:
@@ -358,3 +358,171 @@ def test_replace_run_similarity_computed_once_per_body_pair(monkeypatch):
     results = [remap_range(old, new, s, e, diff=diff) for s, e in spans]
     assert all(r is not None for r in results)
     assert len(constructions) == 1  # the shared run's ratio ran exactly once
+
+
+# resolve_exact_span: a quote carrying an image's src anchors on the whole
+# `![…](…)`, and a quote without media searches exactly as before.
+
+_IMG = "![shot.png](/api/wiki/media/abc123)"
+_BODY = f"intro\n\ntest {_IMG} tail\n"
+
+
+def test_quote_spanning_text_and_image_covers_the_whole_image():
+    quote = "test /api/wiki/media/abc123"
+    start, end = resolve_exact_span(_BODY, 7, 7 + len(quote), quote)
+    assert _BODY[start:end] == f"test {_IMG}"
+
+
+def test_image_only_quote_covers_syntax_not_just_the_src():
+    quote = "/api/wiki/media/abc123"
+    start, end = resolve_exact_span(_BODY, 12, 12 + len(quote), quote)
+    assert _BODY[start:end] == _IMG
+
+
+def test_quote_ending_inside_an_image_src_takes_the_whole_image():
+    # The end lands strictly inside the collapsed image, which is the arm
+    # `_map_end` exists for.
+    quote = "test /api/wiki/media/abc"
+    start, end = resolve_exact_span(_BODY, 7, 7 + len(quote), quote)
+    assert _BODY[start:end] == f"test {_IMG}"
+
+
+def test_text_quote_beside_an_image_is_unaffected():
+    # Offset so the equality fast path cannot answer it.
+    start, end = resolve_exact_span(_BODY, 0, 4, "intro")
+    assert (start, end) == (0, 5)
+
+
+def test_trailing_text_after_an_image_maps_past_the_syntax():
+    start, end = resolve_exact_span(_BODY, 30, 34, "tail")
+    assert _BODY[start:end] == "tail"
+
+
+def test_angle_bracketed_destination_is_projected():
+    # The quote carries the editor's src, which is markdown-it's normalized
+    # link, so a space in the source reaches the backend percent-encoded.
+    body = "see ![a](</media/x y.png>) here"
+    quote = "see /media/x%20y.png"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "see ![a](</media/x y.png>)"
+
+
+def test_non_ascii_destination_is_projected():
+    body = "a ![i](/media/café.png) b"
+    quote = "a /media/caf%C3%A9.png"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "a ![i](/media/café.png)"
+
+
+def test_nested_parens_in_a_destination_are_projected():
+    body = "test ![a](/m/x(1).png) tail"
+    quote = "test /m/x(1).png"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "test ![a](/m/x(1).png)"
+
+
+def test_image_with_title_is_projected():
+    body = 'see ![a](/media/x.png "a title") here'
+    quote = "see /media/x.png"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == 'see ![a](/media/x.png "a title")'
+
+
+def test_body_without_media_still_picks_nearest_occurrence():
+    body = "alpha beta alpha beta"
+    assert resolve_exact_span(body, 10, 15, "alpha") == (11, 16)
+
+
+def test_quote_absent_from_body_returns_the_estimate():
+    assert resolve_exact_span(_BODY, 3, 9, "nowhere") == (3, 9)
+
+
+def test_empty_quote_returns_the_estimate():
+    assert resolve_exact_span(_BODY, 3, 9, "") == (3, 9)
+
+
+# A quote drops inline syntax the source keeps, so it survives only as a
+# subsequence of its own source. These pin that alignment and its guard.
+
+
+def test_quote_across_a_bold_run_anchors_on_the_source():
+    body = "a **bold** run here"
+    quote = "a bold run"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "a **bold** run"
+
+
+def test_quote_across_a_code_span_anchors_on_the_source():
+    body = "use `code` inline"
+    quote = "use code inline"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "use `code` inline"
+
+
+def test_quote_with_both_formatting_and_media_anchors_on_the_source():
+    body = "see **bold** ![a](/api/wiki/media/x1) tail"
+    quote = "see bold /api/wiki/media/x1"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "see **bold** ![a](/api/wiki/media/x1)"
+
+
+def test_scattered_characters_do_not_count_as_an_alignment():
+    # Every character is present in order, but only across a run far longer
+    # than the quote. That is coincidence, not dropped syntax, so keep the
+    # estimate rather than anchoring across the whole line.
+    body = "a...b...c...d...e...f...g...h...i...j... and more"
+    assert resolve_exact_span(body, 0, 10, "abcdefghij") == (0, 10)
+
+
+def test_dropped_syntax_within_the_limit_still_aligns():
+    # Same shape, tight enough to be inline syntax rather than a scatter.
+    body = "a.b.c.d.e.f.g.h.i.j. and more prose"
+    start, end = resolve_exact_span(body, 0, 10, "abcdefghij")
+    assert body[start:end] == "a.b.c.d.e.f.g.h.i.j"
+
+
+def test_alignment_prefers_leaving_the_estimate_when_a_char_is_missing():
+    # "xyz" never appears, so no alignment can cover the whole quote.
+    body = "some ordinary prose here"
+    assert resolve_exact_span(body, 2, 8, "some xyz") == (2, 8)
+
+
+def test_repeated_formatted_text_anchors_nearest_the_estimate():
+    body = "a **bold** run here. filler filler filler. a **bold** run here."
+    quote = "a bold run"
+    second = body.rindex("a **bold** run")
+    start, end = resolve_exact_span(body, second, second + len(quote), quote)
+    assert (start, end) == (second, second + len("a **bold** run"))
+
+
+def test_repeated_formatted_text_still_finds_the_first_when_that_is_nearest():
+    body = "a **bold** run here. filler filler filler. a **bold** run here."
+    quote = "a bold run"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert (start, end) == (0, len("a **bold** run"))
+
+
+def test_repeated_media_anchors_nearest_the_estimate():
+    body = "x ![a](/m/1) y and later x ![a](/m/1) y"
+    quote = "x /m/1 y"
+    second = body.rindex("x ![a](/m/1) y")
+    start, end = resolve_exact_span(body, second, second + len(quote), quote)
+    assert body[start:end] == "x ![a](/m/1) y"
+    assert start == second
+
+
+def test_image_syntax_in_a_code_fence_falls_back_to_the_raw_search():
+    # The projection collapses this like a real image, so only the raw tier can
+    # place a quote of the literal source.
+    body = "intro\n\n```\n![a](/m/1)\n```\n\ntail"
+    quote = "![a](/m/1)"
+    at = body.index(quote)
+    start, end = resolve_exact_span(body, at - 1, at - 1 + len(quote), quote)
+    assert body[start:end] == quote
+
+
+def test_alignment_prefers_the_tightest_span_over_the_nearest_start():
+    body = "a filler filler a **bold** run"
+    quote = "a bold run"
+    start, end = resolve_exact_span(body, 0, len(quote), quote)
+    assert body[start:end] == "a **bold** run"

@@ -17,6 +17,8 @@ import type { EditorView, NodeView } from "@tiptap/pm/view";
 import { ApiError, apiUpload } from "@/lib/api";
 import { toast } from "@/hooks/useToast";
 import {
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_LABEL,
   isSameOriginSrc,
   parseMediaWidth,
   srcWithoutFragment,
@@ -333,6 +335,10 @@ function imageUploadPlugin(pagePath: string): Plugin<DecorationSet> {
   const startUpload = (view: EditorView, file: File, rawPos: number): void => {
     const imageType = view.state.schema.nodes.image;
     if (!imageType) return;
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(`${file.name} is larger than ${MAX_UPLOAD_LABEL}.`);
+      return;
+    }
     // Land the placeholder (and later the node) at the nearest position an
     // inline image is actually allowed, so a drop at a block boundary still
     // produces a valid document.

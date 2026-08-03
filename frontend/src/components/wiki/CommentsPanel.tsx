@@ -10,7 +10,12 @@ import {
 import { Section } from "@onyx-ai/opal/layouts";
 
 import { useAuth } from "@/lib/auth";
-import { createComment } from "@/lib/comments";
+import { toast } from "@/hooks/useToast";
+import {
+  NO_HEAD_SHA_MESSAGE,
+  commentErrorMessage,
+  createComment,
+} from "@/lib/comments";
 import type { CoeditorHandle, CommentDraft } from "@/lib/editor/types";
 import { useIsMobile } from "@/lib/viewport";
 import type { CommentThreadView } from "@/types";
@@ -80,7 +85,6 @@ export function CommentsPanel({
 }: Props) {
   const { user } = useAuth();
   const isMobile = useIsMobile();
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState("");
   const listMode = listView || isMobile || !editorRef;
@@ -95,7 +99,7 @@ export function CommentsPanel({
         await onChanged();
         return true;
       } catch (e) {
-        setError(e instanceof Error ? e.message : "action failed");
+        toast.error(commentErrorMessage(e));
         return false;
       } finally {
         setBusy(false);
@@ -159,7 +163,7 @@ export function CommentsPanel({
   const submitDraft = async (body: string) => {
     if (!draft) return;
     if (!headSha) {
-      setError("page version unknown, reload and retry");
+      toast.error(NO_HEAD_SHA_MESSAGE);
       return;
     }
     const ok = await run(() =>
@@ -214,11 +218,6 @@ export function CommentsPanel({
         <div className="shrink-0 rounded-(--radius-12) border border-(--border-01) p-1">
           {searchRow}
         </div>
-        {error && (
-          <div className="px-2 py-1 text-xs text-(--status-text-error-05)">
-            {error}
-          </div>
-        )}
         <CommentMarginRail
           inPanel
           threads={searched}
@@ -257,12 +256,6 @@ export function CommentsPanel({
         gap={0.25}
         className="scroll-fade-bottom scroll-y-hidden min-h-0 flex-1 overflow-y-auto"
       >
-        {error && (
-          <div className="px-2 py-1 text-xs text-(--status-text-error-05)">
-            {error}
-          </div>
-        )}
-
         {draft && (
           <NewCommentComposer
             selfName={user?.name || user?.email || "You"}

@@ -44,8 +44,9 @@ import logging
 import re
 from collections.abc import Sequence
 from difflib import SequenceMatcher
-from typing import cast
+from typing import NamedTuple, cast
 
+from markdown_it.common.normalize_url import normalizeLink
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 log = logging.getLogger(__name__)
@@ -89,6 +90,10 @@ _END = -1
 # knob — raise it to orphan more aggressively, lower it to keep more migrated
 # anchors.
 _MIN_PRESERVED = 0.5
+
+# Inline-syntax characters an alignment may span on top of doubling the quote.
+# Sized for stacked marks around a short quote.
+_SUBSEQUENCE_SLACK = 16
 
 # (tag, i1, i2, j1, j2) as returned by SequenceMatcher.get_opcodes().
 _Opcode = tuple[str, int, int, int, int]
@@ -329,6 +334,147 @@ def _snap_to_words(body: str, start: int, end: int) -> tuple[int, int]:
     return start, end
 
 
+# `![alt](dest)`, optionally <>-wrapped with a title. A regex because markdown-it
+# gives source offsets on block tokens only. It also collapses image syntax
+# inside a code fence, which is why the raw search stays its own tier.
+_IMAGE_RE = re.compile(
+    r"!\[(?:\\.|[^\]\\])*\]\(\s*"
+    r"(?:<(?P<angle>(?:\\.|[^<>\\])*)>|(?P<bare>(?:\\.|[^\s()\\]|\([^\s()]*\))*))"
+    r"(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*\)"
+)
+
+
+class _Segment(NamedTuple):
+    """One run of the body and where it landed in the projection. ``literal``
+    runs map position for position, images collapse to their destination."""
+
+    proj_start: int
+    proj_end: int
+    body_start: int
+    body_end: int
+    literal: bool
+
+
+def _project_media(body: str) -> tuple[str, list[_Segment]]:
+    """``body`` with each image reduced to its destination, plus a segment map.
+
+    The editor gives an image its src and nothing else, so a quote spanning text
+    and an image matches only once the body is reduced the same way. The src it
+    holds is markdown-it's normalized link, which is why the destination is
+    normalized here rather than copied.
+    """
+    parts: list[str] = []
+    segments: list[_Segment] = []
+    proj = 0
+    last = 0
+
+    def add(text: str, body_start: int, body_end: int, literal: bool) -> None:
+        nonlocal proj
+        parts.append(text)
+        segments.append(_Segment(proj, proj + len(text), body_start, body_end, literal))
+        proj += len(text)
+
+    for m in _IMAGE_RE.finditer(body):
+        if m.start() > last:
+            add(body[last : m.start()], last, m.start(), True)
+        raw = m.group("angle") if m.group("angle") is not None else m.group("bare")
+        add(normalizeLink(raw), m.start(), m.end(), False)
+        last = m.end()
+    if last < len(body):
+        add(body[last:], last, len(body), True)
+    return "".join(parts), segments
+
+
+def _map_start(segments: Sequence[_Segment], pos: int, body_len: int) -> int:
+    """Projection offset to body offset, opening edge. Any position inside a
+    collapsed image takes the whole image, so a highlight starts at its ``!``
+    rather than part-way through the source."""
+    for seg in segments:
+        if seg.proj_start <= pos < seg.proj_end:
+            if seg.literal:
+                return seg.body_start + (pos - seg.proj_start)
+            return seg.body_start
+    return body_len
+
+
+def _map_end(segments: Sequence[_Segment], pos: int, body_len: int) -> int:
+    """Projection offset to body offset, closing edge. Any position inside a
+    collapsed image takes the whole image. Position 0 needs its own guard, since
+    no segment satisfies ``proj_start < 0``."""
+    if pos <= 0:
+        return 0
+    for seg in segments:
+        if seg.proj_start < pos <= seg.proj_end:
+            if seg.literal:
+                return seg.body_start + (pos - seg.proj_start)
+            return seg.body_end
+    return body_len  # defensive, segments always tile [0, len(projected)]
+
+
+def _map_span(
+    segments: Sequence[_Segment], proj_start: int, proj_end: int, body_len: int
+) -> tuple[int, int]:
+    """A projection span as a body span, both edges expanded over any image
+    they land inside."""
+    return (
+        _map_start(segments, proj_start, body_len),
+        _map_end(segments, proj_end, body_len),
+    )
+
+
+def _subsequence_end(haystack: str, needle: str, start: int, limit: int) -> int | None:
+    """Exclusive end of the shortest run from ``start`` holding all of
+    ``needle`` in order, or None if it needs more than ``limit`` characters."""
+    stop = min(len(haystack), start + limit)
+    consumed = 0
+    pos = start
+    while pos < stop and consumed < len(needle):
+        if haystack[pos] == needle[consumed]:
+            consumed += 1
+        pos += 1
+    return pos if consumed == len(needle) else None
+
+
+def _subsequence_span(haystack: str, needle: str, near: int) -> tuple[int, int] | None:
+    """Tightest span of ``haystack`` holding every character of ``needle`` in
+    order, nearest ``near``, or None when no alignment is convincing.
+
+    A quote drops inline syntax its source keeps (``**bold**`` arrives as
+    ``bold``), so it survives only as a subsequence. The length cap is what
+    keeps a coincidental scatter out. Tightest wins ahead of nearest, since a
+    nearer start can otherwise buy a span several times the quote's length.
+    """
+    if not needle:
+        return None
+    limit = 2 * len(needle) + _SUBSEQUENCE_SLACK
+    # The estimate under-counts by the syntax before the span, so the true start
+    # sits near it. Astral characters can push it either way (see the module
+    # docstring on code points), hence a window rather than a forward scan.
+    lo = max(0, near - limit)
+    hi = min(len(haystack), near + limit)
+    best: tuple[tuple[int, int], tuple[int, int]] | None = None
+    start = haystack.find(needle[0], lo)
+    while start != -1 and start <= hi:
+        end = _subsequence_end(haystack, needle, start, limit)
+        if end is not None:
+            rank = (end - start, abs(start - near))
+            if best is None or rank < best[0]:
+                best = (rank, (start, end))
+        start = haystack.find(needle[0], start + 1)
+    return best[1] if best else None
+
+
+def _nearest_occurrence(haystack: str, needle: str, near: int) -> int | None:
+    starts: list[int] = []
+    idx = haystack.find(needle)
+    while idx != -1:
+        starts.append(idx)
+        idx = haystack.find(needle, idx + 1)
+    if not starts:
+        return None
+    return min(starts, key=lambda s: abs(s - near))
+
+
 def resolve_exact_span(
     body: str, approx_start: int, approx_end: int, quoted_text: str
 ) -> tuple[int, int]:
@@ -344,26 +490,33 @@ def resolve_exact_span(
     with no fuzzy matching, so an already-wrong starting span only ever
     compounds through every future remap.
 
-    Returns the approximate span unchanged if ``quoted_text`` is empty, or
-    isn't found anywhere in ``body`` at all (nothing to correct against —
-    never worse than the caller's own estimate). When ``quoted_text``
-    occurs more than once, picks the occurrence whose start is closest to
-    ``approx_start``: the estimate is off by the syntax overhead *before*
-    the span, so the true position is always nearby, never far.
+    An image reaches the editor as its src alone, so the body is matched in its
+    media projection and the hit mapped back, covering the whole ``![…](…)``.
+    A quote that also drops inline syntax is aligned as a subsequence before
+    giving up.
+
+    Returns the approximate span unchanged when the quote is empty, or when
+    neither the literal search nor the alignment places it. Among several
+    candidates it takes the one starting closest to ``approx_start``: the
+    estimate is off by the syntax overhead *before* the span, so the true
+    position is always nearby, never far.
     """
     if not quoted_text:
         return approx_start, approx_end
     if body[approx_start:approx_end] == quoted_text:
         return approx_start, approx_end  # already exact — no syntax preceded it
-    starts: list[int] = []
-    idx = body.find(quoted_text)
-    while idx != -1:
-        starts.append(idx)
-        idx = body.find(quoted_text, idx + 1)
-    if not starts:
-        return approx_start, approx_end
-    best = min(starts, key=lambda s: abs(s - approx_start))
-    return best, best + len(quoted_text)
+    projected, segments = _project_media(body)
+    if projected != body:
+        hit = _nearest_occurrence(projected, quoted_text, approx_start)
+        if hit is not None:
+            return _map_span(segments, hit, hit + len(quoted_text), len(body))
+    best = _nearest_occurrence(body, quoted_text, approx_start)
+    if best is not None:
+        return best, best + len(quoted_text)
+    aligned = _subsequence_span(projected, quoted_text, approx_start)
+    if aligned is not None:
+        return _map_span(segments, aligned[0], aligned[1], len(body))
+    return approx_start, approx_end
 
 
 def remap_range(

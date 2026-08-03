@@ -127,7 +127,9 @@
   color: var(--text-03);
 }
 
-/* Lists. */
+/* Lists. Native markers, so a nested list stays a block below its parent and an
+   ordered list keeps its `start`. Both depend on the item remaining a
+   `list-item`, which is why the marker is not a flex child here. */
 .editor-prose ul {
   list-style: disc;
   padding-left: 1.5rem;
@@ -151,7 +153,7 @@
    TaskItem renders that and nothing else, no `data-type`. */
 .editor-prose ul[data-type="taskList"] > li[data-checked] {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 0.5rem;
 }
 /* A plain item in a task list. The list itself is `list-style: none` for the
@@ -300,10 +302,21 @@
    small name tag above it. */
 .editor-prose .ProseMirror-yjs-cursor {
   position: relative;
-  margin-left: -1px;
-  margin-right: -1px;
+  /* The bar is the ::before because this element's height follows the line box,
+     which an image stretches. The per-user color lands inline here, so the
+     ::before inherits it. */
+  z-index: 1; /* the image is positioned and would paint over the caret */
+}
+.editor-prose .ProseMirror-yjs-cursor::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -1px;
+  /* Font-relative so the caret tracks whatever type size it sits in, which the
+     prose line-height alone does not. */
+  height: 1.3em;
   border-left: 2px solid;
-  border-left-style: solid;
+  border-left-color: inherit;
 }
 .editor-prose .ProseMirror-yjs-cursor div {
   position: absolute;
@@ -320,6 +333,12 @@
   opacity: 0.3;
 }
 
+/* A draggable node is not user-selectable by default, so a selection covering
+   media would leave it untinted. */
+.editor-prose [draggable][contenteditable="false"] {
+  user-select: text;
+}
+
 /* Inline image node (lib/editor/images.ts). The NodeView renders this raw
    token-styled DOM directly, so unlike every construct above these classes
    are set by that view, not by ProseMirror's default rendering. Width comes
@@ -330,7 +349,7 @@
   display: inline-block;
   max-width: 100%;
   line-height: 0;
-  vertical-align: bottom;
+  vertical-align: baseline;
 }
 .editor-prose .editor-image-img {
   display: block;
@@ -400,7 +419,7 @@
   display: inline-block;
   width: 140px;
   height: 100px;
-  vertical-align: bottom;
+  vertical-align: baseline;
   border-radius: var(--radius-08);
   background: var(--background-tint-02);
   animation: editor-image-pulse 1.2s ease-in-out infinite;
