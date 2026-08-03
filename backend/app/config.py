@@ -77,6 +77,11 @@ class Config(BaseModel):
     # no-op. Populates the store for the cosine cold-start / two-tower warm
     # filter that lands in later phases.
     ingest_embed_model: str
+    # How many entity-type extraction / naming LLM calls run at once during a derivation.
+    # Operator-tunable because the ceiling is the PROVIDER's rate limit, not this code: each
+    # call can carry ~47k input tokens, and this pool sits inside a queue task, so the real
+    # concurrency is the queue's own worker count multiplied by this. Lower it on a lower tier.
+    entity_type_derive_workers: int = 8
 
     # Relevance filter (drops irrelevant candidate pages before the LLM reconcile).
     # Empty model path => cosine cold-start filter; a path to an exported two-tower
@@ -208,6 +213,7 @@ def load_config() -> Config:
         ingest_bm25_limit=_positive_int("INGEST_BM25_LIMIT", 20),
         ingest_irrelevant_stop_n=_positive_int("INGEST_IRRELEVANT_STOP_N", 2),
         ingest_embed_model=os.environ.get("INGEST_EMBED_MODEL", "text-embedding-3-small"),
+        entity_type_derive_workers=_positive_int("ENTITY_TYPE_DERIVE_WORKERS", 8),
         ingest_relevance_two_tower_model_path=os.environ.get("INGEST_RELEVANCE_TWO_TOWER_MODEL_PATH", ""),
         # Cosine cold-start default: the study's 85%-filter operating point.
         ingest_relevance_cosine_threshold=_nonneg_float(
