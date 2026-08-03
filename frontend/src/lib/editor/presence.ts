@@ -11,28 +11,9 @@ import { Extension } from "@tiptap/core";
 import { yCursorPlugin } from "@tiptap/y-tiptap";
 import type { Awareness } from "y-protocols/awareness";
 
-/** Opal-ish hues that read on both themes, one per peer slot — ported
- * verbatim from `lib/editor/constants.ts`. */
-const PEER_COLORS = [
-  "#e5484d",
-  "#0090ff",
-  "#30a46c",
-  "#f76b15",
-  "#8e4ec6",
-  "#e5b000",
-  "#00a2c7",
-  "#e93d82",
-];
-
-/** Deterministically map a `userId` to a color from `PEER_COLORS` so a given
- * peer keeps the same color for the full session — ported verbatim from
- * `lib/editor/utils.ts`. */
-export function colorFor(userId: string): string {
-  let h = 0;
-  for (let i = 0; i < userId.length; i++)
-    h = (h * 31 + userId.charCodeAt(i)) | 0;
-  return PEER_COLORS[Math.abs(h) % PEER_COLORS.length]!;
-}
+// Re-exported so existing importers keep working; the definition lives in one
+// place because the caret and the presence chip must agree (see identityColor).
+export { colorFor } from "@/lib/editor/identityColor";
 
 /** Registers `yCursorPlugin` — renders every other client's caret/selection
  * from `awareness`'s shared state as a `Decoration.widget` (colored bar +

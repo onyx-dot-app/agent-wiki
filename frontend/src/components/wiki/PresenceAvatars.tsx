@@ -24,6 +24,7 @@ import {
   PolicyPopover,
   type OpenUpdatesPanelOpts,
 } from "@/components/wiki/policyPanels";
+import { colorFor } from "@/lib/editor/identityColor";
 import { relativeTime } from "@/lib/users";
 import { fetchFileHistory } from "@/lib/wiki/svc";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
@@ -36,14 +37,6 @@ import type { DocumentActivity } from "@/types";
 // Identity hues cycled per user. Semantic hues stay reserved: red/green/
 // orange for status, blue/amber/sky for selection. The mock's mint/coral/
 // violet have no Opal tokens, so the cycle substitutes shipped hues.
-const USER_COLORS = [
-  "var(--neon-cyan-50)",
-  "var(--neon-yellow-50)",
-  "var(--neon-lime-60)",
-  "var(--neon-magenta-50)",
-  "var(--purple-50)",
-];
-
 const MAX_CHIPS = 5;
 
 function agentGlyph(name: string | null): IconFunctionComponent | null {
@@ -345,7 +338,7 @@ export function PresenceAvatars({
     ): PresenceEntry => ({
       userId,
       display,
-      color: USER_COLORS[i % USER_COLORS.length],
+      color: colorFor(userId),
       editing,
       agentName,
       caretHead: caretByUser.get(userId) ?? null,
