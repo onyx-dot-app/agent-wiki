@@ -667,3 +667,21 @@ def test_blocking_active_session_path(repo):
     assert coedit.blocking_active_session_path("guides/new-home.md") == "guides/new-home.md"
     assert coedit.blocking_active_session_path("guides") == "guides/new-home.md"
     assert coedit.blocking_active_session_path("other") is None
+
+
+def test_implausible_growth_guard() -> None:
+    """The backstop for any route to a doubled document the lineage rule
+    doesn't cover: a couple of update rows can add a paragraph, not a second
+    copy of the page."""
+    from app.wiki.coedit_checkpoint import _implausible_growth
+
+    page = "x" * 8000
+    assert _implausible_growth(page, page * 2, updates=1)
+    assert _implausible_growth(page, page * 2, updates=3)
+
+    # Ordinary editing is untouched: a big append over many updates, a small
+    # page (a paste can legitimately dwarf it), and normal growth all pass.
+    assert not _implausible_growth(page, page * 2, updates=4)
+    assert not _implausible_growth("tiny", "tiny" * 50, updates=1)
+    assert not _implausible_growth(page, page + "a new paragraph", updates=1)
+    assert not _implausible_growth(page, page[:100], updates=1)

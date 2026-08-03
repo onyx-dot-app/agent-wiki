@@ -52,6 +52,29 @@ log = logging.getLogger(__name__)
 # completely fresh by the next trigger.
 _LATE_UPDATE_FOLD_ATTEMPTS = 3
 
+# Growth a handful of update rows cannot legitimately produce. A Yjs update
+# carries the edits one client made, so a couple of them can add a paragraph,
+# not a second copy of the page — doubling means the document is holding the
+# same content twice under two CRDT lineages that share no item ids and
+# therefore cannot dedupe (`open_session`'s reuse rule exists to prevent that
+# happening in the first place; this is the backstop for any other route to
+# it). The bound is deliberately loose in both directions so that ordinary
+# editing never trips it: a paste into a small page is exempted by the floor,
+# and a long typing burst is exempted by the row count.
+_GROWTH_FACTOR_LIMIT = 2.0
+_GROWTH_FLOOR_BYTES = 4096
+_GROWTH_MAX_UPDATES = 3
+
+
+def _implausible_growth(base_body: str, body: str, updates: int) -> bool:
+    """Whether ``body`` grew by more than a whole copy of ``base_body`` in too
+    few updates to explain it. Only ever *declines* to commit — a false
+    positive costs one deferred checkpoint (the session stays dirty and the
+    next trigger retries), a false negative costs a corrupted page."""
+    if updates > _GROWTH_MAX_UPDATES or len(base_body) < _GROWTH_FLOOR_BYTES:
+        return False
+    return len(body) >= len(base_body) * _GROWTH_FACTOR_LIMIT
+
 
 def _user(user_id: str) -> User | None:
     row = users_repo.get_by_id(user_id)
@@ -271,6 +294,18 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         body = base_body
         for attempt in range(_LATE_UPDATE_FOLD_ATTEMPTS):
             body = markdown_splice.checkpoint_body(base_body, doc, tracker)
+            if _implausible_growth(base_body, body, replayed_seq - sess.ydoc_checkpointed_seq):
+                log.error(
+                    "coedit checkpoint: refusing to commit implausible growth for %s "
+                    "(session %s): %d -> %d bytes across %d update(s); leaving the "
+                    "session dirty rather than committing likely-duplicated content",
+                    path,
+                    session_id,
+                    len(base_body),
+                    len(body),
+                    replayed_seq - sess.ydoc_checkpointed_seq,
+                )
+                return None
             message = _commit_message(session_id, primary_author_id=primary_id)
 
             # System-initiated write: editors' write permission was already

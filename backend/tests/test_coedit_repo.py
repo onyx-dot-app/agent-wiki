@@ -521,3 +521,74 @@ def test_deleting_an_author_keeps_their_updates(users):
     # The watermark still describes a log that is actually all there.
     fetched = coedit.get_active_session(_PATH)
     assert fetched is not None and fetched.ydoc_seq == 2
+
+
+def _close_clean(session_id: int) -> None:
+    """Close a session the way the abandoned-session scan does: clean (every
+    update committed) and with nobody attached."""
+    with db_session() as s:
+        s.execute(
+            update(CoeditSession)
+            .where(CoeditSession.id == session_id)
+            .values(status="closed")
+        )
+
+
+def test_open_session_reactivates_a_matching_closed_session(users):
+    """A closed session whose document still describes the committed page is
+    reactivated rather than replaced.
+
+    Replacing it would seed a new Yjs lineage from markdown, and a client that
+    reconnects still holding the old lineage answers the server's sync offer
+    with its whole document — which cannot dedupe against content carrying
+    different item ids, so the page ends up in the doc twice.
+    """
+    first = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.set_initial_snapshot(first.id, b"snap0", "hello")
+    _close_clean(first.id)
+
+    again = coedit.open_session(_PATH, base_sha="sha1")
+    assert again.id == first.id
+    assert again.status == "active"
+    kept = coedit.get_session_for_checkpoint(again.id)
+    assert kept is not None and kept.ydoc_snapshot == b"snap0"
+    assert count_rows(CoeditSession) == 1
+
+
+def test_open_session_does_not_reuse_when_the_page_moved_on(users):
+    """A commit since that session's last checkpoint means its document no
+    longer describes the page, so it must not be revived."""
+    first = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.set_initial_snapshot(first.id, b"snap0", "hello")
+    _close_clean(first.id)
+
+    again = coedit.open_session(_PATH, base_sha="sha2")
+    assert again.id != first.id
+    assert again.base_sha == "sha2"
+    assert count_rows(CoeditSession) == 2
+
+
+def test_open_session_does_not_reuse_a_dirty_or_snapshotless_session(users):
+    # Never seeded — no lineage to preserve, nothing to reuse.
+    bare = coedit.open_session(_PATH, base_sha="sha1")
+    _close_clean(bare.id)
+    after_bare = coedit.open_session(_PATH, base_sha="sha1")
+    assert after_bare.id != bare.id
+
+    # Dirty: holds updates that were never committed. Reviving it would
+    # resurrect them against a page state nobody verified.
+    coedit.set_initial_snapshot(after_bare.id, b"snap0", "hello")
+    coedit.apply_update(after_bare.id, update_bytes=b"upd", author_user_id="usr_a")
+    _close_clean(after_bare.id)
+    after_dirty = coedit.open_session(_PATH, base_sha="sha1")
+    assert after_dirty.id != after_bare.id
+
+
+def test_open_session_ignores_a_closed_session_on_another_path(users):
+    other = coedit.open_session("guides/other.md", base_sha="sha1")
+    coedit.set_initial_snapshot(other.id, b"snap0", "hello")
+    _close_clean(other.id)
+
+    mine = coedit.open_session(_PATH, base_sha="sha1")
+    assert mine.id != other.id
+    assert mine.path == _PATH

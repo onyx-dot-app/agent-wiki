@@ -1442,3 +1442,40 @@ def test_a_foreign_src_set_on_a_live_node_is_not_serialized() -> None:
         image.attributes["src"] = "https://evil.example.com/t.png"  # pyright: ignore[reportArgumentType]
 
     assert "evil.example.com" not in reconstruct_body(doc)
+
+
+def test_two_seeds_of_one_body_share_no_lineage() -> None:
+    """Seeding the same markdown twice produces documents that are textually
+    identical and, to Yjs, entirely unrelated.
+
+    This is why a session's document identity has to survive a reconnect (see
+    `coedit.open_session`'s reuse rule). Yjs merges by item id — `(client_id,
+    clock)` — never by content, and `Doc()` mints a random client id per
+    instance. So a client still holding the first lineage answers the second
+    one's sync offer with its whole document, and the two copies cannot
+    collapse into each other: the page ends up in the doc twice, and each
+    further cycle doubles it again.
+    """
+    body = "- A\n\n- B\n\n- C\n"
+    client_doc = seed_doc_from_markdown(body)
+    server_doc = seed_doc_from_markdown(body)
+    assert client_doc.client_id != server_doc.client_id
+
+    # Exactly what the browser sends when it answers the server's SYNC_STEP1:
+    # every update the server's state vector says it is missing.
+    reply = client_doc.get_update(server_doc.get_state())
+    server_doc.apply_update(reply)
+
+    assert reconstruct_body(server_doc) == body + body  # the bug, made explicit
+
+
+def test_a_shared_lineage_survives_the_same_exchange() -> None:
+    """The same exchange against the *same* lineage is a no-op — which is what
+    reusing the session's existing snapshot buys."""
+    body = "- A\n\n- B\n\n- C\n"
+    server_doc = seed_doc_from_markdown(body)
+    client_doc = Doc()
+    client_doc.apply_update(server_doc.get_update())  # synced, as a real client is
+
+    server_doc.apply_update(client_doc.get_update(server_doc.get_state()))
+    assert reconstruct_body(server_doc) == body
