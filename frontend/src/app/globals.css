@@ -159,6 +159,33 @@ body {
   overflow: clip;
 }
 
+/* Doc scroller: thumb only, no track. A full-height rail down the page reads as
+   a border rather than a scroll affordance, and it appears on any system set to
+   show scroll bars always (an overlay-scrollbar system never paints the track,
+   so this is invisible there). Still the native scrollbar, restyled — the
+   `::-webkit-*` pair is the fallback for engines that don't honour the standard
+   properties; where both are understood the standard ones win.
+   `.panel-anchored` hides this bar entirely in favour of EditorEdgeScrollbar
+   (see below). */
+.editor-prose::-webkit-scrollbar {
+  width: 0.625rem;
+}
+.editor-prose::-webkit-scrollbar-track {
+  background: transparent;
+}
+.editor-prose::-webkit-scrollbar-thumb {
+  background: var(--border-04);
+  border-radius: var(--radius-04);
+  /* Inset the thumb off both edges without shrinking the hit area. */
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.editor-prose {
+  scrollbar-width: thin;
+  /* thumb, then track */
+  scrollbar-color: var(--border-04) transparent;
+}
+
 /* ── Doc panel tab transitions ────────────────────────────────────────────
    Enter-only fade + directional slide for the incoming tab surface, matched
    to the underline indicator's travel (DocPanel keys the body by tab). No
