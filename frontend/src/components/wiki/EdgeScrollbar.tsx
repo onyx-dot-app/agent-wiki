@@ -152,7 +152,7 @@ export function EdgeScrollbar({
     >
       <div
         ref={thumbRef}
-        className="mx-auto w-[6px] rounded-full bg-(--text-02) hover:bg-(--text-04)"
+        className="mx-auto w-[6px] rounded-full bg-(--alpha-grey-100-30) hover:bg-(--text-02)"
       />
     </div>
   );
