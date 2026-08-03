@@ -35,6 +35,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { ApiError } from "@/lib/api";
+import { colorFor } from "@/lib/editor/identityColor";
 import { opaqueId } from "@/lib/editor/ids";
 import {
   checkpointSession,
@@ -74,8 +75,15 @@ const SAVE_RETRY_MS = 3000;
 const SAVE_RETRY_LIMIT = 10;
 
 export interface CoeditPeer {
+  /** Awareness client id — one per live connection, so two tabs from the
+   * same user are two peers. Only the local connection is excluded. */
+  client_id: number;
   user_id: string;
   user_display: string;
+  /** The identity colour this connection advertises for its caret
+   * (`components.tsx` sets it via `sessionColorFor`) — presence chips show
+   * the same value so caret and chip always agree. */
+  color: string;
   /** ProseMirror document positions (not markdown character offsets) —
    * pass directly to `CoeditorHandle.scrollToOffset`. `null` when the
    * peer's cursor can't currently be resolved (e.g. it points at content
@@ -171,7 +179,9 @@ function derivePeers(editor: Editor, awareness: Awareness): CoeditPeer[] {
   awareness.getStates().forEach((state, clientId) => {
     if (clientId === awareness.clientID) return; // never render self as a peer
     const user = (
-      state as { user?: { id?: string; name?: string } } | undefined
+      state as
+        | { user?: { id?: string; name?: string; color?: string } }
+        | undefined
     )?.user;
     const cursor = (
       state as { cursor?: { anchor: unknown; head: unknown } } | undefined
@@ -194,8 +204,10 @@ function derivePeers(editor: Editor, awareness: Awareness): CoeditPeer[] {
       );
     }
     peers.push({
+      client_id: clientId,
       user_id: user.id,
       user_display: user.name ?? "Anonymous",
+      color: user.color ?? colorFor(user.id),
       anchor,
       head,
     });

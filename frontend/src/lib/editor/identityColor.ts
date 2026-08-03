@@ -8,8 +8,11 @@
  * in one module is what makes that true; two lists drift the moment either
  * side is edited.
  *
- * Keyed on `userId`, never on a position in a list: a peer's colour has to
- * hold still while other people come and go around them.
+ * Keyed on stable ids, never on a position in a list: a peer's colour has
+ * to hold still while other people come and go around them. Live sessions
+ * key on `userId` + client id (`sessionColorFor`) so the same user's two
+ * tabs are two distinguishable carets/chips; everything without a live
+ * connection keys on `userId` alone.
  */
 
 /** Opal tokens rather than literals, per CLAUDE.md. */
@@ -30,4 +33,12 @@ export function colorFor(userId: string): string {
   for (let i = 0; i < userId.length; i++)
     h = (h * 31 + userId.charCodeAt(i)) | 0;
   return IDENTITY_COLORS[Math.abs(h) % IDENTITY_COLORS.length]!;
+}
+
+/** A stable colour for one live session — a user's two tabs are two
+ * sessions, each with its own caret and chip colour. `clientId` is the
+ * connection's Yjs Awareness client id, so the colour holds for the life of
+ * the connection (a reconnect re-rolls it, on both surfaces together). */
+export function sessionColorFor(userId: string, clientId: number): string {
+  return colorFor(`${userId}:${clientId}`);
 }

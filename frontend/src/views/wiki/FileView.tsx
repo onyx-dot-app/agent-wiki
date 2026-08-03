@@ -18,7 +18,6 @@ import { cn } from "@onyx-ai/opal/utils";
 import {
   SvgChevronLeft,
   SvgChevronRight,
-  SvgExternalLink,
   SvgDocFile,
   SvgDownload,
   SvgFolder,
@@ -55,12 +54,7 @@ import { CommentMarginRail } from "@/components/wiki/CommentMarginRail";
 import { PresenceAvatars } from "@/components/wiki/PresenceAvatars";
 import { toast } from "@/hooks/useToast";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
-import { craftFailureMessage } from "@/lib/craft";
-import {
-  closeSession,
-  useAgentSessions,
-  type AgentSessionSummary,
-} from "@/lib/launchers";
+import { closeSession, useAgentSessions } from "@/lib/launchers";
 import { apiFetch } from "@/lib/api";
 import { deleteTrigger, useTriggers, type Trigger } from "@/lib/triggers";
 import { wikiHref, resolveIds, revalidateWiki } from "@/lib/wikiHref";
@@ -77,7 +71,6 @@ import { CoeditPresenceBar, TiptapEditor } from "@/lib/editor/components";
 import { useCoeditSession } from "@/lib/editor/hooks";
 import type { CoeditorHandle } from "@/lib/editor/types";
 import {
-  useAgentsBarHost,
   useHeaderActionsHost,
   useHeaderCrumbHost,
   useRightPanelHost,
@@ -90,7 +83,7 @@ import {
   setDraftTemplate,
   type DocumentTemplateSummary,
 } from "@/lib/templates";
-import { absoluteTime, longDateTime, relativeTime } from "@/lib/time";
+import { longDateTime, relativeTime } from "@/lib/time";
 import { useIsMobile } from "@/lib/viewport";
 import {
   downloadMarkdownExport,
@@ -163,7 +156,6 @@ export function FileView({ path }: FileViewProps) {
   const isMobile = useIsMobile();
   const host = useHeaderActionsHost();
   const crumbHost = useHeaderCrumbHost();
-  const agentsBarHost = useAgentsBarHost();
   const rightHost = useRightPanelHost();
   const { isActivitiesOpen, toggleActivities } = useLeftPanel();
   const { setDrafting, requestExpand } = useDrafting();
@@ -572,12 +564,8 @@ export function FileView({ path }: FileViewProps) {
     [],
   );
 
-  // Active-agents panel (collapsible chip near the top of the doc).
-  // We always know the count (so the chip can label "Active agents (N)"),
-  // but the entry list only renders when the user expands it.
-  const [agentsOpen, setAgentsOpen] = useState(false);
+  // Agent activity rows feeding the presence avatar cluster.
   const [agents, setAgents] = useState<DocumentActivity[]>([]);
-  const [agentsError, setAgentsError] = useState<string | null>(null);
   // Inline template gallery state. We show clickable cards above the
   // editor whenever the draft is "empty enough" — either truly blank
   // or still matching the body of the template the user just applied
@@ -656,19 +644,18 @@ export function FileView({ path }: FileViewProps) {
     setCommits(null);
   }, [loadLatest]);
 
-  // Active external agent sessions on this page — surfaced in the
-  // Active agents bar alongside read/write activity.
+  // Active external agent sessions on this page — surfaced as presence
+  // chips alongside read/write activity.
   const { sessions: agentSessions, refresh: refreshSessions } =
     useAgentSessions(path);
   const activeSessions = agentSessions.filter(
     (s) =>
       s.status === "active" ||
       s.status === "idle" ||
-      // Onyx Craft (in_app) lifecycle states worth surfacing on the page.
+      // Onyx Craft (in_app) live states get a presence chip; failures are
+      // CraftNotifier's toast, not a lingering avatar.
       (s.tool_id === "onyx-craft" &&
-        (s.status === "provisioning" ||
-          s.status === "ready" ||
-          s.status === "failed")),
+        (s.status === "provisioning" || s.status === "ready")),
   );
 
   const handleCloseSession = useCallback(
@@ -754,30 +741,39 @@ export function FileView({ path }: FileViewProps) {
     return () => setDrafting(null);
   }, [setDrafting]);
 
+  // Only the newest in-flight activity request may write the roster. The
+  // monotonic id also covers navigation (A → B → A with A's first request
+  // still pending): every path change fires a refresh, so any older
+  // request — same path or not — fails the id check and is dropped.
+  const agentsRequestRef = useRef(0);
+
   const refreshAgents = useCallback(() => {
-    setAgentsError(null);
+    const requestId = ++agentsRequestRef.current;
     apiFetch<DocumentActivityResponse>(
       `/wiki/file/activity?path=${encodeURIComponent(path)}`,
     )
-      .then((r) => setAgents(r.agents))
-      .catch((e) =>
-        setAgentsError(
-          e instanceof Error ? e.message : "failed to load activity",
-        ),
-      );
+      .then((r) => {
+        if (agentsRequestRef.current !== requestId) return;
+        setAgents(r.agents);
+      })
+      // Presence is ambient — on a failed refresh keep showing the page's
+      // last known roster rather than surfacing an error.
+      .catch(() => undefined);
   }, [path]);
 
   useEffect(() => {
+    // A new path starts from an empty roster: nothing from the previous
+    // page may linger while its own fetch is in flight or failing.
+    setAgents([]);
     refreshAgents();
-    setAgentsOpen(false);
-    // Refresh on window focus so the chip count tracks reality after
+    // Refresh on window focus so the cluster tracks reality after
     // the user comes back from another tab. The endpoint is cheap.
     function onFocus() {
       refreshAgents();
     }
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [refreshAgents]);
+  }, [path, refreshAgents]);
 
   const refreshHistory = useCallback(async () => {
     setHistoryError(null);
@@ -1045,7 +1041,10 @@ export function FileView({ path }: FileViewProps) {
             peers={coedit.peers}
             typing={coedit.typing}
             myUserId={user?.id ?? null}
+            myUserDisplay={user?.name ?? null}
             agents={agents}
+            sessions={activeSessions}
+            onCloseSession={(id) => void handleCloseSession(id)}
             onScrollToOffset={(offset) =>
               coeditorRef.current?.scrollToOffset(offset)
             }
@@ -1246,19 +1245,6 @@ export function FileView({ path }: FileViewProps) {
         versionChip &&
         crumbHost?.el &&
         createPortal(versionChip, crumbHost.el)}
-
-      {agentsBarHost?.el &&
-        createPortal(
-          <ActiveAgentsBar
-            agents={agents}
-            sessions={activeSessions}
-            error={agentsError}
-            open={agentsOpen}
-            onToggle={() => setAgentsOpen((v) => !v)}
-            onCloseSession={handleCloseSession}
-          />,
-          agentsBarHost.el,
-        )}
 
       {/* The margin-comments lane overlays the right 360px of the doc area
           while every centered block reserves that width via .rail-reserved
@@ -1525,203 +1511,6 @@ export function FileView({ path }: FileViewProps) {
         </div>
       )}
     </main>
-  );
-}
-
-interface ActiveAgentsBarProps {
-  agents: DocumentActivity[];
-  sessions: AgentSessionSummary[];
-  error: string | null;
-  open: boolean;
-  onToggle: () => void;
-  onCloseSession: (id: string) => void;
-}
-
-function ActiveAgentsBar({
-  agents,
-  sessions,
-  error,
-  open,
-  onToggle,
-  onCloseSession,
-}: ActiveAgentsBarProps) {
-  const count = agents.length + sessions.length;
-  const expandable = count > 0;
-  return (
-    <div className="mb-3 overflow-hidden rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01)">
-      <button
-        onClick={expandable ? onToggle : undefined}
-        aria-expanded={expandable ? open : undefined}
-        disabled={!expandable}
-        className={cn(
-          "flex w-full items-center gap-2 border-none bg-transparent px-3 py-2 text-left text-[13px]",
-          expandable
-            ? "cursor-pointer text-(--text-05)"
-            : "cursor-default text-(--text-03)",
-        )}
-      >
-        <span
-          aria-hidden
-          className={cn(
-            "flex shrink-0 transition-transform duration-[120ms] ease-in-out",
-            open ? "rotate-90" : "rotate-0",
-            !expandable ? "text-(--text-02)" : "text-(--text-03)",
-          )}
-        >
-          <SvgChevronRight size={10} />
-        </span>
-        <span className="font-medium">
-          {expandable ? "Active agents" : "No agents active"}
-        </span>
-        {expandable && (
-          <span className="rounded-full bg-(--background-tint-03) px-[6px] py-[1px] text-[11px] font-semibold text-(--text-05)">
-            {count}
-          </span>
-        )}
-        {error && (
-          <span className="ml-auto text-xs text-(--status-text-error-05)">
-            {error}
-          </span>
-        )}
-      </button>
-      {expandable && open && (
-        <ul className="m-0 list-none border-t border-(--border-01) bg-(--background-tint-00) p-0">
-          {sessions.map((s, i) => (
-            <ActiveSessionRow
-              key={s.id}
-              s={s}
-              isLast={agents.length === 0 && i === sessions.length - 1}
-              onClose={() => onCloseSession(s.id)}
-            />
-          ))}
-          {agents.map((a, i) => (
-            <ActiveAgentRow
-              key={`${a.owner_display}-${a.agent_name ?? ""}-${
-                a.activity
-              }-${i}`}
-              a={a}
-              isLast={i === agents.length - 1}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-interface ActiveAgentRowProps {
-  a: DocumentActivity;
-  isLast: boolean;
-}
-
-function ActiveAgentRow({ a, isLast }: ActiveAgentRowProps) {
-  return (
-    <li
-      className={cn(
-        "flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap",
-        !isLast && "border-b border-(--border-01)",
-      )}
-    >
-      <span className="shrink-0 rounded-(--radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
-        {a.activity}
-      </span>
-
-      <span className="shrink-0 font-medium text-(--text-05)">
-        {a.owner_display}
-      </span>
-      {a.agent_name ? (
-        <span className="shrink-0 text-(--text-03)">
-          {"·"} {a.agent_name}
-        </span>
-      ) : null}
-
-      {a.description ? (
-        <span
-          className="min-w-0 grow overflow-hidden text-ellipsis text-(--text-04) italic"
-          title={a.description}
-        >
-          {"“"}
-          {a.description}
-          {"”"}
-        </span>
-      ) : (
-        <span className="flex-1" />
-      )}
-
-      <span
-        className="shrink-0 text-[11px] text-(--text-02)"
-        title={`Started ${absoluteTime(
-          a.registered_at,
-        )} · Expires ${absoluteTime(a.expires_at)}`}
-      >
-        {relativeTime(a.registered_at, "short")} {"·"} expires{" "}
-        {relativeTime(a.expires_at, "short")}
-      </span>
-    </li>
-  );
-}
-
-interface ActiveSessionRowProps {
-  s: AgentSessionSummary;
-  isLast: boolean;
-  onClose: () => void;
-}
-
-function ActiveSessionRow({ s, isLast, onClose }: ActiveSessionRowProps) {
-  return (
-    <li
-      className={cn(
-        "flex items-center gap-[10px] overflow-hidden px-3 py-[10px] text-[13px] whitespace-nowrap",
-        !isLast && "border-b border-(--border-01)",
-      )}
-    >
-      <span className="shrink-0 rounded-(--radius-04) bg-(--background-tint-03) px-[6px] py-[1px] text-[10px] font-semibold tracking-[0.3px] text-(--text-05) uppercase">
-        {s.status}
-      </span>
-
-      <span className="shrink-0 font-medium text-(--text-05)">{s.tool_id}</span>
-
-      {s.tool_id === "onyx-craft" && s.status === "failed" ? (
-        <span
-          className="min-w-0 grow overflow-hidden text-ellipsis text-(--status-text-error-05)"
-          title={craftFailureMessage(s.failure_reason)}
-        >
-          {craftFailureMessage(s.failure_reason)}
-        </span>
-      ) : (
-        <>
-          <span className="flex-1" />
-          <span
-            className="shrink-0 text-[11px] text-(--text-02)"
-            title={`Started ${absoluteTime(s.started_at)}`}
-          >
-            started {relativeTime(s.started_at, "short")}
-          </span>
-        </>
-      )}
-
-      {s.tool_id === "onyx-craft" && s.status === "ready" && s.external_url && (
-        <Button
-          type="button"
-          variant="default"
-          size="sm"
-          icon={SvgExternalLink}
-          onClick={() =>
-            window.open(
-              s.external_url as string,
-              "_blank",
-              "noopener,noreferrer",
-            )
-          }
-        >
-          Open Craft
-        </Button>
-      )}
-
-      <Button type="button" variant="default" size="sm" onClick={onClose}>
-        Close
-      </Button>
-    </li>
   );
 }
 
