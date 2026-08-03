@@ -844,6 +844,13 @@ def derive(
             "n_groups": len(groups),
             "n_types_named": len(collapsed),
             "n_types": len(final),
+            # Share of typed referents under the single largest type. A taxonomy is a key space,
+            # so this is the number that says whether it discriminates: a label most referents
+            # share carries almost no information for a consumer, however sound its definition.
+            # Recorded because it is otherwise only visible by inspecting the type list by hand.
+            "largest_type_share": (
+                round(max(t.n_referents for t in final) / len(surviving), 3) if final else 0.0
+            ),
         },
         "entity_types": [t.model_dump() for t in final],
     }
@@ -871,6 +878,12 @@ def run_derivation(
     artifact = derive(pages, model=model)
 
     stats = artifact["stats"]
+    if stats.get("largest_type_share", 0) >= 0.4:
+        log.warning(
+            "entity_types: the largest type holds %.0f%% of typed referents — a label that many "
+            "share tells a consumer little; the taxonomy may be over-merged",
+            100 * stats["largest_type_share"],
+        )
     log.info(
         "entity_types: %d mention(s) -> %d referent(s) -> %d typed -> %d type(s)",
         stats["n_mentions"],

@@ -765,3 +765,99 @@ class TestMergeConvergence:
         messages = " ".join(r.getMessage() for r in caplog.records)
         assert "50 -> 30" in messages and "30 -> 12" in messages
         assert "converged" in messages
+
+
+class TestLargestTypeShare:
+    """A taxonomy is a key space, so the share held by its biggest type is what says whether it
+    discriminates. The recorded run had 51% under one type and nothing reported it."""
+
+    def test_share_is_recorded(self, monkeypatch) -> None:
+        artifact = self._derive(monkeypatch, sizes=[6, 3, 1])
+
+        assert artifact["stats"]["largest_type_share"] == 0.6
+
+    def test_a_dominant_type_warns(self, monkeypatch, caplog) -> None:
+        from app.ingest import entity_types
+
+        monkeypatch.setattr(entity_types, "read_corpus", lambda prefix="": [("a.md", "b")])
+        monkeypatch.setattr(entity_types, "store_taxonomy", lambda a, triggered_by=None: 1)
+        monkeypatch.setattr(
+            entity_types,
+            "derive",
+            lambda pages, model=None: {
+                "entity_types": [{"name": "software", "definition": "d"}],
+                "stats": {
+                    "n_mentions": 1,
+                    "n_referents": 1,
+                    "n_typed": 1,
+                    "n_types": 1,
+                    "largest_type_share": 0.51,
+                },
+            },
+        )
+        monkeypatch.setattr(entity_types, "get_llm_settings", lambda: _Settings())
+
+        with caplog.at_level("WARNING"):
+            entity_types.run_derivation()
+
+        assert any("51% of typed referents" in r.getMessage() for r in caplog.records)
+
+    def test_a_balanced_taxonomy_does_not_warn(self, monkeypatch, caplog) -> None:
+        from app.ingest import entity_types
+
+        monkeypatch.setattr(entity_types, "read_corpus", lambda prefix="": [("a.md", "b")])
+        monkeypatch.setattr(entity_types, "store_taxonomy", lambda a, triggered_by=None: 1)
+        monkeypatch.setattr(
+            entity_types,
+            "derive",
+            lambda pages, model=None: {
+                "entity_types": [{"name": "software", "definition": "d"}],
+                "stats": {
+                    "n_mentions": 1,
+                    "n_referents": 1,
+                    "n_typed": 1,
+                    "n_types": 1,
+                    "largest_type_share": 0.25,
+                },
+            },
+        )
+        monkeypatch.setattr(entity_types, "get_llm_settings", lambda: _Settings())
+
+        with caplog.at_level("WARNING"):
+            entity_types.run_derivation()
+
+        assert not any("typed referents" in r.getMessage() for r in caplog.records)
+
+    @staticmethod
+    def _derive(monkeypatch, *, sizes: list[int]) -> dict:
+        """Drive derive() with stubbed LLM stages so only the arithmetic is under test."""
+        from app.ingest import entity_types
+        from app.ingest.entity_types import EntityType, Mention
+
+        total = sum(sizes)
+        monkeypatch.setattr(
+            entity_types,
+            "extract_page",
+            lambda path, body, model=None: [
+                Mention(surface=f"r{i}", page=path) for i in range(total)
+            ],
+        )
+        monkeypatch.setattr(entity_types, "_leader_cluster", lambda unit, order, sim: [order])
+        monkeypatch.setattr(
+            entity_types,
+            "name_group",
+            lambda group, model=None: [
+                EntityType(name=f"t{n}", definition="d", n_referents=size, n_docs=1)
+                for n, size in enumerate(sizes)
+            ],
+        )
+        monkeypatch.setattr(entity_types, "merge_types", lambda types, model=None: types)
+        monkeypatch.setattr(
+            entity_types.embeddings, "embed_texts", lambda texts: [[1.0, 0.0] for _ in texts]
+        )
+        return entity_types.derive([("a.md", "body")])
+
+
+class _Settings:
+    model = "m"
+    ingest_selector_model = ""
