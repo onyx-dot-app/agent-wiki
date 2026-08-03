@@ -430,10 +430,13 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
         ctx=f"naming a group of {len(group)} referent(s)",
     )
 
-    # The prompt requires a partition: every member in exactly one type. Enforce it. A
-    # response that omits members would silently drop referents, and one that repeats them
-    # would inflate the support counts a type is judged on — so a partial answer is treated
-    # as no answer, not as a smaller one.
+    # The prompt requires a partition: every member in exactly one type. Both ways it can break
+    # are handled by taking what is valid rather than discarding the response, because
+    # all-or-nothing costs far more than the flaw it guards against — a group of 261 referents
+    # was rejected over ONE uncovered member, and the whole group then fell through to a
+    # placeholder that the merge step had to place from examples with no definition. Losing one
+    # referent's type beats losing the name of 260. (Same conclusion the merge step reached; see
+    # ``merge_types``.)
     out: list[EntityType] = []
     claimed: set[int] = set()
     for raw_entry in cast(list[Any], (data or {}).get("types") or []):
@@ -444,12 +447,20 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
         indices = _member_indices(entry, len(group))
         if not name or not indices:
             continue
-        if claimed & set(indices):
-            log.warning("entity_types: naming returned overlapping members; ignoring response")
-            out = []
-            break
-        claimed.update(indices)
-        members = [group[i] for i in indices]
+        # A repeated member would inflate the support counts a type is judged on, so the FIRST
+        # claim wins and later duplicates are dropped — not the entry, and not the response.
+        fresh = [i for i in indices if i not in claimed]
+        if len(fresh) != len(indices):
+            log.warning(
+                "entity_types: naming claimed %d already-assigned member(s) for %r; keeping the "
+                "first assignment",
+                len(indices) - len(fresh),
+                name,
+            )
+        if not fresh:
+            continue
+        claimed.update(fresh)
+        members = [group[i] for i in fresh]
         out.append(
             EntityType(
                 name=name,
@@ -459,13 +470,30 @@ def name_group(group: list[Referent], *, model: str | None = None) -> list[Entit
                 n_docs=len({p for r in members for p in r.pages}),
             )
         )
-    if out and len(claimed) < len(group):
+
+    # Members the response never assigned are carried as their own remainder rather than dropped
+    # silently. They stay visible to the merge step, which can place a handful from examples far
+    # better than it can place a whole group.
+    uncovered = [i for i in range(len(group)) if i not in claimed]
+    if out and uncovered:
         log.warning(
-            "entity_types: naming covered %d of %d member(s); ignoring response",
+            "entity_types: naming covered %d of %d member(s); keeping the %d named type(s) and "
+            "carrying %d uncovered member(s)",
             len(claimed),
             len(group),
+            len(out),
+            len(uncovered),
         )
-        out = []
+        members = [group[i] for i in uncovered]
+        out.append(
+            EntityType(
+                name=f"unnamed_{len(uncovered)}",
+                definition="(uncovered by naming)",
+                examples=[r.canonical for r in members[:8]],
+                n_referents=len(members),
+                n_docs=len({p for r in members for p in r.pages}),
+            )
+        )
     if out:
         return out
     # A group we could not name is still evidence; keep it visible rather than dropping it.

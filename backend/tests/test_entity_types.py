@@ -475,3 +475,120 @@ class TestDerivationTaskModel:
         entity_types.run_derivation()
 
         assert seen["model"] is None
+
+
+class TestNamingPartialAcceptance:
+    """Naming used to discard a whole response over one unassigned member. On the production
+    corpus that rejected the three LARGEST groups (261, 119 and 94 referents) — each for a single
+    uncovered member — and merge then had to place them from a placeholder with no definition,
+    which is how `organization` and `person` referents ended up inside `software`."""
+
+    @staticmethod
+    def _group(n: int):
+        from app.ingest.entity_types import Referent
+
+        return [
+            Referent(canonical=f"r{i}", variants=[f"r{i}"], pages={f"p{i}.md"})
+            for i in range(n)
+        ]
+
+    @staticmethod
+    def _stub(monkeypatch, payload):
+        from app.ingest import entity_types
+
+        monkeypatch.setattr(entity_types, "_complete_json", lambda *a, **k: payload)
+
+    def test_one_uncovered_member_no_longer_discards_the_group(self, monkeypatch, caplog) -> None:
+        from app.ingest import entity_types
+
+        group = self._group(10)
+        # Covers members 1-9 of 10, omitting the last — the shape seen in production.
+        # Indices are 1-based in the payload (see ``_member_indices``).
+        self._stub(
+            monkeypatch,
+            {
+                "types": [
+                    {
+                        "type_name": "organization",
+                        "definition": "d",
+                        "member_indices": list(range(1, 10)),
+                    }
+                ]
+            },
+        )
+
+        with caplog.at_level("WARNING"):
+            out = entity_types.name_group(group)
+
+        assert [t.name for t in out] == ["organization", "unnamed_1"]
+        assert out[0].n_referents == 9
+        assert out[1].n_referents == 1
+        assert not any(t.name.startswith("unnamed_10") for t in out)
+
+    def test_a_full_partition_is_unchanged(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        self._stub(
+            monkeypatch,
+            {
+                "types": [
+                    {"type_name": "person", "definition": "d", "member_indices": [1, 2]},
+                    {"type_name": "organization", "definition": "d", "member_indices": [3]},
+                ]
+            },
+        )
+
+        out = entity_types.name_group(self._group(3))
+
+        assert [t.name for t in out] == ["person", "organization"]
+        assert sum(t.n_referents for t in out) == 3
+
+    def test_a_repeated_member_keeps_the_first_assignment(self, monkeypatch, caplog) -> None:
+        """A double-claimed member would inflate the support counts a type is judged on, so the
+        duplicate is dropped — not the entry, and not the response."""
+        from app.ingest import entity_types
+
+        self._stub(
+            monkeypatch,
+            {
+                "types": [
+                    {"type_name": "person", "definition": "d", "member_indices": [1, 2]},
+                    {"type_name": "organization", "definition": "d", "member_indices": [2, 3]},
+                ]
+            },
+        )
+
+        with caplog.at_level("WARNING"):
+            out = entity_types.name_group(self._group(3))
+
+        assert [t.name for t in out] == ["person", "organization"]
+        assert [t.n_referents for t in out] == [2, 1]
+        assert sum(t.n_referents for t in out) == 3
+
+    def test_an_unusable_response_still_falls_back_to_the_whole_group(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+
+        out = entity_types.name_group(self._group(5))
+
+        assert [t.name for t in out] == ["unnamed_5"]
+
+    def test_referent_counts_stay_exact(self, monkeypatch) -> None:
+        """The counts are what a type's support is judged on downstream, so they must sum to the
+        group with nothing double-counted and nothing lost."""
+        from app.ingest import entity_types
+
+        self._stub(
+            monkeypatch,
+            {
+                "types": [
+                    {"type_name": "a", "definition": "d", "member_indices": [1, 2, 3]},
+                    {"type_name": "b", "definition": "d", "member_indices": [3, 4]},
+                ]
+            },
+        )
+
+        out = entity_types.name_group(self._group(6))
+
+        assert sum(t.n_referents for t in out) == 6
