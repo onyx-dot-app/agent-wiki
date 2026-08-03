@@ -17,6 +17,7 @@ engine replays them through ``pycrdt``
 which is what a client actually sends — a whole-state payload would converge
 too (CRDT updates are idempotent) but would hide a broken delta.
 """
+
 from __future__ import annotations
 
 import os
@@ -174,7 +175,9 @@ def test_checkpoint_folds_in_late_update_landing_during_its_own_commit(repo, mon
     )
     st = coedit.get_active_session(_PATH)
     assert st is not None
-    assert st.ydoc_checkpointed_seq == st.ydoc_seq, "session must be fully clean, not just partially"
+    assert st.ydoc_checkpointed_seq == st.ydoc_seq, (
+        "session must be fully clean, not just partially"
+    )
 
 
 def test_diverged_checkpoint_reaches_the_editors(repo):
@@ -195,7 +198,9 @@ def test_diverged_checkpoint_reaches_the_editors(repo):
     # commits a distant, non-overlapping change out of band, against the
     # original HEAD, unaware of the human's in-session edit.
     _edit(sess, client, uid, "EDIT-")
-    wiki_git.commit_file(_PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>")
+    wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
     sent: list[bytes] = []
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
@@ -241,7 +246,9 @@ def test_late_update_after_a_diverged_checkpoint_is_not_pruned(repo):
     coedit.join(sess.id, uid)
     client = _client(sess, body)
     _edit(sess, client, uid, "EDIT-")
-    wiki_git.commit_file(_PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>")
+    wiki_git.commit_file(
+        _PATH, "one\ntwo\nthree\nfour\nFIVE\n", "agent edit", author="Agent <a@x.com>"
+    )
 
     outcome = coedit_checkpoint.checkpoint_session(sess.id)
     assert outcome is not None
@@ -486,9 +493,7 @@ def test_checkpoint_lock_times_out_when_held(repo):
     with coedit.checkpoint_lock(base) as acquired:
         assert acquired is True
         with db_session() as s2:
-            got = try_advisory_xact_lock(
-                s2, coedit.checkpoint_lock_key(base), timeout_ms=100
-            )
+            got = try_advisory_xact_lock(s2, coedit.checkpoint_lock_key(base), timeout_ms=100)
         assert got is False  # held elsewhere → bounded wait elapsed
 
 
@@ -730,6 +735,49 @@ def test_drop_duplicate_blocks_repairs_the_doc_and_the_client() -> None:
     assert reconstruct_body(client) == body
 
 
+def test_drop_duplicate_blocks_reidentifies_a_split_instead_of_deleting_it() -> None:
+    """A ProseMirror node split copies attrs — the id included — onto both
+    halves, and the editor clears the second one in a separate follow-up
+    update. A checkpoint landing between the two sees a repeated id whose
+    copies hold *different* content: that is a person's edit mid-flight, not
+    a lineage merge, and deleting it eats what they just typed (observed
+    live). The repair clears the later child's id instead — the same fix the
+    client's own plugin was about to apply — and both texts survive."""
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids, drop_duplicate_blocks
+    from app.wiki.markdown_splice import TouchedTracker, checkpoint_body, restamp_block_ids
+    from app.wiki.markdown_yjs import (
+        BLOCK_ID_ATTR,
+        ROOT_XML_KEY,
+        reconstruct_body,
+        seed_doc_from_markdown,
+        serialize_block,
+    )
+
+    body = "1. item\n\nafter\n"
+    doc = seed_doc_from_markdown(body)
+    tracker = TouchedTracker(doc)
+    restamp_block_ids(doc, body)
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    # The split's copied id: give the freshly typed paragraph the list's id.
+    lst = root.children[0]
+    para = next(
+        c for c in root.children if isinstance(c, XmlElement) and "after" in serialize_block(c)
+    )
+    with doc.transaction():
+        para.children[0].insert(0, "typed ")  # pyright: ignore[reportAttributeAccessIssue]
+        para.attributes[BLOCK_ID_ATTR] = dict(lst.attributes)[BLOCK_ID_ATTR]  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert drop_duplicate_blocks(doc) == ["b0"]
+    assert _duplicated_block_ids(doc) == []
+    rt = reconstruct_body(doc)
+    assert "typed after" in rt  # the person's text survived
+    assert "1. item" in rt  # and so did the block it split from
+
+    out = checkpoint_body(body, doc, tracker)
+    assert "typed after" in out
+    assert out.count("1. item") == 1
+
+
 def test_drop_duplicate_blocks_is_a_no_op_on_a_healthy_doc() -> None:
     from app.wiki.coedit_checkpoint import drop_duplicate_blocks
     from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
@@ -789,9 +837,7 @@ def test_drop_restated_blocks_never_touches_freshly_typed_blocks() -> None:
     root = doc.get(ROOT_XML_KEY, type=XmlFragment)
     with doc.transaction():
         for i in range(6):
-            root.children.append(
-                XmlElement("paragraph", {}, contents=[XmlText(f"para {i}")])
-            )
+            root.children.append(XmlElement("paragraph", {}, contents=[XmlText(f"para {i}")]))
 
     before = reconstruct_body(doc)
     assert drop_restated_blocks(doc, base) == 0
