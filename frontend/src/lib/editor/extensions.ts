@@ -10,6 +10,7 @@ import {
   HeadingBackspace,
   HtmlBlock,
   Image,
+  JoinAdjacentLists,
   InlineCode,
   MarkdownLink,
   MixedTaskList,
@@ -67,6 +68,10 @@ export function tiptapExtensions(
     TaskItem.configure({ nested: true }),
     TaskItemBackspace,
     BlockIdentity,
+    // Join before the id check: the merged node keeps the first list's
+    // identity, so there is no shared id left for UniqueBlockIdentity to
+    // clear.
+    JoinAdjacentLists,
     UniqueBlockIdentity,
     HeadingBackspace,
     ThematicBreak,
