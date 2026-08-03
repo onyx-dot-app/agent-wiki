@@ -5,8 +5,7 @@ You see every type at once, with how many referents and pages each covers.
 TASK: merge types that denote the same KIND of thing.
   - Merge a narrow type into a broader one when the broader one already covers its members: "medical_organization", "telecommunications_company" and "nonprofit_organization" are all "organization".
   - Merge synonyms: types whose definitions are interchangeable are one type, even when the names differ ("software_product" / "software_service" / "software_application").
-  - PREFER FEW, GENERAL types — but fewness is not free. A taxonomy of 5-10 types a later extractor can apply consistently beats 40 it cannot choose between; a type that ends up holding most of the referents is no better, because a label half of them share tells that extractor nothing. When a merge would produce such a type, keep the distinction instead.
-  - The two counts mean different things. PAGES is the evidence that a kind is real and worth telling apart: a kind appearing on 30 pages is established across the corpus, while 200 referents confined to 2 pages is one page's list. A type with a single referent usually belongs inside a larger one — but not when it is thin in referents yet spread across many pages.
+  - PREFER FEW, GENERAL types. A taxonomy of 5-10 types that a later extractor can apply consistently beats 40 precise ones it cannot choose between. Referent counts are your guide: a type with 1 referent almost always belongs inside a larger one.
   - Do NOT merge kinds that a later extractor would need to tell apart — a person is not an organization, a protocol is not a product.
   - Reject a type whose basis is not the KIND of thing:
       * FORM-based: "abbreviation" classifies how a name is SPELLED, not what it denotes. Every acronym would qualify, so it steals members from every real type.

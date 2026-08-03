@@ -768,65 +768,24 @@ class TestMergeConvergence:
 
 
 class TestLargestTypeShare:
-    """A taxonomy is a key space, so the share held by its biggest type is what says whether it
-    discriminates. The recorded run had 51% under one type and nothing reported it."""
+    """The share held by the biggest type is RECORDED, not policed. A dominant type is what an
+    accurate taxonomy looks like when the corpus really is mostly one kind of thing. The number is
+    kept as a tripwire: one that moves between runs on the same corpus says the merge is unstable,
+    which is a defect — unlike being large."""
 
     def test_share_is_recorded(self, monkeypatch) -> None:
         artifact = self._derive(monkeypatch, sizes=[6, 3, 1])
 
         assert artifact["stats"]["largest_type_share"] == 0.6
 
-    def test_a_dominant_type_warns(self, monkeypatch, caplog) -> None:
-        from app.ingest import entity_types
+    def test_a_dominant_type_is_not_treated_as_a_fault(self, monkeypatch, caplog) -> None:
+        """No warning, no suppression: 51% under one type was the taxonomy being right about an
+        engineering wiki, and forcing a split would manufacture boundaries a later extractor has
+        to guess at."""
+        artifact = self._derive(monkeypatch, sizes=[9, 1])
 
-        monkeypatch.setattr(entity_types, "read_corpus", lambda prefix="": [("a.md", "b")])
-        monkeypatch.setattr(entity_types, "store_taxonomy", lambda a, triggered_by=None: 1)
-        monkeypatch.setattr(
-            entity_types,
-            "derive",
-            lambda pages, model=None: {
-                "entity_types": [{"name": "software", "definition": "d"}],
-                "stats": {
-                    "n_mentions": 1,
-                    "n_referents": 1,
-                    "n_typed": 1,
-                    "n_types": 1,
-                    "largest_type_share": 0.51,
-                },
-            },
-        )
-        monkeypatch.setattr(entity_types, "get_llm_settings", lambda: _Settings())
-
-        with caplog.at_level("WARNING"):
-            entity_types.run_derivation()
-
-        assert any("51% of typed referents" in r.getMessage() for r in caplog.records)
-
-    def test_a_balanced_taxonomy_does_not_warn(self, monkeypatch, caplog) -> None:
-        from app.ingest import entity_types
-
-        monkeypatch.setattr(entity_types, "read_corpus", lambda prefix="": [("a.md", "b")])
-        monkeypatch.setattr(entity_types, "store_taxonomy", lambda a, triggered_by=None: 1)
-        monkeypatch.setattr(
-            entity_types,
-            "derive",
-            lambda pages, model=None: {
-                "entity_types": [{"name": "software", "definition": "d"}],
-                "stats": {
-                    "n_mentions": 1,
-                    "n_referents": 1,
-                    "n_typed": 1,
-                    "n_types": 1,
-                    "largest_type_share": 0.25,
-                },
-            },
-        )
-        monkeypatch.setattr(entity_types, "get_llm_settings", lambda: _Settings())
-
-        with caplog.at_level("WARNING"):
-            entity_types.run_derivation()
-
-        assert not any("typed referents" in r.getMessage() for r in caplog.records)
+        assert artifact["stats"]["largest_type_share"] == 0.9
+        assert len(artifact["entity_types"]) == 2
 
     @staticmethod
     def _derive(monkeypatch, *, sizes: list[int]) -> dict:
@@ -856,8 +815,3 @@ class TestLargestTypeShare:
             entity_types.embeddings, "embed_texts", lambda texts: [[1.0, 0.0] for _ in texts]
         )
         return entity_types.derive([("a.md", "body")])
-
-
-class _Settings:
-    model = "m"
-    ingest_selector_model = ""
