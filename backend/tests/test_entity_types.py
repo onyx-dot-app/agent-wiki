@@ -200,3 +200,117 @@ class TestCompleteJson:
 
         assert len(seen) == 2
         assert any("Notes/x.md" in r.getMessage() for r in caplog.records)
+
+
+class TestParallelExtraction:
+    """Extraction and naming run concurrently. The property that matters is that concurrency
+    changes only the wall clock: ``_leader_cluster`` takes the FIRST centroid a referent matches
+    and the naming collapse keeps first-seen examples, so a reordered result set is a different
+    taxonomy from the same corpus."""
+
+    def test_results_keep_input_order_regardless_of_completion_order(self, monkeypatch) -> None:
+        """Completion order is deliberately the reverse of input order here, so a naive
+        as-completed collection would fail this and a taxonomy would silently shift."""
+        import time
+
+        from app.ingest import entity_types
+
+        pages = [(f"p{i}.md", "body") for i in range(8)]
+
+        def slow_extract(path, body, *, model=None):
+            # Earlier pages sleep longest, so they finish last.
+            time.sleep(0.05 * (8 - int(path[1:-3])))
+            return [entity_types.Mention(surface=path, page=path)]
+
+        monkeypatch.setattr(entity_types, "extract_page", slow_extract)
+        captured: list[list[entity_types.Mention]] = entity_types._map_ordered(
+            lambda pb: slow_extract(pb[0], pb[1]), pages, stage="extract"
+        )
+
+        assert [m[0].surface for m in captured] == [p for p, _ in pages]
+
+    def test_pages_really_run_concurrently(self, monkeypatch) -> None:
+        """Otherwise this is a no-op refactor: the whole point is that 147 sequential calls at
+        ~55s each took 1.5 hours."""
+        import threading
+        import time
+
+        from app.ingest import entity_types
+
+        in_flight = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def watched(item):
+            nonlocal in_flight, peak
+            with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            time.sleep(0.05)
+            with lock:
+                in_flight -= 1
+            return [item]
+
+        entity_types._map_ordered(watched, list(range(16)), stage="extract")
+
+        assert peak > 1
+        assert peak <= entity_types.DERIVE_WORKERS
+
+    def test_concurrency_is_bounded(self, monkeypatch) -> None:
+        """Unbounded fan-out over a large wiki would hit the provider's rate limit rather than
+        finish faster."""
+        import threading
+        import time
+
+        from app.ingest import entity_types
+
+        in_flight = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def watched(item):
+            nonlocal in_flight, peak
+            with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            time.sleep(0.02)
+            with lock:
+                in_flight -= 1
+            return [item]
+
+        entity_types._map_ordered(watched, list(range(200)), stage="extract")
+
+        assert peak <= entity_types.DERIVE_WORKERS
+
+    def test_one_failing_item_does_not_abort_the_rest(self, monkeypatch) -> None:
+        """The module's stated rule — a single failed page must not abort a corpus-wide
+        derivation — has to survive the pool, which would otherwise propagate the exception and
+        discard every other page's paid-for work."""
+        from app.ingest import entity_types
+
+        def sometimes_raises(item):
+            if item == 3:
+                raise RuntimeError("provider blew up")
+            return [item]
+
+        out = entity_types._map_ordered(sometimes_raises, list(range(6)), stage="extract")
+
+        assert out == [[0], [1], [2], [], [4], [5]]
+
+    def test_progress_reports_every_item(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        seen: list[tuple[str, int, int]] = []
+        entity_types._map_ordered(
+            lambda item: [item],
+            list(range(5)),
+            stage="extract",
+            progress=lambda stage, n, total: seen.append((stage, n, total)),
+        )
+
+        assert seen == [("extract", n, 5) for n in range(1, 6)]
+
+    def test_an_empty_corpus_starts_no_pool(self) -> None:
+        from app.ingest import entity_types
+
+        assert entity_types._map_ordered(lambda item: [item], [], stage="extract") == []

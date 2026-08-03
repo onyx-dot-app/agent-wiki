@@ -51,9 +51,10 @@ import logging
 import math
 import re
 from collections import Counter, OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, Field
 
@@ -63,6 +64,9 @@ from app.llm.prompts import load_prompt
 from app.wiki import filesystem, git as wiki_git
 
 log = logging.getLogger(__name__)
+
+_Item = TypeVar("_Item")
+_Result = TypeVar("_Result")
 
 # --- parameters ---------------------------------------------------------------------------
 # Cosine floor for "same kind of thing" — the one parameter with real leverage, because it
@@ -92,6 +96,13 @@ MAX_OUTPUT_TOKENS = 16384
 
 # Retries on MALFORMED output only. Truncation is deterministic, so it is never retried.
 _JSON_RETRIES = 1
+
+# Concurrency for the two per-item LLM stages. Run sequentially, 147 pages took ~1.5 hours in
+# production and a pod restart killed it before it could record anything — the calls are
+# independent, so that wall clock was pure serialization. Eight matches the eval harness this
+# module was ported from; it is a named constant because the ceiling is the provider's rate limit,
+# not this code, and a deployment on a lower tier may need to turn it down.
+DERIVE_WORKERS = 8
 
 # Fallback when no derived artifact is present, so a deployment that has never run the
 # derivation still has something usable. Intentionally generic: these are the types that
@@ -601,6 +612,58 @@ def load_taxonomy(entity_type_taxonomy_id: int | None = None) -> dict[str, str]:
     return defs or dict(DEFAULT_TYPES)
 
 
+def _guarded(fn: Callable[[_Item], list[_Result]], item: _Item, stage: str) -> list[_Result]:
+    """Run one item, absorbing its failure. Preserves the module's rule that a single failed page
+    or group must not abort a corpus-wide derivation — which a raised exception inside a pool
+    would otherwise do, taking every other page's paid-for work with it."""
+    try:
+        return fn(item)
+    except Exception:
+        log.warning("entity_types: %s failed for one item", stage, exc_info=True)
+        return []
+
+
+def _map_ordered(
+    fn: Callable[[_Item], list[_Result]],
+    items: list[_Item],
+    *,
+    stage: str,
+    progress: Callable[[str, int, int], None] | None = None,
+) -> list[list[_Result]]:
+    """Map ``fn`` over ``items`` concurrently, returning results in INPUT order.
+
+    The ordering is load-bearing, not cosmetic. ``_leader_cluster`` assigns each referent to the
+    FIRST centroid it matches, and the naming collapse keeps first-seen examples — so a different
+    arrival order can produce a different taxonomy from the same corpus. ``Executor.map`` yields
+    by submission index rather than completion, which keeps a parallel run reproducible and
+    identical to a sequential one.
+
+    Progress therefore reports the index reached, not the number finished: with eight in flight,
+    item 1 can still be running while 2-8 are done.
+    """
+    if not items:
+        return []
+
+    def one(item: _Item) -> list[_Result]:
+        return _guarded(fn, item, stage)
+
+    results: list[list[_Result]] = []
+    workers = min(DERIVE_WORKERS, len(items))
+    if workers <= 1:
+        for n, item in enumerate(items, start=1):
+            results.append(one(item))
+            if progress:
+                progress(stage, n, len(items))
+        return results
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for n, result in enumerate(pool.map(one, items), start=1):
+            results.append(result)
+            if progress:
+                progress(stage, n, len(items))
+    return results
+
+
 def derive(
     pages: list[tuple[str, str]],
     *,
@@ -608,11 +671,15 @@ def derive(
     progress: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Run the whole derivation over ``(path, body)`` pairs. Returns the artifact."""
+    log.info("entity_types: extracting from %d page(s), %d at a time", len(pages), DERIVE_WORKERS)
     mentions: list[Mention] = []
-    for n, (path, body) in enumerate(pages, start=1):
-        mentions.extend(extract_page(path, body, model=model))
-        if progress:
-            progress("extract", n, len(pages))
+    for page_mentions in _map_ordered(
+        lambda pb: extract_page(pb[0], pb[1], model=model),
+        pages,
+        stage="extract",
+        progress=progress,
+    ):
+        mentions.extend(page_mentions)
 
     referents = fold(mentions)
     titles = {path.rsplit("/", 1)[-1].removesuffix(".md").lower() for path, _ in pages}
@@ -644,10 +711,13 @@ def derive(
     # coverage while typing only part of the wiki.
     log.info("entity_types: naming %d group(s)", len(groups))
     named: list[EntityType] = []
-    for n, group in enumerate(groups, start=1):
-        named.extend(name_group(group, model=model))
-        if progress:
-            progress("name", n, len(groups))
+    for group_types in _map_ordered(
+        lambda g: name_group(g, model=model),
+        groups,
+        stage="name",
+        progress=progress,
+    ):
+        named.extend(group_types)
 
     # Types the LLM named identically across groups are one type.
     collapsed: OrderedDict[str, EntityType] = OrderedDict()
