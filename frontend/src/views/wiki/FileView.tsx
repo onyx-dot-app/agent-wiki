@@ -741,17 +741,19 @@ export function FileView({ path }: FileViewProps) {
     return () => setDrafting(null);
   }, [setDrafting]);
 
-  // The path whose roster `agents` currently holds — a late response from
-  // a page we've already navigated away from must not seed this page's
-  // presence cluster.
-  const agentsPathRef = useRef(path);
+  // Only the newest in-flight activity request may write the roster. The
+  // monotonic id also covers navigation (A → B → A with A's first request
+  // still pending): every path change fires a refresh, so any older
+  // request — same path or not — fails the id check and is dropped.
+  const agentsRequestRef = useRef(0);
 
   const refreshAgents = useCallback(() => {
+    const requestId = ++agentsRequestRef.current;
     apiFetch<DocumentActivityResponse>(
       `/wiki/file/activity?path=${encodeURIComponent(path)}`,
     )
       .then((r) => {
-        if (agentsPathRef.current !== path) return;
+        if (agentsRequestRef.current !== requestId) return;
         setAgents(r.agents);
       })
       // Presence is ambient — on a failed refresh keep showing the page's
@@ -762,7 +764,6 @@ export function FileView({ path }: FileViewProps) {
   useEffect(() => {
     // A new path starts from an empty roster: nothing from the previous
     // page may linger while its own fetch is in flight or failing.
-    agentsPathRef.current = path;
     setAgents([]);
     refreshAgents();
     // Refresh on window focus so the cluster tracks reality after
