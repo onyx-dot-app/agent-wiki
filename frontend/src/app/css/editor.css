@@ -94,6 +94,25 @@
   color: var(--text-05);
 }
 
+/* Breathing room the Tailwind reset removed. Kept deliberately small: the
+   doc's larger rhythm is the author's own blank lines — the codec models
+   each one as an empty paragraph (see markdown_yjs) — so real block
+   margins here would double-space every existing page. Headings get a
+   bottom margin (a heading directly above a list sat flush on it), list
+   rows get 2px each side so a tight list isn't a solid brick. */
+.editor-prose h1,
+.editor-prose h2,
+.editor-prose h3,
+.editor-prose h4,
+.editor-prose h5,
+.editor-prose h6 {
+  margin-bottom: 0.25em;
+}
+.editor-prose li {
+  margin-top: 0.125rem;
+  margin-bottom: 0.125rem;
+}
+
 /* Marks. */
 .editor-prose strong {
   font-weight: bold;
