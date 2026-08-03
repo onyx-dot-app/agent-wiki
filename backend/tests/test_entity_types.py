@@ -387,3 +387,56 @@ class TestDeriveWorkers:
         monkeypatch.setenv("ENTITY_TYPE_DERIVE_WORKERS", "not-a-number")
         with _pytest.raises(ValueError):
             load_config()
+
+
+class TestDerivationTaskModel:
+    """The task can pin a model. This job does not need the deployment's strongest one — the
+    validated taxonomy for the reference wiki came from gpt-5.4-mini — and a less verbose model
+    is safer here, since truncation costs a page's referents outright."""
+
+    def test_the_model_reaches_run_derivation(self, monkeypatch) -> None:
+        from app.ingest import entity_types as ingest_entity_types
+        from app.tasks import entity_types as task_module
+
+        seen: dict[str, object] = {}
+
+        def fake_run(**kwargs):
+            seen.update(kwargs)
+            return {}
+
+        monkeypatch.setattr(ingest_entity_types, "run_derivation", fake_run)
+        task_module.derive_entity_types.fn(triggered_by_user_id="usr_1", model="gpt-5.4-mini")
+
+        assert seen == {"triggered_by_user_id": "usr_1", "model": "gpt-5.4-mini"}
+
+    def test_no_model_keeps_the_deployment_default(self, monkeypatch) -> None:
+        """None must reach run_derivation as None, so client.complete resolves llm_settings —
+        not be turned into an empty string, which would read as a configured-but-blank model."""
+        from app.ingest import entity_types as ingest_entity_types
+        from app.tasks import entity_types as task_module
+
+        seen: dict[str, object] = {}
+        monkeypatch.setattr(
+            ingest_entity_types, "run_derivation", lambda **kw: seen.update(kw) or {}
+        )
+        task_module.derive_entity_types.fn()
+
+        assert seen["model"] is None
+
+    def test_the_task_does_not_read_llm_settings(self) -> None:
+        """The model is passed in, never inferred from settings. Specifically it must not read
+        ``ingest_selector_model``: that field is EMPTY when the ingest pre-filter is off, so
+        deriving the taxonomy model from it would let an unrelated switch silently change which
+        model builds the taxonomy. Checked against imports rather than text, so a docstring that
+        explains the reasoning cannot satisfy it."""
+        import ast
+        import pathlib
+
+        tree = ast.parse(pathlib.Path("app/tasks/entity_types.py").read_text())
+        imported = {
+            alias.name if isinstance(node, ast.Import) else f"{node.module}.{alias.name}"
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names
+        }
+        assert not any("llm" in name for name in imported), imported
