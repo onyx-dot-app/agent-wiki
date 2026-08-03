@@ -40,10 +40,19 @@
      edge) — matching DocTitle/the banners' width (--app-container-sm-md,
      Opal's sizes.css) so the title, banners, and doc text all share one
      column. The old CM6 editor capped this internally via its own theme;
-     ProseMirror has no equivalent, hence doing it here. */
+     ProseMirror has no equivalent, hence doing it here.
+
+     The wrapper is full-bleed (FileView cancels <main>'s padding so the
+     scrollbar hugs the window edge) and sets --cm-gutter to that padding;
+     consuming it here keeps the text on DocTitle's left edge when the
+     width cap stops binding — otherwise a narrow window lets the text run
+     past the title toward the window edge. Border-box, so the cap grows
+     by the gutters and the wide layout's text width is unchanged. */
   margin-left: auto;
   margin-right: auto;
-  max-width: var(--app-container-sm-md);
+  max-width: calc(var(--app-container-sm-md) + 2 * var(--cm-gutter, 0rem));
+  padding-left: var(--cm-gutter, 0rem);
+  padding-right: var(--cm-gutter, 0rem);
 }
 
 /* Headings — same size scale as the old CM6 WYSIWYG decorations. */

@@ -470,10 +470,17 @@ body {
    visibly out of alignment, which is what happened when the editor moved to
    Tiptap and this rule kept pointing at CodeMirror's DOM. */
 @container (min-width: 920px) {
-  .rail-reserved .editor-prose .ProseMirror,
   .rail-reserved .rail-inset {
     max-width: calc(768px + 360px);
     padding-right: 360px;
+  }
+  /* Same geometry, plus the side gutters the full-bleed editor column
+     carries (see .editor-prose .ProseMirror in css/editor.css) — without
+     them this override re-loses the gutter and the doc text slides off
+     DocTitle's edge whenever the lane is reserved. */
+  .rail-reserved .editor-prose .ProseMirror {
+    max-width: calc(768px + 360px + 2 * var(--cm-gutter, 0rem));
+    padding-right: calc(360px + var(--cm-gutter, 0rem));
   }
 }
 
