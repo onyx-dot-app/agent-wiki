@@ -101,35 +101,54 @@ def drop_duplicate_blocks(doc: Doc) -> list[str]:
     client holds, the client's document converges to the repaired state
     without a reload (verified directly against pycrdt).
 
-    A repeat with **different content** is an ordinary edit caught
-    mid-flight: ProseMirror's node split copies attrs — the id included —
-    onto both halves, and the editor's ``UniqueBlockIdentity`` clears the
-    second one in a separate follow-up update. A checkpoint landing between
-    the two sees the duplicate the client is about to fix. Deleting here
-    destroys what the person just typed (observed live: a paragraph lifted
-    out of a list, still carrying the list's id, eaten by the checkpoint
-    that raced the fix-up). Instead the later child's id is *cleared* —
-    exactly what the client's own repair would do — which routes it through
-    ``checkpoint_body``'s ``orig is None`` path as the new content it is.
+    A repeat that is **adjacent to, or differs from, its predecessor** is an
+    ordinary edit caught mid-flight: ProseMirror's node split copies attrs —
+    the id included — onto both halves, and the editor's
+    ``UniqueBlockIdentity`` clears the second one in a separate follow-up
+    update. A checkpoint landing between the two sees the duplicate the
+    client is about to fix. Deleting here destroys what the person just
+    typed (observed live: a paragraph lifted out of a list, still carrying
+    the list's id, eaten by the checkpoint that raced the fix-up). Instead
+    the later child's id is *cleared* — exactly what the client's own repair
+    would do — which routes it through ``checkpoint_body``'s ``orig is
+    None`` path as the new content it is.
+
+    Content equality alone cannot separate the two situations: splitting an
+    empty paragraph, or "aa" down the middle, yields halves that serialize
+    identically. The tiebreak is shape. A split's identical halves are
+    adjacent **textblocks** (paragraph or heading — splitting is a textblock
+    operation), and sparing those is safe because adjacent textblocks
+    re-parse into a single block on the next cycle: even a genuine
+    single-paragraph lineage merge spared here converges instead of
+    compounding. Adjacent identical **containers** (two lists, two fences)
+    re-parse as separate blocks that the restamp re-shares an id onto — the
+    compounding loop — and no editing operation splits one into identical
+    halves, so those stay deletions.
     """
     dupes = _duplicated_block_ids(doc)
     if not dupes:
         return []
     root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
-    first_text: dict[str, str] = {}
+    prev: dict[str, tuple[int, str]] = {}
     stale: list[int] = []
     reidentify: list[int] = []
     for i, child in enumerate(root.children):
         block_id = dict(getattr(child, "attributes", {})).get(markdown_yjs.BLOCK_ID_ATTR)
         if not isinstance(block_id, str):
             continue
-        if block_id not in first_text:
-            first_text[block_id] = markdown_yjs.serialize_block(child)
+        text = markdown_yjs.serialize_block(child)
+        if block_id in prev:
+            prev_i, prev_text = prev[block_id]
+            splittable = getattr(child, "tag", None) in ("paragraph", "heading")
+            if text == prev_text and not (splittable and i - prev_i == 1):
+                stale.append(i)
+            else:
+                reidentify.append(i)
+            # Either way this child stops carrying the id, so the retained
+            # first occurrence stays the comparison anchor for any later
+            # repeat of it.
             continue
-        if markdown_yjs.serialize_block(child) == first_text[block_id]:
-            stale.append(i)
-        else:
-            reidentify.append(i)
+        prev[block_id] = (i, text)
     # Descending, so each deletion can't shift the index of one still pending.
     with doc.transaction():
         for i in reidentify:

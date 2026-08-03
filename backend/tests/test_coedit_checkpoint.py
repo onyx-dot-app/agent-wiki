@@ -778,6 +778,53 @@ def test_drop_duplicate_blocks_reidentifies_a_split_instead_of_deleting_it() -> 
     assert out.count("1. item") == 1
 
 
+def test_drop_duplicate_blocks_spares_identical_adjacent_split_halves() -> None:
+    """Splitting an empty paragraph — or "aa" down the middle — yields halves
+    that serialize identically, so content equality alone would classify the
+    person's new block as a lineage duplicate and delete it. A split's
+    identical halves are adjacent textblocks; those are re-identified
+    instead, and both survive. Adjacent identical *containers* have no
+    editing operation that produces them, and sparing them would compound
+    (their serialization re-parses as separate blocks the restamp re-shares
+    an id onto), so a merged single-list page still repairs by deletion."""
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids, drop_duplicate_blocks
+    from app.wiki.markdown_splice import restamp_block_ids
+    from app.wiki.markdown_yjs import (
+        BLOCK_ID_ATTR,
+        reconstruct_body,
+        seed_doc_from_markdown,
+    )
+
+    body = "a\n"
+    doc = seed_doc_from_markdown(body)
+    restamp_block_ids(doc, body)
+    root = _root(doc)
+    # The split's second half: same content, same copied id, adjacent.
+    with doc.transaction():
+        root.children.insert(
+            1, XmlElement("paragraph", {BLOCK_ID_ATTR: "b0"}, contents=[XmlText("a")])
+        )
+
+    assert drop_duplicate_blocks(doc) == ["b0"]
+    assert _duplicated_block_ids(doc) == []
+    # Both halves survived (adjacent paragraphs carry no blank-line block
+    # between them, and their reparse folds into one block — convergent).
+    assert reconstruct_body(doc) == "a\na\n"
+
+    # The container counterpart: a single-list page merged with itself gives
+    # two adjacent identical lists — that is a lineage duplicate, deleted.
+    list_body = "- A\n- B\n"
+    ldoc = seed_doc_from_markdown(list_body)
+    restamp_block_ids(ldoc, list_body)
+    lroot = _root(ldoc)
+    other = seed_doc_from_markdown(list_body)
+    restamp_block_ids(other, list_body)
+    ldoc.apply_update(other.get_update(ldoc.get_state()))
+    assert len(list(lroot.children)) == 2
+    assert drop_duplicate_blocks(ldoc) == ["b0"]
+    assert reconstruct_body(ldoc) == list_body
+
+
 def test_drop_duplicate_blocks_is_a_no_op_on_a_healthy_doc() -> None:
     from app.wiki.coedit_checkpoint import drop_duplicate_blocks
     from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
