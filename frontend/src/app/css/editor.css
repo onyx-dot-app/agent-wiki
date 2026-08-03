@@ -138,6 +138,24 @@
   list-style: decimal;
   padding-left: 1.5rem;
 }
+/* Nested ordered lists step through Notion's outline sequence — decimal,
+   lower-alpha, lower-roman — repeating from the fourth level. Without this
+   every level renders "1." and the nesting depth is illegible. */
+.editor-prose ol ol {
+  list-style: lower-alpha;
+}
+.editor-prose ol ol ol {
+  list-style: lower-roman;
+}
+.editor-prose ol ol ol ol {
+  list-style: decimal;
+}
+.editor-prose ol ol ol ol ol {
+  list-style: lower-alpha;
+}
+.editor-prose ol ol ol ol ol ol {
+  list-style: lower-roman;
+}
 .editor-prose ul[data-type="taskList"] {
   list-style: none;
   padding-left: 0;
