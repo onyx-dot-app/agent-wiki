@@ -48,7 +48,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Callable, Generator
+from typing import Any, Callable, Generator, cast
 
 import redis as redis_lib
 from croniter import croniter
@@ -66,6 +66,17 @@ log = logging.getLogger(__name__)
 _DEFAULT_VT_SECONDS = 300       # visibility timeout — how long a worker holds a message
 _POLL_IDLE_SLEEP = 1.0          # seconds to sleep when the stream is empty
 _MAX_RETRIES = 3
+# An entry claimed this many times without being acked is dropped as poison:
+# each delivery means a consumer took it and died/stalled before finishing, so
+# handing it to a fourth consumer would just wedge that one too.
+_MAX_DELIVERIES = 3
+_RECLAIM_BATCH = 10             # stale entries adopted per idle reclaim pass
+# Reclaim fires at vt * factor, not vt itself. Reclaiming an entry whose
+# consumer is merely *slow* (not dead) runs it twice, and several handlers have
+# non-idempotent side effects (trigger notifications, wiki commits) — so the
+# reclaim horizon sits well past any handler's legitimate runtime while still
+# recovering orphans within minutes. 3 x 300s = 15 min.
+_RECLAIM_IDLE_FACTOR = 3
 _RETRY_BASE_SECONDS = 30
 _RETRY_MAX_SECONDS = 600
 _LEADER_RETRY_SECONDS = 30
@@ -582,26 +593,115 @@ def _worker_loop(
             continue
 
         if not results:
+            _reclaim_stale(queue, consumer_name, r, vt_seconds, max_retries)
             continue
 
-        for _stream, messages in results:
-            for stream_entry_id, fields in messages:
-                payload_json = fields.get("payload", "{}")
-                try:
-                    body: dict[str, Any] = json.loads(payload_json)
-                except (ValueError, TypeError):
-                    log.error(
-                        "queue %s: malformed payload at %s — acking and skipping",
-                        queue.name, stream_entry_id,
-                    )
-                    r.xack(_stream_key(queue.name), "workers", stream_entry_id)
-                    r.xdel(_stream_key(queue.name), stream_entry_id)
-                    continue
-                _process_one(
-                    queue, stream_entry_id, body, r, max_retries=max_retries,
-                )
+        try:
+            for _stream, messages in results:
+                for stream_entry_id, fields in messages:
+                    _handle_entry(queue, stream_entry_id, fields, r, max_retries)
+        except Exception:
+            # _process_one contains handler failures, but anything escaping it
+            # (a Redis error on ack, a malformed message shape) must not kill
+            # this thread: its exception would land in a Future nobody reads,
+            # and the queue would silently stop consuming until pod restart.
+            log.exception("queue %s: worker loop error — continuing", queue.name)
 
     log.debug("queue %s: worker %s stopped", queue.name, consumer_name)
+
+
+def _handle_entry(
+    queue: TaskQueue, stream_entry_id: str, fields: dict[str, Any], r: Any, max_retries: int
+) -> None:
+    payload_json = fields.get("payload", "{}")
+    try:
+        body: dict[str, Any] = json.loads(payload_json)
+    except (ValueError, TypeError):
+        log.error(
+            "queue %s: malformed payload at %s — acking and skipping",
+            queue.name, stream_entry_id,
+        )
+        _drop_entry(queue, r, stream_entry_id)
+        return
+    _process_one(queue, stream_entry_id, body, r, max_retries=max_retries)
+
+
+
+def _drop_entry(queue: TaskQueue, r: Any, stream_entry_id: str) -> None:
+    """Remove a finished (or discarded) entry: XDEL first, then XACK.
+
+    The failure modes between the two calls are asymmetric. Delete-then-ack
+    failing halfway leaves a dangling PEL reference to a deleted entry, which
+    the next XAUTOCLAIM pass cleans up (Redis returns such entries with no
+    fields; the reclaim loop skips them). Ack-then-delete failing halfway
+    leaves an acked entry in the stream forever — never deliverable again,
+    invisible to reclaim, but still counted by depth().ready and pinning
+    oldest_age_seconds(): a zombie backlog that cannot drain.
+    """
+    r.xdel(_stream_key(queue.name), stream_entry_id)
+    r.xack(_stream_key(queue.name), "workers", stream_entry_id)
+
+
+def _reclaim_stale(
+    queue: TaskQueue, consumer_name: str, r: Any, vt_seconds: int, max_retries: int
+) -> None:
+    """Adopt pending entries whose consumer died or stalled past ``vt_seconds``.
+
+    ``XREADGROUP ">"`` never re-reads another consumer's pending entries, and
+    every worker start mints a fresh consumer name — so an entry in flight when
+    its worker was killed would otherwise sit in the PEL forever, invisible to
+    all future consumers. Runs only when this consumer is idle, so a busy
+    single-consumer queue never steals its own in-flight work.
+
+    Reclaim makes delivery at-least-once: a handler still running past the
+    reclaim horizon (``vt_seconds * _RECLAIM_IDLE_FACTOR``) while another
+    consumer is idle runs twice. Entries delivered more than
+    ``_MAX_DELIVERIES`` times are dropped as poison rather than wedging every
+    successive consumer. Never raises — this runs on the consumer thread's
+    idle path, outside the message-handling guard.
+    """
+    sk = _stream_key(queue.name)
+    try:
+        resp = r.xautoclaim(
+            sk, "workers", consumer_name,
+            min_idle_time=vt_seconds * _RECLAIM_IDLE_FACTOR * 1000,
+            start_id="0-0", count=_RECLAIM_BATCH,
+        )
+    except Exception:
+        log.exception("queue %s: xautoclaim failed", queue.name)
+        return
+    # redis-py returns (next_start_id, messages[, deleted_ids]) depending on
+    # server version; index 1 is the claimed messages in every shape.
+    try:
+        messages = cast("list[tuple[str, dict[str, Any] | None]]", resp[1])
+    except (IndexError, TypeError):
+        return
+    for stream_entry_id, fields in messages:
+        try:
+            if fields is None:
+                continue  # entry was XDELed while still pending — nothing to run
+            delivered = 1
+            info = r.xpending_range(
+                sk, "workers", min=stream_entry_id, max=stream_entry_id, count=1,
+            )
+            if info:
+                delivered = int(info[0].get("times_delivered", 1))
+            if delivered > _MAX_DELIVERIES:
+                log.warning(
+                    "queue %s: entry %s delivered %d times without completing — dropping as poison",
+                    queue.name, stream_entry_id, delivered,
+                )
+                _drop_entry(queue, r, stream_entry_id)
+                continue
+            log.info(
+                "queue %s: reclaimed stale entry %s (delivery %d)",
+                queue.name, stream_entry_id, delivered,
+            )
+            _handle_entry(queue, stream_entry_id, fields, r, max_retries)
+        except Exception:
+            # One bad entry (or a Redis hiccup on its ack/delete) must not
+            # abort the remaining claims or escape to kill the consumer.
+            log.exception("queue %s: reclaimed entry %s failed", queue.name, stream_entry_id)
 
 
 def _process_one(
@@ -623,8 +723,7 @@ def _process_one(
             "queue %s: no handler for task %r — discarding entry %s",
             queue.name, task_name, stream_entry_id,
         )
-        r.xack(_stream_key(queue.name), "workers", stream_entry_id)
-        r.xdel(_stream_key(queue.name), stream_entry_id)
+        _drop_entry(queue, r, stream_entry_id)
         return
 
     try:
@@ -638,9 +737,11 @@ def _process_one(
             "queue %s: task %s failed (entry=%s retry=%d)",
             queue.name, task_name, stream_entry_id, retry_count,
         )
-        # Ack first (remove from PEL), then re-enqueue if retries remain.
-        r.xack(_stream_key(queue.name), "workers", stream_entry_id)
-        r.xdel(_stream_key(queue.name), stream_entry_id)
+        # Persist the retry copy BEFORE dropping the entry. If any step after
+        # the persist fails partway, the original entry is still (or again)
+        # deliverable and the worst case is a duplicate retry, bounded by the
+        # delivery cap — whereas drop-then-persist failing between the two
+        # would leave no copy anywhere and lose the task outright.
         if retry_count < max_retries:
             backoff = _retry_backoff_seconds(retry_count + 1)
             log.info(
@@ -659,10 +760,10 @@ def _process_one(
                 "queue %s: task %s exceeded %d retries — dropping entry %s",
                 queue.name, task_name, max_retries, stream_entry_id,
             )
+        _drop_entry(queue, r, stream_entry_id)
         return
 
-    r.xack(_stream_key(queue.name), "workers", stream_entry_id)
-    r.xdel(_stream_key(queue.name), stream_entry_id)
+    _drop_entry(queue, r, stream_entry_id)
 
 
 # --------------------------------------------------------------------------- #

@@ -45,7 +45,6 @@ from app.metrics import (
     ingest_document_results_total,
     ingest_llm_calls_per_doc,
     ingest_outcomes_total,
-    ingest_queue_depth,
     ingest_requests_total,
     ingest_selector_candidates_filtered,
     ingest_selector_duration_seconds,
@@ -306,7 +305,6 @@ def _reconcile_pushed_document(push: dict[str, Any]) -> None:
 
     ingest_requests_total.labels(source_type=source_type or "unknown").inc()
     ingest_document_chars.labels(source_type=source_type or "unknown").observe(len(content))
-    ingest_queue_depth.set(documents_queue.depth().pending)
 
     if is_filtered(source_type):
         log.debug("process_pushed_document: filtered source %s, dropping", source_type)
