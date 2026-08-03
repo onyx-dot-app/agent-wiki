@@ -159,18 +159,6 @@ body {
   overflow: clip;
 }
 
-/* The editor hides its scroll chrome per the mocks; EditorEdgeScrollbar's tick
-   rail is the intended indicator surface. `.editor-prose` is the editor's own
-   scroll container (css/editor.css) — the CodeMirror `.cm-scroller` this
-   replaces. */
-.editor-prose {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.editor-prose::-webkit-scrollbar {
-  display: none;
-}
-
 /* ── Doc panel tab transitions ────────────────────────────────────────────
    Enter-only fade + directional slide for the incoming tab surface, matched
    to the underline indicator's travel (DocPanel keys the body by tab). No
