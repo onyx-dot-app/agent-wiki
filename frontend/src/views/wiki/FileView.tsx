@@ -1032,9 +1032,16 @@ export function FileView({ path }: FileViewProps) {
           >
             {coedit.saveStatus === "saving"
               ? "Saving…"
-              : coedit.saveError
-                ? `Couldn't save: ${coedit.saveError}`
-                : "Couldn't save"}
+              : coedit.saveStatus === "unconfirmed"
+                ? // Not a failure: the acknowledgement went missing, so whether
+                  // the commit happened is unknown. Saying "couldn't save"
+                  // here would claim more than we know.
+                  coedit.saveError
+                  ? `Couldn't confirm the save — ${coedit.saveError}`
+                  : "Couldn't confirm the save"
+                : coedit.saveError
+                  ? `Couldn't save: ${coedit.saveError}`
+                  : "Couldn't save"}
           </span>
         )}
         {!viewingVersion && !isMobile && (

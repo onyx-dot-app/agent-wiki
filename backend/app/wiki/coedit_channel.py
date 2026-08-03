@@ -164,16 +164,24 @@ def _deliver_local(coedit_session_id: int, frame: ControlFrame) -> None:
         q.put_nowait(frame)
         notify()
         delivered += 1
-    # A process with no connection for this session is the normal case for a
-    # task worker (it publishes; the socket lives in the web process, reached
-    # via the bus), so this is not an error on its own. It is logged because a
-    # frame delivered to nobody *anywhere* is otherwise invisible: a
+    # A frame delivered to nobody *anywhere* is otherwise invisible: a
     # checkpoint ack that never lands leaves the client's save promise pending,
-    # and until this line there was no trace to distinguish "never published"
-    # from "published, never delivered".
-    log.info(
+    # and without this there is no trace to distinguish "never published" from
+    # "published, never delivered". A process holding no connection for the
+    # session is the normal case rather than a fault — a task worker publishes
+    # while the socket lives in the web process, reached via the bus — so this
+    # records the counts and judges nothing.
+    #
+    # Only the checkpoint ack is worth INFO: it is the one whose loss is known
+    # to strand a client, and it is rare (one per edit burst). Presence frames
+    # go out on every join and leave, which would be noise at this level and
+    # would bury the signal. They stay at DEBUG, where the whole trace is still
+    # available when someone is looking for it.
+    frame_type = frame.get("type", "?")
+    log_at = log.info if frame_type == "checkpoint_result" else log.debug
+    log_at(
         "coedit control frame %s session=%s delivered=%d of %d local conn(s)",
-        frame.get("type", "?"),
+        frame_type,
         coedit_session_id,
         delivered,
         len(targets),

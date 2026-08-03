@@ -146,13 +146,24 @@ export interface UseCoeditSession {
   joinErrorRetryable: boolean;
   /** Clears `joinError` and re-runs the join handshake. */
   retryJoin: () => void;
-  /** Autosave state, for a "Saving…/Saved/Couldn't save" indicator. */
-  saveStatus: "saved" | "saving" | "error";
-  /** Why the last save failed, when `saveStatus` is "error" — the server's own
-   * reason ("forbidden", the task's failure) or "not connected" when there was
-   * no live socket to ask. Surfaced because a bare "Couldn't save" is
-   * undiagnosable: three unrelated faults produce it, and the reason was being
-   * swallowed by a `catch {}` so it reached neither the UI nor the console. */
+  /** Autosave state, for a "Saving…/Saved/Couldn't save" indicator.
+   *
+   * "unconfirmed" is distinct from "error" on purpose: the save's
+   * acknowledgement never came back, which says nothing about whether the
+   * commit happened — the server may well have committed and only the reply
+   * gone missing. Rendering that as a failure would be a claim we can't
+   * support, so it gets its own label. */
+  saveStatus: "saved" | "saving" | "error" | "unconfirmed";
+  /** Detail for the current `saveStatus`, when there is any.
+   *
+   * For "error", why the save failed — the server's own reason ("forbidden",
+   * the task's failure) or "not connected" when there was no live socket to
+   * ask. Surfaced because a bare "Couldn't save" is undiagnosable: three
+   * unrelated faults produce it, and the reason was being swallowed by a
+   * `catch {}` so it reached neither the UI nor the console.
+   *
+   * For "unconfirmed", what happens next rather than what went wrong. Both are
+   * rendered as a suffix to the status label, so neither should repeat it. */
   saveError: string | null;
   /** Wire the underlying Tiptap `Editor` instance once it mounts — needed
    * to resolve peer cursor positions and to drive `setDoc`. Pass directly
@@ -353,19 +364,19 @@ export function useCoeditSession(opts: {
       // the reconnect loop is already fixing.
       const terminal = reason.toLowerCase().includes("forbidden");
       const retrying = !terminal && armSaveRetry(timedOut);
-      // A timeout means the ack never came back, which says nothing about
-      // whether the commit happened — the server may well have committed and
-      // only the reply gone missing. So don't claim the save failed, and once
-      // the budget is spent, say what actually happens next: the server's
-      // periodic scan commits a dirty session without the client's help.
+      // Reported as "unconfirmed", not "error": see saveStatus. The detail says
+      // what happens next rather than what went wrong, and once the budget is
+      // spent that is the server's periodic scan, which commits a dirty session
+      // without the client's help. Neither string repeats the status label —
+      // the indicator prefixes it.
       setSaveError(
         !timedOut
           ? reason
           : retrying
-            ? "Couldn't confirm this save — retrying."
-            : "Couldn't confirm this save. The server will commit it shortly.",
+            ? "retrying"
+            : "the server will commit it shortly",
       );
-      setSaveStatus("error");
+      setSaveStatus(timedOut ? "unconfirmed" : "error");
     } finally {
       saveInFlight.current = false;
     }
@@ -509,6 +520,13 @@ export function useCoeditSession(opts: {
 
         sessionId.current = snap.session_id;
         ownedConnection.current = snap.connectionId;
+        // Both save budgets are per-socket: they exist to stop retrying at a
+        // socket that isn't answering, and this is a different one. Without
+        // resetting, a spent budget outlived the connection whose failures
+        // spent it, so a timeout on a healthy new socket skipped the retry that
+        // would have recovered it and waited for the server's scan instead.
+        saveRetries.current = 0;
+        saveTimeouts.current = 0;
         setCanWrite(snap.can_write);
         setParticipants(snap.participants);
         setActive(true);
