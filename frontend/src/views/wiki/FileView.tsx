@@ -41,7 +41,7 @@ import {
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
-import { EditorEdgeScrollbar } from "@/components/wiki/EditorEdgeScrollbar";
+import { EdgeScrollbar } from "@/components/wiki/EdgeScrollbar";
 import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
 import type { AnchoredHighlightTarget } from "@/lib/editor/types";
@@ -444,7 +444,7 @@ export function FileView({ path }: FileViewProps) {
     (marginThreadCount > 0 || commentDraft !== null);
 
   // With any panel open on the live doc, the doc's scrollbar docks at the
-  // viewport edge (EditorEdgeScrollbar) and the native one hides, so tab
+  // viewport edge (EdgeScrollbar) and the native one hides, so tab
   // switches never toggle the native bar's width inside the scroller.
   const panelScrollDocked =
     coedit.active && !viewingVersion && !isMobile && panelTab !== null;
@@ -1435,7 +1435,7 @@ export function FileView({ path }: FileViewProps) {
                     {/* One docked doc scrollbar for every tab, so switching
                         tabs never toggles the native bar's width. */}
                     {panelScrollDocked && (
-                      <EditorEdgeScrollbar editorRef={coeditorRef} />
+                      <EdgeScrollbar targetRef={coeditorRef} />
                     )}
                   </div>
                 </DocPanel>,
