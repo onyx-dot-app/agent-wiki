@@ -669,19 +669,32 @@ def test_blocking_active_session_path(repo):
     assert coedit.blocking_active_session_path("other") is None
 
 
-def test_implausible_growth_guard() -> None:
-    """The backstop for any route to a doubled document the lineage rule
-    doesn't cover: a couple of update rows can add a paragraph, not a second
-    copy of the page."""
-    from app.wiki.coedit_checkpoint import _implausible_growth
+def test_duplicated_block_ids_detects_a_merged_double() -> None:
+    """The signature of two CRDT lineages merged into one document: the same
+    top-level block id present twice. Ordinary editing cannot produce it —
+    freshly typed blocks carry no id at all."""
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids
+    from app.wiki.markdown_yjs import seed_doc_from_markdown
 
-    page = "x" * 8000
-    assert _implausible_growth(page, page * 2, updates=1)
-    assert _implausible_growth(page, page * 2, updates=3)
+    body = "- A\n\n- B\n\n- C\n"
+    clean = seed_doc_from_markdown(body)
+    assert _duplicated_block_ids(clean) == []
 
-    # Ordinary editing is untouched: a big append over many updates, a small
-    # page (a paste can legitimately dwarf it), and normal growth all pass.
-    assert not _implausible_growth(page, page * 2, updates=4)
-    assert not _implausible_growth("tiny", "tiny" * 50, updates=1)
-    assert not _implausible_growth(page, page + "a new paragraph", updates=1)
-    assert not _implausible_growth(page, page[:100], updates=1)
+    # Exactly what a reconnect onto a fresh lineage does: the client's whole
+    # document arrives as one update and cannot dedupe against the seed.
+    server = seed_doc_from_markdown(body)
+    server.apply_update(clean.get_update(server.get_state()))
+    assert _duplicated_block_ids(server) == ["b0"]
+
+
+def test_duplicated_block_ids_ignores_legitimate_growth() -> None:
+    """A page that grows — even a lot, even in one update — is not suspicious;
+    only a repeated id is. This is what keeps the guard from ever refusing a
+    real edit, which would leave the session dirty and stuck."""
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids
+    from app.wiki.markdown_yjs import seed_doc_from_markdown
+
+    small = seed_doc_from_markdown("- A\n")
+    huge = seed_doc_from_markdown("".join(f"- line {i}\n\n" for i in range(500)))
+    assert _duplicated_block_ids(small) == []
+    assert _duplicated_block_ids(huge) == []

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 
-from pycrdt import Doc, create_update_message
+from pycrdt import Doc, XmlFragment, create_update_message
 from pydantic import BaseModel, ConfigDict
 
 from app.auth import User, set_current_user
@@ -52,28 +52,34 @@ log = logging.getLogger(__name__)
 # completely fresh by the next trigger.
 _LATE_UPDATE_FOLD_ATTEMPTS = 3
 
-# Growth a handful of update rows cannot legitimately produce. A Yjs update
-# carries the edits one client made, so a couple of them can add a paragraph,
-# not a second copy of the page — doubling means the document is holding the
-# same content twice under two CRDT lineages that share no item ids and
-# therefore cannot dedupe (`open_session`'s reuse rule exists to prevent that
-# happening in the first place; this is the backstop for any other route to
-# it). The bound is deliberately loose in both directions so that ordinary
-# editing never trips it: a paste into a small page is exempted by the floor,
-# and a long typing burst is exempted by the row count.
-_GROWTH_FACTOR_LIMIT = 2.0
-_GROWTH_FLOOR_BYTES = 4096
-_GROWTH_MAX_UPDATES = 3
 
+def _duplicated_block_ids(doc: Doc) -> list[str]:
+    """Top-level ``_blockId``s appearing more than once, in document order.
 
-def _implausible_growth(base_body: str, body: str, updates: int) -> bool:
-    """Whether ``body`` grew by more than a whole copy of ``base_body`` in too
-    few updates to explain it. Only ever *declines* to commit — a false
-    positive costs one deferred checkpoint (the session stays dirty and the
-    next trigger retries), a false negative costs a corrupted page."""
-    if updates > _GROWTH_MAX_UPDATES or len(base_body) < _GROWTH_FLOOR_BYTES:
-        return False
-    return len(body) >= len(base_body) * _GROWTH_FACTOR_LIMIT
+    Two top-level blocks sharing an id is not a thing editing can produce — it
+    means the document holds the same block twice under two CRDT lineages that
+    share no item ids and therefore cannot dedupe (``open_session``'s reuse rule
+    exists to stop that arising; this catches any other route to it). Freshly
+    typed content carries no id at all and takes ``checkpoint_body``'s
+    ``orig is None`` path, so it can't collide.
+
+    Committing in this state duplicates content rather than merely mis-ordering
+    it: ``markdown_splice.checkpoint_body`` keys a live block back to its range
+    in the committed markdown by id, so both copies resolve to the same range —
+    the same reason the editor enforces uniqueness client-side (see
+    ``UniqueBlockIdentity`` in ``frontend/src/lib/editor/blocks.ts``).
+    """
+    seen: set[str] = set()
+    dupes: list[str] = []
+    root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
+    for child in root.children:
+        block_id = dict(getattr(child, "attributes", {})).get(markdown_yjs.BLOCK_ID_ATTR)
+        if not isinstance(block_id, str):
+            continue
+        if block_id in seen and block_id not in dupes:
+            dupes.append(block_id)
+        seen.add(block_id)
+    return dupes
 
 
 def _user(user_id: str) -> User | None:
@@ -249,6 +255,28 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             return None
 
         doc, base_body, tracker, replayed_seq = _rebuild_doc(sess)
+
+        dupes = _duplicated_block_ids(doc)
+        if dupes:
+            # Terminal, not a retry: replaying the same log rebuilds the same
+            # document, so returning while leaving the session dirty would
+            # re-attempt this every minute forever. Closing it means the next
+            # reader seeds afresh from the last good commit — the page keeps
+            # that state instead of gaining a duplicate, and editing recovers.
+            # Whatever this session held past its watermark is lost, which is
+            # the intent: in this state that content *is* the duplication.
+            log.error(
+                "coedit checkpoint: %s (session %s) holds duplicate top-level block ids "
+                "%s — refusing to commit and closing the session; the page stays at its "
+                "last checkpoint. This should be unreachable: see open_session's lineage "
+                "reuse rule.",
+                path,
+                session_id,
+                dupes,
+            )
+            coedit.close_session(session_id)
+            return None
+
         change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
 
         primary_id = coedit.last_update_author(session_id)
@@ -294,18 +322,6 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         body = base_body
         for attempt in range(_LATE_UPDATE_FOLD_ATTEMPTS):
             body = markdown_splice.checkpoint_body(base_body, doc, tracker)
-            if _implausible_growth(base_body, body, replayed_seq - sess.ydoc_checkpointed_seq):
-                log.error(
-                    "coedit checkpoint: refusing to commit implausible growth for %s "
-                    "(session %s): %d -> %d bytes across %d update(s); leaving the "
-                    "session dirty rather than committing likely-duplicated content",
-                    path,
-                    session_id,
-                    len(base_body),
-                    len(body),
-                    replayed_seq - sess.ydoc_checkpointed_seq,
-                )
-                return None
             message = _commit_message(session_id, primary_author_id=primary_id)
 
             # System-initiated write: editors' write permission was already
