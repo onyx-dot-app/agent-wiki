@@ -475,3 +475,193 @@ class TestDerivationTaskModel:
         entity_types.run_derivation()
 
         assert seen["model"] is None
+
+
+class TestNamingPartialAcceptance:
+    """A partition violation costs only what is invalid: the named types survive, and uncovered or
+    double-claimed members are handled without discarding the response."""
+
+    @staticmethod
+    def _group(n: int):
+        from app.ingest.entity_types import Referent
+
+        return [
+            Referent(canonical=f"r{i}", variants=[f"r{i}"], pages={f"p{i}.md"})
+            for i in range(n)
+        ]
+
+    @staticmethod
+    def _stub(monkeypatch, payload):
+        from app.ingest import entity_types
+
+        monkeypatch.setattr(entity_types, "_complete_json", lambda *a, **k: payload)
+
+    def test_one_uncovered_member_does_not_discard_the_group(self, monkeypatch, caplog) -> None:
+        from app.ingest import entity_types
+
+        group = self._group(10)
+        # Covers members 1-9 of 10. Indices are 1-based (see ``_member_indices``).
+        self._stub(
+            monkeypatch,
+            {
+                "types": [
+                    {
+                        "type_name": "organization",
+                        "definition": "d",
+                        "member_indices": list(range(1, 10)),
+                    }
+                ]
+            },
+        )
+
+        with caplog.at_level("WARNING"):
+            out = entity_types.name_group(group)
+
+        assert out[0].name == "organization"
+        assert out[0].n_referents == 9
+        assert out[1].name.startswith("unnamed")
+        assert out[1].n_referents == 1
+
+    def test_a_full_partition_is_unchanged(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        self._stub(
+            monkeypatch,
+            {
+                "types": [
+                    {"type_name": "person", "definition": "d", "member_indices": [1, 2]},
+                    {"type_name": "organization", "definition": "d", "member_indices": [3]},
+                ]
+            },
+        )
+
+        out = entity_types.name_group(self._group(3))
+
+        assert [t.name for t in out] == ["person", "organization"]
+        assert sum(t.n_referents for t in out) == 3
+
+    def test_a_repeated_member_keeps_the_first_assignment(self, monkeypatch, caplog) -> None:
+        """A double-claimed member would inflate the support counts a type is judged on, so the
+        duplicate is dropped — not the entry, and not the response."""
+        from app.ingest import entity_types
+
+        self._stub(
+            monkeypatch,
+            {
+                "types": [
+                    {"type_name": "person", "definition": "d", "member_indices": [1, 2]},
+                    {"type_name": "organization", "definition": "d", "member_indices": [2, 3]},
+                ]
+            },
+        )
+
+        with caplog.at_level("WARNING"):
+            out = entity_types.name_group(self._group(3))
+
+        assert [t.name for t in out] == ["person", "organization"]
+        assert [t.n_referents for t in out] == [2, 1]
+        assert sum(t.n_referents for t in out) == 3
+
+    def test_an_unusable_response_still_falls_back_to_the_whole_group(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+
+        out = entity_types.name_group(self._group(5))
+
+        assert len(out) == 1
+        assert out[0].name.startswith("unnamed")
+        assert out[0].n_referents == 5
+
+    def test_remainders_from_different_groups_get_different_names(self, monkeypatch) -> None:
+        """``derive`` collapses types sharing a name, so identically-sized remainders from
+        unrelated groups would otherwise pool their referents and examples into one type."""
+        from app.ingest import entity_types
+
+        names = []
+        for offset in (0, 100):
+            group = [
+                entity_types.Referent(canonical=f"r{offset + i}", pages={f"p{i}.md"})
+                for i in range(3)
+            ]
+            self._stub(
+                monkeypatch,
+                {"types": [{"type_name": "person", "definition": "d", "member_indices": [1, 2]}]},
+            )
+            out = entity_types.name_group(group)
+            names.append([t.name for t in out if t.name.startswith("unnamed")])
+
+        assert names[0] != names[1], names
+
+    def test_names_survive_truncation_of_long_canonicals(self, monkeypatch) -> None:
+        """A readable slug has to be cut somewhere, so two long names sharing a prefix would
+        collide on length alone. The digest is what keeps them apart."""
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+        shared = "x" * 80
+        first = entity_types.name_group(
+            [entity_types.Referent(canonical=shared + "alpha", pages={"a.md"})]
+        )
+        second = entity_types.name_group(
+            [entity_types.Referent(canonical=shared + "beta", pages={"b.md"})]
+        )
+
+        assert first[0].name != second[0].name
+
+    def test_names_distinguish_canonicals_that_differ_only_by_punctuation(
+        self, monkeypatch
+    ) -> None:
+        """Folding already merges these, so they should never be two referents — but the name
+        must not depend on that invariant holding."""
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+        first = entity_types.name_group(
+            [entity_types.Referent(canonical="Acme-Foo", pages={"a.md"})]
+        )
+        second = entity_types.name_group(
+            [entity_types.Referent(canonical="Acme Foo", pages={"b.md"})]
+        )
+
+        assert first[0].name != second[0].name
+
+    def test_the_same_member_set_names_deterministically(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+
+        def once():
+            return entity_types.name_group(
+                [entity_types.Referent(canonical="alpha", pages={"a.md"})]
+            )[0].name
+
+        assert once() == once()
+
+    def test_a_whole_group_fallback_is_also_named_per_group(self, monkeypatch) -> None:
+        from app.ingest import entity_types
+
+        self._stub(monkeypatch, {"types": []})
+        first = entity_types.name_group([entity_types.Referent(canonical="alpha", pages={"a.md"})])
+        second = entity_types.name_group([entity_types.Referent(canonical="beta", pages={"b.md"})])
+
+        assert first[0].name != second[0].name
+
+    def test_referent_counts_stay_exact(self, monkeypatch) -> None:
+        """The counts are what a type's support is judged on downstream, so they must sum to the
+        group with nothing double-counted and nothing lost."""
+        from app.ingest import entity_types
+
+        self._stub(
+            monkeypatch,
+            {
+                "types": [
+                    {"type_name": "a", "definition": "d", "member_indices": [1, 2, 3]},
+                    {"type_name": "b", "definition": "d", "member_indices": [3, 4]},
+                ]
+            },
+        )
+
+        out = entity_types.name_group(self._group(6))
+
+        assert sum(t.n_referents for t in out) == 6
