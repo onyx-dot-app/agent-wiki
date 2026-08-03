@@ -82,6 +82,46 @@ def _duplicated_block_ids(doc: Doc) -> list[str]:
     return dupes
 
 
+def drop_duplicate_blocks(doc: Doc) -> list[str]:
+    """Delete every repeat of a top-level ``_blockId``, keeping the first, and
+    return the ids that were repeated.
+
+    A *deletion*, deliberately, rather than declining to commit: the duplicated
+    content is in the connected browsers' own documents too, so refusing here
+    leaves them holding it and re-sending it on the next reconnect — closing the
+    session doesn't help either, since the next one can't reuse a dirty session
+    and so seeds yet another lineage for the same retained document to merge
+    into. Deleting escapes that: the deletion is broadcast at the end of
+    ``checkpoint_session`` like any other update, and because a Yjs delete
+    addresses the same items the client holds, the client's document converges
+    to the repaired state without a reload (verified directly against pycrdt).
+
+    Keeping the first occurrence is arbitrary but deterministic. The copies are
+    identical when this arises from a lineage merge; if one had been edited
+    afterwards, those edits are lost — no worse than the alternative, which is a
+    page that can never be saved again.
+    """
+    dupes = _duplicated_block_ids(doc)
+    if not dupes:
+        return []
+    root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
+    seen: set[str] = set()
+    stale: list[int] = []
+    for i, child in enumerate(root.children):
+        block_id = dict(getattr(child, "attributes", {})).get(markdown_yjs.BLOCK_ID_ATTR)
+        if not isinstance(block_id, str):
+            continue
+        if block_id in seen:
+            stale.append(i)
+        else:
+            seen.add(block_id)
+    # Descending, so each deletion can't shift the index of one still pending.
+    with doc.transaction():
+        for i in reversed(stale):
+            del root.children[i]
+    return dupes
+
+
 def _user(user_id: str) -> User | None:
     row = users_repo.get_by_id(user_id)
     if row is None:
@@ -256,26 +296,23 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
 
         doc, base_body, tracker, replayed_seq = _rebuild_doc(sess)
 
-        dupes = _duplicated_block_ids(doc)
+        # Repaired in place and then committed normally, rather than refused:
+        # the checkpoint's closing broadcast carries the deletion to every
+        # connected client, so their documents converge too. Refusing instead
+        # would leave the duplication in the browsers that hold it, to be
+        # re-sent on their next reconnect — and closing the session wouldn't
+        # help, since the next one can't reuse a dirty session and would seed
+        # yet another lineage for that same retained document to merge into.
+        dupes = drop_duplicate_blocks(doc)
         if dupes:
-            # Terminal, not a retry: replaying the same log rebuilds the same
-            # document, so returning while leaving the session dirty would
-            # re-attempt this every minute forever. Closing it means the next
-            # reader seeds afresh from the last good commit — the page keeps
-            # that state instead of gaining a duplicate, and editing recovers.
-            # Whatever this session held past its watermark is lost, which is
-            # the intent: in this state that content *is* the duplication.
             log.error(
-                "coedit checkpoint: %s (session %s) holds duplicate top-level block ids "
-                "%s — refusing to commit and closing the session; the page stays at its "
-                "last checkpoint. This should be unreachable: see open_session's lineage "
-                "reuse rule.",
+                "coedit checkpoint: %s (session %s) held duplicate top-level block ids "
+                "%s; dropped the repeats and committing the repaired document. This "
+                "should be unreachable — see open_session's lineage reuse rule.",
                 path,
                 session_id,
                 dupes,
             )
-            coedit.close_session(session_id)
-            return None
 
         change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
 

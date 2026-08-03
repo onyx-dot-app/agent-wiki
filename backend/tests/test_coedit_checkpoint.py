@@ -698,3 +698,43 @@ def test_duplicated_block_ids_ignores_legitimate_growth() -> None:
     huge = seed_doc_from_markdown("".join(f"- line {i}\n\n" for i in range(500)))
     assert _duplicated_block_ids(small) == []
     assert _duplicated_block_ids(huge) == []
+
+
+def test_drop_duplicate_blocks_repairs_the_doc_and_the_client() -> None:
+    """The repair has to reach the browsers too, or they re-send the
+    duplication on their next reconnect.
+
+    A Yjs delete addresses the same items the client holds, so the update the
+    checkpoint broadcasts converges the client's own document — no reload, and
+    no loop where each new session gets the retained copy merged in again.
+    """
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids, drop_duplicate_blocks
+    from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
+
+    body = "- A\n\n- B\n\n- C\n"
+    # A browser already corrupted once: its doc holds both lineages.
+    client = seed_doc_from_markdown(body)
+    client.apply_update(seed_doc_from_markdown(body).get_update(client.get_state()))
+    assert reconstruct_body(client) == body + body
+
+    # The server rebuilds that same state, then repairs it.
+    server = seed_doc_from_markdown(body)
+    server.apply_update(client.get_update(server.get_state()))
+    assert drop_duplicate_blocks(server) == ["b0"]
+    assert _duplicated_block_ids(server) == []
+    assert reconstruct_body(server) == body
+
+    # What checkpoint_session broadcasts at the end, applied by the client.
+    client.apply_update(server.get_update(client.get_state()))
+    assert _duplicated_block_ids(client) == []
+    assert reconstruct_body(client) == body
+
+
+def test_drop_duplicate_blocks_is_a_no_op_on_a_healthy_doc() -> None:
+    from app.wiki.coedit_checkpoint import drop_duplicate_blocks
+    from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
+
+    body = "\n\n".join(f"- line {i}" for i in range(50)) + "\n"
+    doc = seed_doc_from_markdown(body)
+    assert drop_duplicate_blocks(doc) == []
+    assert reconstruct_body(doc) == body
