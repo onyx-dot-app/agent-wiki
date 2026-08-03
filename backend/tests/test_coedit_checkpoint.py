@@ -667,3 +667,74 @@ def test_blocking_active_session_path(repo):
     assert coedit.blocking_active_session_path("guides/new-home.md") == "guides/new-home.md"
     assert coedit.blocking_active_session_path("guides") == "guides/new-home.md"
     assert coedit.blocking_active_session_path("other") is None
+
+
+def test_duplicated_block_ids_detects_a_merged_double() -> None:
+    """The signature of two CRDT lineages merged into one document: the same
+    top-level block id present twice. Ordinary editing cannot produce it —
+    freshly typed blocks carry no id at all."""
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids
+    from app.wiki.markdown_yjs import seed_doc_from_markdown
+
+    body = "- A\n\n- B\n\n- C\n"
+    clean = seed_doc_from_markdown(body)
+    assert _duplicated_block_ids(clean) == []
+
+    # Exactly what a reconnect onto a fresh lineage does: the client's whole
+    # document arrives as one update and cannot dedupe against the seed.
+    server = seed_doc_from_markdown(body)
+    server.apply_update(clean.get_update(server.get_state()))
+    assert _duplicated_block_ids(server) == ["b0"]
+
+
+def test_duplicated_block_ids_ignores_legitimate_growth() -> None:
+    """A page that grows — even a lot, even in one update — is not suspicious;
+    only a repeated id is. This is what keeps the guard from ever refusing a
+    real edit, which would leave the session dirty and stuck."""
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids
+    from app.wiki.markdown_yjs import seed_doc_from_markdown
+
+    small = seed_doc_from_markdown("- A\n")
+    huge = seed_doc_from_markdown("".join(f"- line {i}\n\n" for i in range(500)))
+    assert _duplicated_block_ids(small) == []
+    assert _duplicated_block_ids(huge) == []
+
+
+def test_drop_duplicate_blocks_repairs_the_doc_and_the_client() -> None:
+    """The repair has to reach the browsers too, or they re-send the
+    duplication on their next reconnect.
+
+    A Yjs delete addresses the same items the client holds, so the update the
+    checkpoint broadcasts converges the client's own document — no reload, and
+    no loop where each new session gets the retained copy merged in again.
+    """
+    from app.wiki.coedit_checkpoint import _duplicated_block_ids, drop_duplicate_blocks
+    from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
+
+    body = "- A\n\n- B\n\n- C\n"
+    # A browser already corrupted once: its doc holds both lineages.
+    client = seed_doc_from_markdown(body)
+    client.apply_update(seed_doc_from_markdown(body).get_update(client.get_state()))
+    assert reconstruct_body(client) == body + body
+
+    # The server rebuilds that same state, then repairs it.
+    server = seed_doc_from_markdown(body)
+    server.apply_update(client.get_update(server.get_state()))
+    assert drop_duplicate_blocks(server) == ["b0"]
+    assert _duplicated_block_ids(server) == []
+    assert reconstruct_body(server) == body
+
+    # What checkpoint_session broadcasts at the end, applied by the client.
+    client.apply_update(server.get_update(client.get_state()))
+    assert _duplicated_block_ids(client) == []
+    assert reconstruct_body(client) == body
+
+
+def test_drop_duplicate_blocks_is_a_no_op_on_a_healthy_doc() -> None:
+    from app.wiki.coedit_checkpoint import drop_duplicate_blocks
+    from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
+
+    body = "\n\n".join(f"- line {i}" for i in range(50)) + "\n"
+    doc = seed_doc_from_markdown(body)
+    assert drop_duplicate_blocks(doc) == []
+    assert reconstruct_body(doc) == body

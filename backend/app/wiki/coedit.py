@@ -38,6 +38,7 @@ from sqlalchemy import Text as SAText, cast, delete, func, literal, or_, select,
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User
 from app.models.wiki import PathMove
@@ -260,6 +261,46 @@ def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
         )
 
 
+def _reusable_closed_session(
+    s: Session, path: str, base_sha: str | None
+) -> CoeditSession | None:
+    """The newest closed session for ``path`` whose document still describes
+    the page as committed, or ``None`` when reactivating would be unsafe and
+    the caller should seed a fresh one.
+
+    Three conditions, each ruling out a way the old lineage could disagree with
+    what the next reader expects:
+
+    ``base_sha`` matches the caller's current HEAD for the path
+        A session stamps its own ``base_sha`` with the commit its last
+        checkpoint produced, so equality means nothing has touched the file
+        since — no agent write, no API PUT, no other session. Any commit moves
+        HEAD and disqualifies the row, which is what keeps this from reviving a
+        document that no longer matches the page. ``None`` (a page with no
+        commit of its own yet) never matches.
+    a snapshot exists
+        Without one there is no lineage to preserve, so reuse buys nothing.
+    the session is clean
+        ``ydoc_seq == ydoc_checkpointed_seq``, i.e. every update it holds is
+        already committed. A dirty session was closed with work outstanding
+        (the missing-path close is the one that does this) and reactivating it
+        would resurrect updates against a page state nobody has verified.
+    """
+    if base_sha is None:
+        return None
+    return s.scalar(
+        select(CoeditSession)
+        .where(
+            CoeditSession.path == path,
+            CoeditSession.status == SessionStatus.CLOSED.value,
+            CoeditSession.base_sha == base_sha,
+            CoeditSession.ydoc_snapshot.is_not(None),
+            CoeditSession.ydoc_seq == CoeditSession.ydoc_checkpointed_seq,
+        )
+        .order_by(CoeditSession.id.desc())
+    )
+
+
 def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     """Get-or-create the active session row for ``path``.
 
@@ -269,6 +310,18 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     ``base_sha`` is ignored: that session's own merge base already reflects its
     history. Concurrent opens race on the partial unique index; the loser
     re-reads the winner's row.
+
+    When no active session exists, a closed one for the same path is
+    *reactivated* in preference to inserting a fresh row, provided it still
+    describes the page as committed (see ``_reusable_closed_session``). This is
+    a correctness requirement, not an optimization: a session's document
+    identity is its Yjs lineage, and a new row means a new snapshot seeded by
+    ``seed_doc_from_markdown``, whose ``Doc()`` carries a fresh random client
+    id. A client that reconnects onto a new lineage answers the server's
+    SYNC_STEP1 with its entire retained document — the two lineages share no
+    item ids, so nothing dedupes and every block ends up in the page twice,
+    compounding on each cycle. Reactivating keeps the lineage, which makes that
+    reply a no-op and also preserves anything typed while disconnected.
     """
     with session() as s:
         existing = s.scalar(
@@ -278,11 +331,31 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
         )
         if existing is not None:
             return _session_row(existing)
-        # Stamp created_at/updated_at in _iso (T-separated, +00:00) rather than
-        # letting the space-separated server_default fill them: sessions_due_for_
-        # checkpoint compares these against _iso cutoffs, and mixing the two
-        # string formats breaks the lexicographic ordering.
         now = _iso(_now())
+        reusable = _reusable_closed_session(s, path, base_sha)
+        if reusable is not None:
+            reusable.status = SessionStatus.ACTIVE.value
+            reusable.updated_at = now
+            try:
+                s.flush()
+            except IntegrityError:
+                # Another opener activated a row for this path first — same
+                # race the insert path below handles, same resolution.
+                s.rollback()
+                winner = s.scalar(
+                    select(CoeditSession).where(
+                        CoeditSession.path == path,
+                        CoeditSession.status == SessionStatus.ACTIVE.value,
+                    )
+                )
+                if winner is None:  # pragma: no cover - winner closed in the gap
+                    raise
+                return _session_row(winner)
+            return _session_row(reusable)
+        # `now` is stamped in _iso (T-separated, +00:00) rather than letting the
+        # space-separated server_default fill it: sessions_due_for_checkpoint
+        # compares these against _iso cutoffs, and mixing the two string formats
+        # breaks the lexicographic ordering.
         fresh = CoeditSession(
             path=path,
             ydoc_seq=0,

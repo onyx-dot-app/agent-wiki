@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 
-from pycrdt import Doc, create_update_message
+from pycrdt import Doc, XmlFragment, create_update_message
 from pydantic import BaseModel, ConfigDict
 
 from app.auth import User, set_current_user
@@ -51,6 +51,75 @@ log = logging.getLogger(__name__)
 # session that's still dirty after the bound is hit just gets picked up
 # completely fresh by the next trigger.
 _LATE_UPDATE_FOLD_ATTEMPTS = 3
+
+
+def _duplicated_block_ids(doc: Doc) -> list[str]:
+    """Top-level ``_blockId``s appearing more than once, in document order.
+
+    Two top-level blocks sharing an id is not a thing editing can produce — it
+    means the document holds the same block twice under two CRDT lineages that
+    share no item ids and therefore cannot dedupe (``open_session``'s reuse rule
+    exists to stop that arising; this catches any other route to it). Freshly
+    typed content carries no id at all and takes ``checkpoint_body``'s
+    ``orig is None`` path, so it can't collide.
+
+    Committing in this state duplicates content rather than merely mis-ordering
+    it: ``markdown_splice.checkpoint_body`` keys a live block back to its range
+    in the committed markdown by id, so both copies resolve to the same range —
+    the same reason the editor enforces uniqueness client-side (see
+    ``UniqueBlockIdentity`` in ``frontend/src/lib/editor/blocks.ts``).
+    """
+    seen: set[str] = set()
+    dupes: list[str] = []
+    root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
+    for child in root.children:
+        block_id = dict(getattr(child, "attributes", {})).get(markdown_yjs.BLOCK_ID_ATTR)
+        if not isinstance(block_id, str):
+            continue
+        if block_id in seen and block_id not in dupes:
+            dupes.append(block_id)
+        seen.add(block_id)
+    return dupes
+
+
+def drop_duplicate_blocks(doc: Doc) -> list[str]:
+    """Delete every repeat of a top-level ``_blockId``, keeping the first, and
+    return the ids that were repeated.
+
+    A *deletion*, deliberately, rather than declining to commit: the duplicated
+    content is in the connected browsers' own documents too, so refusing here
+    leaves them holding it and re-sending it on the next reconnect — closing the
+    session doesn't help either, since the next one can't reuse a dirty session
+    and so seeds yet another lineage for the same retained document to merge
+    into. Deleting escapes that: the deletion is broadcast at the end of
+    ``checkpoint_session`` like any other update, and because a Yjs delete
+    addresses the same items the client holds, the client's document converges
+    to the repaired state without a reload (verified directly against pycrdt).
+
+    Keeping the first occurrence is arbitrary but deterministic. The copies are
+    identical when this arises from a lineage merge; if one had been edited
+    afterwards, those edits are lost — no worse than the alternative, which is a
+    page that can never be saved again.
+    """
+    dupes = _duplicated_block_ids(doc)
+    if not dupes:
+        return []
+    root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
+    seen: set[str] = set()
+    stale: list[int] = []
+    for i, child in enumerate(root.children):
+        block_id = dict(getattr(child, "attributes", {})).get(markdown_yjs.BLOCK_ID_ATTR)
+        if not isinstance(block_id, str):
+            continue
+        if block_id in seen:
+            stale.append(i)
+        else:
+            seen.add(block_id)
+    # Descending, so each deletion can't shift the index of one still pending.
+    with doc.transaction():
+        for i in reversed(stale):
+            del root.children[i]
+    return dupes
 
 
 def _user(user_id: str) -> User | None:
@@ -226,6 +295,25 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             return None
 
         doc, base_body, tracker, replayed_seq = _rebuild_doc(sess)
+
+        # Repaired in place and then committed normally, rather than refused:
+        # the checkpoint's closing broadcast carries the deletion to every
+        # connected client, so their documents converge too. Refusing instead
+        # would leave the duplication in the browsers that hold it, to be
+        # re-sent on their next reconnect — and closing the session wouldn't
+        # help, since the next one can't reuse a dirty session and would seed
+        # yet another lineage for that same retained document to merge into.
+        dupes = drop_duplicate_blocks(doc)
+        if dupes:
+            log.error(
+                "coedit checkpoint: %s (session %s) held duplicate top-level block ids "
+                "%s; dropped the repeats and committing the repaired document. This "
+                "should be unreachable — see open_session's lineage reuse rule.",
+                path,
+                session_id,
+                dupes,
+            )
+
         change_kind = ChangeKind.EDIT if sess.base_sha else ChangeKind.CREATE
 
         primary_id = coedit.last_update_author(session_id)
