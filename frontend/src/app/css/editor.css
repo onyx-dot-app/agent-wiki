@@ -94,12 +94,11 @@
   color: var(--text-05);
 }
 
-/* Breathing room the Tailwind reset removed. Kept deliberately small: the
-   doc's larger rhythm is the author's own blank lines — the codec models
-   each one as an empty paragraph (see markdown_yjs) — so real block
-   margins here would double-space every existing page. Headings get a
-   bottom margin (a heading directly above a list sat flush on it), list
-   rows get 2px each side so a tight list isn't a solid brick. */
+/* Kept deliberately small: the doc's larger rhythm is the author's own
+   blank lines — the codec models each one as an empty paragraph (see
+   markdown_yjs) — so real block margins here would double-space every
+   page. Headings carry the separation from the block that follows them;
+   list rows get 2px each side so a tight list reads as distinct rows. */
 .editor-prose h1,
 .editor-prose h2,
 .editor-prose h3,
