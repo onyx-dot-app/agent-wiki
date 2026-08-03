@@ -5,10 +5,20 @@
 
 /* Fill the RootLayout main slot (which sits below the pinned header), not the
    whole viewport — otherwise this scroller + the slot's own overflow stack into
-   two scrollbars. */
+   two scrollbars. The view wrapper anchors the shared EdgeScrollbar thumb;
+   the scroller's native bar is hidden, same as the doc surfaces. */
+.view {
+  position: relative;
+  height: 100%;
+}
 .scroll {
   height: 100%;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scroll::-webkit-scrollbar {
+  display: none;
 }
 
 /* Top header — folder chip + breadcrumb */
