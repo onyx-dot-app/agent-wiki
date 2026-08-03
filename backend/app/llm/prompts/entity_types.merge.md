@@ -11,6 +11,7 @@ TASK: merge types that denote the same KIND of thing.
       * FORM-based: "abbreviation" classifies how a name is SPELLED, not what it denotes. Every acronym would qualify, so it steals members from every real type.
       * NEGATIVE: "non_organization_reference" defines by what a thing is NOT. That is a junk drawer, not a category, and it will absorb anything unclear.
       * FUNCTIONAL co-occurrence: do not group by what a thing is USED WITH. Okta is a COMPANY even though it is discussed alongside OAuth and SAML; a vendor of authentication software is not an authentication protocol.
+  - Judge a type by its MEMBERS, not by its name. A plausible label can sit on top of members that belong elsewhere: if the referents under "place" are all deployment regions, merge that whole type into infrastructure; if the referents under "website" are all companies' domains, merge it into organization. You reassign WHOLE types, not individual referents, so decide from the examples which kind the type as a whole is — and where a type is genuinely mixed, leave it rather than moving it somewhere only some of its members fit.
     Fold such members into the type their referent actually belongs to. Every type you output must be statable as "a kind of X" where X is a thing, not a property of its name and not the absence of something.
 
 For each merged type give a canonical type_name (lower_snake_case) and ONE definition that covers all its members and is decidable by a later extractor reading it alone.
