@@ -692,15 +692,16 @@ def _build_list(
         if ordered:
             attrs["start"] = str(open_tok.attrs.get("start", 1))
 
-    # Tight vs. loose is recorded, not discarded: markdown-it hides a tight
-    # item's paragraph tokens (CommonMark makes looseness a whole-list
-    # property, so they're all hidden or all visible per list). The direct
-    # item paragraphs sit exactly two levels below this list's open token —
-    # a nested list's paragraphs are deeper and carry that list's own flag,
-    # judged by its own recursive ``_build_list`` call. Without this
-    # attribute every touched list re-serialized loose, so editing one item
-    # rewrote the whole list's spacing — phantom formatting churn in every
-    # co-edit checkpoint that touched a tight list.
+    # A tight list is recorded as such so ``_serialize_list`` can keep its
+    # shape. The signal is markdown-it's: a tight item's paragraph tokens
+    # are hidden, and CommonMark makes looseness a whole-list property, so
+    # per list they are all hidden or all visible. Only paragraphs exactly
+    # two levels below this list's open token count — a nested list's
+    # paragraphs are deeper and carry that list's own flag, judged by its
+    # own recursive ``_build_list`` call. A list with no direct paragraphs
+    # at all (items holding only nested blocks, e.g. fenced code) has no
+    # signal to read and stays unstamped — serialized loose, the safe
+    # direction, since a wrongly-tight stamp would strip its blank lines.
     para_level = open_tok.level + 2
     direct_paras = [
         t
@@ -708,7 +709,7 @@ def _build_list(
         for t in tokens[s:e]
         if t.type == "paragraph_open" and t.level == para_level
     ]
-    if all(t.hidden for t in direct_paras):
+    if direct_paras and all(t.hidden for t in direct_paras):
         attrs["tight"] = "true"
 
     items: list[XmlElement] = []
@@ -1034,10 +1035,10 @@ def _tight_item_safe(item: XmlElement) -> bool:
 def _serialize_list(node: XmlElement) -> str:
     """Serializes a list in the style its ``tight`` attribute records —
     single newlines between a tight list's items, blank lines for a loose
-    one — so an edit to one item no longer reflows the whole list's
-    spacing. A list with no attribute (built by the editor rather than the
-    parser) serializes loose, the safe direction. Still not byte-identical
-    for every touched list (ordered-list renumbering, marker style) — only
+    one — so editing one item leaves the rest of the list's spacing as
+    written. A list with no attribute (built by the editor rather than the
+    parser) serializes loose, the safe direction. Not byte-identical for
+    every touched list (ordered-list renumbering, marker style) — only
     untouched blocks carry the byte-stability guarantee
     (``markdown_splice.py``), which never calls this serializer at all.
     """

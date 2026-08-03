@@ -469,11 +469,9 @@ def test_list_reserialization_is_content_correct_and_idempotent() -> None:
 
 
 def test_tight_list_round_trips_byte_identically() -> None:
-    """A tight list (no blank lines between items) keeps its shape. Every
-    touched list used to re-serialize loose, so editing one item rewrote the
-    whole list's spacing — phantom formatting churn in each co-edit
-    checkpoint that brushed a tight list, which is exactly the "saves not
-    from a human" a reader sees in the page history."""
+    """A tight list (no blank lines between items) keeps its shape, so a
+    checkpoint that touches one commits only the edit, never a whole-list
+    spacing reflow."""
     for body in (
         "- one\n- two\n- three\n",
         "- [ ] todo\n- [x] done\n- [ ] later\n",
@@ -491,6 +489,20 @@ def test_loose_list_round_trips_byte_identically() -> None:
         "1. first\n\n2. second\n",
     ):
         assert reconstruct_body(seed_doc_from_markdown(body)) == body
+
+
+def test_paragraphless_list_stays_unstamped_and_serializes_loose() -> None:
+    """A list whose items hold only nested blocks (no direct paragraphs)
+    carries no tight/loose signal — markdown-it's marker is paragraph
+    hiddenness — so it stays unstamped and serializes loose, the safe
+    direction. A wrongly-tight stamp would strip a loose source's blank
+    lines."""
+    loose = "- ```py\n  x\n  ```\n\n- ```py\n  y\n  ```\n"
+    doc = seed_doc_from_markdown(loose)
+    lst = _root(doc).children[0]
+    assert isinstance(lst, XmlElement)
+    assert dict(lst.attributes).get("tight") is None
+    assert reconstruct_body(doc) == loose
 
 
 def test_mixed_spacing_normalizes_loose_and_converges() -> None:
