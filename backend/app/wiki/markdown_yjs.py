@@ -88,6 +88,10 @@ _KNOWN_INLINE_TYPES = {
 # semantically nest (or be nested inside) other marks anyway.
 _NESTING_MARK_ORDER = ("link", "bold", "strike", "italic")
 _SYMMETRIC_MARK_DELIMS = {"italic": "*", "bold": "**", "strike": "~~"}
+# The equivalent underscore spellings, used only when an emphasis opener
+# would directly abut a same-character closer (see the delimiter-collision
+# fallback in ``_serialize_inline_text``).
+_ALT_EMPHASIS_DELIMS = {"*": "_", "**": "__"}
 
 # A text segment or a leaf segment. The 4th slot carries a leaf's attrs
 # dict, used for images and ``None`` for text runs or hard breaks.
@@ -322,15 +326,20 @@ def _close_delim(key: _MarkKey) -> str:
     return _SYMMETRIC_MARK_DELIMS[key]
 
 
-def _close_after(out: str, keys: Iterable[_MarkKey]) -> str:
+def _close_after(out: str, closers: Iterable[str]) -> str:
     """Append closing delimiters, keeping trailing whitespace outside them.
 
     CommonMark only closes emphasis on a delimiter preceded by non-whitespace,
     so `*before *` is literal text, not emphasis. A leaf (an image, a hard
     break) splitting a marked run forces a close mid-run, which is exactly
     where that trailing space appears.
+
+    Takes the closer strings themselves rather than mark keys: openers are
+    chosen per instance (an emphasis mark can open with either spelling —
+    see the collision fallback in ``_serialize_inline_text``), and only the
+    caller's stack knows which one to match.
     """
-    closing = "".join(_close_delim(key) for key in keys)
+    closing = "".join(closers)
     if not closing:
         return out
     body = out.rstrip()
@@ -352,44 +361,70 @@ def _serialize_inline_text(xt: XmlText) -> str:
 
     Fixed by tracking a single stack of currently-open marks across the
     *whole* run sequence — the standard "properly nested delimiters"
-    approach: at each run boundary, find the longest common prefix between
-    what's currently open and what the next run wants (both in
-    ``_NESTING_MARK_ORDER``, outer to inner), close everything after that
-    prefix (innermost first — a mark can't close while something opened
-    after it is still open, that's what "nested" means), then open
-    whatever the next run newly wants. A mark that's genuinely continuous
-    across runs never closes at all.
+    approach: at each run boundary, keep the longest prefix of the open
+    stack that the next run still carries, close everything after it
+    (innermost first — a mark can't close while something opened after it
+    is still open, that's what "nested" means), then open whatever the
+    next run newly wants, in ``_NESTING_MARK_ORDER``. Which mark nests
+    outside which is this serializer's own choice, so a mark carried by
+    both neighbouring runs stays open in the position it already holds —
+    continuity, not a fixed order — and a genuinely continuous mark never
+    closes at all.
 
     "code" is handled separately, per run (``_wrap_code_run``) — a code
     span's own fence is already self-delimiting per its own text and
     doesn't participate in this cross-run nesting.
     """
-    open_keys: list[_MarkKey] = []
+    # Each open mark remembers the closer it was opened with, because the
+    # opener is chosen per instance (see the delimiter-collision fallback
+    # below) and the closer must match it.
+    open_marks: list[tuple[_MarkKey, str]] = []
     out = ""
     for text, attrs in xt.diff():
         attrs = attrs or {}
-        target = [_mark_key(m, attrs) for m in _NESTING_MARK_ORDER if m in attrs]
+        ordered = [_mark_key(m, attrs) for m in _NESTING_MARK_ORDER if m in attrs]
+        want = set(ordered)
+        # Keep every already-open mark this run still carries, in the order
+        # they are open — not in ``_NESTING_MARK_ORDER``. The order marks
+        # nest in is this serializer's own choice, and continuity is the
+        # correct choice: for italic text with a bold word inside, closing
+        # the italic to reopen it bold-first abuts the two spans' delimiter
+        # runs into one (``***Status****.*``), which CommonMark reads as a
+        # single unmatchable run — the emphasis is lost and the asterisks
+        # go literal on the next parse. Keeping the continuing mark open
+        # reproduces the nesting the source actually had.
         common = 0
-        while (
-            common < len(open_keys) and common < len(target) and open_keys[common] == target[common]
-        ):
+        while common < len(open_marks) and open_marks[common][0] in want:
             common += 1
-        out = _close_after(out, reversed(open_keys[common:]))
-        open_keys = target
+        out = _close_after(out, (close for _, close in reversed(open_marks[common:])))
+        open_marks = open_marks[:common]
+        kept = {key for key, _ in open_marks}
         # Inline code spans are verbatim — CommonMark never processes
         # escapes inside them, so escaping here would corrupt the code's
         # actual text (a literal backslash would become part of the
         # visible content).
         rendered = _wrap_code_run(text) if "code" in attrs else _escape_inline_text(text)
-        opening = "".join(_open_delim(key) for key in target[common:])
-        if opening:
-            # An opener must be followed by non-whitespace, so any leading
-            # space stays in front of it.
-            lead = len(rendered) - len(rendered.lstrip())
-            out += rendered[:lead] + opening + rendered[lead:]
-        else:
-            out += rendered
-    return _close_after(out, reversed(open_keys))
+        # An opener must be followed by non-whitespace, so any leading
+        # space stays in front of it.
+        lead = len(rendered) - len(rendered.lstrip())
+        prefix = out + rendered[:lead]
+        opening = ""
+        for key in ordered:
+            if key in kept:
+                continue
+            delim = _open_delim(key)
+            # A genuine mark crossing (one span ends exactly where another
+            # begins) still abuts a closer and an opener of the same
+            # character into one ambiguous delimiter run. Emphasis has an
+            # equivalent spelling to break the tie with; a strike run has
+            # no alternate and keeps its (pre-existing) ambiguity.
+            last = (prefix + opening)[-1:]
+            if delim[0] == last and delim in _ALT_EMPHASIS_DELIMS:
+                delim = _ALT_EMPHASIS_DELIMS[delim]
+            opening += delim
+            open_marks.append((key, delim if not isinstance(key, tuple) else _close_delim(key)))
+        out = prefix + opening + rendered[lead:]
+    return _close_after(out, (close for _, close in reversed(open_marks)))
 
 
 def _escape_title(title: str) -> str:

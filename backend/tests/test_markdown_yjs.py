@@ -468,6 +468,38 @@ def test_list_reserialization_is_content_correct_and_idempotent() -> None:
     assert "item one" in once and "item two" in once and "item three" in once
 
 
+def test_nested_emphasis_keeps_the_continuing_mark_open() -> None:
+    """A mark carried by both neighbouring runs stays open in the position
+    it already holds, whatever ``_NESTING_MARK_ORDER`` says — italic around
+    a bold word round-trips as written instead of closing and reopening the
+    italic at each boundary, whose abutted delimiters (``****``) CommonMark
+    reads as one unmatchable run."""
+    for body in (
+        "*a **b** c*\n",
+        "**a *b* c**\n",
+        "*a **b***\n",
+        "**a *b***\n",
+        "**bold [link](x) more**\n",
+        "~~a *b* c~~\n",
+        "> *the **Design** section is under **Status**.*\n",
+    ):
+        assert reconstruct_body(seed_doc_from_markdown(body)) == body
+
+
+def test_emphasis_crossing_opens_with_the_underscore_spelling() -> None:
+    """When one emphasis span ends exactly where another begins, the opener
+    would abut a same-character closer into an ambiguous delimiter run — it
+    opens with the underscore spelling instead, which re-parses to the same
+    marks and is byte-stable from then on."""
+    for src, want in (
+        ("**a***b*\n", "**a**_b_\n"),
+        ("*a***b**\n", "*a*__b__\n"),
+    ):
+        one = reconstruct_body(seed_doc_from_markdown(src))
+        assert one == want
+        assert reconstruct_body(seed_doc_from_markdown(one)) == one
+
+
 def test_tight_list_round_trips_byte_identically() -> None:
     """A tight list (no blank lines between items) keeps its shape, so a
     checkpoint that touches one commits only the edit, never a whole-list
