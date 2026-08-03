@@ -57,9 +57,13 @@ def remap_anchored(
         old_body = _read_old_body(path, anchor_sha)
         if old_body is None:
             continue
+        # Both diffs depend only on the body pair, so pay them once per anchor
+        # group rather than once per record — a page can carry dozens of source
+        # ranges against one anchor_sha.
+        diff = None if old_body == new_body else comment_anchor.body_diff(old_body, new_body)
         for r in group:
             result = comment_anchor.remap_range(
-                old_body, new_body, r["start_offset"], r["end_offset"]
+                old_body, new_body, r["start_offset"], r["end_offset"], diff=diff
             )
             if result is None:
                 on_lost(r["id"])

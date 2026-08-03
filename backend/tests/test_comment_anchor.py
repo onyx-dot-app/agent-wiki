@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.wiki import comment_anchor
 from app.wiki.comment_anchor import remap_range
 
 
@@ -227,3 +228,133 @@ def test_disjoint_full_rewrite_orphans():
     new = "keep )))))))))) keep"
     s, e = old.index("[["), old.index("[[") + 10
     assert remap_range(old, new, s, e) is None
+
+
+# --------------------------------------------------------------------------- #
+# body_diff precomputation + cost caps                                        #
+# --------------------------------------------------------------------------- #
+
+
+def test_precomputed_diff_matches_per_call_results():
+    old = "\n".join(f"line {i} stays the same" for i in range(30))
+    new = old.replace("line 7 stays", "line 7 mostly stays").replace(
+        "line 21 stays the same", "entirely new text here"
+    )
+    diff = comment_anchor.body_diff(old, new)
+    spans = [
+        (0, 10),
+        (old.index("line 7"), old.index("line 7") + len("line 7 stays")),
+        (old.index("line 21"), old.index("line 21") + len("line 21 stays the same")),
+        (len(old) - 15, len(old)),
+    ]
+    for s, e in spans:
+        assert remap_range(old, new, s, e, diff=diff) == remap_range(old, new, s, e)
+
+
+def test_multiline_edit_keeps_unchanged_line_anchor_exact():
+    old = "alpha\nbravo target words\ncharlie\n"
+    new = "alpha\nbravo target words\nCHARLIE REWRITTEN\n"
+    s = old.index("target")
+    assert remap_range(old, new, s, s + len("target words")) == (s, s + len("target words"))
+
+
+def test_over_cap_hunk_degrades_to_coarse_replace(monkeypatch):
+    monkeypatch.setattr(comment_anchor, "_MAX_HUNK_CHAR_PRODUCT", 4)
+    old = "stable\nthe quick brown fox\nstable2\n"
+    new = "stable\nthe quick red fox\nstable2\n"
+    s = old.index("quick")
+    # Under the cap the whole changed line stays one coarse replace opcode, so a
+    # span inside it collapses and orphans instead of fine-aligning.
+    assert remap_range(old, new, s, s + len("quick brown fox")) is None
+    # Anchors on unchanged lines are unaffected by the cap.
+    assert remap_range(old, new, 0, len("stable")) == (0, len("stable"))
+
+
+def test_over_cap_token_diff_skips_survival_guard(monkeypatch):
+    monkeypatch.setattr(comment_anchor, "_MAX_TOKEN_PRODUCT", 1)
+    old = "alpha\nthe quick brown fox\nomega\n"
+    new = "alpha\nthe quick red fox\nomega\n"
+    diff = comment_anchor.body_diff(old, new)
+    assert diff.token_opcodes is None
+    # Endpoint mapping still works; the guard is bypassed rather than orphaning.
+    s = old.index("quick")
+    result = remap_range(old, new, s, s + len("quick brown fox"), diff=diff)
+    assert result is not None
+    assert new[result[0] : result[1]] == "quick red fox"
+
+
+def test_append_only_edit_maps_all_anchors_exactly():
+    # Common-suffix/prefix trim: appending at the bottom must leave every
+    # existing anchor at its exact old offsets, at any page size.
+    old = "\n".join(f"- item {i} with some text" for i in range(500)) + "\n"
+    new = old + "- appended row\n"
+    diff = comment_anchor.body_diff(old, new)
+    for i in (0, 250, 499):  # word-aligned spans so _snap_to_words is a no-op
+        s = old.index(f"- item {i} with")
+        e = s + len(f"- item {i} with some text")
+        assert remap_range(old, new, s, e, diff=diff) == (s, e)
+
+
+def test_anchor_after_edited_line_shifts_by_exact_delta():
+    lines = [f"line {i} content here\n" for i in range(50)]
+    old = "".join(lines)
+    edited = lines.copy()
+    edited[10] = "line 10 content here plus an insertion\n"
+    new = "".join(edited)
+    delta = len(edited[10]) - len(lines[10])
+    s = old.index("line 40")
+    e = s + len("line 40 content")
+    assert remap_range(old, new, s, e) == (s + delta, e + delta)
+
+
+def test_over_cap_line_diff_falls_back_to_one_hunk(monkeypatch):
+    monkeypatch.setattr(comment_anchor, "_MAX_LINE_PRODUCT", 1)
+    # Prefix/suffix lines are trimmed before the cap applies, so anchors there
+    # stay exact even when the middle is treated as a single hunk.
+    old = "stable head\nAAA one\nBBB two\nstable tail\n"
+    new = "stable head\nCCC uno\nDDD dos\nstable tail\n"
+    assert remap_range(old, new, 0, len("stable head")) == (0, len("stable head"))
+    s = old.index("stable tail")
+    s_new = new.index("stable tail")
+    assert remap_range(old, new, s, s + 6) == (s_new, s_new + 6)
+    # The middle collapses through the coarse hunk and orphans.
+    assert remap_range(old, new, old.index("AAA"), old.index("AAA") + 7) is None
+
+
+def test_huge_replaced_run_gets_no_partial_credit(monkeypatch):
+    # An in-place-edited token run over the ratio cap must score zero credit
+    # (orphan) instead of running a quadratic similarity pass.
+    old = "prefix stays. weekly rotation. suffix stays."
+    new = "prefix stays. biweekly rotation. suffix stays."
+    s, e = old.index("weekly"), old.index("weekly") + len("weekly")
+    # Control: under the normal cap the in-place edit earns partial credit.
+    assert remap_range(old, new, s, e) is not None
+    # The same edit with its run over the cap earns nothing and orphans.
+    monkeypatch.setattr(comment_anchor, "_MAX_RUN_RATIO_PRODUCT", 10)
+    assert remap_range(old, new, s, e) is None
+
+
+def test_replace_run_similarity_computed_once_per_body_pair(monkeypatch):
+    # Spans sharing a BodyDiff must pay each edited run's ratio() once, not
+    # once per span — the group remap on a many-span page depends on it.
+    import difflib
+
+    old = "alpha weekly rotation gamma\n"
+    new = "alpha biweekly rotation gamma\n"
+    diff = comment_anchor.body_diff(old, new)  # built before counting starts
+
+    constructions: list[int] = []
+
+    class _Counting(difflib.SequenceMatcher):
+        def __init__(self, *args, **kwargs):
+            constructions.append(1)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(comment_anchor, "SequenceMatcher", _Counting)
+    spans = [
+        (old.index("weekly"), old.index("weekly") + len("weekly")),
+        (0, old.index("rotation") + len("rotation")),
+    ]
+    results = [remap_range(old, new, s, e, diff=diff) for s, e in spans]
+    assert all(r is not None for r in results)
+    assert len(constructions) == 1  # the shared run's ratio ran exactly once
