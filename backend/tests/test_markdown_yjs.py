@@ -459,14 +459,70 @@ def test_task_list_nesting_and_inside_blockquote() -> None:
 
 
 def test_list_reserialization_is_content_correct_and_idempotent() -> None:
-    """The tight->loose list normalization (see markdown_yjs.py) means
-    output isn't byte-identical to a tight-list source, but re-parsing the
-    output must be a no-op (a well-defined normal form, not drift)."""
+    """Re-parsing the output must be a no-op (a well-defined normal form,
+    not drift)."""
     body = "- item one\n- item two\n- item three\n"
     once = reconstruct_body(seed_doc_from_markdown(body))
     twice = reconstruct_body(seed_doc_from_markdown(once))
     assert once == twice
     assert "item one" in once and "item two" in once and "item three" in once
+
+
+def test_tight_list_round_trips_byte_identically() -> None:
+    """A tight list (no blank lines between items) keeps its shape. Every
+    touched list used to re-serialize loose, so editing one item rewrote the
+    whole list's spacing — phantom formatting churn in each co-edit
+    checkpoint that brushed a tight list, which is exactly the "saves not
+    from a human" a reader sees in the page history."""
+    for body in (
+        "- one\n- two\n- three\n",
+        "- [ ] todo\n- [x] done\n- [ ] later\n",
+        "1. first\n2. second\n",
+        "- top\n  - nested tight\n- next\n",
+        "- [ ] top\n  - [x] nested\n- [ ] after\n",
+    ):
+        assert reconstruct_body(seed_doc_from_markdown(body)) == body
+
+
+def test_loose_list_round_trips_byte_identically() -> None:
+    for body in (
+        "- one\n\n- two\n",
+        "- [ ] todo\n\n- [x] done\n",
+        "1. first\n\n2. second\n",
+    ):
+        assert reconstruct_body(seed_doc_from_markdown(body)) == body
+
+
+def test_mixed_spacing_normalizes_loose_and_converges() -> None:
+    """CommonMark makes looseness a whole-list property: one blank line
+    anywhere makes the entire list loose, so mixed spacing has no faithful
+    representation. It normalizes to uniform loose in one pass and is
+    byte-stable from then on."""
+    body = "- one\n- two\n\n- three\n"
+    once = reconstruct_body(seed_doc_from_markdown(body))
+    assert once == "- one\n\n- two\n\n- three\n"
+    assert reconstruct_body(seed_doc_from_markdown(once)) == once
+
+
+def test_editor_added_second_paragraph_falls_back_to_loose() -> None:
+    """The tight attribute lives on the list node, so nothing clears it when
+    an edit gives an item a second paragraph. Serializing that tightly would
+    merge the paragraphs on the next parse — the serializer must fall back
+    to loose for the whole list instead, and the result must re-parse to the
+    same two paragraphs."""
+    doc = seed_doc_from_markdown("- one\n- two\n")
+    lst = _root(doc).children[0]
+    assert isinstance(lst, XmlElement)
+    assert dict(lst.attributes).get("tight") == "true"
+    with doc.transaction():
+        item = lst.children[0]
+        item.children.append(XmlElement("paragraph", {}, contents=[XmlText("second para")]))  # pyright: ignore[reportAttributeAccessIssue]
+    out = reconstruct_body(doc)
+    assert out == "- one\n\n  second para\n\n- two\n"
+    reparsed = _root(seed_doc_from_markdown(out)).children[0]
+    assert isinstance(reparsed, XmlElement)
+    first_item_tags = [c.tag for c in reparsed.children[0].children]  # pyright: ignore[reportAttributeAccessIssue]
+    assert first_item_tags == ["paragraph", "paragraph"]
 
 
 def test_blockquote_multi_paragraph_round_trips_exactly() -> None:
@@ -492,10 +548,10 @@ def test_task_item_continuation_indents_to_the_bullet_not_the_checkbox() -> None
     code block on the next parse: a checkpoint rewrote a task item's nested
     list into code, and the page then wouldn't open at all (the codec had
     no support for a code block inside a list item). The indentation of the
-    output is what matters here — the blank line the first case gains is
-    this module's usual tight->loose list normalization."""
+    output is what matters here — and the first case is tight, so it keeps
+    its no-blank-line shape byte-for-byte."""
     assert reconstruct_body(seed_doc_from_markdown("- [ ] top\n  - [x] nested\n")) == (
-        "- [ ] top\n\n  - [x] nested\n"
+        "- [ ] top\n  - [x] nested\n"
     )
     for body in (
         "- [ ] top\n\n  a second paragraph\n",
@@ -1350,7 +1406,7 @@ def test_checkbox_accepts_the_legacy_string_attribute() -> None:
         lst.children[0].attributes["checked"] = "true"  # pyright: ignore[reportAttributeAccessIssue]
         lst.children[1].attributes["checked"] = "false"  # pyright: ignore[reportAttributeAccessIssue]
 
-    assert reconstruct_body(doc) == "- [x] one\n\n- [ ] two\n"
+    assert reconstruct_body(doc) == "- [x] one\n- [ ] two\n"
 
 
 def test_code_block_closing_fence_starts_its_own_line() -> None:

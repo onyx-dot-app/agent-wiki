@@ -692,6 +692,25 @@ def _build_list(
         if ordered:
             attrs["start"] = str(open_tok.attrs.get("start", 1))
 
+    # Tight vs. loose is recorded, not discarded: markdown-it hides a tight
+    # item's paragraph tokens (CommonMark makes looseness a whole-list
+    # property, so they're all hidden or all visible per list). The direct
+    # item paragraphs sit exactly two levels below this list's open token —
+    # a nested list's paragraphs are deeper and carry that list's own flag,
+    # judged by its own recursive ``_build_list`` call. Without this
+    # attribute every touched list re-serialized loose, so editing one item
+    # rewrote the whole list's spacing — phantom formatting churn in every
+    # co-edit checkpoint that touched a tight list.
+    para_level = open_tok.level + 2
+    direct_paras = [
+        t
+        for s, e in item_ranges
+        for t in tokens[s:e]
+        if t.type == "paragraph_open" and t.level == para_level
+    ]
+    if all(t.hidden for t in direct_paras):
+        attrs["tight"] = "true"
+
     items: list[XmlElement] = []
     finishers: list[Any] = []
     for idx, (item_start, item_end) in enumerate(item_ranges):
@@ -954,7 +973,7 @@ def serialize_row(row: XmlElement) -> str:
     return kids[0].to_py() if kids else ""  # type: ignore[return-value]
 
 
-def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
+def _serialize_block_sequence(children: list[XmlElement], indent: str, sep: str = "\n\n") -> str:
     """Inverse of ``_build_block_sequence``: block children joined by blank
     lines, with every line after the very first indented by ``indent`` so
     continuation lines / nested constructs align under the parent marker or
@@ -966,28 +985,72 @@ def _serialize_block_sequence(children: list[XmlElement], indent: str) -> str:
     block-start escaping: a list item or blockquote's own first line is just
     as much a fresh block-start position as the top of the document, so a
     literal leading ``-``/``>``/``#``/``---`` needs the same escaping there.
-    Each block's own trailing newline is dropped here because the blank-line
-    join below supplies the separation instead."""
+    Each block's own trailing newline is dropped here because the join
+    below supplies the separation instead.
+
+    ``sep`` is ``"\\n"`` for a tight list item's blocks (no blank between a
+    tight item's paragraph and its nested list — see ``_serialize_list``,
+    which only passes it when ``_tight_item_safe`` proved the reparse keeps
+    the blocks apart) and the default blank-line join everywhere else."""
     parts = [serialize_block(child).rstrip("\n") for child in children]
-    combined = "\n\n".join(parts)
+    combined = sep.join(parts)
     lines = combined.split("\n")
     indented = [lines[0]] + [(indent + line if line else line) for line in lines[1:]]
     return "\n".join(indented)
 
 
+# Blocks that may directly follow a tight item's first paragraph with no
+# blank line and still reparse as their own block: constructs CommonMark
+# lets interrupt a paragraph. Notably absent: ``paragraph`` (two need a
+# blank between them or they merge), ``horizontalRule`` (``---`` under a
+# paragraph line is a setext heading, not a rule), ``table`` (a delimiter
+# row can't interrupt), and ``orderedList`` unless it starts at 1 (checked
+# separately — only ``1.`` may interrupt).
+_TIGHT_INTERRUPTERS = frozenset({"bulletList", "taskList", "codeBlock", "heading", "blockquote"})
+
+
+def _tight_item_safe(item: XmlElement) -> bool:
+    """Whether this item's blocks survive a tight (no-blank-line) join.
+
+    A tight list parsed from markdown always satisfies this — a blank line
+    inside an item would have made the whole list loose. What can't is a doc
+    the editor mutated after parsing: the ``tight`` attribute lives on the
+    list node, so nothing clears it when an edit gives an item a second
+    paragraph. Serializing that tightly would merge the paragraphs on the
+    next parse; the caller falls back to loose for the whole list instead
+    (one visible reflow, after which the reparse records ``loose`` and the
+    round trip is stable again)."""
+    blocks = [c for c in item.children if isinstance(c, XmlElement)]
+    for later in blocks[1:]:
+        if later.tag == "orderedList":
+            if dict(later.attributes).get("start", "1") != "1":
+                return False
+            continue
+        if later.tag not in _TIGHT_INTERRUPTERS:
+            return False
+    return True
+
+
 def _serialize_list(node: XmlElement) -> str:
-    """Serializes every list as CommonMark "loose" style (blank line between
-    items), even if the source was "tight" (no blank lines) — tight vs.
-    loose is purely an HTML-rendering distinction (whether item content gets
-    wrapped in ``<p>``); the item *text* is identical either way, so this
-    never changes a page's actual content. Not byte-identical for a touched
-    list, same accepted tradeoff as ordered-list renumbering — only
+    """Serializes a list in the style its ``tight`` attribute records —
+    single newlines between a tight list's items, blank lines for a loose
+    one — so an edit to one item no longer reflows the whole list's
+    spacing. A list with no attribute (built by the editor rather than the
+    parser) serializes loose, the safe direction. Still not byte-identical
+    for every touched list (ordered-list renumbering, marker style) — only
     untouched blocks carry the byte-stability guarantee
     (``markdown_splice.py``), which never calls this serializer at all.
     """
     ordered = node.tag == "orderedList"
     attrs = dict(node.attributes)
     start = int(attrs.get("start", "1")) if ordered else 1
+    tight = _is_tight(attrs.get("tight")) and all(
+        _tight_item_safe(item)  # type: ignore[arg-type]
+        for item in node.children
+        if isinstance(item, XmlElement)
+    )
+    item_sep = "\n" if tight else "\n\n"
+    block_sep = "\n" if tight else "\n\n"
     lines: list[str] = []
     for idx, item in enumerate(node.children):
         # Per item, not per list: a taskList holds plain listItems alongside
@@ -1010,7 +1073,7 @@ def _serialize_list(node: XmlElement) -> str:
         else:
             marker = f"{start + idx}. " if ordered else "- "
             indent = " " * len(marker)
-        body = _serialize_block_sequence(list(item.children), indent)  # type: ignore[arg-type]
+        body = _serialize_block_sequence(list(item.children), indent, block_sep)  # type: ignore[arg-type]
         if not is_task:
             # A literal "[x] " opening a plain list item is a checkbox marker
             # the parse declined to promote — the item is in an ordered list,
@@ -1034,7 +1097,17 @@ def _serialize_list(node: XmlElement) -> str:
             # list and a uniform one.
             body = _ESCAPED_TASK_MARKER_RE.sub(r"[\1]\2", body, count=1)
         lines.append(marker + body)
-    return "\n\n".join(lines) + "\n"
+    return item_sep.join(lines) + "\n"
+
+
+def _is_tight(value: object) -> bool:
+    """Whether a list's ``tight`` attribute means tight. Same two-writer
+    tolerance as ``_is_checked`` below: this codec writes the string
+    ``"true"``; a node that round-tripped through a y-prosemirror client can
+    hand back a real bool."""
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, str) and value == "true"
 
 
 def _is_checked(value: object) -> bool:
