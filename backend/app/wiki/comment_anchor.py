@@ -46,7 +46,7 @@ from collections.abc import Sequence
 from difflib import SequenceMatcher
 from typing import cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +113,31 @@ class BodyDiff(BaseModel):
     old_tokens: list[str]
     new_tokens: list[str]
     new_token_starts: list[int]
+
+    # Similarity of each in-place-edited run, keyed by its token opcode
+    # bounds. The value depends only on the body pair, so spans sharing a
+    # BodyDiff pay each run's (capped) ratio once, not once per span.
+    _run_similarity: dict[tuple[int, int, int, int], float] = PrivateAttr(
+        default_factory=dict
+    )
+
+    def run_similarity(self, i1: int, i2: int, j1: int, j2: int) -> float:
+        """Char-level similarity of the replaced run ``old_tokens[i1:i2]`` →
+        ``new_tokens[j1:j2]``, memoized per body pair. A run over
+        ``_MAX_RUN_RATIO_PRODUCT`` scores 0.0 — that large is a wholesale
+        rewrite, not an in-place edit, and its ratio would be quadratic."""
+        key = (i1, i2, j1, j2)
+        cached = self._run_similarity.get(key)
+        if cached is not None:
+            return cached
+        old_run = "".join(self.old_tokens[i1:i2])
+        new_run = "".join(self.new_tokens[j1:j2])
+        if len(old_run) * len(new_run) > _MAX_RUN_RATIO_PRODUCT:
+            similarity = 0.0
+        else:
+            similarity = SequenceMatcher(None, old_run, new_run, autojunk=False).ratio()
+        self._run_similarity[key] = similarity
+        return similarity
 
 
 def _char_opcodes(old_body: str, new_body: str) -> list[_Opcode]:
@@ -285,12 +310,7 @@ def _word_preserved_fraction(diff: BodyDiff, new_body_len: int, new_start: int, 
         if tag == "equal":
             kept += overlap
         else:  # replace — credit the in-place edit by how similar the runs are
-            old_run = "".join(diff.old_tokens[i1:i2])
-            new_run = "".join(diff.new_tokens[j1:j2])
-            if len(old_run) * len(new_run) > _MAX_RUN_RATIO_PRODUCT:
-                continue  # wholesale rewrite, not an in-place edit — no credit
-            similarity = SequenceMatcher(None, old_run, new_run, autojunk=False).ratio()
-            kept += similarity * overlap
+            kept += diff.run_similarity(i1, i2, j1, j2) * overlap
     return kept / span
 
 

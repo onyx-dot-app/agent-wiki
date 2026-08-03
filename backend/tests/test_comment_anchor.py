@@ -332,3 +332,29 @@ def test_huge_replaced_run_gets_no_partial_credit(monkeypatch):
     # The same edit with its run over the cap earns nothing and orphans.
     monkeypatch.setattr(comment_anchor, "_MAX_RUN_RATIO_PRODUCT", 10)
     assert remap_range(old, new, s, e) is None
+
+
+def test_replace_run_similarity_computed_once_per_body_pair(monkeypatch):
+    # Spans sharing a BodyDiff must pay each edited run's ratio() once, not
+    # once per span — the group remap on a many-span page depends on it.
+    import difflib
+
+    old = "alpha weekly rotation gamma\n"
+    new = "alpha biweekly rotation gamma\n"
+    diff = comment_anchor.body_diff(old, new)  # built before counting starts
+
+    constructions: list[int] = []
+
+    class _Counting(difflib.SequenceMatcher):
+        def __init__(self, *args, **kwargs):
+            constructions.append(1)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(comment_anchor, "SequenceMatcher", _Counting)
+    spans = [
+        (old.index("weekly"), old.index("weekly") + len("weekly")),
+        (0, old.index("rotation") + len("rotation")),
+    ]
+    results = [remap_range(old, new, s, e, diff=diff) for s, e in spans]
+    assert all(r is not None for r in results)
+    assert len(constructions) == 1  # the shared run's ratio ran exactly once
