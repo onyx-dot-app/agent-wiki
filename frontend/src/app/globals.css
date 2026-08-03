@@ -129,6 +129,41 @@ body {
   box-shadow: var(--shadow-box-00);
 }
 
+/* ── Native scrollbars, app-wide ──────────────────────────────────────────
+   Every scroller that still shows native chrome (panel lists, the tree
+   sidebar, code blocks, tables) matches EdgeScrollbar: a light-grey
+   rounded thumb, no track. The transparent border + padding-box clip
+   insets the painted thumb to ~6px, the custom thumb's width. Styling
+   ::-webkit-scrollbar opts these scrollers out of macOS overlay bars —
+   deliberate: the thumb is then always visible, like EdgeScrollbar's.
+   The scroll-x/y-hidden utilities and hidden editor scrollers below still
+   win with display:none / scrollbar-width:none.
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  scrollbar-color: var(--alpha-grey-100-30) transparent;
+  scrollbar-width: thin;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--alpha-grey-100-30);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-02);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* ── Horizontal scroll containers ─────────────────────────────────────────
    Native swipe/scroll without a visible scrollbar (e.g. mobile template
    picker). The container still scrolls — only the chrome is hidden.
