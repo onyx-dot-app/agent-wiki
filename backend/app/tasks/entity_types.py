@@ -25,10 +25,17 @@ log = logging.getLogger(__name__)
 
 
 @automanage_offline_queue.task()
-def derive_entity_types(triggered_by_user_id: str | None = None) -> None:
+def derive_entity_types(
+    triggered_by_user_id: str | None = None, model: str | None = None
+) -> None:
     """Derive the taxonomy from the current wiki and store it.
 
     ``triggered_by_user_id`` is the admin who asked (NULL for a system run),
     matching ``run_detection_sweep``.
+
+    ``model`` overrides the default for this run. Unset, ``run_derivation``
+    uses the ingestion-pipeline model.
     """
-    entity_types.run_derivation(triggered_by_user_id=triggered_by_user_id)
+    entity_types.run_derivation(
+        triggered_by_user_id=triggered_by_user_id, model=model
+    )

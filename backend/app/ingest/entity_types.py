@@ -61,6 +61,7 @@ from pydantic import BaseModel, Field
 from app.config import CONFIG
 from app.db import entity_type_taxonomy
 from app.llm import client, embeddings
+from app.llm.settings import get as get_llm_settings
 from app.llm.prompts import load_prompt
 from app.wiki import filesystem, git as wiki_git
 
@@ -784,6 +785,10 @@ def run_derivation(
     the caller decides whether that is fatal (nothing is stored, so the previous taxonomy,
     or the fallback, stays in force).
     """
+    # Default to the admin's ingestion-pipeline model: this job is ingest-side and does not need
+    # the main model. Unset means none was nominated, so fall through to the deployment default.
+    model = model or get_llm_settings().ingest_selector_model or None
+
     pages = read_corpus(prefix)
     if not pages:
         raise RuntimeError("no wiki pages to derive from")
