@@ -58,6 +58,7 @@ from typing import Any, TypeVar, cast
 
 from pydantic import BaseModel, Field
 
+from app.config import CONFIG
 from app.db import entity_type_taxonomy
 from app.llm import client, embeddings
 from app.llm.prompts import load_prompt
@@ -100,9 +101,21 @@ _JSON_RETRIES = 1
 # Concurrency for the two per-item LLM stages. Run sequentially, 147 pages took ~1.5 hours in
 # production and a pod restart killed it before it could record anything — the calls are
 # independent, so that wall clock was pure serialization. Eight matches the eval harness this
-# module was ported from; it is a named constant because the ceiling is the provider's rate limit,
-# not this code, and a deployment on a lower tier may need to turn it down.
-DERIVE_WORKERS = 8
+# module was ported from.
+#
+# Set by ``ENTITY_TYPE_DERIVE_WORKERS`` rather than fixed here, because the governing constraint
+# is the PROVIDER's rate limit and no value is right for every deployment: each call can carry
+# ~47k input tokens, and this pool runs INSIDE a queue task, so effective concurrency is the
+# queue's own worker count multiplied by this. An operator on a lower tier has to be able to turn
+# it down without rebuilding the image. Read per call, not captured at import, so a test (or a
+# restart with a new value) takes effect.
+DEFAULT_DERIVE_WORKERS = 8
+
+
+def _derive_workers() -> int:
+    """Concurrent extract/name calls. Never below 1 — 0 would mean a derivation that does
+    nothing while reporting success."""
+    return max(1, CONFIG.entity_type_derive_workers)
 
 # Fallback when no derived artifact is present, so a deployment that has never run the
 # derivation still has something usable. Intentionally generic: these are the types that
@@ -648,7 +661,7 @@ def _map_ordered(
         return _guarded(fn, item, stage)
 
     results: list[list[_Result]] = []
-    workers = min(DERIVE_WORKERS, len(items))
+    workers = min(_derive_workers(), len(items))
     if workers <= 1:
         for n, item in enumerate(items, start=1):
             results.append(one(item))
@@ -671,7 +684,9 @@ def derive(
     progress: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Run the whole derivation over ``(path, body)`` pairs. Returns the artifact."""
-    log.info("entity_types: extracting from %d page(s), %d at a time", len(pages), DERIVE_WORKERS)
+    log.info(
+        "entity_types: extracting from %d page(s), %d at a time", len(pages), _derive_workers()
+    )
     mentions: list[Mention] = []
     for page_mentions in _map_ordered(
         lambda pb: extract_page(pb[0], pb[1], model=model),

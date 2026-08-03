@@ -254,7 +254,7 @@ class TestParallelExtraction:
         entity_types._map_ordered(watched, list(range(16)), stage="extract")
 
         assert peak > 1
-        assert peak <= entity_types.DERIVE_WORKERS
+        assert peak <= entity_types._derive_workers()
 
     def test_concurrency_is_bounded(self, monkeypatch) -> None:
         """Unbounded fan-out over a large wiki would hit the provider's rate limit rather than
@@ -280,7 +280,7 @@ class TestParallelExtraction:
 
         entity_types._map_ordered(watched, list(range(200)), stage="extract")
 
-        assert peak <= entity_types.DERIVE_WORKERS
+        assert peak <= entity_types._derive_workers()
 
     def test_one_failing_item_does_not_abort_the_rest(self, monkeypatch) -> None:
         """The module's stated rule — a single failed page must not abort a corpus-wide
@@ -314,3 +314,76 @@ class TestParallelExtraction:
         from app.ingest import entity_types
 
         assert entity_types._map_ordered(lambda item: [item], [], stage="extract") == []
+
+
+class TestDeriveWorkers:
+    """The pool size is an operator knob, not a build-time constant: the governing constraint is
+    the provider's rate limit, and this pool runs inside a queue task, so effective concurrency is
+    the queue's worker count multiplied by this."""
+
+    def test_defaults_to_eight(self) -> None:
+        from app.ingest import entity_types
+
+        assert entity_types._derive_workers() == entity_types.DEFAULT_DERIVE_WORKERS == 8
+
+    def test_env_var_lowers_it(self, monkeypatch) -> None:
+        """A lower-tier deployment has to be able to turn this down without rebuilding."""
+        from app.config import load_config
+
+        monkeypatch.setenv("ENTITY_TYPE_DERIVE_WORKERS", "2")
+        assert load_config().entity_type_derive_workers == 2
+
+    def test_a_lowered_knob_actually_bounds_the_pool(self, monkeypatch) -> None:
+        import threading
+        import time
+
+        from app.ingest import entity_types
+
+        monkeypatch.setattr(entity_types, "_derive_workers", lambda: 2)
+        in_flight = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def watched(item):
+            nonlocal in_flight, peak
+            with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            time.sleep(0.03)
+            with lock:
+                in_flight -= 1
+            return [item]
+
+        entity_types._map_ordered(watched, list(range(20)), stage="extract")
+
+        assert peak == 2
+
+    def test_a_zero_knob_does_not_stall_the_derivation(self, monkeypatch) -> None:
+        """0 would otherwise mean a pool of no workers — a run that reports success having done
+        nothing. Clamped to sequential instead."""
+        from types import SimpleNamespace
+
+        from app.ingest import entity_types
+
+        # Config validates on assignment, so the knob cannot be mutated at runtime — only set at
+        # boot. Patch the module's reference to stand in for a deployment booted with 0.
+        monkeypatch.setattr(
+            entity_types, "CONFIG", SimpleNamespace(entity_type_derive_workers=0)
+        )
+        assert entity_types._derive_workers() == 1
+        assert entity_types._map_ordered(lambda i: [i], [1, 2, 3], stage="extract") == [
+            [1],
+            [2],
+            [3],
+        ]
+
+    def test_a_bad_value_is_rejected_at_startup(self, monkeypatch) -> None:
+        """Fail loudly at boot rather than silently falling back to a default an operator did not
+        choose."""
+        import pytest as _pytest
+
+        from app.config import load_config
+
+        monkeypatch.setenv("ENTITY_TYPE_DERIVE_WORKERS", "not-a-number")
+        with _pytest.raises(ValueError):
+            load_config()
