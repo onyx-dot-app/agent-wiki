@@ -471,7 +471,7 @@ body {
    Tiptap and this rule kept pointing at CodeMirror's DOM. */
 @container (min-width: 920px) {
   .rail-reserved .rail-inset {
-    max-width: calc(768px + 360px);
+    max-width: calc(var(--app-container-sm-md) + 360px);
     padding-right: 360px;
   }
   /* Same geometry, plus the side gutters the full-bleed editor column
@@ -479,7 +479,9 @@ body {
      them this override re-loses the gutter and the doc text slides off
      DocTitle's edge whenever the lane is reserved. */
   .rail-reserved .editor-prose .ProseMirror {
-    max-width: calc(768px + 360px + 2 * var(--cm-gutter, 0rem));
+    max-width: calc(
+      var(--app-container-sm-md) + 360px + 2 * var(--cm-gutter, 0rem)
+    );
     padding-right: calc(360px + var(--cm-gutter, 0rem));
   }
 }
