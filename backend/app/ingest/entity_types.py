@@ -87,11 +87,12 @@ _Result = TypeVar("_Result")
 # generic average as a group grows and then admits almost anything, so it tolerates far less
 # permissiveness than a linkage-based method at the "same" threshold.
 GROUP_SIMILARITY = 0.45
-# Safety bound on the merge loop, which exits as soon as a round stops collapsing anything.
-# Three was too low to be that bound: naming emitted 204 candidate types on a real corpus and
-# the loop stopped mid-descent, leaving single-referent types the merge prompt explicitly asks
-# to fold. One round is one LLM call, so a generous cap costs nothing when convergence is early.
-MERGE_ROUNDS = 8
+# Runaway guard on the merge loop, not a working limit: the loop exits as soon as a round stops
+# collapsing anything, so this only bounds a pathological case. Kept well clear of what real runs
+# need — a 148-page corpus converged in 6 rounds, most of it in the first (221 -> 34), then a slow
+# tail. One round is one LLM call, so headroom is nearly free, and running out is worse than
+# paying for a round that finds nothing.
+MERGE_ROUNDS = 20
 
 # Output cap, well above the client's 4096 default. Extraction lists every referent on a page, so
 # the response scales with the page — and on a 205k-char page it overflowed 4096, which cut the
