@@ -258,11 +258,12 @@ function TemplateModal({
   const [updateInstruction, setUpdateInstruction] = useState(
     initial?.update_instruction ?? "",
   );
-  // Whether pages created from this template start opted into AI
-  // auto-management. Defaults to off; a template author enables it
-  // deliberately (e.g. team spaces the AI should keep organized).
+  // Whether pages created from this template start opted into Auto
+  // Organize. New templates default to on — the product encourages
+  // AI-managed pages — and a template author opts out deliberately
+  // (e.g. records that must never be reorganized).
   const [aiManagedOn, setAiManagedOn] = useState<boolean>(
-    initial?.ai_management_allowed === true,
+    initial == null ? true : initial.ai_management_allowed === true,
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
