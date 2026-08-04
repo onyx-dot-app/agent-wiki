@@ -4,9 +4,9 @@ import { SWR_KEYS } from "@/lib/swr-keys";
 
 export interface QueueHealth {
   name: string;
-  // Human name + what a backlog means, served from the queue's own
-  // definition (backend `app/tasks/queues.py`). Optional so this page
-  // renders against a backend that predates them.
+  // Human name and what a backlog means, served from the queue's own
+  // definition (backend `app/tasks/queues.py`). Optional: callers fall
+  // back to the queue name when the metadata is unavailable.
   label?: string;
   description?: string;
   // Per-state breakdown. `ready` is what a worker can pick up right now;
