@@ -1,8 +1,8 @@
 """Infer each wiki page's INFORMATION NEEDS — what it keeps track of, and how closely.
 
 A need is not a fact on the page. It is a statement of what the page maintains: a stable
-spec (``description``, ``detail_level``) plus a snapshot of the state it currently holds
-(``current_content``). One page yields a handful, typically 1-5.
+spec (``description``, ``detail_level``, ``update_instruction``) plus a snapshot of the state it
+currently holds (``current_content``). One page yields a handful, typically 1-5.
 
 Why that framing pays: a page tracking "current deal status and blockers" has a need whose
 *shape* is stable even as its content churns. An incoming document can then be judged against
@@ -122,6 +122,15 @@ class InformationNeed(BaseModel):
     need_kind: NeedKind
     description: str
     detail_level: str = ""
+    # The page's OWN stated rule for maintaining this, quoted verbatim; empty when the page
+    # states none. Distinct from ``detail_level``, which is inferred from the entries already
+    # there: an instruction is a directive its author wrote, and it can constrain things no
+    # amount of looking at content reveals — where a new entry goes ("newest first"), which
+    # sources are admissible ("only from the customer; deal status from the CRM"), what a row
+    # must carry. Verbatim because paraphrasing a directive can change what it permits, and
+    # empty rather than inferred because a fabricated instruction would be obeyed as if a human
+    # had written it.
+    update_instruction: str = ""
     # The state the page holds right now — what an incoming document gets diffed against. A
     # description of what the page *tracks* is therefore a failure, not a shorter answer.
     current_content: str = ""
@@ -157,6 +166,25 @@ def build_prompt(type_defs: dict[str, str]) -> str:
     return load_prompt("needs.extract").replace("ENTITY_TYPES", block)
 
 
+def _text(value: object, *, field: str, ctx: str) -> str:
+    """Free text from an LLM payload, or "" when the value is not text.
+
+    A non-string is dropped rather than coerced. ``str(42)`` would store "42" and
+    ``str(["a"])`` would store "['a']" as though the page had said it, which is worst for
+    ``update_instruction`` — that field is kept verbatim precisely so it can be treated as the
+    author's own directive — but no field wants a repr of a list as its value.
+
+    Dropping rather than raising keeps the failure proportionate for the optional fields: losing
+    one advisory value beats discarding a whole page's needs. The REQUIRED fields still reach the
+    retry path, because "" is exactly what their existing emptiness check rejects.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if value is not None:
+        log.debug("needs: %s.%s was %s, not text; dropped", ctx, field, type(value).__name__)
+    return ""
+
+
 def _parse_entities(raw: object, type_defs: dict[str, str]) -> list[EntityMention]:
     """Structural validation, plus a check that the type came from the menu.
 
@@ -172,10 +200,12 @@ def _parse_entities(raw: object, type_defs: dict[str, str]) -> list[EntityMentio
         if not isinstance(item, dict):
             continue
         entry = cast(dict[str, Any], item)
-        name = str(entry.get("canonical_name") or entry.get("name") or "").strip()
+        name = _text(entry.get("canonical_name"), field="canonical_name", ctx="entity") or _text(
+            entry.get("name"), field="name", ctx="entity"
+        )
         if not name:
             continue
-        etype = str(entry.get("entity_type") or "").strip().lower()
+        etype = _text(entry.get("entity_type"), field="entity_type", ctx="entity").lower()
         if etype and etype not in type_defs:
             log.debug("needs: dropping off-menu entity_type %r", etype)
             etype = ""
@@ -193,14 +223,17 @@ def parse_need(obj: object, ctx: str, type_defs: dict[str, str]) -> InformationN
         raise SchemaError(f"{ctx} must be an object")
     entry = cast(dict[str, Any], obj)
 
-    need_name = str(entry.get("need_name") or "").strip()
+    # "must be a non-empty string" rather than "is required": it is accurate whether the field was
+    # missing, blank, or the wrong type, and a message that says "required" for a value the model
+    # DID send would send it looking for the wrong fix on the retry.
+    need_name = _text(entry.get("need_name"), field="need_name", ctx=ctx)
     if not need_name:
-        raise SchemaError(f"{ctx}.need_name is required")
-    description = str(entry.get("description") or "").strip()
+        raise SchemaError(f"{ctx}.need_name must be a non-empty string")
+    description = _text(entry.get("description"), field="description", ctx=ctx)
     if not description:
-        raise SchemaError(f"{ctx}.description is required")
+        raise SchemaError(f"{ctx}.description must be a non-empty string")
 
-    raw_kind = str(entry.get("need_kind") or "").strip().lower()
+    raw_kind = _text(entry.get("need_kind"), field="need_kind", ctx=ctx).lower()
     try:
         need_kind = NeedKind(raw_kind)
     except ValueError:
@@ -210,7 +243,7 @@ def parse_need(obj: object, ctx: str, type_defs: dict[str, str]) -> InformationN
     # Unlike need_kind, an unusable focus is defaulted rather than rejected: it narrows what the
     # need may absorb, so getting it wrong costs a missed entity, not a misapplied fact.
     try:
-        focus = Focus(str(entry.get("focus") or "").strip().lower())
+        focus = Focus(_text(entry.get("focus"), field="focus", ctx=ctx).lower())
     except ValueError:
         focus = DEFAULT_FOCUS
 
@@ -218,8 +251,11 @@ def parse_need(obj: object, ctx: str, type_defs: dict[str, str]) -> InformationN
         need_name=need_name,
         need_kind=need_kind,
         description=description,
-        detail_level=str(entry.get("detail_level") or "").strip(),
-        current_content=str(entry.get("current_content") or "").strip(),
+        detail_level=_text(entry.get("detail_level"), field="detail_level", ctx=ctx),
+        update_instruction=_text(
+            entry.get("update_instruction"), field="update_instruction", ctx=ctx
+        ),
+        current_content=_text(entry.get("current_content"), field="current_content", ctx=ctx),
         entities=_parse_entities(entry.get("entities"), type_defs),
         focus=focus,
     )
