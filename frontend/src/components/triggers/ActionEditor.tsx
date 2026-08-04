@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 
 import {
   Button,
+  InputTextArea,
   LineItemButton,
   Popover,
   PopoverMenu,
@@ -24,7 +25,6 @@ import {
 import { ContentAction } from "@onyx-ai/opal/layouts";
 
 import InputChipField from "@/components/inputs/InputChipField";
-import InputTextArea from "@/components/inputs/InputTextArea";
 import { ensureEmailDestination } from "@/lib/emailConnect";
 import {
   ensureSlackDestination,

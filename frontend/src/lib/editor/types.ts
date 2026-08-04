@@ -5,9 +5,6 @@
  * not the old `lib/editor/types.ts` (CoeditSession, CoeditFrame, etc.) —
  * those are collab-wire-protocol shapes with no equivalent here yet.
  */
-import type { Editor } from "@tiptap/core";
-import type { Awareness } from "y-protocols/awareness";
-import type * as Y from "yjs";
 
 /** An anchored `[startOffset, endOffset)` range decorated into the doc —
  * comment threads and source attribution are the two instantiations,
@@ -35,60 +32,6 @@ export interface CommentDraft {
   startOffset: number;
   endOffset: number;
   quotedText: string;
-}
-
-export interface TipTapEditorProps {
-  /** The Yjs doc this editor's content lives in. Defaults to a fresh local
-   * `Y.Doc` if omitted (P1's scaffold behavior — never synced anywhere).
-   * Real live sessions (Track B) and multi-client verification (two editors
-   * sharing two relayed docs) both need to supply their own. */
-  doc?: Y.Doc;
-  /** This client's Awareness instance (Yjs's ephemeral, non-document shared
-   * state — presence/cursor data, separate from `doc`'s content). Defaults
-   * to a fresh local instance tied to `doc` if omitted, owned and destroyed
-   * by this component; a caller-supplied one (a real live session, or
-   * multi-client verification wiring its own relay) is left for the caller
-   * to destroy. */
-  awareness?: Awareness;
-  /** This client's id for presence/coloring — a stable random id if
-   * omitted. Distinct clients sharing a `doc` must pass distinct ids. */
-  userId?: string;
-  /** This client's display name, shown on its caret in peers' views. */
-  userDisplay?: string;
-  /** Render without accepting edits. */
-  readOnly?: boolean;
-  /** The wiki page path this editor is editing, used to scope image uploads
-   * (`POST /api/wiki/media?path=...`). Omitted by the scaffold/multi-client
-   * verification harness, which has no real page - image paste/drop then
-   * falls through to default handling instead of uploading. */
-  pagePath?: string;
-  /** Comment thread spans to highlight in the doc. */
-  commentHighlights?: CommentHighlightTarget[];
-  /** Thread ids whose spans get the stronger (active) highlight. */
-  activeCommentIds?: string[];
-  /** Fires with the thread ids whose spans contain the caret (or intersect
-   * the selection), deduped against the last report. */
-  onCommentCaret?: (ids: string[]) => void;
-  /** Source-attributed spans to highlight while the Sources tab is open. */
-  sourceHighlights?: AnchoredHighlightTarget[];
-  /** Source keys whose spans get the stronger (active) highlight. */
-  activeSourceIds?: string[];
-  /** Fires with the source ids whose spans contain the caret (or intersect
-   * the selection), deduped against the last report. */
-  onSourceCaret?: (ids: string[]) => void;
-  /** Fires on every selection change with the current selection as a
-   * comment draft (null if collapsed) plus its on-screen coordinates, for
-   * the caller to position a floating "Comment" affordance. */
-  onSelectionForComment?: (
-    draft: CommentDraft | null,
-    coords: { x: number; y: number } | null,
-  ) => void;
-  /** Fires once the underlying Tiptap `Editor` is created — for callers that
-   * need the raw editor instance itself (seeding content, computing document
-   * positions for a test harness), distinct from `CoeditorHandle` below,
-   * which covers the scroll/geometry surface other components actually
-   * depend on. */
-  onEditorReady?: (editor: Editor) => void;
 }
 
 /** Imperative handle for scrolling the editor to a raw-doc position — used
