@@ -10,12 +10,6 @@ import { useIsMobile } from "@/lib/viewport";
 
 const POLL_MS = 5000;
 
-const QUEUE_LABELS: Record<string, string> = {
-  documents: "Document update processing",
-  triggers: "Trigger evaluations",
-  lightweight_maintenance: "Lightweight maintenance",
-};
-
 export default function AdminHealthPage() {
   const isMobile = useIsMobile();
   const {
@@ -110,9 +104,14 @@ export default function AdminHealthPage() {
                   key={q.name}
                   className="mb-[10px] rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) px-4 py-[14px]"
                 >
-                  <div className="mb-2 flex items-baseline justify-between">
-                    <div className="text-sm">
-                      {QUEUE_LABELS[q.name] ?? q.name}
+                  <div className="mb-2 flex items-baseline justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm">{q.label || q.name}</div>
+                      {q.description && (
+                        <div className="mt-[2px] text-[11px] text-(--text-03)">
+                          {q.description}
+                        </div>
+                      )}
                     </div>
                     <div className="text-xs text-(--text-04)">
                       {haveCounts && pending != null ? (
@@ -141,8 +140,8 @@ export default function AdminHealthPage() {
                   </div>
                   {haveCounts && (
                     <div className="flex gap-4 text-[11px] text-(--text-03)">
-                      <span>
-                        ready{" "}
+                      <span title="Tasks a worker can pick up right now.">
+                        waiting{" "}
                         <strong className="text-(--text-05)">{q.ready}</strong>
                       </span>
                       <span title="Tasks scheduled for a future run time — waiting their turn, not stuck.">
@@ -151,8 +150,8 @@ export default function AdminHealthPage() {
                           {q.delayed}
                         </strong>
                       </span>
-                      <span>
-                        in flight{" "}
+                      <span title="Tasks a worker is running right now.">
+                        running{" "}
                         <strong className="text-(--text-05)">
                           {q.in_flight}
                         </strong>
