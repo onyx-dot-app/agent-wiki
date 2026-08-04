@@ -27,6 +27,7 @@ import {
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { SvgFolderDashed, SvgSlashCircle } from "@/components/wiki/icons";
 import { pathKind } from "@/lib/wiki/utils";
+import { revalidateWiki } from "@/lib/wikiHref";
 
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -179,6 +180,10 @@ export function SuggestionsCard({
         const fresh = await fetchProposal(id);
         if (fresh.status === "applied") {
           setOutcome(id, "applied");
+          // The change just landed in the wiki (a move, a deletion): the
+          // tree and listings this tab shows are now wrong — refresh them
+          // rather than waiting out their poll interval.
+          void revalidateWiki();
           return fadeActed(id);
         }
         if (fresh.status === "stale") {
@@ -249,6 +254,23 @@ export function SuggestionsCard({
       setOutcome(id, "error");
     }
   }
+
+  // Rows that disappear from the server list without a local outcome were
+  // acted on by someone else — their change may have landed in the wiki,
+  // so the structural views deserve the same immediate refresh the acting
+  // client gives itself.
+  const prevIds = useRef<Set<number>>(new Set());
+  useEffect(() => {
+    const ids = new Set(proposals.map((p) => p.id));
+    const vanishedElsewhere = [...prevIds.current].some(
+      (id) => !ids.has(id) && !outcomes[id],
+    );
+    prevIds.current = ids;
+    if (vanishedElsewhere) void revalidateWiki();
+    // outcomes intentionally unlisted: this reacts to the server list
+    // changing, not to local action state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposals]);
 
   const actedOnly = Object.values(acted).filter(
     (a): a is Proposal => !!a && !proposals.some((p) => p.id === a.id),

@@ -57,10 +57,18 @@ export async function saveUpdatePolicy(
 }
 
 /** The full flat wiki listing — backs the folder Explorer and the New Doc
- * destination picker. */
+ * destination picker.
+ *
+ * Polled: the listing changes under a focused tab all the time — agents
+ * write, ingestion lands, a colleague approves a proposal — and focus
+ * revalidation only helps the tab being returned to. A minute is fresh
+ * enough for structure (page bodies are live through the co-edit session),
+ * and proposal applies additionally force an immediate refresh
+ * (SuggestionsCard). */
 export function useWikiTree() {
   const { data, error, isLoading, mutate } = useSWR<ListResponse>(
     SWR_KEYS.wikiTree,
+    { refreshInterval: 60_000 },
   );
   return { entries: data?.entries ?? [], error, isLoading, mutate };
 }
