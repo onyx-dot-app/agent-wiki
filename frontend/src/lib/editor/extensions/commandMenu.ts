@@ -7,6 +7,10 @@
  * hand-rolled popup; positioning is Floating UI via `SuggestionProps.mount`,
  * confirmed against the installed package's own documented API.
  *
+ * The command set and its filtering live here; the menu UI (`CommandMenu`) is
+ * a plain React component in `components.tsx` (which keeps this a JSX-free
+ * `.ts` extension), and the shared `CommandItem` type is in `./types`.
+ *
  * Table isn't offered here: there's no "insert a blank table" flow (the
  * backend's opaque-row table shape has no per-cell editing to seed —
  * see blocks.ts), so a command would have nothing sensible to insert.
@@ -15,14 +19,9 @@
  * user should hand-author.
  */
 import { Extension } from "@tiptap/core";
-import type { Editor, Range } from "@tiptap/core";
+import type { Editor } from "@tiptap/core";
 import { ReactRenderer } from "@tiptap/react";
-import Suggestion, {
-  type SuggestionKeyDownProps,
-  type SuggestionProps,
-} from "@tiptap/suggestion";
-import { useEffect, useImperativeHandle, useState, type Ref } from "react";
-import { LineItemButton } from "@onyx-ai/opal/components";
+import Suggestion, { type SuggestionProps } from "@tiptap/suggestion";
 import {
   SvgCheckSquare,
   SvgCode,
@@ -33,17 +32,15 @@ import {
   SvgQuoteStart,
   SvgTextLines,
 } from "@onyx-ai/opal/icons";
-import type { IconFunctionComponent } from "@onyx-ai/opal/types";
-
-import { canUploadImages, promptImageUpload } from "@/lib/editor/images";
-
-interface CommandItem {
-  title: string;
-  icon: IconFunctionComponent;
-  run: (editor: Editor, range: Range) => void;
-  /** Omitted means always offered. */
-  available?: (editor: Editor) => boolean;
-}
+import {
+  CommandMenu as CommandMenuComponent,
+  type CommandMenuHandle,
+} from "@/lib/editor/components";
+import {
+  canUploadImages,
+  promptImageUpload,
+} from "@/lib/editor/extensions/images";
+import type { CommandItem } from "@/lib/editor/extensions/types";
 
 const COMMANDS: CommandItem[] = [
   {
@@ -158,74 +155,6 @@ function filterCommands(query: string, editor: Editor): CommandItem[] {
   return available.filter((c) => c.title.toLowerCase().includes(q));
 }
 
-interface CommandListHandle {
-  onKeyDown: (props: SuggestionKeyDownProps) => boolean;
-}
-
-function CommandList({
-  items,
-  command,
-  ref,
-}: SuggestionProps<CommandItem> & { ref?: Ref<CommandListHandle> }) {
-  const [selected, setSelected] = useState(0);
-  useEffect(() => setSelected(0), [items]);
-
-  const select = (index: number) => {
-    const item = items[index];
-    if (item) command(item);
-  };
-
-  useImperativeHandle(ref, () => ({
-    onKeyDown: ({ event }) => {
-      if (event.key === "ArrowDown") {
-        setSelected((s) => (items.length ? (s + 1) % items.length : 0));
-        return true;
-      }
-      if (event.key === "ArrowUp") {
-        setSelected((s) =>
-          items.length ? (s - 1 + items.length) % items.length : 0,
-        );
-        return true;
-      }
-      if (event.key === "Enter") {
-        select(selected);
-        return true;
-      }
-      return false;
-    },
-  }));
-
-  if (items.length === 0) return null;
-
-  return (
-    <div className="max-h-[320px] w-[220px] overflow-y-auto rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-1 shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)]">
-      {items.map((item, i) => (
-        // The wrapper carries the keyboard-selection highlight rather than
-        // relying on LineItemButton's own "selected" state, which is a hover-
-        // weight tint — too quiet for the thing Enter is about to apply. A
-        // solid fill and nothing else, as Notion's menu does it.
-        <div
-          key={item.title}
-          className={
-            i === selected
-              ? "rounded-(--radius-06) bg-(--background-tint-03)"
-              : undefined
-          }
-        >
-          <LineItemButton
-            title={item.title}
-            icon={item.icon}
-            sizePreset="main-ui"
-            variant="section"
-            state={i === selected ? "selected" : "empty"}
-            onClick={() => select(i)}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export const CommandMenu = Extension.create({
   name: "commandMenu",
 
@@ -245,13 +174,13 @@ export const CommandMenu = Extension.create({
         command: ({ editor, range, props }) => props.run(editor, range),
         render: () => {
           let component: ReactRenderer<
-            CommandListHandle,
+            CommandMenuHandle,
             SuggestionProps<CommandItem>
           >;
           let unmount: (() => void) | undefined;
           return {
             onStart: (props) => {
-              component = new ReactRenderer(CommandList, {
+              component = new ReactRenderer(CommandMenuComponent, {
                 props,
                 editor: props.editor,
               });

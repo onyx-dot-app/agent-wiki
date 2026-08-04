@@ -36,7 +36,6 @@ import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { ApiError } from "@/lib/api";
 import { colorFor } from "@/lib/editor/identityColor";
-import { opaqueId } from "@/lib/editor/ids";
 import {
   CHECKPOINT_TIMED_OUT,
   checkpointSession,
@@ -198,10 +197,6 @@ export interface UseCoeditSession {
    * a normal local edit (propagates via the live doc like any other
    * change), matching the old hook's `setDoc` semantics. */
   setDoc: (text: string) => void;
-}
-
-function newClientId(): string {
-  return opaqueId();
 }
 
 /** Peer cursor positions, resolved against the *current* doc via the sync

@@ -50,6 +50,39 @@ import { canJoin } from "@tiptap/pm/transform";
 import { TaskList } from "@tiptap/extension-task-list";
 import { isSameOriginSrc } from "./media";
 
+/** A line consisting of nothing but 3+ of the same `-`/`_`/`*` character
+ * (each optionally followed by spaces/tabs), 0-3 leading spaces — the
+ * actual CommonMark thematic-break grammar (spec section 4.1), not a
+ * simplified stand-in. Deliberately per-character-type (`-*` mixed with
+ * `_` doesn't count) and deliberately permissive about interior spacing
+ * (`- - -` is as valid as `---`) and trailing spaces, matching the spec
+ * exactly rather than the common "just `---`" shorthand. Used by
+ * `ThematicBreak` below. */
+const THEMATIC_BREAK_LINE_RE =
+  /^ {0,3}(?:-[ \t]*){3,}$|^ {0,3}(?:_[ \t]*){3,}$|^ {0,3}(?:\*[ \t]*){3,}$/;
+
+/** `[text](url)` → a real link, on typing the closing paren (used by
+ * `MarkdownLink` below).
+ *
+ * StarterKit ships the `link` mark and autolinks a bare URL as you type, but
+ * nothing converted markdown link *syntax*, so `[bo](https://…)` just sat
+ * there as literal text — the one link form someone writing markdown will
+ * reach for first.
+ *
+ * Safe to author because the backend codec round-trips the mark: it reads
+ * `link_open`/`link_close` into a `link` format run carrying href (and title)
+ * and serializes it back to `[text](href)` — see `app/wiki/markdown_yjs.py`.
+ *
+ * `markInputRule` can't express this: it keeps `match[match.length - 1]` as
+ * the surviving text, and here the text to keep is the *first* group, so the
+ * replacement is done explicitly.
+ *
+ * Titled links (`[text](url "title")`) are deliberately NOT matched. Tiptap's
+ * `link` mark has no `title` attribute, so converting one would drop the title
+ * silently; left as literal text it round-trips through the codec intact and
+ * still renders as a titled link wherever the markdown is read. */
+const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((\S+)\)$/;
+
 /** Internal bookkeeping attrs never rendered into the DOM (`rendered:
  * false`) — they exist purely for the Yjs XML round trip, not for display
  * or HTML paste/import. */
@@ -62,7 +95,7 @@ function hiddenAttr() {
  * node definitions in place) — `addGlobalAttributes` is Tiptap's supported
  * mechanism for "this attribute applies across several existing node
  * types." */
-export const BlockIdentity = Extension.create({
+const BlockIdentity = Extension.create({
   name: "blockIdentity",
   addGlobalAttributes() {
     return [
@@ -114,7 +147,7 @@ export const BlockIdentity = Extension.create({
  * Every boundary is joined in one appended transaction, later boundaries
  * mapped through the earlier joins, so a run of any length converges in a
  * single pass. */
-export const JoinAdjacentLists = Extension.create({
+const JoinAdjacentLists = Extension.create({
   name: "joinAdjacentLists",
   addProseMirrorPlugins() {
     const listTypes = new Set(["bulletList", "orderedList", "taskList"]);
@@ -171,7 +204,7 @@ export const JoinAdjacentLists = Extension.create({
  * block already behaves — `_blockId: null` routes it through
  * `checkpoint_body`'s `orig is None` fast path, the same path a fresh
  * empty paragraph already takes safely). */
-export const UniqueBlockIdentity = Extension.create({
+const UniqueBlockIdentity = Extension.create({
   name: "uniqueBlockIdentity",
   addProseMirrorPlugins() {
     return [
@@ -232,7 +265,7 @@ export const UniqueBlockIdentity = Extension.create({
  * on timing. Priority 200, same reasoning as `ThematicBreak` below (which
  * keeps the *other* behavior, backspace-undo-text-styling, deliberately —
  * see its own docstring). */
-export const HeadingBackspace = Extension.create({
+const HeadingBackspace = Extension.create({
   name: "headingBackspace",
   priority: 200,
   addKeyboardShortcuts() {
@@ -312,13 +345,13 @@ export const HeadingBackspace = Extension.create({
  * a plain item in a task list gets an ordinary bullet, aligned to the same
  * text column so a mixed list reads as one list rather than two interleaved
  * ones. */
-export const MixedTaskList = TaskList.extend({
+const MixedTaskList = TaskList.extend({
   content() {
     return `(${this.options.itemTypeName}|listItem)+`;
   },
 });
 
-export const TaskItemBackspace = Extension.create({
+const TaskItemBackspace = Extension.create({
   name: "taskItemBackspace",
   priority: 200,
   addKeyboardShortcuts() {
@@ -353,7 +386,7 @@ export const TaskItemBackspace = Extension.create({
  * mark, which is what stops `**`/`~~`/etc. from firing inside a code span —
  * matching CommonMark's own rule that a code span can't contain nested
  * emphasis. */
-export const InlineCode = Mark.create({
+const InlineCode = Mark.create({
   name: "code",
   excludes: "_",
   code: true,
@@ -518,16 +551,6 @@ function createOpaqueBlock(name: string) {
   });
 }
 
-/** A line consisting of nothing but 3+ of the same `-`/`_`/`*` character
- * (each optionally followed by spaces/tabs), 0-3 leading spaces — the
- * actual CommonMark thematic-break grammar (spec section 4.1), not a
- * simplified stand-in. Deliberately per-character-type (`-*` mixed with
- * `_` doesn't count) and deliberately permissive about interior spacing
- * (`- - -` is as valid as `---`) and trailing spaces, matching the spec
- * exactly rather than the common "just `---`" shorthand. */
-const THEMATIC_BREAK_LINE_RE =
-  /^ {0,3}(?:-[ \t]*){3,}$|^ {0,3}(?:_[ \t]*){3,}$|^ {0,3}(?:\*[ \t]*){3,}$/;
-
 /** Matches the backend's literal XML tag for a `---`/`***`/`___` divider —
  * see gap 2 above. Replaces StarterKit's `horizontalRule` (disabled in
  * `extensions.ts`), not layered alongside it: only one node type can ever
@@ -548,7 +571,7 @@ const THEMATIC_BREAK_LINE_RE =
  * directly against a battery of these cases (bare `---`, `***`, `___`,
  * `- - -`, trailing-space, 10-dash, `--- x`, under-count `-- `/`- -`) via
  * the real regex + transaction logic, not assumed. */
-export const ThematicBreak = createOpaqueBlock("thematic_break").extend({
+const ThematicBreak = createOpaqueBlock("thematic_break").extend({
   // Explicit, not relying on extension array order: Tiptap gives each
   // extension its own keymap plugin and checks them in priority order
   // (higher first, confirmed against the installed core's own doc comment
@@ -672,11 +695,11 @@ export const ThematicBreak = createOpaqueBlock("thematic_break").extend({
 
 /** A raw HTML block (e.g. an embedded `<iframe>` or comment) — opaque
  * verbatim, same as a thematic break. */
-export const HtmlBlock = createOpaqueBlock("html_block");
+const HtmlBlock = createOpaqueBlock("html_block");
 
 /** Anything `markdown_blocks.py` couldn't classify more specifically —
  * the backend's catch-all, kept opaque here for the same reason. */
-export const OtherBlock = createOpaqueBlock("other");
+const OtherBlock = createOpaqueBlock("other");
 
 /** A GFM table's header row is required, immediately followed by its
  * required delimiter row, then zero or more data rows — the shape
@@ -685,7 +708,7 @@ export const OtherBlock = createOpaqueBlock("other");
  * purpose: there's no row-insert/delete UI for this opaque-row node (see
  * the module docstring), so the doc should never legitimately reach any
  * other shape. */
-export const Table = Node.create({
+const Table = Node.create({
   name: "table",
   group: "block",
   content: "tableRow tableSeparator tableRow*",
@@ -720,37 +743,16 @@ function createTableRowNode(name: string) {
 
 /** A table row's raw source line (pipes included), verbatim — not
  * decomposed into cells. */
-export const TableRow = createTableRowNode("tableRow");
+const TableRow = createTableRowNode("tableRow");
 
 /** The `| --- | --- |`-style delimiter row between a table's header and
  * its body, equally opaque — editing it is possible (it's still just
  * text) but not a supported/validated interaction; nothing stops a user
  * from breaking their own table's syntax here, same as they could in raw
  * markdown. */
-export const TableSeparator = createTableRowNode("tableSeparator");
+const TableSeparator = createTableRowNode("tableSeparator");
 
-/** `[text](url)` → a real link, on typing the closing paren.
- *
- * StarterKit ships the `link` mark and autolinks a bare URL as you type, but
- * nothing converted markdown link *syntax*, so `[bo](https://…)` just sat
- * there as literal text — the one link form someone writing markdown will
- * reach for first.
- *
- * Safe to author because the backend codec round-trips the mark: it reads
- * `link_open`/`link_close` into a `link` format run carrying href (and title)
- * and serializes it back to `[text](href)` — see `app/wiki/markdown_yjs.py`.
- *
- * `markInputRule` can't express this: it keeps `match[match.length - 1]` as
- * the surviving text, and here the text to keep is the *first* group, so the
- * replacement is done explicitly.
- *
- * Titled links (`[text](url "title")`) are deliberately NOT matched. Tiptap's
- * `link` mark has no `title` attribute, so converting one would drop the title
- * silently; left as literal text it round-trips through the codec intact and
- * still renders as a titled link wherever the markdown is read. */
-const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((\S+)\)$/;
-
-export const MarkdownLink = Extension.create({
+const MarkdownLink = Extension.create({
   name: "markdownLink",
 
   /** Cmd/Ctrl-click opens a link while editing.
@@ -838,7 +840,7 @@ export const MarkdownLink = Extension.create({
  * scheme. Atom + draggable so it selects and moves as one unit. This
  * `renderHTML` is only the clipboard/serialization fallback, and `parseHTML`
  * is what lets a pasted `<img>` become this node. */
-export const Image = Node.create({
+const Image = Node.create({
   name: "image",
   group: "inline",
   inline: true,
@@ -869,3 +871,21 @@ export const Image = Node.create({
     return ["img", mergeAttributes(HTMLAttributes)];
   },
 });
+
+export {
+  BlockIdentity,
+  JoinAdjacentLists,
+  UniqueBlockIdentity,
+  HeadingBackspace,
+  MixedTaskList,
+  TaskItemBackspace,
+  InlineCode,
+  ThematicBreak,
+  HtmlBlock,
+  OtherBlock,
+  Table,
+  TableRow,
+  TableSeparator,
+  MarkdownLink,
+  Image,
+};

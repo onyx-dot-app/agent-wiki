@@ -4,6 +4,10 @@
  * CodeMirror/OT-era editor, deleted once this cutover lands). */
 import { posToDOMRect, type Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
+import type {
+  SuggestionKeyDownProps,
+  SuggestionProps,
+} from "@tiptap/suggestion";
 import {
   useEffect,
   useImperativeHandle,
@@ -14,11 +18,13 @@ import {
 } from "react";
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
+import { LineItemButton } from "@onyx-ai/opal/components";
 import { tiptapExtensions } from "@/lib/editor/extensions";
+import type { CommandItem } from "@/lib/editor/extensions/types";
 import {
   commentHighlights as commentHighlightPlugin,
   sourceHighlights as sourceHighlightPlugin,
-} from "@/lib/editor/highlights";
+} from "@/lib/editor/extensions/highlights";
 import type { CoeditPeer } from "@/lib/editor/hooks";
 import { sessionColorFor } from "@/lib/editor/identityColor";
 import type { CoeditParticipant } from "@/lib/editor/svc";
@@ -110,7 +116,6 @@ export interface TipTapEditorProps {
    * (`CoeditorHandle`). A plain prop in React 19 — no `forwardRef` wrapper. */
   ref?: Ref<CoeditorHandle>;
 }
-
 export function TipTapEditor({
   doc: docProp,
   awareness: awarenessProp,
@@ -415,7 +420,13 @@ export function TipTapEditor({
   );
 }
 
-interface CoeditPresenceBarProps {
+/* Live-session presence: who else is on the page — labeled "editing" while
+   their cursor is rendered in the content (yCursorPlugin), "viewing"
+   otherwise — and who's typing right now. The label is derived from the
+   same peers list that renders the carets, so bar and doc can never
+   disagree. Renders nothing when you're alone. Ported verbatim from
+   `lib/editor/components.tsx`'s component of the same name. */
+export interface CoeditPresenceBarProps {
   participants: CoeditParticipant[];
   /** Peers with a live cursor (from `useCoeditSession`) — a participant
    * with an entry here is "editing", the rest are "viewing". */
@@ -423,13 +434,6 @@ interface CoeditPresenceBarProps {
   typing: string[];
   selfUserId: string | null;
 }
-
-// Live-session presence: who else is on the page — labeled "editing" while
-// their cursor is rendered in the content (yCursorPlugin), "viewing"
-// otherwise — and who's typing right now. The label is derived from the
-// same peers list that renders the carets, so bar and doc can never
-// disagree. Renders nothing when you're alone. Ported verbatim from
-// `lib/editor/components.tsx`'s component of the same name.
 export function CoeditPresenceBar({
   participants,
   peers,
@@ -457,6 +461,72 @@ export function CoeditPresenceBar({
                 : "viewing"}
           </span>
         </span>
+      ))}
+    </div>
+  );
+}
+
+export interface CommandMenuHandle {
+  onKeyDown: (props: SuggestionKeyDownProps) => boolean;
+}
+export type CommandMenuProps = {
+  ref?: Ref<CommandMenuHandle>;
+} & SuggestionProps<CommandItem>;
+export function CommandMenu({ ref, items, command }: CommandMenuProps) {
+  const [selected, setSelected] = useState(0);
+  useEffect(() => setSelected(0), [items]);
+
+  const select = (index: number) => {
+    const item = items[index];
+    if (item) command(item);
+  };
+
+  useImperativeHandle(ref, () => ({
+    onKeyDown: ({ event }) => {
+      if (event.key === "ArrowDown") {
+        setSelected((s) => (items.length ? (s + 1) % items.length : 0));
+        return true;
+      }
+      if (event.key === "ArrowUp") {
+        setSelected((s) =>
+          items.length ? (s - 1 + items.length) % items.length : 0,
+        );
+        return true;
+      }
+      if (event.key === "Enter") {
+        select(selected);
+        return true;
+      }
+      return false;
+    },
+  }));
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="max-h-[320px] w-[220px] overflow-y-auto rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-00) p-1 shadow-[0px_2px_6px_var(--shadow-02),0px_0px_2px_var(--shadow-01)]">
+      {items.map((item, i) => (
+        // The wrapper carries the keyboard-selection highlight rather than
+        // relying on LineItemButton's own "selected" state, which is a hover-
+        // weight tint — too quiet for the thing Enter is about to apply. A
+        // solid fill and nothing else, as Notion's menu does it.
+        <div
+          key={item.title}
+          className={
+            i === selected
+              ? "rounded-(--radius-06) bg-(--background-tint-03)"
+              : undefined
+          }
+        >
+          <LineItemButton
+            title={item.title}
+            icon={item.icon}
+            sizePreset="main-ui"
+            variant="section"
+            state={i === selected ? "selected" : "empty"}
+            onClick={() => select(i)}
+          />
+        </div>
       ))}
     </div>
   );
