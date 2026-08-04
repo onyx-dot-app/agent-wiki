@@ -32,7 +32,7 @@ import type {
   AnchoredHighlightTarget,
   CoeditorHandle,
   CommentDraft,
-  TiptapEditorProps,
+  TipTapEditorProps,
 } from "@/lib/editor/types";
 
 /** Highlight ids whose spans contain a collapsed caret or intersect a
@@ -54,15 +54,14 @@ function caretHitIds(
   return ids;
 }
 
-export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
-  function TiptapEditor(
+export const TipTapEditor = forwardRef<CoeditorHandle, TipTapEditorProps>(
+  function TipTapEditor(
     {
       doc: docProp,
       awareness: awarenessProp,
       userId,
       userDisplay,
       readOnly,
-      placeholder,
       pagePath,
       commentHighlights,
       activeCommentIds,
@@ -72,7 +71,7 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
       onSourceCaret,
       onSelectionForComment,
       onEditorReady,
-    }: TiptapEditorProps,
+    }: TipTapEditorProps,
     ref,
   ) {
     // A caller-supplied doc (a real live session, or two relayed docs for
@@ -120,7 +119,7 @@ export const TiptapEditor = forwardRef<CoeditorHandle, TiptapEditorProps>(
       // the client's hydration pass. Tiptap's documented fix for SSR.
       immediatelyRender: false,
       editable: !readOnly,
-      extensions: tiptapExtensions(doc, awareness, placeholder, pagePath),
+      extensions: tiptapExtensions(doc, awareness, pagePath),
     });
 
     useEffect(() => {

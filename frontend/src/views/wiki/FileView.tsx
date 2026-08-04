@@ -67,7 +67,7 @@ import {
 import type { CommentDraft, CommentHighlightTarget } from "@/lib/editor/types";
 import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
-import { CoeditPresenceBar, TiptapEditor } from "@/lib/editor/components";
+import { CoeditPresenceBar, TipTapEditor } from "@/lib/editor/components";
 import { useCoeditSession } from "@/lib/editor/hooks";
 import type { CoeditorHandle } from "@/lib/editor/types";
 import {
@@ -512,7 +512,7 @@ export function FileView({ path }: FileViewProps) {
   ]);
 
   // Selecting text in the editor offers a floating "Comment" affordance
-  // anchored above the selection — fed by TiptapEditor's onSelectionForComment
+  // anchored above the selection — fed by TipTapEditor's onSelectionForComment
   // instead of a DOM `mouseup`/`selectionchange` handler.
   // The margin rail's mutation runner mirrors the panel's success gate;
   // failures surface as toasts since the rail has no error slot.
@@ -1368,7 +1368,7 @@ export function FileView({ path }: FileViewProps) {
                 </div>
                 {coedit.active ? (
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                    <TiptapEditor
+                    <TipTapEditor
                       key={coedit.connectionId}
                       ref={coeditorRef}
                       doc={coedit.doc}
@@ -1385,7 +1385,6 @@ export function FileView({ path }: FileViewProps) {
                       activeSourceIds={activeSourceIds}
                       onSourceCaret={setCaretSourceKeys}
                       onSelectionForComment={handleSelectionForComment}
-                      placeholder="Start typing, or pick a template above…"
                     />
                   </div>
                 ) : coedit.joinError ? (

@@ -38,7 +38,6 @@ import { presenceExtension } from "@/lib/editor/presence";
 export function tiptapExtensions(
   doc: Y.Doc,
   awareness: Awareness,
-  placeholder?: string,
   pagePath?: string,
 ): AnyExtension[] {
   return [
@@ -93,7 +92,26 @@ export function tiptapExtensions(
       // locally-constructed docs never exercised the mismatch.
       field: "prosemirror",
     }),
-    Placeholder.configure({ placeholder: placeholder ?? "" }),
+    Placeholder.configure({
+      // Node-aware, shown on the current empty block (the extension's
+      // showOnlyCurrent default). An empty heading names its own level; an
+      // empty paragraph — including the blank document — shows the regular-text
+      // prompt; every other empty block stays silent. A prompt on a mid-page
+      // empty paragraph is intended, which is why the CSS keys on `.is-empty`
+      // (any current empty block) rather than `.is-editor-empty` (whole doc
+      // blank): the reason it couldn't before was the copy, not the mechanism
+      // (see editor.css). Copy lives here, at the config site — the editor's
+      // placeholder is intrinsic, not a per-caller prop.
+      placeholder: ({ node }) => {
+        if (node.type.name === "heading") {
+          return `Heading ${node.attrs.level as number}`;
+        }
+        if (node.type.name === "paragraph") {
+          return 'Start typing or press "/" for shortcuts';
+        }
+        return "";
+      },
+    }),
     MarkdownLink,
     AnchoredHighlights,
     presenceExtension(awareness),

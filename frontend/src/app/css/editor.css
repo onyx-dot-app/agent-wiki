@@ -6,7 +6,7 @@
    the DOM ProseMirror actually produces, not Tailwind utilities on our own
    JSX. Opal tokens throughout, same as the rest of the app.
 
-   .editor-prose is the scroll wrapper TiptapEditor renders
+   .editor-prose is the scroll wrapper TipTapEditor renders
    (frontend/src/lib/editor/components.tsx) — every other selector below is
    scoped under it. */
 
@@ -302,17 +302,19 @@
   border-top: 1px solid var(--border-02);
 }
 
-/* Placeholder (@tiptap/extensions' Placeholder), keyed on `.is-editor-empty`
-   rather than `.is-empty`. Both land on the same decoration — the empty
-   textblock holding the cursor — but per the installed extension's source
-   only `.is-editor-empty` is conditional on `editor.isEmpty`, i.e. the whole
-   document being blank.
-   `.is-empty` alone matches any empty block, so pressing Enter part-way down a
-   written page put "Start typing, or pick a template above…" in the middle of
-   it: wrong twice over, since there is nothing to start and a template can't be
-   applied to a page that already has content. No `:first-child` needed — the
-   decoration targets the empty node itself, not a shared wrapper. */
-.editor-prose .is-editor-empty::before {
+/* Placeholder (@tiptap/extensions' Placeholder), keyed on `.is-empty` — any
+   current empty block — so a per-block, node-aware placeholder can render
+   (e.g. "Heading 1" on the empty heading you're in). `.is-editor-empty` is the
+   narrower whole-document-blank case; the empty first paragraph carries both
+   classes, so keying on `.is-empty` still covers it.
+   Keying on `.is-empty` was previously wrong only because the copy was a fixed
+   whole-document message ("Start typing, or pick a template above…") that made
+   no sense part-way down a written page. The placeholder is now node-aware (an
+   empty heading names its level, an empty paragraph shows a "/"-shortcut
+   prompt — see extensions.ts), so a mid-page prompt is intentional rather than
+   the old bug: the content, not the selector, was wrong. No `:first-child`
+   needed — the decoration targets the empty node itself, not a shared wrapper. */
+.editor-prose .is-empty::before {
   content: attr(data-placeholder);
   color: var(--text-02);
   float: left;
