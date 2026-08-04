@@ -63,7 +63,7 @@ export function StartNewPage({ dir = "" }: { dir?: string }) {
               title={t.name}
               description={t.description ?? ""}
               note={
-                t.ingestion_auto_update_disabled ? "Auto-update off" : undefined
+                t.ingestion_auto_update_disabled ? "Auto Update off" : undefined
               }
               onClick={() => startNewPage(t.id)}
             />
