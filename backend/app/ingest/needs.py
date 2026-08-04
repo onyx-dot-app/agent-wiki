@@ -487,11 +487,15 @@ def run_extraction(
             if progress:
                 progress(n, len(stale))
 
-    if pages:
+    # Guarded on the RAW read, not on the filtered set. The two differ once pages can be
+    # excluded by policy: a corpus where every page is disabled leaves ``pages`` empty while the
+    # read succeeded, and those needs genuinely should be retired. Guarding on ``pages`` would
+    # read that as a failed read and keep them forever.
+    if corpus:
         # Scoped to the prefix walked: ``by_path`` only describes that scope, so an unscoped
         # prune would read every page outside it as deleted. Disabled pages are absent from
         # ``by_path``, so this is also what retires the needs of a page that was turned off
-        # after it was last extracted.
+        # after it was last extracted — including the case where that is every page.
         page_needs.prune(set(by_path), prefix=prefix)
     else:
         # A read that comes back empty is not evidence the wiki is empty — ``read_corpus``

@@ -619,3 +619,43 @@ class TestAutoUpdatePolicy:
         needs.run_extraction()
 
         assert llm == []
+
+    def test_disabling_every_page_still_retires_their_needs(
+        self, tmp_repo, llm, monkeypatch
+    ) -> None:
+        """The prune guard exists for a failed READ, and the filtered set is a different quantity
+        once pages can be excluded by policy: a corpus where everything is disabled leaves no
+        pages to extract while the read succeeded perfectly, and those needs should go."""
+        _page("a.md")
+        _page("b.md")
+        needs.run_extraction()
+        assert len(page_needs.load_all()) == 2
+
+        monkeypatch.setattr(
+            needs.update_policy,
+            "resolve_for_paths",
+            self._policy(
+                **{
+                    "a.md": {"ingestion_auto_update_disabled": True},
+                    "b.md": {"ingestion_auto_update_disabled": True},
+                }
+            ),
+        )
+        counts = needs.run_extraction()
+
+        assert counts["pages"] == 0
+        assert page_needs.load_all() == []
+
+    def test_a_failed_read_still_keeps_everything(self, tmp_repo, llm, monkeypatch) -> None:
+        """The case the guard was written for must survive the fix: read_corpus silently skips a
+        page it cannot read, so an empty read is indistinguishable from a wiki that lost every
+        page — and those needs cost an LLM call each."""
+        _page("a.md")
+        needs.run_extraction()
+
+        monkeypatch.setattr(needs.entity_types, "read_corpus", lambda prefix="": [])
+        with monkeypatch.context():
+            counts = needs.run_extraction()
+
+        assert counts["pages"] == 0
+        assert [r.path for r in page_needs.load_all()] == ["a.md"]
