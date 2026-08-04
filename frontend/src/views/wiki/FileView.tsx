@@ -46,8 +46,8 @@ import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
 import type { AnchoredHighlightTarget } from "@/lib/editor/types";
 import { SWR_KEYS } from "@/lib/swr-keys";
-import { Path2ReviewBanner } from "@/components/wiki/Path2ReviewBanner";
 import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
+import { SuggestionsCard } from "@/components/wiki/SuggestionsCard";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { type OpenUpdatesPanelOpts } from "@/components/wiki/policyPanels";
 import { CommentMarginRail } from "@/components/wiki/CommentMarginRail";
@@ -1153,16 +1153,23 @@ export function FileView({ path }: FileViewProps) {
         return (
           // The mock's Panel body (1790:52468) pads the card stack 8px/4px.
           <div className="scroll-y-hidden flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-1">
+            {/* No fullHeight: the policy cards size to content so the
+                suggestions card sits directly beneath them (the folder
+                panel's arrangement), not pinned past a stretch gap. */}
             <UpdatePolicyPanel
               path={path}
               onShowHistory={toggleHistoryList}
               historyOpen={historyListOpen}
               historyList={versionList}
               totalEdits={commits ? commits.length : null}
-              fullHeight
               openInstructionEditor={openInstructionEditor}
               onInstructionEditorOpened={clearInstructionEditorRequest}
             />
+            {/* Proposals live here, in the panel — same placement as the
+                folder view — not as a banner pushed above the doc body. */}
+            <div className="pt-2">
+              <SuggestionsCard path={path} />
+            </div>
           </div>
         );
       case "comments":
@@ -1342,7 +1349,6 @@ export function FileView({ path }: FileViewProps) {
                     path={path}
                     onOpenPolicy={() => openPanel("updates")}
                   />
-                  <Path2ReviewBanner path={path} canWrite={canWrite} />
                   {(() => {
                     // Cards visible while the body is still "empty enough"
                     // to discard without losing user work: truly blank, or
