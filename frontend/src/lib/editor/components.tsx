@@ -18,7 +18,7 @@ import { tiptapExtensions } from "@/lib/editor/extensions";
 import {
   commentHighlights as commentHighlightPlugin,
   sourceHighlights as sourceHighlightPlugin,
-} from "@/lib/editor/highlights";
+} from "@/lib/editor/extensions/highlights";
 import type { CoeditPeer } from "@/lib/editor/hooks";
 import { sessionColorFor } from "@/lib/editor/identityColor";
 import type { CoeditParticipant } from "@/lib/editor/svc";

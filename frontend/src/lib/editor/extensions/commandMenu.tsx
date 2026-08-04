@@ -35,7 +35,10 @@ import {
 } from "@onyx-ai/opal/icons";
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 
-import { canUploadImages, promptImageUpload } from "@/lib/editor/images";
+import {
+  canUploadImages,
+  promptImageUpload,
+} from "@/lib/editor/extensions/images";
 
 interface CommandItem {
   title: string;

@@ -16,7 +16,7 @@ import {
   JoinAdjacentLists,
   MixedTaskList,
   UniqueBlockIdentity,
-} from "@/lib/editor/blocks";
+} from "@/lib/editor/extensions/blocks";
 
 function makeEditor(): Editor {
   return new Editor({

@@ -21,11 +21,11 @@ import {
   TaskItemBackspace,
   ThematicBreak,
   UniqueBlockIdentity,
-} from "@/lib/editor/blocks";
-import { CommandMenu } from "@/lib/editor/commandMenu";
-import { AnchoredHighlights } from "@/lib/editor/highlights";
-import { imageSupport } from "@/lib/editor/images";
-import { presenceExtension } from "@/lib/editor/presence";
+} from "@/lib/editor/extensions/blocks";
+import { CommandMenu } from "@/lib/editor/extensions/commandMenu";
+import { AnchoredHighlights } from "@/lib/editor/extensions/highlights";
+import { imageSupport } from "@/lib/editor/extensions/images";
+import { presenceExtension } from "@/lib/editor/extensions/presence";
 
 /**
  * The Tiptap extension set for the live wiki editor. Every node the backend's
