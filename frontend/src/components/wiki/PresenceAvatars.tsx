@@ -21,9 +21,13 @@ import { SvgAnthropic, SvgOpenai } from "@onyx-ai/opal/logos";
 import {
   AnchoredPanel,
   AutoGlyph,
+  PanelSurface,
   PolicyPopover,
   type OpenUpdatesPanelOpts,
 } from "@/components/wiki/policyPanels";
+import { SuggestionsCard } from "@/components/wiki/SuggestionsCard";
+import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
+import { useProposalsByPath } from "@/lib/autoOrganize";
 import { relativeTime } from "@/lib/users";
 import { fetchFileHistory } from "@/lib/wiki/svc";
 import { useUpdateHealth } from "@/lib/wiki/hooks";
@@ -96,6 +100,10 @@ interface PresenceAvatarsProps {
   onOpenCommit?: (sha: string) => void;
   /** Opens the updates side panel. */
   onOpenUpdatesPanel?: (opts?: OpenUpdatesPanelOpts) => void;
+  /** Whether the updates side panel is currently open — the floating
+   * notification cards are suppressed while it is, since the panel shows
+   * the same proposals and settings. */
+  updatesPanelOpen?: boolean;
 }
 
 interface AvatarCircleProps {
@@ -366,6 +374,7 @@ export function PresenceAvatars({
   onScrollToOffset,
   onOpenCommit,
   onOpenUpdatesPanel,
+  updatesPanelOpen,
 }: PresenceAvatarsProps) {
   const entries = useMemo<PresenceEntry[]>(() => {
     // Session-granular roster: one chip per live connection, so the same
@@ -554,6 +563,19 @@ export function PresenceAvatars({
   const { health } = useUpdateHealth(path);
   const warnLevel = updateWarnLevel(health);
 
+  // The notification cards self-show under the Auto icon — pending
+  // proposals and the update-frequency warning are things to act on, not
+  // things to discover behind a hover (mock 2283:84706, same behaviour the
+  // folder view already has). X hides them for this page until something
+  // changes; the updates panel supersedes them while it is open.
+  const [popupHidden, setPopupHidden] = useState(false);
+  useEffect(() => setPopupHidden(false), [path]);
+  const { proposals } = useProposalsByPath(path);
+  const showNotifications =
+    !popupHidden &&
+    !updatesPanelOpen &&
+    (proposals.length > 0 || warnLevel !== null);
+
   return (
     <Section
       ref={clusterRef}
@@ -720,24 +742,55 @@ export function PresenceAvatars({
           </Section>
         </AnchoredPanel>
       )}
-      {openPanel?.kind === "auto" && clusterRef.current && (
-        <AnchoredPanel
-          anchor={clusterRef.current}
-          onDismiss={() => setOpenPanel(null)}
-          hover={{ onEnter: holdOpen, onLeave: closeSoon }}
-        >
-          <PolicyPopover
-            path={path}
-            canWrite={canWrite}
-            // The popover hands off to the side panel in place: same UI,
-            // so it dismisses as the panel opens.
-            onOpenUpdatesPanel={(opts) => {
-              setOpenPanel(null);
-              onOpenUpdatesPanel?.(opts);
-            }}
-          />
-        </AnchoredPanel>
-      )}
+      {(openPanel?.kind === "auto" || showNotifications) &&
+        clusterRef.current && (
+          <AnchoredPanel
+            anchor={clusterRef.current}
+            onDismiss={() =>
+              openPanel?.kind === "auto"
+                ? setOpenPanel(null)
+                : setPopupHidden(true)
+            }
+            hover={
+              openPanel?.kind === "auto"
+                ? { onEnter: holdOpen, onLeave: closeSoon }
+                : undefined
+            }
+          >
+            <Section gap={0.25} height="fit" alignItems="stretch">
+              {/* Hovering Auto stacks the settings ABOVE the persistent
+                  notification cards, pushing them down — the folder view's
+                  arrangement. */}
+              {openPanel?.kind === "auto" && (
+                <PanelSurface>
+                  <PolicyPopover
+                    path={path}
+                    canWrite={canWrite}
+                    // The popover hands off to the side panel in place: same
+                    // UI, so it dismisses as the panel opens.
+                    onOpenUpdatesPanel={(opts) => {
+                      setOpenPanel(null);
+                      onOpenUpdatesPanel?.(opts);
+                    }}
+                  />
+                </PanelSurface>
+              )}
+              {showNotifications && (
+                <>
+                  <UpdateHealthBanner
+                    path={path}
+                    onOpenPolicy={() => onOpenUpdatesPanel?.()}
+                  />
+                  <SuggestionsCard
+                    path={path}
+                    onClose={() => setPopupHidden(true)}
+                    onOpenPanel={() => onOpenUpdatesPanel?.()}
+                  />
+                </>
+              )}
+            </Section>
+          </AnchoredPanel>
+        )}
     </Section>
   );
 }
