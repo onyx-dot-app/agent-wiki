@@ -160,6 +160,18 @@ export function SuggestionsCard({
   // leaves `pending` server-side immediately, so without this copy the
   // refresh would yank the row before its "Applied ✓" was ever visible.
   const [acted, setActed] = useState<Partial<Record<number, Proposal>>>({});
+  // Server-list ids as of the previous render — the vanished-elsewhere
+  // detector below diffs against it.
+  const prevIds = useRef<Set<number>>(new Set());
+  // All row state is per path. The card instance survives navigation (the
+  // panel stays mounted while `path` changes under it), so without this a
+  // row acted on in the previous folder would merge into the next folder's
+  // list — displayed, counted, and actionable where it doesn't belong.
+  useEffect(() => {
+    setActed({});
+    setOutcomes({});
+    prevIds.current = new Set();
+  }, [path]);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -259,7 +271,6 @@ export function SuggestionsCard({
   // acted on by someone else — their change may have landed in the wiki,
   // so the structural views deserve the same immediate refresh the acting
   // client gives itself.
-  const prevIds = useRef<Set<number>>(new Set());
   useEffect(() => {
     const ids = new Set(proposals.map((p) => p.id));
     const vanishedElsewhere = [...prevIds.current].some(
