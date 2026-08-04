@@ -265,6 +265,11 @@ class TaskQueue(BaseModel):
 
     name: str
     max_size: int
+    # Display metadata for the admin health page, defined beside each queue
+    # in ``queues.py``. ``label`` falls back to ``name`` at the API boundary
+    # when unset.
+    label: str = ""
+    description: str = ""
     immediate: bool = False
     handlers: dict[str, Callable[..., Any]] = Field(default_factory=dict)
     periodic: list[_PeriodicEntry] = Field(default_factory=list)

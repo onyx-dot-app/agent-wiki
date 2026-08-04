@@ -109,16 +109,56 @@ __all__ = [
 ]
 
 
-def _make(name: str) -> TaskQueue:
-    return TaskQueue(name=name, max_size=CONFIG.max_queue_size)
+def _make(name: str, label: str, description: str) -> TaskQueue:
+    return TaskQueue(
+        name=name,
+        label=label,
+        description=description,
+        max_size=CONFIG.max_queue_size,
+    )
 
 
-documents_queue = _make("documents")
-triggers_queue = _make("triggers")
-coedit_queue = _make("coedit")
-automanage_offline_queue = _make("automanage_offline")
-automanage_nearline_queue = _make("automanage_nearline")
-lightweight_maintenance_queue = _make("lightweight_maintenance")
+# The label says what the work is; the description says what a backlog
+# means for a person — that pair is what the admin health page renders.
+documents_queue = _make(
+    "documents",
+    "Document updates",
+    "AI edits to wiki pages — reconciling ingested source changes and "
+    "applying direct agent edits. A backlog means the wiki lags its "
+    "sources and AI edits land late.",
+)
+triggers_queue = _make(
+    "triggers",
+    "Watcher evaluations",
+    "Page watchers, scheduled triggers, and Onyx Craft launches. A "
+    "backlog means late notifications and slow Craft starts.",
+)
+coedit_queue = _make(
+    "coedit",
+    "Editor saves",
+    "Live editing sessions checkpointing to git. A backlog means edits "
+    "stay uncommitted a little longer; nothing is lost.",
+)
+automanage_offline_queue = _make(
+    "automanage_offline",
+    "Auto Organize sweeps",
+    "Unattended batch work: housekeeping sweeps, their AI-approved "
+    "auto-applies, and taxonomy derivation. Nobody is actively "
+    "waiting, but automatic changes land late while it backs up.",
+)
+automanage_nearline_queue = _make(
+    "automanage_nearline",
+    "Auto Organize approvals",
+    "Applies proposals a person just approved. A backlog keeps someone "
+    "waiting.",
+)
+lightweight_maintenance_queue = _make(
+    "lightweight_maintenance",
+    "Indexing & cleanup",
+    "Search reindexing and other fast upkeep (expiries, media sweeps, "
+    "session cleanup). A backlog most visibly means stale search "
+    "results.",
+)
 
 # Map queue-name → instance, used by run_worker.py to launch the right
 # consumer per worker container.

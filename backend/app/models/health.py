@@ -6,6 +6,10 @@ from pydantic import BaseModel
 
 class QueueHealth(BaseModel):
     name: str
+    # Human name + what a backlog on this queue means for a person, from
+    # the queue's own definition (``app/tasks/queues.py``).
+    label: str
+    description: str
     # Per-state breakdown. ``ready`` is what a worker can pick up right
     # now; ``delayed`` is messages scheduled for a future fire time
     # (``schedule(..., eta=...)``); ``in_flight`` is currently held by a

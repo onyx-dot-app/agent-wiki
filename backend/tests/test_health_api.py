@@ -33,4 +33,16 @@ def test_health_response_shape(client):
     assert isinstance(body["queues"], list)
     assert len(body["queues"]) > 0
     for q in body["queues"]:
-        assert {"name", "ready", "delayed", "in_flight", "limit", "ok", "error"} <= set(q)
+        assert {
+            "name",
+            "label",
+            "description",
+            "ready",
+            "delayed",
+            "in_flight",
+            "limit",
+            "ok",
+            "error",
+        } <= set(q)
+        assert q["label"], f"queue {q['name']} has no label"
+        assert q["description"], f"queue {q['name']} has no description"
