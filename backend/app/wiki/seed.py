@@ -126,8 +126,13 @@ def _seed_root_policy_defaults() -> None:
 
     A visible root policy row rather than a code default, so a customer
     changes it like any folder policy and the choice sticks — this runs
-    only on the boot that seeded the wiki, never on a restored or
-    pre-existing install."""
+    only on the boot that seeds the wiki, never on a restored or
+    pre-existing install. It runs *before* the pages are written: an
+    interrupted first boot then recovers on the next one — either the
+    seed branch re-runs (the ``get("")`` guard skips the existing row) or
+    the committed pages route the boot down the pre-existing-content
+    branch with the row already durably in place. After the pages or the
+    marker, a crash could strand the wiki seeded but defaultless."""
     if update_policy.get("") is not None:
         return
     update_policy.set_policy(
@@ -166,9 +171,9 @@ def seed_if_empty(target_dir: str) -> bool:
         _stamp_seed_marker()
         return False
     log.info("seeding empty wiki at %s from %s", target_dir, SEED_SOURCE_DIR)
+    _seed_root_policy_defaults()
     written = write_seed_pages(Path(target_dir), overwrite_existing=False)
     if written > 0:
         _stamp_seed_marker()
-        _seed_root_policy_defaults()
         reindex_all_inline()
     return written > 0
