@@ -52,6 +52,7 @@ from app.wiki import (
     doc_ids,
     drafts,
     update_policy,
+    wiki_documents,
 )
 from app.wiki.comment_remap import remap_comments
 from app.wiki.provenance_remap import remap_source_ranges
@@ -194,6 +195,12 @@ def after_doc_delete(rel_path: str, sha: str, actor: str | None) -> None:
     drop_page_embedding(rel_path)
     acl.on_page_deleted(rel_path)
     update_policy.on_page_deleted(rel_path)
+    # The page's CRDT document row is operational live-editing state with no
+    # archival value — drop it (a recreate at this path seeds a fresh lineage,
+    # safe because no client can still hold a deleted page's document). Must
+    # run before doc_ids.on_deleted below: the drop resolves the row's id
+    # through the registry, which that call tombstones.
+    wiki_documents.on_pages_deleted([rel_path])
     # Tombstone the id (kept, not dropped) so it still resolves — to a deleted
     # state — and a later restore can re-bind it.
     doc_ids.on_deleted(rel_path)
@@ -245,6 +252,13 @@ def after_doc_trashed(
     # closed in the DB by on_path_moved and needs nothing else: no process holds
     # a live document that would have to be evicted.
     coedit.on_path_moved(moves)
+    # Unlike sessions (re-keyed into .trash above, so their queued checkpoints
+    # resolve), the pages' CRDT document rows are dropped: a restore re-binds
+    # the id but seeds a fresh lineage, which is safe because no client can
+    # still hold a trashed page's document. Must run before doc_ids.on_deleted
+    # below — the drop resolves the rows' ids through the registry, which that
+    # call tombstones.
+    wiki_documents.on_pages_deleted([mv.old for mv in moves])
     # Tombstone the id(s) at the *original* root rather than following the move
     # into `.trash/` — the id keeps resolving (to a deleted state), and restore
     # re-binds it. ACL/policy above deliberately follow into `.trash/` (so the
@@ -314,6 +328,14 @@ def after_path_move(
     """
     acl.on_path_moved(moves, root_move=root_move)
     update_policy.on_path_moved(moves, root_move=root_move)
+    # Document rows are keyed by doc id, so a rename needs nothing here —
+    # doc_ids.on_path_moved re-keys the registry and the row follows for
+    # free. The exception is a page renamed *out of* ``.md``-space: it stops
+    # being a document (the registry stamps its id deleted), so its document
+    # row drops — resolved before that stamping happens.
+    wiki_documents.on_pages_deleted(
+        [mv.old for mv in moves if mv.old.endswith(".md") and not mv.new.endswith(".md")]
+    )
     doc_ids.on_path_moved(moves, root_move=root_move)
     coedit.on_path_moved(moves)
     list_changed = False

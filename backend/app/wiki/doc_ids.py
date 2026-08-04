@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.db.models import WikiDocId
 from app.db.session import session
@@ -118,10 +119,16 @@ def resolve(doc_id: str) -> dict[str, str | None] | None:
 def id_for_path(path: str) -> str | None:
     """Id of the live row at ``path``, or ``None``."""
     with session() as s:
-        row = s.execute(
-            select(WikiDocId).where(WikiDocId.path == path, WikiDocId.deleted_at.is_(None))
-        ).scalar_one_or_none()
-        return row.id if row else None
+        return id_for_path_in(s, path)
+
+
+def id_for_path_in(s: Session, path: str) -> str | None:
+    """:func:`id_for_path`, inside the caller's open ORM session — for
+    callers resolving as part of their own transaction (the
+    ``wiki_documents`` mirror)."""
+    return s.execute(
+        select(WikiDocId.id).where(WikiDocId.path == path, WikiDocId.deleted_at.is_(None))
+    ).scalar_one_or_none()
 
 
 def ids_for_paths(paths: list[str]) -> dict[str, str]:
@@ -138,16 +145,21 @@ def ids_for_paths(paths: list[str]) -> dict[str, str]:
     """
     if not paths:
         return {}
-    out: dict[str, str] = {}
     with session() as s:
-        for i in range(0, len(paths), _ID_LOOKUP_CHUNK):
-            chunk = paths[i : i + _ID_LOOKUP_CHUNK]
-            rows = s.execute(
-                select(WikiDocId.path, WikiDocId.id).where(
-                    WikiDocId.path.in_(chunk), WikiDocId.deleted_at.is_(None)
-                )
-            ).all()
-            out.update({path: doc_id for path, doc_id in rows})
+        return ids_for_paths_in(s, paths)
+
+
+def ids_for_paths_in(s: Session, paths: list[str]) -> dict[str, str]:
+    """:func:`ids_for_paths`, inside the caller's open ORM session."""
+    out: dict[str, str] = {}
+    for i in range(0, len(paths), _ID_LOOKUP_CHUNK):
+        chunk = paths[i : i + _ID_LOOKUP_CHUNK]
+        rows = s.execute(
+            select(WikiDocId.path, WikiDocId.id).where(
+                WikiDocId.path.in_(chunk), WikiDocId.deleted_at.is_(None)
+            )
+        ).all()
+        out.update({path: doc_id for path, doc_id in rows})
     return out
 
 
