@@ -2288,20 +2288,26 @@ class AspectPage(Base):
 
     __tablename__ = "aspect_pages"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # A natural key rather than a surrogate id: it says what the row IS, and makes a duplicate
+    # page-link impossible instead of merely unlikely. ``entity`` is part of it because one page
+    # legitimately holds many entities' rows for one aspect — a customer-tracker page carries a
+    # deal-status row per customer.
     aspect_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("aspects.id", ondelete="CASCADE"), nullable=False
+        Integer, ForeignKey("aspects.id", ondelete="CASCADE"), primary_key=True
     )
     doc_id: Mapped[str] = mapped_column(
-        Text, ForeignKey("wiki_doc_ids.id", ondelete="CASCADE"), nullable=False
+        Text, ForeignKey("wiki_doc_ids.id", ondelete="CASCADE"), primary_key=True
+    )
+    # Which entity's row this page holds, when the topic is entity-keyed. "" otherwise — and part
+    # of the key, so the un-keyed case is naturally one row per (aspect, page).
+    entity: Mapped[str] = mapped_column(
+        Text, primary_key=True, nullable=False, server_default=text("''")
     )
     need_name: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    # Which entity's row this page holds, when the topic is entity-keyed. "" otherwise.
-    entity: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
 
     __table_args__ = (
-        Index("ix_aspect_pages_aspect_id", "aspect_id"),
-        # The reverse lookup a reconciler needs: given a page, which aspects does it hold?
+        # The reverse lookup a reconciler needs: given a page, which aspects does it hold? The
+        # aspect side is already covered by the primary key's leading column.
         Index("ix_aspect_pages_doc_id", "doc_id"),
     )
 

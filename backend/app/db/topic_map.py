@@ -46,9 +46,13 @@ class PageRef(NamedTuple):
 
 
 class AspectRecord(NamedTuple):
-    """One facet, with the pages holding it. ``pages`` of length > 1 is the fan-out."""
+    """One facet, with the pages holding it. ``pages`` of length > 1 is the fan-out.
 
-    id: int
+    ``aspect_id``, not ``id``: the same value is called ``aspect_id`` in every table that
+    references it, and one name for one thing is worth more than brevity here.
+    """
+
+    aspect_id: int
     name: str
     description: str
     need_kind: str
@@ -62,7 +66,7 @@ class AspectRecord(NamedTuple):
 
 
 class TopicRecord(NamedTuple):
-    id: int
+    topic_id: int
     name: str
     gist: str
     subject_entity_type: str
@@ -111,7 +115,9 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
     pages_by_aspect: dict[int, list[PageRef]] = {}
     if aspect_ids:
         for row in db.scalars(
-            select(AspectPage).where(AspectPage.aspect_id.in_(aspect_ids)).order_by(AspectPage.id)
+            select(AspectPage)
+            .where(AspectPage.aspect_id.in_(aspect_ids))
+            .order_by(AspectPage.aspect_id, AspectPage.doc_id, AspectPage.entity)
         ):
             pages_by_aspect.setdefault(row.aspect_id, []).append(
                 PageRef(doc_id=row.doc_id, need_name=row.need_name, entity=row.entity)
@@ -119,7 +125,7 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
 
     records = {
         a.id: AspectRecord(
-            id=a.id,
+            aspect_id=a.id,
             name=a.name,
             description=a.description,
             need_kind=a.need_kind,
@@ -146,7 +152,7 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
         created_at=run.created_at,
         topics=[
             TopicRecord(
-                id=t.id,
+                topic_id=t.id,
                 name=t.name,
                 gist=t.gist,
                 subject_entity_type=t.subject_entity_type,
@@ -205,7 +211,7 @@ def aspects_for_page(doc_id: str) -> list[AspectRecord]:
             )
         return [
             AspectRecord(
-                id=a.id,
+                aspect_id=a.id,
                 name=a.name,
                 description=a.description,
                 need_kind=a.need_kind,
@@ -286,13 +292,29 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
                     aspect_id = aspect_row.id
                     aspect_ids[key] = aspect_id
                     n_aspects += 1
+                    # Deduped here as well as constrained in the schema. The key alone would
+                    # abort the whole run on a repeated page — losing a derivation that already
+                    # paid for its LLM calls — so a producer listing a page twice loses the
+                    # duplicate, not the run. The constraint stays as the backstop.
+                    seen: set[tuple[str, str]] = set()
                     for page in cast(list[dict[str, Any]], aspect.get("pages") or []):
+                        doc_id = str(page.get("doc_id") or "")
+                        entity = str(page.get("entity") or "")
+                        if (doc_id, entity) in seen:
+                            log.debug(
+                                "topic_map: dropping repeated page %s (entity %r) on aspect %r",
+                                doc_id,
+                                entity,
+                                aspect.get("name"),
+                            )
+                            continue
+                        seen.add((doc_id, entity))
                         db.add(
                             AspectPage(
                                 aspect_id=aspect_id,
-                                doc_id=str(page.get("doc_id") or ""),
+                                doc_id=doc_id,
                                 need_name=str(page.get("need_name") or ""),
-                                entity=str(page.get("entity") or ""),
+                                entity=entity,
                             )
                         )
                         n_pages += 1

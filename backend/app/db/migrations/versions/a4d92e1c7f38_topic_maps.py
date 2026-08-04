@@ -113,19 +113,21 @@ def upgrade() -> None:
     )
     op.create_index("ix_topic_aspects_aspect_id", "topic_aspects", ["aspect_id"])
 
+    # Natural key rather than a surrogate id: it says what the row is, and makes a duplicate
+    # page-link impossible. ``entity`` is part of it because one page legitimately holds many
+    # entities' rows for one aspect.
     op.create_table(
         "aspect_pages",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("aspect_id", sa.Integer(), nullable=False),
         sa.Column("doc_id", sa.Text(), nullable=False),
-        sa.Column("need_name", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.Column("entity", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("need_name", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.ForeignKeyConstraint(["aspect_id"], ["aspects.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["doc_id"], ["wiki_doc_ids.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("aspect_id", "doc_id", "entity"),
     )
-    op.create_index("ix_aspect_pages_aspect_id", "aspect_pages", ["aspect_id"])
-    # The reverse lookup a reconciler needs: given a page, which aspects does it hold?
+    # The reverse lookup a reconciler needs: given a page, which aspects does it hold? The aspect
+    # side is already served by the primary key's leading column.
     op.create_index("ix_aspect_pages_doc_id", "aspect_pages", ["doc_id"])
 
 

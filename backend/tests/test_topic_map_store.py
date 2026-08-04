@@ -84,7 +84,7 @@ class TestRecord:
         assert loaded is not None
         assert len(loaded.topics) == 2
         first, second = (t.aspects[0] for t in loaded.topics)
-        assert first.id == second.id  # the same aspect, not a copy
+        assert first.aspect_id == second.aspect_id  # the same aspect, not a copy
         assert first.pages == second.pages
 
     def test_a_single_page_aspect_is_not_a_failure(self, tmp_repo) -> None:
@@ -186,6 +186,38 @@ class TestForeignKeys:
         assert loaded is not None
         assert loaded.entity_type_taxonomy_id is None
         assert [t.name for t in loaded.topics] == ["T"]
+
+
+class TestNaturalKey:
+    def test_the_same_page_cannot_be_attached_twice(self, tmp_repo) -> None:
+        """Nothing upstream guarantees a producer lists a page once. The duplicate is dropped
+        rather than raised: the key alone would abort the whole run, losing a derivation that
+        already paid for its LLM calls."""
+        d1 = _page("a.md")
+        dupe = _aspect("x", [d1])
+        dupe["pages"] = dupe["pages"] * 2
+
+        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [dupe]}]))
+
+        loaded = topic_map.active()
+        assert loaded is not None
+        assert [p.doc_id for p in loaded.topics[0].aspects[0].pages] == [d1]
+
+    def test_one_page_can_hold_several_entities_rows(self, tmp_repo) -> None:
+        """Why ``entity`` is IN the key: a customer-tracker page carries a deal-status row per
+        customer, so the same (aspect, page) legitimately repeats."""
+        d1 = _page("customers.md")
+        aspect = _aspect("deal status", [])
+        aspect["pages"] = [
+            {"doc_id": d1, "need_name": "deal status", "entity": "Acme"},
+            {"doc_id": d1, "need_name": "deal status", "entity": "Globex"},
+        ]
+
+        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
+
+        loaded = topic_map.active()
+        assert loaded is not None
+        assert sorted(p.entity for p in loaded.topics[0].aspects[0].pages) == ["Acme", "Globex"]
 
 
 class TestReverseLookup:
