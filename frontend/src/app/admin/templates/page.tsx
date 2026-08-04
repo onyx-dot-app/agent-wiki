@@ -129,10 +129,10 @@ function TemplatesList() {
                 )}
                 <div className="mt-1 text-xs text-(--text-02)">
                   {t.ingestion_auto_update_disabled == null
-                    ? "Auto-update: default"
+                    ? "Auto Update: default"
                     : t.ingestion_auto_update_disabled
-                      ? "Auto-update: off"
-                      : "Auto-update: on"}{" "}
+                      ? "Auto Update: off"
+                      : "Auto Update: on"}{" "}
                   • Updated {t.updated_at}
                 </div>
               </div>
@@ -352,25 +352,25 @@ function TemplateModal({
 
         <div>
           <div className="flex items-center justify-between gap-3">
-            <div className={lblClass}>Auto-update</div>
+            <div className={lblClass}>Auto Update</div>
             <Switch checked={autoUpdateOn} onCheckedChange={setAutoUpdateOn} />
           </div>
           <div className="mt-1 text-xs text-(--text-02)">
-            Pages created from this template start with ingestion auto-update{" "}
+            Pages created from this template start with Auto Update{" "}
             {autoUpdateOn ? "on" : "off"}. Leave it off for pages that shouldn't
-            be rewritten by ingestion (e.g. meeting notes).
+            be rewritten by ingested source changes (e.g. meeting notes).
           </div>
         </div>
 
         <div>
           <div className="flex items-center justify-between gap-3">
-            <div className={lblClass}>AI management</div>
+            <div className={lblClass}>Auto Organize</div>
             <Switch checked={aiManagedOn} onCheckedChange={setAiManagedOn} />
           </div>
           <div className="mt-1 text-xs text-(--text-02)">
             Pages created from this template {aiManagedOn ? "are" : "are not"}{" "}
-            opted into AI auto-management (the AI may organize them — moves,
-            merges — without per-change approval).
+            opted into Auto Organize (the AI may organize them — moves, merges —
+            without per-change approval).
           </div>
         </div>
 
