@@ -17,7 +17,7 @@
  *
  * On `enabled` it opens the session's WebSocket for `path`, binding a
  * `Y.Doc`/`Awareness` pair this hook owns for the connection's lifetime —
- * pass them to `<TiptapEditor doc={coedit.doc} awareness={coedit.awareness}
+ * pass them to `<TipTapEditor doc={coedit.doc} awareness={coedit.awareness}
  * .../>`. Teardown (checkpoint, then close, in that order — closing before
  * a final edit's checkpoint has landed would let the server's last-leave
  * forced commit race ahead of it) happens entirely inside the hook's own
@@ -109,7 +109,7 @@ export interface UseCoeditSession {
   /** True once the join handshake completes. */
   active: boolean;
   /** Bump count for `doc`/`awareness`'s identity — pass as
-   * `<TiptapEditor key={coedit.connectionId}>`. Required, not cosmetic:
+   * `<TipTapEditor key={coedit.connectionId}>`. Required, not cosmetic:
    * Tiptap's `useEditor` defaults to building the editor once and never
    * rebuilding it from new `doc`/`awareness` props (confirmed against the
    * installed `@tiptap/react` — `deps = []` unless the caller opts in), so
@@ -119,10 +119,10 @@ export interface UseCoeditSession {
    * (the session outlives any one socket), so that id alone can't be used as
    * the key the way the old hook's `session.id` was. */
   connectionId: number;
-  /** This connection's Yjs doc — pass to `<TiptapEditor doc={...}>`. A
+  /** This connection's Yjs doc — pass to `<TipTapEditor doc={...}>`. A
    * fresh instance every time `connectionId` bumps. */
   doc: Y.Doc;
-  /** This connection's Awareness — pass to `<TiptapEditor awareness={...}>`. */
+  /** This connection's Awareness — pass to `<TipTapEditor awareness={...}>`. */
   awareness: Awareness;
   /** Whether the user may edit this page (`can_write` from the join
    * response). False joins as a pure viewer: presence + live updates flow
@@ -175,7 +175,7 @@ export interface UseCoeditSession {
   saveError: string | null;
   /** Wire the underlying Tiptap `Editor` instance once it mounts — needed
    * to resolve peer cursor positions and to drive `setDoc`. Pass directly
-   * as `<TiptapEditor onEditorReady={coedit.onEditorReady}>`. */
+   * as `<TipTapEditor onEditorReady={coedit.onEditorReady}>`. */
   onEditorReady: (editor: Editor) => void;
   /** Replace the whole document with plain text, split into paragraphs on
    * blank lines — used by template-picking. A deliberate simplification:

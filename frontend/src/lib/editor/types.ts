@@ -37,7 +37,7 @@ export interface CommentDraft {
   quotedText: string;
 }
 
-export interface TiptapEditorProps {
+export interface TipTapEditorProps {
   /** The Yjs doc this editor's content lives in. Defaults to a fresh local
    * `Y.Doc` if omitted (P1's scaffold behavior — never synced anywhere).
    * Real live sessions (Track B) and multi-client verification (two editors
@@ -57,8 +57,6 @@ export interface TiptapEditorProps {
   userDisplay?: string;
   /** Render without accepting edits. */
   readOnly?: boolean;
-  /** Placeholder text shown on an empty document. */
-  placeholder?: string;
   /** The wiki page path this editor is editing, used to scope image uploads
    * (`POST /api/wiki/media?path=...`). Omitted by the scaffold/multi-client
    * verification harness, which has no real page - image paste/drop then
