@@ -83,41 +83,64 @@ def _duplicated_block_ids(doc: Doc) -> list[str]:
 
 
 def drop_duplicate_blocks(doc: Doc) -> list[str]:
-    """Delete every repeat of a top-level ``_blockId``, keeping the first, and
-    return the ids that were repeated.
+    """Repair repeats of a top-level ``_blockId``; return the repeated ids.
 
-    A *deletion*, deliberately, rather than declining to commit: the duplicated
-    content is in the connected browsers' own documents too, so refusing here
-    leaves them holding it and re-sending it on the next reconnect — closing the
-    session doesn't help either, since the next one can't reuse a dirty session
-    and so seeds yet another lineage for the same retained document to merge
-    into. Deleting escapes that: the deletion is broadcast at the end of
-    ``checkpoint_session`` like any other update, and because a Yjs delete
-    addresses the same items the client holds, the client's document converges
-    to the repaired state without a reload (verified directly against pycrdt).
+    Two different situations produce a repeated id, and they need different
+    repairs:
 
-    Keeping the first occurrence is arbitrary but deterministic. The copies are
-    identical when this arises from a lineage merge; if one had been edited
-    afterwards, those edits are lost — no worse than the alternative, which is a
-    page that can never be saved again.
+    A **content-identical** repeat is redundancy — a lineage merge, or a
+    split of a block whose halves serialize the same (an empty paragraph,
+    "aa" down the middle). All copies but the **last** are *deleted*,
+    deliberately, rather than declined or re-identified: the duplication is
+    in the connected browsers' own documents too, so refusing leaves them
+    holding it to re-send on the next reconnect, and re-identifying loops —
+    identical neighbours serialize to text that re-parses as one block, the
+    restamp shares one id across the doc's children again, and every cycle
+    appends one more copy. Deletion converges, and the broadcast at the end
+    of ``checkpoint_session`` converges the clients too (a Yjs delete
+    addresses the same items they hold — verified directly against pycrdt).
+    Keeping the *last* copy rather than the first is what makes the raced
+    split of an identical-halves block harmless: the person's cursor is in
+    the later half, so the block they are typing into survives with its
+    identity and only the redundant earlier half goes.
+
+    A repeat with **different content** is an ordinary edit caught
+    mid-flight: ProseMirror's node split copies attrs — the id included —
+    onto both halves, and the editor's ``UniqueBlockIdentity`` clears the
+    second one in a separate follow-up update. A checkpoint landing between
+    the two sees the duplicate the client is about to fix. Deleting here
+    destroys what the person just typed (observed live: a paragraph lifted
+    out of a list, still carrying the list's id, eaten by the checkpoint
+    that raced the fix-up). Instead the later child's id is *cleared* —
+    exactly what the client's own repair would do — which routes it through
+    ``checkpoint_body``'s ``orig is None`` path as the new content it is.
+    Differing copies can't loop the way identical ones do: their
+    serializations are distinct blocks that each earn their own id on the
+    next restamp.
     """
     dupes = _duplicated_block_ids(doc)
     if not dupes:
         return []
     root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
-    seen: set[str] = set()
-    stale: list[int] = []
+    occurrences: dict[str, list[tuple[int, str]]] = {}
     for i, child in enumerate(root.children):
         block_id = dict(getattr(child, "attributes", {})).get(markdown_yjs.BLOCK_ID_ATTR)
-        if not isinstance(block_id, str):
+        if isinstance(block_id, str):
+            occurrences.setdefault(block_id, []).append((i, markdown_yjs.serialize_block(child)))
+    stale: list[int] = []
+    reidentify: list[int] = []
+    for members in occurrences.values():
+        if len(members) == 1:
             continue
-        if block_id in seen:
-            stale.append(i)
-        else:
-            seen.add(block_id)
+        anchor_text = members[0][1]
+        identical = [i for i, text in members if text == anchor_text]
+        stale.extend(identical[:-1])  # the last identical copy keeps the id
+        reidentify.extend(i for i, text in members if text != anchor_text)
     # Descending, so each deletion can't shift the index of one still pending.
     with doc.transaction():
-        for i in reversed(stale):
+        for i in reidentify:
+            root.children[i].attributes[markdown_yjs.BLOCK_ID_ATTR] = None
+        for i in sorted(stale, reverse=True):
             del root.children[i]
     return dupes
 
@@ -253,9 +276,7 @@ def _user(user_id: str) -> User | None:
     row = users_repo.get_by_id(user_id)
     if row is None:
         return None
-    return User(
-        id=row["id"], email=row["email"], name=row["name"], is_admin=bool(row["is_admin"])
-    )
+    return User(id=row["id"], email=row["email"], name=row["name"], is_admin=bool(row["is_admin"]))
 
 
 def _commit_message(session_id: int, *, primary_author_id: str | None) -> str:
@@ -552,8 +573,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 # Shouldn't happen — a no-op merge implies HEAD exists. Surface
                 # it rather than silently leaving the session dirty forever.
                 log.warning(
-                    "coedit checkpoint: no-op merge but no HEAD for %s (session %s); "
-                    "left dirty",
+                    "coedit checkpoint: no-op merge but no HEAD for %s (session %s); left dirty",
                     path,
                     session_id,
                 )
@@ -608,7 +628,11 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         snapshot = doc.get_update()
 
         coedit.advance_checkpoint(
-            session_id, seq=replayed_seq, snapshot=snapshot, body=result.new_body, base_sha=result.sha
+            session_id,
+            seq=replayed_seq,
+            snapshot=snapshot,
+            body=result.new_body,
+            base_sha=result.sha,
         )
         wiki_drafts.clear_if_diverged(path, result.new_body)
         if diverged:
