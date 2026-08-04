@@ -127,14 +127,12 @@ interface SuggestionsCardProps {
    * stay pending (mock annotation). */
   onClose?: () => void;
   /** Row click, with the proposal's source paths (mock: highlight folder). */
-  onHighlight?: (paths: string[]) => void;
 }
 
 export function SuggestionsCard({
   path,
   onOpenPanel,
   onClose,
-  onHighlight,
 }: SuggestionsCardProps) {
   const router = useRouter();
   const { user } = useAuth();
@@ -283,9 +281,14 @@ export function SuggestionsCard({
               outcome={outcomes[p.id]}
               onApprove={() => void act(p.id, "approve")}
               onDismiss={() => void act(p.id, "reject")}
-              onClick={
-                onHighlight ? () => onHighlight(p.source_paths) : undefined
-              }
+              // Click opens the affected page/folder — the proposal may
+              // target something nested well below the current view, and
+              // inspecting a page is how you decide on its proposal. The
+              // path URL redirects to the canonical id URL.
+              onClick={() => {
+                const target = p.source_paths[0] ?? p.target_paths[0];
+                if (target) router.push(`/app/wiki/${target}`);
+              }}
             />
           ))}
           <Section
