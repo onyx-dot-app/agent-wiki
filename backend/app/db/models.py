@@ -2157,6 +2157,155 @@ class EntityTypeTaxonomy(Base):
     )
 
 
+class TopicMapRun(Base):
+    """One derivation of the topic layer — the version header its rows hang from.
+
+    Needs are per page, so no page can see that four of them track one subject. Clustering plus a
+    naming pass can, and this is the result:
+
+        topic   the SUBJECT ("Wiki Auto Management")
+        aspect  a FACET ("implementation status")
+        pages   the documents holding that facet — the fan-out
+
+    Fan-out is a property of the ASPECT, not the topic: reconcile a fact into one aspect and it
+    applies to every page under it.
+
+    Relational rather than one JSONB document, for two reasons that are not about size. An aspect
+    can belong to more than one topic — "implementation status" is a facet of several subjects —
+    which nesting cannot express at all; and a page reference can be a real foreign key, so a
+    deleted page cannot leave a dangling row the way it could inside a blob.
+
+    Everything is scoped to a run and cascades from it, so a derivation is one insert and a prune
+    is one delete. One run is ``active``; the rest stay readable, because topic and aspect ids are
+    only stable WITHIN a run — a re-derivation mints new ones, so a consumer that recorded a
+    decision against an aspect must resolve it through the run it belongs to.
+    """
+
+    __tablename__ = "topic_map_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Exactly one run is in force. Enforced by the partial unique index below.
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    # sha256 over the (doc_id, content_sha256) of every contributing need set. Answers "have the
+    # needs moved since this was derived?" — which decides whether re-deriving is worth an LLM
+    # pass. Built from the needs' own guard hash rather than page bodies, so a page edit that
+    # leaves its needs unchanged does not make the map look stale.
+    corpus_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    # The taxonomy whose type names appear in ``Topic.subject_entity_type``. SET NULL rather than
+    # CASCADE: losing it costs the ability to resolve those names, not the topics.
+    entity_type_taxonomy_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("entity_type_taxonomies.id", ondelete="SET NULL")
+    )
+    # Model, thresholds, embed key. Kept so a human can judge whether a run is trustworthy
+    # without re-running it.
+    provenance: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    stats: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    triggered_by: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (
+        Index("uq_topic_map_runs_active", "active", unique=True, postgresql_where=text("active")),
+    )
+
+
+class Topic(Base):
+    """A subject the wiki tracks, named from a cluster of needs."""
+
+    __tablename__ = "topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("topic_map_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    # The subject, named abstractly so another page tracking it would plausibly produce the same
+    # name: "Wiki Auto Management", not "the auto-management PRD".
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    # One line on what the subject IS. A thin aspect name ("implementation status") is ambiguous
+    # alone; this anchors it for anything embedding or reasoning over the aspect.
+    gist: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # The entity type keying this topic's rows, from the run's taxonomy. "" = not entity-keyed,
+    # meaning one un-keyed cell per aspect rather than one per entity.
+    subject_entity_type: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+
+    __table_args__ = (Index("ix_topics_run_id", "run_id"),)
+
+
+class Aspect(Base):
+    """A facet that is tracked — one column of what a subject records.
+
+    Belongs to a run, not to a topic: an aspect can be a facet of several subjects, so the link is
+    the association table. That is the whole reason this is not nested JSON.
+    """
+
+    __tablename__ = "aspects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("topic_map_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # How a fact applies: a timeline appends an entry, an entity_status replaces a cell. When the
+    # contributing needs disagree, the producer decides — see app/db/topic_map.py.
+    need_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    detail_level: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # "specific" = a closed entity set; "generic" = an open roster admitting new instances.
+    focus: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+
+    __table_args__ = (Index("ix_aspects_run_id", "run_id"),)
+
+
+class TopicAspect(Base):
+    """Which topics an aspect is a facet of. Many-to-many by design."""
+
+    __tablename__ = "topic_aspects"
+
+    topic_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("topics.id", ondelete="CASCADE"), primary_key=True
+    )
+    aspect_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("aspects.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    __table_args__ = (Index("ix_topic_aspects_aspect_id", "aspect_id"),)
+
+
+class AspectPage(Base):
+    """A page that holds an aspect — one unit of fan-out.
+
+    ``doc_id`` is a real foreign key, which is the second reason for tables over a blob: a deleted
+    page cannot leave this row pointing at nothing. ``need_name`` is provenance only; the live
+    need is read from ``page_needs``, so a rule stored there cannot go stale here.
+    """
+
+    __tablename__ = "aspect_pages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    aspect_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("aspects.id", ondelete="CASCADE"), nullable=False
+    )
+    doc_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("wiki_doc_ids.id", ondelete="CASCADE"), nullable=False
+    )
+    need_name: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # Which entity's row this page holds, when the topic is entity-keyed. "" otherwise.
+    entity: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+
+    __table_args__ = (
+        Index("ix_aspect_pages_aspect_id", "aspect_id"),
+        # The reverse lookup a reconciler needs: given a page, which aspects does it hold?
+        Index("ix_aspect_pages_doc_id", "doc_id"),
+    )
+
+
 class PageNeeds(Base):
     """What one wiki page keeps track of — its information needs.
 

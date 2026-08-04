@@ -33,6 +33,15 @@ CREATE TABLE entity_taxonomies (
 
 def _rewind_to_the_old_name(seed_row: bool = False) -> None:
     with session() as s:
+        # Dependents first: Postgres refuses to drop a table another one references. Every table
+        # that gains a foreign key to entity_type_taxonomies has to be listed here, or this rewind
+        # stops reproducing a pre-rename database and the test fails on setup rather than on the
+        # behaviour it is checking.
+        s.execute(sa.text("DROP TABLE IF EXISTS aspect_pages"))
+        s.execute(sa.text("DROP TABLE IF EXISTS topic_aspects"))
+        s.execute(sa.text("DROP TABLE IF EXISTS aspects"))
+        s.execute(sa.text("DROP TABLE IF EXISTS topics"))
+        s.execute(sa.text("DROP TABLE IF EXISTS topic_map_runs"))
         s.execute(sa.text("DROP TABLE IF EXISTS page_needs"))
         s.execute(sa.text("DROP TABLE IF EXISTS entity_type_taxonomies"))
         s.execute(sa.text(_CREATE_OLD))
