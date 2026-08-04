@@ -7,7 +7,7 @@
  * hand-rolled popup; positioning is Floating UI via `SuggestionProps.mount`,
  * confirmed against the installed package's own documented API.
  *
- * The command set and its filtering live here; the menu UI (`CommandList`) is
+ * The command set and its filtering live here; the menu UI (`CommandMenu`) is
  * a plain React component in `components.tsx` (which keeps this a JSX-free
  * `.ts` extension), and the shared `CommandItem` type is in `./types`.
  *
@@ -34,7 +34,7 @@ import {
 } from "@onyx-ai/opal/icons";
 import {
   CommandMenu as CommandMenuComponent,
-  type CommandMenuyHandle,
+  type CommandMenuHandle,
 } from "@/lib/editor/components";
 import {
   canUploadImages,
@@ -174,7 +174,7 @@ export const CommandMenu = Extension.create({
         command: ({ editor, range, props }) => props.run(editor, range),
         render: () => {
           let component: ReactRenderer<
-            CommandMenuyHandle,
+            CommandMenuHandle,
             SuggestionProps<CommandItem>
           >;
           let unmount: (() => void) | undefined;

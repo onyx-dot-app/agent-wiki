@@ -466,11 +466,11 @@ export function CoeditPresenceBar({
   );
 }
 
-export interface CommandMenuyHandle {
+export interface CommandMenuHandle {
   onKeyDown: (props: SuggestionKeyDownProps) => boolean;
 }
 export type CommandMenuProps = {
-  ref?: Ref<CommandMenuyHandle>;
+  ref?: Ref<CommandMenuHandle>;
 } & SuggestionProps<CommandItem>;
 export function CommandMenu({ ref, items, command }: CommandMenuProps) {
   const [selected, setSelected] = useState(0);
