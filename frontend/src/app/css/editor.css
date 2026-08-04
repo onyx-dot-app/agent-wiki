@@ -313,8 +313,12 @@
    empty heading names its level, an empty paragraph shows a "/"-shortcut
    prompt — see extensions.ts), so a mid-page prompt is intentional rather than
    the old bug: the content, not the selector, was wrong. No `:first-child`
-   needed — the decoration targets the empty node itself, not a shared wrapper. */
-.editor-prose .is-empty::before {
+   needed — the decoration targets the empty node itself, not a shared wrapper.
+   Gated on `.ProseMirror-focused` (ProseMirror sets it on the editable root
+   while the view holds focus, clears it on blur) so a prompt shows only while
+   the editor is actually focused — a blurred editor renders no placeholder,
+   empty block or not. */
+.editor-prose .ProseMirror-focused .is-empty::before {
   content: attr(data-placeholder);
   color: var(--text-02);
   float: left;
