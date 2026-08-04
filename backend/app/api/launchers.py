@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from threading import RLock
 from time import time
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -246,7 +247,13 @@ def post_launch(req: LaunchRequest, user: User = Depends(require_user)) -> Launc
     # Sourced from explicit operator config (PUBLIC_BASE_URL), never
     # request headers — header sniffing behind a proxy is a spoofing surface.
     # No rstrip needed: the config validator rejects trailing slashes.
-    uri = f"agentwiki://run?code={code}&tool={req.tool_id}&endpoint={CONFIG.public_base_url}"
+    # Match the browser's encodeURIComponent encoder used for probe URIs.
+    query = urlencode(
+        {"code": code, "tool": req.tool_id, "endpoint": CONFIG.public_base_url},
+        safe="-_.!~*'()",
+        quote_via=quote,
+    )
+    uri = f"agentwiki://run?{query}"
 
     return LaunchResponse(launch_code=code, uri=uri, agent_session_id=sid)
 

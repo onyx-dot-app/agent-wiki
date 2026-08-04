@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlparse
+
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api import launchers as launchers_api
 from app.db import launch_codes as codes_repo
 from app.auth import mcp_tokens as tokens_repo
 from app.db.session import init_db
@@ -522,6 +525,27 @@ def test_launch_uri_endpoint_is_wiki_base(client):
         "URI endpoint must be wiki base, not MCP path: " + encoded_endpoint
     )
     assert "api%2Fmcp" not in encoded_endpoint
+
+
+def test_launch_uri_encodes_endpoint_as_one_query_value(client, monkeypatch):
+    uid = seed_user()
+    login_fastapi(client, uid)
+    endpoint = "https://wiki.example.com/root?a=1&b=2"
+    monkeypatch.setattr(
+        launchers_api,
+        "CONFIG",
+        launchers_api.CONFIG.model_copy(update={"public_base_url": endpoint}),
+    )
+
+    res = client.post(
+        "/api/launch",
+        json={"tool_id": "claude-code", "wiki_path": None, "message": "x"},
+    )
+
+    assert res.status_code == 200, res.text
+    uri = res.json()["uri"]
+    assert parse_qs(urlparse(uri).query, strict_parsing=True)["endpoint"] == [endpoint]
+    assert "endpoint=https%3A%2F%2Fwiki.example.com%2Froot%3Fa%3D1%26b%3D2" in uri
 
 
 # --------------------------------------------------------------------------- #
