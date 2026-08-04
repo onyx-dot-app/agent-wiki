@@ -80,7 +80,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("run_id", sa.Integer(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
-        sa.Column("gist", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("description", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.Column(
             "subject_entity_type", sa.Text(), server_default=sa.text("''"), nullable=False
         ),

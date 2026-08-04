@@ -2227,8 +2227,11 @@ class Topic(Base):
     # name: "Wiki Auto Management", not "the auto-management PRD".
     name: Mapped[str] = mapped_column(Text, nullable=False)
     # One line on what the subject IS. A thin aspect name ("implementation status") is ambiguous
-    # alone; this anchors it for anything embedding or reasoning over the aspect.
-    gist: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # alone; this anchors it for anything embedding or reasoning over the aspect. Same role as
+    # ``Aspect.description`` one level up, so it carries the same name — unlike
+    # ``EntityTypeTaxonomy``'s ``definition``, which states a DECIDABLE membership criterion
+    # rather than explaining what a thing is.
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     # The entity type keying this topic's rows, from the run's taxonomy. "" = not entity-keyed,
     # meaning one un-keyed cell per aspect rather than one per entity.
     subject_entity_type: Mapped[str] = mapped_column(

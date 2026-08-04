@@ -68,7 +68,7 @@ class AspectRecord(NamedTuple):
 class TopicRecord(NamedTuple):
     topic_id: int
     name: str
-    gist: str
+    description: str
     subject_entity_type: str
     aspects: list[AspectRecord]
 
@@ -154,7 +154,7 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
             TopicRecord(
                 topic_id=t.id,
                 name=t.name,
-                gist=t.gist,
+                description=t.description,
                 subject_entity_type=t.subject_entity_type,
                 aspects=[records[i] for i in links.get(t.id, []) if i in records],
             )
@@ -269,7 +269,7 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
             topic_row = Topic(
                 run_id=run.id,
                 name=str(topic.get("name") or ""),
-                gist=str(topic.get("gist") or ""),
+                description=str(topic.get("description") or ""),
                 subject_entity_type=str(topic.get("subject_entity_type") or ""),
             )
             db.add(topic_row)

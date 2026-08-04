@@ -49,7 +49,7 @@ class TestRecord:
                 topics=[
                     {
                         "name": "Wiki Auto Management",
-                        "gist": "AI-managed wiki structure.",
+                        "description": "AI-managed wiki structure.",
                         "subject_entity_type": "",
                         "aspects": [_aspect("implementation status", [d1, d2])],
                     }
