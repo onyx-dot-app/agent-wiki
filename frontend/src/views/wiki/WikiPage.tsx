@@ -460,26 +460,6 @@ function Explorer({ dir }: ExplorerProps) {
   }, [dir]);
   // Mock annotation "Click to highlight folder": flash the listing row for
   // the proposal's first path segment under this folder.
-  const highlightPath = useCallback(
-    (paths: string[]) => {
-      const target = paths.find((x) => x.startsWith(dir ? dir + "/" : ""));
-      if (!target) return;
-      const rel = dir ? target.slice(dir.length + 1) : target;
-      const childPath = (dir ? dir + "/" : "") + rel.split("/")[0];
-      const el = document.querySelector(
-        `[data-wiki-row="${CSS.escape(childPath)}"]`,
-      );
-      if (!el) return;
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
-      el.classList.add("wiki-row-flash");
-      el.addEventListener(
-        "animationend",
-        () => el.classList.remove("wiki-row-flash"),
-        { once: true },
-      );
-    },
-    [dir],
-  );
 
   const headerActions = (
     <>
@@ -832,7 +812,6 @@ function Explorer({ dir }: ExplorerProps) {
                   // Wrapped: the prop is wired to onClick, so a bare reference
                   // would pass the MouseEvent as the opts argument.
                   onOpenPanel={() => openSidePanel()}
-                  onHighlight={highlightPath}
                 />
               )}
             </Section>
@@ -861,9 +840,7 @@ function Explorer({ dir }: ExplorerProps) {
                   onInstructionEditorOpened={clearInstructionEditorRequest}
                 />
                 {/* Not at root — a wiki-wide review is the admin queue's job. */}
-                {dir && (
-                  <SuggestionsCard path={dir} onHighlight={highlightPath} />
-                )}
+                {dir && <SuggestionsCard path={dir} />}
               </div>
             ) : (
               <div

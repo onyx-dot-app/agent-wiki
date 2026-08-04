@@ -316,7 +316,11 @@ export function WikiTree() {
   const router = useRouter();
   const { toggleTree } = useLeftPanel();
   const actions = useRowActions();
-  const { data } = useSWR<{ entries: Entry[] }>("/wiki");
+  // Same key + polling rationale as useWikiTree: the sidebar must track
+  // changes other people/agents make while this tab stays focused.
+  const { data } = useSWR<{ entries: Entry[] }>("/wiki", {
+    refreshInterval: 60_000,
+  });
   const entries = data?.entries ?? [];
 
   const [query, setQuery] = useState("");

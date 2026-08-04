@@ -27,6 +27,7 @@ import {
 import type { IconFunctionComponent } from "@onyx-ai/opal/types";
 import { SvgFolderDashed, SvgSlashCircle } from "@/components/wiki/icons";
 import { pathKind } from "@/lib/wiki/utils";
+import { revalidateWiki } from "@/lib/wikiHref";
 
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -69,6 +70,18 @@ function displayPath(path: string, budget = 28): string {
     head = candidate;
   }
   return head ? `${head}/…/${leaf}` : `…/${leaf}`;
+}
+
+/** The reason clause of a backend summary — the text after the " — " that
+ * follows the quoted path (`Remove “x.md” — still identical to …`). The
+ * first closing quote ends the path, so a quote inside the reason itself
+ * doesn't confuse the split; summaries with no quoted path fall back to
+ * the first separator. Null when the summary carries no reason. */
+function proposalReason(summary: string): string | null {
+  const afterPath = summary.indexOf("”");
+  const i = summary.indexOf(" — ", afterPath >= 0 ? afterPath : 0);
+  if (i < 0) return null;
+  return summary.slice(i + 3).trim() || null;
 }
 
 /** Short, path-free row title — the folder tag right under it already
@@ -127,14 +140,12 @@ interface SuggestionsCardProps {
    * stay pending (mock annotation). */
   onClose?: () => void;
   /** Row click, with the proposal's source paths (mock: highlight folder). */
-  onHighlight?: (paths: string[]) => void;
 }
 
 export function SuggestionsCard({
   path,
   onOpenPanel,
   onClose,
-  onHighlight,
 }: SuggestionsCardProps) {
   const router = useRouter();
   const { user } = useAuth();
@@ -143,6 +154,24 @@ export function SuggestionsCard({
   const [outcomes, setOutcomes] = useState<Partial<Record<number, Outcome>>>(
     {},
   );
+  // Rows the local user acted on, kept rendered until their outcome has
+  // been shown — the proposals list now revalidates in the background
+  // (another reviewer's action must reach this screen), and an acted row
+  // leaves `pending` server-side immediately, so without this copy the
+  // refresh would yank the row before its "Applied ✓" was ever visible.
+  const [acted, setActed] = useState<Partial<Record<number, Proposal>>>({});
+  // Server-list ids as of the previous render — the vanished-elsewhere
+  // detector below diffs against it.
+  const prevIds = useRef<Set<number>>(new Set());
+  // All row state is per path. The card instance survives navigation (the
+  // panel stays mounted while `path` changes under it), so without this a
+  // row acted on in the previous folder would merge into the next folder's
+  // list — displayed, counted, and actionable where it doesn't belong.
+  useEffect(() => {
+    setActed({});
+    setOutcomes({});
+    prevIds.current = new Set();
+  }, [path]);
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
@@ -161,8 +190,18 @@ export function SuggestionsCard({
       if (!alive.current) return;
       try {
         const fresh = await fetchProposal(id);
-        if (fresh.status === "applied") return setOutcome(id, "applied");
-        if (fresh.status === "stale") return setOutcome(id, "stale");
+        if (fresh.status === "applied") {
+          setOutcome(id, "applied");
+          // The change just landed in the wiki (a move, a deletion): the
+          // tree and listings this tab shows are now wrong — refresh them
+          // rather than waiting out their poll interval.
+          void revalidateWiki();
+          return fadeActed(id);
+        }
+        if (fresh.status === "stale") {
+          setOutcome(id, "stale");
+          return fadeActed(id);
+        }
       } catch {
         // transient failure (or the row was purged) — keep polling
       }
@@ -172,7 +211,28 @@ export function SuggestionsCard({
     if (alive.current) void refresh();
   }
 
+  // Terminal outcomes linger briefly so the human sees the result, then
+  // the local copy drops; the background revalidation has removed the row
+  // from the server list by then.
+  function fadeActed(id: number) {
+    setTimeout(() => {
+      if (!alive.current) return;
+      setActed((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setOutcomes((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }, 4000);
+  }
+
   async function act(id: number, kind: "approve" | "reject") {
+    const row = proposals.find((x) => x.id === id);
+    if (row) setActed((prev) => ({ ...prev, [id]: row }));
     setOutcome(id, "working");
     try {
       if (kind === "approve") {
@@ -181,6 +241,7 @@ export function SuggestionsCard({
       } else {
         await rejectProposal(id);
         setOutcome(id, "rejected");
+        fadeActed(id);
       }
     } catch (e) {
       if (!alive.current) return;
@@ -194,12 +255,38 @@ export function SuggestionsCard({
           delete next[id];
           return next;
         });
+        setActed((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
         void refresh();
         return;
       }
       setOutcome(id, "error");
     }
   }
+
+  // Rows that disappear from the server list without a local outcome were
+  // acted on by someone else — their change may have landed in the wiki,
+  // so the structural views deserve the same immediate refresh the acting
+  // client gives itself.
+  useEffect(() => {
+    const ids = new Set(proposals.map((p) => p.id));
+    const vanishedElsewhere = [...prevIds.current].some(
+      (id) => !ids.has(id) && !outcomes[id],
+    );
+    prevIds.current = ids;
+    if (vanishedElsewhere) void revalidateWiki();
+    // outcomes intentionally unlisted: this reacts to the server list
+    // changing, not to local action state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposals]);
+
+  const actedOnly = Object.values(acted).filter(
+    (a): a is Proposal => !!a && !proposals.some((p) => p.id === a.id),
+  );
+  const rows = [...proposals, ...actedOnly];
 
   const pendingIds = proposals
     .filter((p) => {
@@ -218,8 +305,8 @@ export function SuggestionsCard({
   // Once every row is handled, leave the outcomes visible briefly, then
   // refresh so the settled rows drop out (they have left `pending`).
   const allHandled =
-    proposals.length > 0 &&
-    proposals.every((p) => {
+    rows.length > 0 &&
+    rows.every((p) => {
       const o = outcomes[p.id];
       return !!o && HANDLED.has(o);
     });
@@ -231,8 +318,8 @@ export function SuggestionsCard({
     return () => clearTimeout(t);
   }, [allHandled, refresh]);
 
-  if (proposals.length === 0) return null;
-  const n = proposals.length;
+  if (rows.length === 0) return null;
+  const n = rows.length;
 
   return (
     <Section
@@ -276,16 +363,21 @@ export function SuggestionsCard({
       </Section>
       {open && (
         <Section gap={0.25} height="fit" alignItems="stretch" className="mt-1">
-          {proposals.map((p) => (
+          {rows.map((p) => (
             <SuggestionRow
               key={p.id}
               proposal={p}
               outcome={outcomes[p.id]}
               onApprove={() => void act(p.id, "approve")}
               onDismiss={() => void act(p.id, "reject")}
-              onClick={
-                onHighlight ? () => onHighlight(p.source_paths) : undefined
-              }
+              // Click opens the affected page/folder — the proposal may
+              // target something nested well below the current view, and
+              // inspecting a page is how you decide on its proposal. The
+              // path URL redirects to the canonical id URL.
+              onClick={() => {
+                const target = p.source_paths[0] ?? p.target_paths[0];
+                if (target) router.push(`/app/wiki/${target}`);
+              }}
             />
           ))}
           <Section
@@ -423,11 +515,22 @@ function SuggestionRow({
           title={proposal.summary}
         >
           <Text font="main-ui-action" color="text-04">
-            {opTitle(
-              proposal.op,
-              proposal.source_paths[0] ?? "",
-              proposal.summary,
-            )}
+            {/* The reason rides the visible title — the "why" is what the
+                approve decision needs, and hover-only detail never reaches
+                keyboard or touch users. Long reasons wrap; nothing here
+                truncates. */}
+            {(() => {
+              const title = opTitle(
+                proposal.op,
+                proposal.source_paths[0] ?? "",
+                proposal.summary,
+              );
+              const reason =
+                title === proposal.summary
+                  ? null
+                  : proposalReason(proposal.summary);
+              return reason ? `${title} — ${reason}` : title;
+            })()}
           </Text>
         </span>
         <span className="block w-full min-w-0">
