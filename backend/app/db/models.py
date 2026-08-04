@@ -2102,7 +2102,7 @@ class PageNeeds(Base):
     entity_type_taxonomy_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("entity_type_taxonomies.id", ondelete="SET NULL")
     )
-    # [{need_name, need_kind, description, detail_level, current_content,
+    # [{need_name, need_kind, description, detail_level, update_instruction, current_content,
     #   entities: [{canonical_name, entity_type, primary}], focus}, ...]
     # JSONB and free-form for the same reason as ``EntityTypeTaxonomy.types``: the shape is owned
     # by ``app.ingest.needs``, read whole, and never queried by field.

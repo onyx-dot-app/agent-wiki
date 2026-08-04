@@ -53,6 +53,14 @@ class TestBuildPrompt:
         assert "- aircraft_model: A named aircraft type." in prompt
         assert "organization" not in prompt
 
+    def test_asks_for_a_verbatim_update_instruction(self) -> None:
+        prompt = needs.build_prompt(TYPE_DEFS)
+
+        assert "update_instruction" in prompt
+        assert "VERBATIM" in prompt
+        # The guard that matters: an invented instruction would be obeyed as a human directive.
+        assert "do NOT invent" in prompt
+
     def test_does_not_cap_how_many_entities_a_need_may_have(self) -> None:
         """The prompt used to hint "usually 0-3", which suppresses entities on exactly the pages
         that name many — a tracker with a row per customer is about every one of them."""
@@ -90,6 +98,43 @@ class TestParseNeed:
 
     def test_generic_focus_survives(self) -> None:
         assert needs.parse_need(_need(focus="generic"), "n", TYPE_DEFS).focus is Focus.GENERIC
+
+    def test_captures_an_update_instruction(self) -> None:
+        need = needs.parse_need(
+            _need(update_instruction="Add each Friday's notes as a new dated section, newest first."),
+            "n",
+            TYPE_DEFS,
+        )
+
+        assert need.update_instruction == "Add each Friday's notes as a new dated section, newest first."
+
+    def test_no_instruction_is_empty_not_invented(self) -> None:
+        """Most pages state no maintenance rule, and a fabricated one would be obeyed as though a
+        human wrote it — worse than having none. Absence must survive parsing as absence."""
+        assert needs.parse_need(_need(), "n", TYPE_DEFS).update_instruction == ""
+        assert needs.parse_need(_need(update_instruction=None), "n", TYPE_DEFS).update_instruction == ""
+        assert needs.parse_need(_need(update_instruction="   "), "n", TYPE_DEFS).update_instruction == ""
+
+    def test_an_instruction_is_independent_of_detail_level(self) -> None:
+        """They answer different questions: detail_level is inferred from the entries already
+        there, an instruction is the author's directive and can constrain placement or admissible
+        sources, which no amount of reading the content reveals."""
+        need = needs.parse_need(
+            _need(
+                detail_level="one line per report",
+                update_instruction="Each line should include the source, the customer, and the date.",
+            ),
+            "n",
+            TYPE_DEFS,
+        )
+
+        assert need.detail_level == "one line per report"
+        assert need.update_instruction.startswith("Each line should include")
+
+    def test_the_instruction_reaches_stored_json(self) -> None:
+        need = needs.parse_need(_need(update_instruction="Newest first."), "n", TYPE_DEFS)
+
+        assert need.model_dump(mode="json")["update_instruction"] == "Newest first."
 
     def test_ignores_fields_the_schema_no_longer_carries(self) -> None:
         """``cadence`` was dropped: it was populated on 9-18% of needs, missed 30/43 timelines

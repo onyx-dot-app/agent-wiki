@@ -1,8 +1,8 @@
 """Infer each wiki page's INFORMATION NEEDS — what it keeps track of, and how closely.
 
 A need is not a fact on the page. It is a statement of what the page maintains: a stable
-spec (``description``, ``detail_level``) plus a snapshot of the state it currently holds
-(``current_content``). One page yields a handful, typically 1-5.
+spec (``description``, ``detail_level``, ``update_instruction``) plus a snapshot of the state it
+currently holds (``current_content``). One page yields a handful, typically 1-5.
 
 Why that framing pays: a page tracking "current deal status and blockers" has a need whose
 *shape* is stable even as its content churns. An incoming document can then be judged against
@@ -122,6 +122,15 @@ class InformationNeed(BaseModel):
     need_kind: NeedKind
     description: str
     detail_level: str = ""
+    # The page's OWN stated rule for maintaining this, quoted verbatim; empty when the page
+    # states none. Distinct from ``detail_level``, which is inferred from the entries already
+    # there: an instruction is a directive its author wrote, and it can constrain things no
+    # amount of looking at content reveals — where a new entry goes ("newest first"), which
+    # sources are admissible ("only from the customer; deal status from the CRM"), what a row
+    # must carry. Verbatim because paraphrasing a directive can change what it permits, and
+    # empty rather than inferred because a fabricated instruction would be obeyed as if a human
+    # had written it.
+    update_instruction: str = ""
     # The state the page holds right now — what an incoming document gets diffed against. A
     # description of what the page *tracks* is therefore a failure, not a shorter answer.
     current_content: str = ""
@@ -219,6 +228,7 @@ def parse_need(obj: object, ctx: str, type_defs: dict[str, str]) -> InformationN
         need_kind=need_kind,
         description=description,
         detail_level=str(entry.get("detail_level") or "").strip(),
+        update_instruction=str(entry.get("update_instruction") or "").strip(),
         current_content=str(entry.get("current_content") or "").strip(),
         entities=_parse_entities(entry.get("entities"), type_defs),
         focus=focus,

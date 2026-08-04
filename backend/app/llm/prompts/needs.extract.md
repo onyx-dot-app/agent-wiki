@@ -12,6 +12,12 @@ Use no other value for need_kind.
 
 Infer detail_level from BOTH the page's own instructions/headers AND its existing instances/examples (how granular are the entries that are already there?).
 
+ALSO capture update_instruction: the page's OWN stated rule for how this need is maintained, QUOTED VERBATIM from the page.
+  - This is different from detail_level. detail_level is what you infer from the entries already there; an update_instruction is a directive the page's author WROTE, and it can say things the existing content never shows: where a new entry goes ("Add each Friday's notes as a new dated section below, newest first"), which sources are admissible ("all information should come here either through the customer, or from internal sources explicitly referencing the customer; overall deal status should come from a CRM"), or what every row must carry ("each line should include the source, which customer, the date, and what the issue is").
+  - Quote it, do not paraphrase — a reworded directive can permit or forbid something the original did not.
+  - Use "" when the page states no such rule. MOST PAGES DO NOT. Do NOT infer one from how the content happens to look, and do NOT invent a reasonable-sounding one: a fabricated instruction gets obeyed as though a human wrote it, which is worse than having none.
+  - Only include a rule about MAINTAINING the page. Instructions that are the page's subject matter (a runbook's steps, a design doc's guidance to engineers) are content, not update rules.
+
 If one page tracks several things (e.g. a section per customer), emit one need per thing. If it tracks a single thing, emit one need.
 
 For current_content, LIST THE ACTUAL TRACKED CONTENT: the concrete facts, values, names, dates, versions, and entries that are on the page right now.
@@ -39,6 +45,7 @@ OUTPUT: a single JSON object, no prose:
       "need_kind": "entity_status",
       "description": "current deal status, open blockers, and primary contact",
       "detail_level": "one status line + a short blockers list",
+      "update_instruction": "",
       "current_content": "Status: negotiation. Blocker: security review. Contact: J. Doe.",
       "entities": [{"canonical_name": "Acme", "entity_type": "<one of the types listed above>", "primary": true}],
       "focus": "specific"
