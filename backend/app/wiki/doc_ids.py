@@ -20,7 +20,9 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.db.models import WikiDocId
 from app.db.session import session
@@ -118,10 +120,16 @@ def resolve(doc_id: str) -> dict[str, str | None] | None:
 def id_for_path(path: str) -> str | None:
     """Id of the live row at ``path``, or ``None``."""
     with session() as s:
-        row = s.execute(
-            select(WikiDocId).where(WikiDocId.path == path, WikiDocId.deleted_at.is_(None))
-        ).scalar_one_or_none()
-        return row.id if row else None
+        return id_for_path_in(s, path)
+
+
+def id_for_path_in(s: Session, path: str) -> str | None:
+    """:func:`id_for_path`, inside the caller's open ORM session — for
+    callers resolving as part of their own transaction (the
+    ``wiki_documents`` mirror)."""
+    return s.execute(
+        select(WikiDocId.id).where(WikiDocId.path == path, WikiDocId.deleted_at.is_(None))
+    ).scalar_one_or_none()
 
 
 def ids_for_paths(paths: list[str]) -> dict[str, str]:
@@ -138,16 +146,21 @@ def ids_for_paths(paths: list[str]) -> dict[str, str]:
     """
     if not paths:
         return {}
-    out: dict[str, str] = {}
     with session() as s:
-        for i in range(0, len(paths), _ID_LOOKUP_CHUNK):
-            chunk = paths[i : i + _ID_LOOKUP_CHUNK]
-            rows = s.execute(
-                select(WikiDocId.path, WikiDocId.id).where(
-                    WikiDocId.path.in_(chunk), WikiDocId.deleted_at.is_(None)
-                )
-            ).all()
-            out.update({path: doc_id for path, doc_id in rows})
+        return ids_for_paths_in(s, paths)
+
+
+def ids_for_paths_in(s: Session, paths: list[str]) -> dict[str, str]:
+    """:func:`ids_for_paths`, inside the caller's open ORM session."""
+    out: dict[str, str] = {}
+    for i in range(0, len(paths), _ID_LOOKUP_CHUNK):
+        chunk = paths[i : i + _ID_LOOKUP_CHUNK]
+        rows = s.execute(
+            select(WikiDocId.path, WikiDocId.id).where(
+                WikiDocId.path.in_(chunk), WikiDocId.deleted_at.is_(None)
+            )
+        ).all()
+        out.update({path: doc_id for path, doc_id in rows})
     return out
 
 
@@ -176,6 +189,35 @@ def get_or_mint(path: str) -> str:
             return winner
         raise
     return new_id
+
+
+def get_or_mint_in(s: Session, path: str) -> str:
+    """:func:`get_or_mint`, but inside the caller's open ORM session.
+
+    For callers whose id lookup must commit or roll back atomically with
+    their own writes (the ``wiki_documents`` mirror keys its rows by this id,
+    in the same transaction as the session-snapshot write it shadows).
+    Race-safe without the exception dance: ``ON CONFLICT DO NOTHING`` against
+    the live-path partial unique index — an ``IntegrityError`` here would
+    poison the caller's whole transaction, so losing the race must not raise.
+    """
+    existing = id_for_path_in(s, path)
+    if existing is not None:
+        return existing
+    s.execute(
+        pg_insert(WikiDocId)
+        .values(id=_mint_id(), path=path, kind=_kind_for(path))
+        .on_conflict_do_nothing(
+            index_elements=[WikiDocId.path],
+            index_where=WikiDocId.deleted_at.is_(None),
+        )
+    )
+    # Re-read rather than RETURNING: on a lost race the insert returns
+    # nothing, and the winner's row is what this path's id *is*.
+    minted = id_for_path_in(s, path)
+    if minted is None:  # pragma: no cover - tombstoned between statements
+        raise RuntimeError(f"doc id for {path!r} vanished mid-mint")
+    return minted
 
 
 def mint_for_page(path: str) -> str:

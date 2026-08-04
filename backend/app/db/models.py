@@ -1090,6 +1090,79 @@ class CoeditUpdate(Base):
     )
 
 
+class WikiDocument(Base):
+    """One row per page holding the page's CRDT (Yjs) document state.
+
+    A page's document identity is its Yjs lineage — Yjs merges by item id
+    ``(client_id, clock)``, never by content, so two documents independently
+    seeded from the same markdown duplicate on merge (see "Document identity
+    is the Yjs lineage" on the co-editing design page). This table makes the
+    lineage a property of the *page* rather than of whichever
+    ``coedit_sessions`` row happens to exist, so a second lineage for a page
+    becomes structurally impossible instead of detected after the fact.
+
+    **Dual-write phase**: nothing reads this table yet. The mirror writes in
+    ``app/wiki/wiki_documents.py`` keep each row in lockstep with its page's
+    session snapshot state — the row *follows* the session, including a
+    reseed overwriting it. Seed-once semantics (row created on a page's first
+    open, never reseeded) begin at cutover, when opens attach here and
+    ``coedit_updates`` re-keys from sessions to documents.
+
+    Named generically rather than ``coedit_*``: this is "the wiki's documents
+    as CRDT rows", scoped today to live editing with git still authoritative.
+    A future doc-native committed store would *promote* this table rather
+    than replace it. It pairs with ``wiki_doc_ids`` the way a content store
+    pairs with an identity registry, and is keyed by that registry's id
+    rather than by path (unlike the other coedit tables): renames never
+    touch a document row, so a missed move re-key can't strand one — which
+    would recreate exactly the second-lineage bug this table exists to kill.
+    The registry's identity semantics are the lineage's: a page recreated at
+    a previously-deleted path is a new document with a fresh id, and a new
+    lineage. Delete and trash drop the row via the lifecycle hooks in
+    ``app/wiki/notify.py`` (a restore re-binds the *id* but reseeds the
+    document from HEAD — a fresh lineage is fine there, since no client can
+    hold a deleted page's document).
+    """
+
+    __tablename__ = "wiki_documents"
+
+    # ``wiki_doc_ids.id`` of the live page. No FK, matching ``media``'s
+    # ``anchor_doc_id``: registry rows are tombstoned rather than deleted,
+    # so referential integrity can't break by deletion, and the mirror
+    # resolves ids through ``app.wiki.doc_ids`` anyway.
+    doc_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    # The document's last-persisted binary state at ``ydoc_snapshot_seq`` —
+    # same shape and lockstep invariants as the ``coedit_sessions`` columns
+    # these mirror (and will eventually replace). NOT NULL, unlike the
+    # session column: a document row exists only once there is a seeded doc,
+    # so there is no pre-snapshot window to represent.
+    ydoc_snapshot: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    ydoc_snapshot_seq: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
+    # The markdown ``ydoc_snapshot`` represents — the checkpoint diff base.
+    # Content-equal to what the snapshot reconstructs to, not byte-equal to
+    # whatever an author typed (the codec normalizes block terminators).
+    ydoc_snapshot_body: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
+    )
+    # Monotonic update sequence. In the dual-write phase ``coedit_updates``
+    # is still session-keyed, so no update rows are logged against the
+    # document and this stays equal to ``ydoc_snapshot_seq`` (the row is the
+    # document as of its last checkpoint). Diverges from ``ydoc_snapshot_seq``
+    # only after cutover, when the update log re-keys here.
+    ydoc_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    # Git HEAD the document was last seeded from / checkpointed against —
+    # the merge base for the checkpoint 3-way merge.
+    base_sha: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+    updated_at: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Cron state — per-(queue, task) last-fired timestamp so the periodic         #
 # scheduler can survive restarts without silently dropping or stampeding      #

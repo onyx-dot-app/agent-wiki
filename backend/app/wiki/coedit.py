@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session, aliased
 from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User
 from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
+from app.wiki import wiki_documents
 
 log = logging.getLogger(__name__)
 
@@ -409,12 +410,19 @@ def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> bool:
         # checkpoint), and sidesteps a basedpyright strict-mode gap:
         # SQLAlchemy's plain Result.rowcount isn't typed on the generic
         # Result[Any] this execute() returns.
-        row = s.scalars(
+        row = s.execute(
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.ydoc_snapshot.is_(None))
             .values(ydoc_snapshot=snapshot, ydoc_snapshot_seq=0, ydoc_snapshot_body=body)
-            .returning(CoeditSession.id)
+            .returning(CoeditSession.path, CoeditSession.base_sha)
         ).one_or_none()
+        if row is not None:
+            # Dual-write: mirror the seeded document onto the page's
+            # ``wiki_documents`` row, in this same transaction so the two
+            # stores can't disagree about which snapshot exists.
+            wiki_documents.mirror_seed(
+                s, row.path, snapshot=snapshot, body=body, base_sha=row.base_sha
+            )
         return row is not None
 
 
@@ -557,9 +565,12 @@ def set_base_sha(session_id: int, base_sha: str) -> bool:
                 CoeditSession.status == SessionStatus.ACTIVE.value,
             )
             .values(base_sha=base_sha, updated_at=_iso(_now()))
-            .returning(CoeditSession.id)
+            .returning(CoeditSession.path)
             .execution_options(synchronize_session=False)
         ).one_or_none()
+        if moved is not None:
+            # Dual-write: keep the ``wiki_documents`` merge base in lockstep.
+            wiki_documents.mirror_base_sha(s, moved, base_sha)
         return moved is not None
 
 
@@ -602,7 +613,7 @@ def advance_checkpoint(
         # conditional-UPDATE call sites (e.g. close_if_clean), and sidesteps
         # a basedpyright strict-mode gap: SQLAlchemy's plain Result.rowcount
         # isn't typed on the generic Result[Any] this execute() returns.
-        updated_id = s.scalars(
+        updated_path = s.scalars(
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.ydoc_checkpointed_seq < seq)
             .values(
@@ -614,14 +625,20 @@ def advance_checkpoint(
                 last_checkpoint_at=now,
                 updated_at=now,
             )
-            .returning(CoeditSession.id)
+            .returning(CoeditSession.path)
             .execution_options(synchronize_session=False)
         ).one_or_none()
-        if updated_id is not None:
+        if updated_path is not None:
             s.execute(
                 delete(CoeditUpdate).where(
                     CoeditUpdate.session_id == session_id, CoeditUpdate.seq <= seq
                 )
+            )
+            # Dual-write: mirror the advanced snapshot state onto the page's
+            # ``wiki_documents`` row, in this same transaction so the two
+            # stores can't disagree about which snapshot exists.
+            wiki_documents.mirror_checkpoint(
+                s, updated_path, seq=seq, snapshot=snapshot, body=body, base_sha=base_sha
             )
 
 
