@@ -46,7 +46,6 @@ import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
 import type { AnchoredHighlightTarget } from "@/lib/editor/types";
 import { SWR_KEYS } from "@/lib/swr-keys";
-import { UpdateHealthBanner } from "@/components/wiki/UpdateHealthBanner";
 import { SuggestionsCard } from "@/components/wiki/SuggestionsCard";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { type OpenUpdatesPanelOpts } from "@/components/wiki/policyPanels";
@@ -1060,6 +1059,7 @@ export function FileView({ path }: FileViewProps) {
           <PresenceAvatars
             path={path}
             canWrite={canWrite}
+            updatesPanelOpen={panelTab === "updates"}
             participants={coedit.participants}
             peers={coedit.peers}
             typing={coedit.typing}
@@ -1345,10 +1345,6 @@ export function FileView({ path }: FileViewProps) {
                     isMobile ? "px-3" : ""
                   }`}
                 >
-                  <UpdateHealthBanner
-                    path={path}
-                    onOpenPolicy={() => openPanel("updates")}
-                  />
                   {(() => {
                     // Cards visible while the body is still "empty enough"
                     // to discard without losing user work: truly blank, or
