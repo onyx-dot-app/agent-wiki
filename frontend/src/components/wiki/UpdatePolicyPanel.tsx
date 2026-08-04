@@ -20,7 +20,6 @@ import {
   SvgX,
 } from "@onyx-ai/opal/icons";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {

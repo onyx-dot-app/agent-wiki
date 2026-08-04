@@ -14,6 +14,7 @@ import useSWR from "swr";
 import {
   Button,
   Divider,
+  InputTextArea,
   LineItemButton,
   Popover,
   PopoverMenu,
@@ -50,7 +51,6 @@ import {
   type ActionGroup,
 } from "@/components/triggers/ActionEditor";
 import InputChipField from "@/components/inputs/InputChipField";
-import InputTextArea from "@/components/inputs/InputTextArea";
 import { useCraftConnect } from "@/lib/craft";
 import { useSlackConnectStatus } from "@/lib/slackConnect";
 import {
