@@ -8,8 +8,8 @@
  * confirmed against the installed package's own documented API.
  *
  * The command set and its filtering live here; the menu UI (`CommandMenu`) is
- * a plain React component in `components.tsx` (which keeps this a JSX-free
- * `.ts` extension), and the shared `CommandItem` type is in `./types`.
+ * a plain React component in the sibling `./components.tsx` (which keeps this a
+ * JSX-free `.ts` extension), and the shared `CommandItem` type is in `./types`.
  *
  * Table isn't offered here: there's no "insert a blank table" flow (the
  * backend's opaque-row table shape has no per-cell editing to seed —
@@ -35,7 +35,7 @@ import {
 import {
   CommandMenu as CommandMenuComponent,
   type CommandMenuHandle,
-} from "@/lib/editor/components";
+} from "@/lib/editor/extensions/components";
 import {
   canUploadImages,
   promptImageUpload,
