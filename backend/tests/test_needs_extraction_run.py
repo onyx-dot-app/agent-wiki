@@ -520,3 +520,142 @@ class TestParallelAndModel:
         assert counts["extracted"] == 0
         assert "extracting needs failed for a.md" in messages
         assert "storing" not in messages
+
+
+class TestAutoUpdatePolicy:
+    """Needs are only useful where the ingestion pipeline may write. A need on a page that can
+    never be auto-updated is not merely wasted spend — it joins clusters and presents itself as
+    somewhere a fact could be reconciled to, when nothing may write there."""
+
+    @staticmethod
+    def _policy(**per_path):
+        from app.wiki import update_policy
+
+        def resolve(paths, **kw):
+            return {
+                p: update_policy.ResolvedPolicy(**per_path.get(p, {})) for p in paths
+            }
+
+        return resolve
+
+    def test_disabled_pages_are_not_extracted(self, tmp_repo, llm, monkeypatch) -> None:
+        _page("open.md")
+        _page("closed.md")
+        monkeypatch.setattr(
+            needs.update_policy,
+            "resolve_for_paths",
+            self._policy(**{"closed.md": {"ingestion_auto_update_disabled": True}}),
+        )
+
+        counts = needs.run_extraction()
+
+        assert counts["pages"] == 1
+        assert [r.path for r in page_needs.load_all()] == ["open.md"]
+        assert len(llm) == 1
+
+    def test_disabling_a_page_retires_its_needs(self, tmp_repo, llm, monkeypatch) -> None:
+        """The prune is driven by the live set, so a page turned off after extraction drops out
+        without a separate cleanup path."""
+        _page("a.md")
+        _page("b.md")
+        needs.run_extraction()
+        assert len(page_needs.load_all()) == 2
+
+        monkeypatch.setattr(
+            needs.update_policy,
+            "resolve_for_paths",
+            self._policy(**{"b.md": {"ingestion_auto_update_disabled": True}}),
+        )
+        needs.run_extraction()
+
+        assert [r.path for r in page_needs.load_all()] == ["a.md"]
+
+    def test_the_policy_instruction_is_stored_on_every_need(
+        self, tmp_repo, llm, monkeypatch
+    ) -> None:
+        _page("a.md")
+        monkeypatch.setattr(
+            needs.update_policy,
+            "resolve_for_paths",
+            self._policy(**{"a.md": {"update_instruction": "Only update from the CRM."}}),
+        )
+
+        needs.run_extraction()
+
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.needs[0]["policy_update_instruction"] == "Only update from the CRM."
+
+    def test_editing_the_policy_instruction_re_extracts(self, tmp_repo, llm, monkeypatch) -> None:
+        """Governance state can change with the page untouched. Without it in the guard, needs
+        derived under a superseded rule would stay stored and look current forever."""
+        _page("a.md")
+        monkeypatch.setattr(
+            needs.update_policy, "resolve_for_paths", self._policy(**{"a.md": {"update_instruction": "Old rule."}})
+        )
+        needs.run_extraction()
+        llm.clear()
+
+        # Same body, same model, same taxonomy — only the admin's rule moved.
+        monkeypatch.setattr(
+            needs.update_policy, "resolve_for_paths", self._policy(**{"a.md": {"update_instruction": "New rule."}})
+        )
+        counts = needs.run_extraction()
+
+        assert len(llm) == 1
+        assert counts["extracted"] == 1
+        stored = page_needs.get("a.md")
+        assert stored is not None
+        assert stored.needs[0]["policy_update_instruction"] == "New rule."
+
+    def test_an_unchanged_policy_does_not_re_extract(self, tmp_repo, llm, monkeypatch) -> None:
+        _page("a.md")
+        monkeypatch.setattr(
+            needs.update_policy, "resolve_for_paths", self._policy(**{"a.md": {"update_instruction": "Rule."}})
+        )
+        needs.run_extraction()
+        llm.clear()
+
+        needs.run_extraction()
+
+        assert llm == []
+
+    def test_disabling_every_page_still_retires_their_needs(
+        self, tmp_repo, llm, monkeypatch
+    ) -> None:
+        """The prune guard exists for a failed READ, and the filtered set is a different quantity
+        once pages can be excluded by policy: a corpus where everything is disabled leaves no
+        pages to extract while the read succeeded perfectly, and those needs should go."""
+        _page("a.md")
+        _page("b.md")
+        needs.run_extraction()
+        assert len(page_needs.load_all()) == 2
+
+        monkeypatch.setattr(
+            needs.update_policy,
+            "resolve_for_paths",
+            self._policy(
+                **{
+                    "a.md": {"ingestion_auto_update_disabled": True},
+                    "b.md": {"ingestion_auto_update_disabled": True},
+                }
+            ),
+        )
+        counts = needs.run_extraction()
+
+        assert counts["pages"] == 0
+        assert page_needs.load_all() == []
+
+    def test_a_failed_read_still_keeps_everything(self, tmp_repo, llm, monkeypatch) -> None:
+        """The case the guard was written for must survive the fix: read_corpus silently skips a
+        page it cannot read, so an empty read is indistinguishable from a wiki that lost every
+        page — and those needs cost an LLM call each."""
+        _page("a.md")
+        needs.run_extraction()
+
+        monkeypatch.setattr(needs.entity_types, "read_corpus", lambda prefix="": [])
+        with monkeypatch.context():
+            counts = needs.run_extraction()
+
+        assert counts["pages"] == 0
+        assert [r.path for r in page_needs.load_all()] == ["a.md"]
