@@ -49,7 +49,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import math
 import re
 from collections import Counter, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -61,6 +60,7 @@ from pydantic import BaseModel, Field
 
 from app.config import CONFIG
 from app.db import entity_type_taxonomy
+from app.ingest.clustering import leader_cluster, normalize
 from app.llm import client, embeddings
 from app.llm.settings import get as get_llm_settings
 from app.llm.prompts import load_prompt
@@ -252,48 +252,6 @@ class EntityType(BaseModel):
 
 
 # --- vector helpers (no numpy in the backend) -------------------------------------------
-def _normalize(vec: list[float]) -> list[float]:
-    norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-    return [v / norm for v in vec]
-
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    """Both operands are unit vectors, so the dot product IS the cosine."""
-    return sum(x * y for x, y in zip(a, b))
-
-
-def _leader_cluster(
-    vectors: list[list[float]], order: list[int], threshold: float
-) -> list[list[int]]:
-    """Greedy leader clustering: each item joins the first cluster whose centroid is within
-    ``threshold``, else seeds a new one.
-
-    Chosen over agglomerative linkage because the backend has no scipy/sklearn and an O(n^3)
-    pure-Python linkage would not finish on a real corpus. ``order`` should put the
-    best-supported referents first so they seed clusters — that makes the result
-    deterministic and puts the strongest evidence in charge of each group.
-    """
-    clusters: list[list[int]] = []
-    centroids: list[list[float]] = []
-    for idx in order:
-        vec = vectors[idx]
-        best, best_sim = -1, threshold
-        for c, centroid in enumerate(centroids):
-            sim = _cosine(vec, centroid)
-            if sim >= best_sim:
-                best, best_sim = c, sim
-        if best < 0:
-            clusters.append([idx])
-            centroids.append(list(vec))
-            continue
-        members = clusters[best]
-        centroid = centroids[best]
-        n = len(members)
-        centroids[best] = _normalize([(c * n + v) / (n + 1) for c, v in zip(centroid, vec)])
-        members.append(idx)
-    return clusters
-
-
 # --- LLM steps --------------------------------------------------------------------------
 def _is_truncated(stop_reason: str) -> bool:
     """Whether a response was cut short rather than finished.
@@ -791,9 +749,9 @@ def derive(
     vectors = embeddings.embed_texts(texts)
     if vectors is None:
         raise RuntimeError("embeddings unavailable; cannot group referents")
-    unit = [_normalize(v) for v in vectors]
+    unit = [normalize(v) for v in vectors]
     order = sorted(range(len(surviving)), key=lambda i: -surviving[i].n_docs)
-    groups = [[surviving[i] for i in g] for g in _leader_cluster(unit, order, GROUP_SIMILARITY)]
+    groups = [[surviving[i] for i in g] for g in leader_cluster(unit, order, GROUP_SIMILARITY)]
     groups.sort(key=len, reverse=True)
 
     # Every group is named. There is no cap: naming cost is proportional to the corpus, which
