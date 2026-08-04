@@ -17,6 +17,7 @@ import {
   SvgFiles,
   SvgFold,
   SvgFolder,
+  SvgArrowRight,
   SvgFolderIn,
   SvgFolderPlus,
   SvgSettings,
@@ -50,6 +51,26 @@ const HANDLED = new Set<Outcome>(["applied", "rejected", "stale"]);
 /** Row glyph per the mock (2236:78296): merges show the scope being
  * merged (pages icon for a page, folder for a folder), empty-folder
  * deletes the dashed folder. Unknown ops fall back to the page icon. */
+/** Path display for the row's tag, end-biased: CSS truncation cuts the
+ * tail, but a path's tail is its payload — "Remove empty folder" needs the
+ * folder's *name* visible, not its ancestry. Keeps the leaf whole (its own
+ * tail trimmed only if it alone overflows), prepends as many leading
+ * segments as fit, and marks anything skipped with an ellipsis segment.
+ * The full path rides the tag's tooltip. */
+function displayPath(path: string, budget = 28): string {
+  if (path.length <= budget) return path;
+  const segments = path.split("/");
+  const leaf = segments[segments.length - 1]!;
+  if (leaf.length + 2 >= budget) return `…/${leaf.slice(0, budget - 3)}…`;
+  let head = "";
+  for (const seg of segments.slice(0, -1)) {
+    const candidate = head ? `${head}/${seg}` : seg;
+    if (candidate.length + leaf.length + 3 > budget) break;
+    head = candidate;
+  }
+  return head ? `${head}/…/${leaf}` : `…/${leaf}`;
+}
+
 /** Short, path-free row title — the folder tag right under it already
  * shows the path, so repeating it here (the backend summary quotes it in
  * full) only forced long rows to overflow. Unknown ops fall back to the
@@ -221,7 +242,7 @@ export function SuggestionsCard({
       height="fit"
       padding={0.25}
       data-suggestions-card
-      className="w-full rounded-(--radius-12) border border-(--status-info-02) bg-(--status-info-01)"
+      className="w-full rounded-(--radius-12) border border-(--status-info-02) bg-(--status-info-00)"
     >
       <Section gap={0} height="fit" alignItems="stretch" padding={0.25}>
         <ContentAction
@@ -362,6 +383,13 @@ function SuggestionRow({
   const Icon = opIcon(proposal.op, proposal.source_paths[0] ?? "");
   const struck = outcome === "rejected";
   const chipPath = proposal.source_paths[0] ?? proposal.target_paths[0] ?? "";
+  // A proposal whose result lives somewhere else (a move's destination, a
+  // rename's new name, a merge's survivor) shows that path as its own tag —
+  // visibly, for everyone: the summary tooltip is hover-only, which keyboard
+  // and touch users never see, and without the target two proposals of the
+  // same kind are indistinguishable at approve time.
+  const targetPath = proposal.target_paths[0] ?? "";
+  const showTarget = targetPath !== "" && targetPath !== chipPath;
   return (
     <Section
       gap={0.25}
@@ -373,6 +401,7 @@ function SuggestionRow({
         onClick ? "cursor-pointer" : ""
       }`}
       onClick={onClick}
+      aria-label={proposal.summary}
     >
       <Section gap={0} width="fit" height="fit" className="mt-[2px] shrink-0">
         <Icon size={16} />
@@ -404,12 +433,25 @@ function SuggestionRow({
         <span className="block w-full min-w-0">
           <Tag
             icon={SvgFolder}
-            title={chipPath}
+            title={displayPath(chipPath)}
+            tooltip={chipPath}
             color="gray"
             size="sm"
             truncate
           />
         </span>
+        {showTarget && (
+          <span className="block w-full min-w-0">
+            <Tag
+              icon={SvgArrowRight}
+              title={displayPath(targetPath)}
+              tooltip={targetPath}
+              color="gray"
+              size="sm"
+              truncate
+            />
+          </span>
+        )}
       </Section>
       <Section
         gap={0.125}
