@@ -123,14 +123,15 @@ def _make(name: str, label: str, description: str) -> TaskQueue:
 documents_queue = _make(
     "documents",
     "Document updates",
-    "AI reconciliation of ingested source changes into wiki pages. "
-    "A backlog means the wiki lags its sources.",
+    "AI edits to wiki pages — reconciling ingested source changes and "
+    "applying direct agent edits. A backlog means the wiki lags its "
+    "sources and AI edits land late.",
 )
 triggers_queue = _make(
     "triggers",
     "Watcher evaluations",
-    "Page watchers and scheduled triggers. A backlog means late "
-    "notifications.",
+    "Page watchers, scheduled triggers, and Onyx Craft launches. A "
+    "backlog means late notifications and slow Craft starts.",
 )
 coedit_queue = _make(
     "coedit",
@@ -141,8 +142,9 @@ coedit_queue = _make(
 automanage_offline_queue = _make(
     "automanage_offline",
     "Auto Organize sweeps",
-    "Background housekeeping scans that propose cleanups. A backlog "
-    "here is harmless.",
+    "Unattended batch work: housekeeping sweeps, their AI-approved "
+    "auto-applies, and taxonomy derivation. Nobody is actively "
+    "waiting, but automatic changes land late while it backs up.",
 )
 automanage_nearline_queue = _make(
     "automanage_nearline",
@@ -153,7 +155,8 @@ automanage_nearline_queue = _make(
 lightweight_maintenance_queue = _make(
     "lightweight_maintenance",
     "Indexing & cleanup",
-    "Search reindexing and small upkeep. A backlog means stale search "
+    "Search reindexing and other fast upkeep (expiries, media sweeps, "
+    "session cleanup). A backlog most visibly means stale search "
     "results.",
 )
 
