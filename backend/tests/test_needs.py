@@ -136,6 +136,41 @@ class TestParseNeed:
 
         assert need.model_dump(mode="json")["update_instruction"] == "Newest first."
 
+    @pytest.mark.parametrize("bad", [42, True, ["a", "b"], {"k": "v"}, 3.5])
+    def test_a_non_string_instruction_is_dropped_not_stringified(self, bad) -> None:
+        """str(42) would store "42" and str(["a"]) "['a']" as though the page had written it. This
+        field is kept verbatim so it can be treated as the author's own directive, which makes a
+        coerced value worse than no value."""
+        need = needs.parse_need(_need(update_instruction=bad), "n", TYPE_DEFS)
+
+        assert need.update_instruction == ""
+
+    @pytest.mark.parametrize("field", ["detail_level", "current_content"])
+    def test_a_non_string_optional_field_is_dropped(self, field) -> None:
+        """Dropped rather than raised: losing one advisory value beats discarding a whole page's
+        needs."""
+        need = needs.parse_need(_need(**{field: ["x"]}), "n", TYPE_DEFS)
+
+        assert getattr(need, field) == ""
+
+    @pytest.mark.parametrize("field", ["need_name", "description"])
+    def test_a_non_string_required_field_reaches_the_retry_path(self, field) -> None:
+        """The required fields already reject emptiness, so a dropped non-string lands there — and
+        the message says "non-empty string" rather than "required", which would send the model
+        looking for a field it did send."""
+        with pytest.raises(needs.SchemaError, match="non-empty string"):
+            needs.parse_need(_need(**{field: 42}), "n", TYPE_DEFS)
+
+    def test_a_non_string_entity_name_is_skipped(self) -> None:
+        """Same coercion in the entity list would have minted an entity literally named "42"."""
+        need = needs.parse_need(
+            _need(entities=[{"canonical_name": 42}, {"canonical_name": "Acme"}]),
+            "n",
+            TYPE_DEFS,
+        )
+
+        assert [e.canonical_name for e in need.entities] == ["Acme"]
+
     def test_ignores_fields_the_schema_no_longer_carries(self) -> None:
         """``cadence`` was dropped: it was populated on 9-18% of needs, missed 30/43 timelines
         on a weaker model, leaked onto kinds where it means nothing, and restated
