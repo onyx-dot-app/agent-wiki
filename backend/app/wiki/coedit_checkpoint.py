@@ -83,77 +83,64 @@ def _duplicated_block_ids(doc: Doc) -> list[str]:
 
 
 def drop_duplicate_blocks(doc: Doc) -> list[str]:
-    """Repair repeats of a top-level ``_blockId``, keeping the first of each,
-    and return the ids that were repeated.
+    """Repair repeats of a top-level ``_blockId``; return the repeated ids.
 
-    Two different situations produce a repeated id, and they need opposite
+    Two different situations produce a repeated id, and they need different
     repairs:
 
-    A **content-identical** repeat is a lineage merge — the same block
-    integrated twice. It is *deleted*, deliberately, rather than declined:
-    the duplicated content is in the connected browsers' own documents too,
-    so refusing here leaves them holding it and re-sending it on the next
-    reconnect — closing the session doesn't help either, since the next one
-    can't reuse a dirty session and so seeds yet another lineage for the
-    same retained document to merge into. Deleting escapes that: the
-    deletion is broadcast at the end of ``checkpoint_session`` like any
-    other update, and because a Yjs delete addresses the same items the
-    client holds, the client's document converges to the repaired state
-    without a reload (verified directly against pycrdt).
+    A **content-identical** repeat is redundancy — a lineage merge, or a
+    split of a block whose halves serialize the same (an empty paragraph,
+    "aa" down the middle). All copies but the **last** are *deleted*,
+    deliberately, rather than declined or re-identified: the duplication is
+    in the connected browsers' own documents too, so refusing leaves them
+    holding it to re-send on the next reconnect, and re-identifying loops —
+    identical neighbours serialize to text that re-parses as one block, the
+    restamp shares one id across the doc's children again, and every cycle
+    appends one more copy. Deletion converges, and the broadcast at the end
+    of ``checkpoint_session`` converges the clients too (a Yjs delete
+    addresses the same items they hold — verified directly against pycrdt).
+    Keeping the *last* copy rather than the first is what makes the raced
+    split of an identical-halves block harmless: the person's cursor is in
+    the later half, so the block they are typing into survives with its
+    identity and only the redundant earlier half goes.
 
-    A repeat that is **adjacent to, or differs from, its predecessor** is an
-    ordinary edit caught mid-flight: ProseMirror's node split copies attrs —
-    the id included — onto both halves, and the editor's
-    ``UniqueBlockIdentity`` clears the second one in a separate follow-up
-    update. A checkpoint landing between the two sees the duplicate the
-    client is about to fix. Deleting here destroys what the person just
-    typed (observed live: a paragraph lifted out of a list, still carrying
-    the list's id, eaten by the checkpoint that raced the fix-up). Instead
-    the later child's id is *cleared* — exactly what the client's own repair
-    would do — which routes it through ``checkpoint_body``'s ``orig is
-    None`` path as the new content it is.
-
-    Content equality alone cannot separate the two situations: splitting an
-    empty paragraph, or "aa" down the middle, yields halves that serialize
-    identically. The tiebreak is shape. A split's identical halves are
-    adjacent **textblocks** (paragraph or heading — splitting is a textblock
-    operation), and sparing those is safe because adjacent textblocks
-    re-parse into a single block on the next cycle: even a genuine
-    single-paragraph lineage merge spared here converges instead of
-    compounding. Adjacent identical **containers** (two lists, two fences)
-    re-parse as separate blocks that the restamp re-shares an id onto — the
-    compounding loop — and no editing operation splits one into identical
-    halves, so those stay deletions.
+    A repeat with **different content** is an ordinary edit caught
+    mid-flight: ProseMirror's node split copies attrs — the id included —
+    onto both halves, and the editor's ``UniqueBlockIdentity`` clears the
+    second one in a separate follow-up update. A checkpoint landing between
+    the two sees the duplicate the client is about to fix. Deleting here
+    destroys what the person just typed (observed live: a paragraph lifted
+    out of a list, still carrying the list's id, eaten by the checkpoint
+    that raced the fix-up). Instead the later child's id is *cleared* —
+    exactly what the client's own repair would do — which routes it through
+    ``checkpoint_body``'s ``orig is None`` path as the new content it is.
+    Differing copies can't loop the way identical ones do: their
+    serializations are distinct blocks that each earn their own id on the
+    next restamp.
     """
     dupes = _duplicated_block_ids(doc)
     if not dupes:
         return []
     root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
-    prev: dict[str, tuple[int, str]] = {}
-    stale: list[int] = []
-    reidentify: list[int] = []
+    occurrences: dict[str, list[tuple[int, str]]] = {}
     for i, child in enumerate(root.children):
         block_id = dict(getattr(child, "attributes", {})).get(markdown_yjs.BLOCK_ID_ATTR)
-        if not isinstance(block_id, str):
+        if isinstance(block_id, str):
+            occurrences.setdefault(block_id, []).append((i, markdown_yjs.serialize_block(child)))
+    stale: list[int] = []
+    reidentify: list[int] = []
+    for members in occurrences.values():
+        if len(members) == 1:
             continue
-        text = markdown_yjs.serialize_block(child)
-        if block_id in prev:
-            prev_i, prev_text = prev[block_id]
-            splittable = getattr(child, "tag", None) in ("paragraph", "heading")
-            if text == prev_text and not (splittable and i - prev_i == 1):
-                stale.append(i)
-            else:
-                reidentify.append(i)
-            # Either way this child stops carrying the id, so the retained
-            # first occurrence stays the comparison anchor for any later
-            # repeat of it.
-            continue
-        prev[block_id] = (i, text)
+        anchor_text = members[0][1]
+        identical = [i for i, text in members if text == anchor_text]
+        stale.extend(identical[:-1])  # the last identical copy keeps the id
+        reidentify.extend(i for i, text in members if text != anchor_text)
     # Descending, so each deletion can't shift the index of one still pending.
     with doc.transaction():
         for i in reidentify:
             root.children[i].attributes[markdown_yjs.BLOCK_ID_ATTR] = None
-        for i in reversed(stale):
+        for i in sorted(stale, reverse=True):
             del root.children[i]
     return dupes
 

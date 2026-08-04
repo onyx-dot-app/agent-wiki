@@ -778,15 +778,15 @@ def test_drop_duplicate_blocks_reidentifies_a_split_instead_of_deleting_it() -> 
     assert out.count("1. item") == 1
 
 
-def test_drop_duplicate_blocks_spares_identical_adjacent_split_halves() -> None:
-    """Splitting an empty paragraph — or "aa" down the middle — yields halves
-    that serialize identically, so content equality alone would classify the
-    person's new block as a lineage duplicate and delete it. A split's
-    identical halves are adjacent textblocks; those are re-identified
-    instead, and both survive. Adjacent identical *containers* have no
-    editing operation that produces them, and sparing them would compound
-    (their serialization re-parses as separate blocks the restamp re-shares
-    an id onto), so a merged single-list page still repairs by deletion."""
+def test_drop_duplicate_blocks_keeps_the_last_identical_copy() -> None:
+    """Identical copies collapse to one — re-identifying them instead would
+    loop, because identical neighbours serialize to text that re-parses as a
+    single block, the restamp shares one id across the doc's children again,
+    and every checkpoint appends one more copy. The survivor is the *last*
+    copy: in the raced split of an identical-halves block (Enter on an empty
+    paragraph, "aa" down the middle) the person's cursor is in the later
+    half, so the block they are typing into keeps its identity and only the
+    redundant earlier half goes."""
     from app.wiki.coedit_checkpoint import _duplicated_block_ids, drop_duplicate_blocks
     from app.wiki.markdown_splice import restamp_block_ids
     from app.wiki.markdown_yjs import (
@@ -799,30 +799,52 @@ def test_drop_duplicate_blocks_spares_identical_adjacent_split_halves() -> None:
     doc = seed_doc_from_markdown(body)
     restamp_block_ids(doc, body)
     root = _root(doc)
-    # The split's second half: same content, same copied id, adjacent.
+    # The raced split's second half: same content, same copied id.
+    with doc.transaction():
+        root.children.insert(
+            1, XmlElement("paragraph", {BLOCK_ID_ATTR: "b0"}, contents=[XmlText("a")])
+        )
+    # Give the survivor-to-be a distinguishing mark so the test can prove
+    # which copy was kept: a marker attr rides along untouched.
+    with doc.transaction():
+        root.children[1].attributes["_probe"] = "later"  # pyright: ignore[reportIndexIssue]
+
+    assert drop_duplicate_blocks(doc) == ["b0"]
+    assert _duplicated_block_ids(doc) == []
+    assert reconstruct_body(doc) == "a\n"
+    survivors = list(root.children)
+    assert len(survivors) == 1
+    assert dict(survivors[0].attributes).get("_probe") == "later"  # pyright: ignore[reportAttributeAccessIssue]
+    assert dict(survivors[0].attributes).get(BLOCK_ID_ATTR) == "b0"  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_drop_duplicate_blocks_repair_converges_across_checkpoints() -> None:
+    """The full cycle a checkpoint runs — repair, splice, restamp against the
+    committed output — must reach a fixed point. Re-identifying identical
+    copies instead of deleting them fails exactly here: the committed text
+    re-parses as one block, the restamp re-shares its id, and each cycle
+    appends another copy."""
+    from app.wiki.coedit_checkpoint import drop_duplicate_blocks
+    from app.wiki.markdown_splice import TouchedTracker, checkpoint_body, restamp_block_ids
+    from app.wiki.markdown_yjs import BLOCK_ID_ATTR, seed_doc_from_markdown
+
+    body = "a\n"
+    doc = seed_doc_from_markdown(body)
+    tracker = TouchedTracker(doc)
+    restamp_block_ids(doc, body)
+    root = _root(doc)
     with doc.transaction():
         root.children.insert(
             1, XmlElement("paragraph", {BLOCK_ID_ATTR: "b0"}, contents=[XmlText("a")])
         )
 
-    assert drop_duplicate_blocks(doc) == ["b0"]
-    assert _duplicated_block_ids(doc) == []
-    # Both halves survived (adjacent paragraphs carry no blank-line block
-    # between them, and their reparse folds into one block — convergent).
-    assert reconstruct_body(doc) == "a\na\n"
-
-    # The container counterpart: a single-list page merged with itself gives
-    # two adjacent identical lists — that is a lineage duplicate, deleted.
-    list_body = "- A\n- B\n"
-    ldoc = seed_doc_from_markdown(list_body)
-    restamp_block_ids(ldoc, list_body)
-    lroot = _root(ldoc)
-    other = seed_doc_from_markdown(list_body)
-    restamp_block_ids(other, list_body)
-    ldoc.apply_update(other.get_update(ldoc.get_state()))
-    assert len(list(lroot.children)) == 2
-    assert drop_duplicate_blocks(ldoc) == ["b0"]
-    assert reconstruct_body(ldoc) == list_body
+    for _ in range(3):
+        drop_duplicate_blocks(doc)
+        body = checkpoint_body(body, doc, tracker)
+        tracker = TouchedTracker(doc)
+        restamp_block_ids(doc, body)
+    assert body == "a\n"
+    assert len(list(root.children)) == 1
 
 
 def test_drop_duplicate_blocks_is_a_no_op_on_a_healthy_doc() -> None:
