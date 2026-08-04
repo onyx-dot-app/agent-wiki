@@ -109,16 +109,53 @@ __all__ = [
 ]
 
 
-def _make(name: str) -> TaskQueue:
-    return TaskQueue(name=name, max_size=CONFIG.max_queue_size)
+def _make(name: str, label: str, description: str) -> TaskQueue:
+    return TaskQueue(
+        name=name,
+        label=label,
+        description=description,
+        max_size=CONFIG.max_queue_size,
+    )
 
 
-documents_queue = _make("documents")
-triggers_queue = _make("triggers")
-coedit_queue = _make("coedit")
-automanage_offline_queue = _make("automanage_offline")
-automanage_nearline_queue = _make("automanage_nearline")
-lightweight_maintenance_queue = _make("lightweight_maintenance")
+# The label says what the work is; the description says what a backlog
+# means for a person — that pair is what the admin health page renders.
+documents_queue = _make(
+    "documents",
+    "Document updates",
+    "AI reconciliation of ingested source changes into wiki pages. "
+    "A backlog means the wiki lags its sources.",
+)
+triggers_queue = _make(
+    "triggers",
+    "Watcher evaluations",
+    "Page watchers and scheduled triggers. A backlog means late "
+    "notifications.",
+)
+coedit_queue = _make(
+    "coedit",
+    "Editor saves",
+    "Live editing sessions checkpointing to git. A backlog means edits "
+    "stay uncommitted a little longer; nothing is lost.",
+)
+automanage_offline_queue = _make(
+    "automanage_offline",
+    "Auto Organize sweeps",
+    "Background housekeeping scans that propose cleanups. A backlog "
+    "here is harmless.",
+)
+automanage_nearline_queue = _make(
+    "automanage_nearline",
+    "Auto Organize approvals",
+    "Applies proposals a person just approved. A backlog keeps someone "
+    "waiting.",
+)
+lightweight_maintenance_queue = _make(
+    "lightweight_maintenance",
+    "Indexing & cleanup",
+    "Search reindexing and small upkeep. A backlog means stale search "
+    "results.",
+)
 
 # Map queue-name → instance, used by run_worker.py to launch the right
 # consumer per worker container.

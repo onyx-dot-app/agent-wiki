@@ -36,6 +36,8 @@ def _build() -> HealthResponse:
             error = str(e)
         queues.append(QueueHealth(
             name=name,
+            label=queue.label or name,
+            description=queue.description,
             ready=ready,
             delayed=delayed,
             in_flight=in_flight,
