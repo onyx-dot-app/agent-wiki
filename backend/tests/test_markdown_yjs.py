@@ -1579,3 +1579,17 @@ def test_a_shared_lineage_survives_the_same_exchange() -> None:
 
     server_doc.apply_update(client_doc.get_update(server_doc.get_state()))
     assert reconstruct_body(server_doc) == body
+
+
+def test_lazy_continuation_list_markers_survive() -> None:
+    """A paragraph line beginning with an ordered-list marker that can't
+    interrupt a paragraph (start != 1) is a lazy continuation in the
+    original document, but the per-line block split reparses it standalone
+    — where it *is* a list, and the marker was consumed into list syntax
+    and lost. The parse-side guard escapes it like the write side does; the
+    text survives, converging to the escaped spelling."""
+    src = "some paragraph text.\n5. bought milk\n6. sold eggs\n"
+    once = reconstruct_body(seed_doc_from_markdown(src))
+    assert "5\\. bought milk" in once
+    assert "6\\. sold eggs" in once
+    assert reconstruct_body(seed_doc_from_markdown(once)) == once

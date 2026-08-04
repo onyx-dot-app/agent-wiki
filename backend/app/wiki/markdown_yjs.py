@@ -916,7 +916,7 @@ def build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list[
 
     if block.kind is BlockKind.PARAGRAPH:
         line = raw[:-1] if raw.endswith("\n") else raw
-        line = _strip_indented_code_ambiguity_for_parse(line)
+        line = _guard_paragraph_line_for_parse(line)
         return _make_inline_element("paragraph", {BLOCK_ID_ATTR: block.block_id}, line)
 
     if block.kind is BlockKind.LIST:
@@ -1272,25 +1272,32 @@ _FENCE_OPENER_RE = re.compile(r"^(?:`{3,}|~{3,})")
 _INDENTED_CODE_FIRST_LINE_RE = re.compile(r"^(?: {4}| {0,3}\t)")
 
 
-def _strip_indented_code_ambiguity_for_parse(line: str) -> str:
-    """Parse-side mirror of ``_escape_block_start_ambiguity``'s first-line
-    handling, below.
+def _guard_paragraph_line_for_parse(line: str) -> str:
+    """Parse-side mirror of ``_escape_block_start_ambiguity``, below.
 
     ``top_level_block_ranges`` splits a multi-line paragraph into one
     ``BlockRange`` per soft-break line (every newline is its own block
-    boundary now - see that function's docstring). A continuation line with
-    4+ leading columns of indentation was always safe as part of a bigger
-    paragraph (an indented code block can't interrupt one already started),
-    but once split out it becomes its own block and gets reparsed standalone
-    by ``_make_inline_element`` - exactly the indented-code-block trigger,
-    which has no ``inline`` token at all, so the paragraph's content would
-    silently come back empty instead of just losing its indentation. Strip
-    the same leading run stripped on the write side so the round-trip stays
-    symmetric: a promoted continuation line still parses as a paragraph."""
+    boundary now - see that function's docstring). Inside the original
+    paragraph those lines were mere continuations, but once split out each
+    is reparsed standalone by ``_make_inline_element`` — a fresh block-start
+    position where CommonMark's lazy-continuation protections no longer
+    apply. Two consequences, same shape:
+
+    - a line with 4+ leading columns becomes an indented code block, which
+      has no ``inline`` token at all, so the paragraph's content silently
+      came back empty. The leading run is stripped, matching the write
+      side's first-line handling.
+    - a line starting with a block marker becomes that block: ``5. bought
+      milk`` — safe inside a paragraph, since an ordered list not starting
+      at 1 can't interrupt one — reparses standalone as an ordered *list*,
+      whose inline token no longer contains the consumed ``5. `` (observed
+      as lost list numbers on a real page). The marker is escaped with the
+      same per-line escape serialization uses, which the parse consumes
+      straight back to the original text."""
     lines = line.split("\n")
     if lines[0] and _INDENTED_CODE_FIRST_LINE_RE.match(lines[0]):
         lines[0] = lines[0].lstrip(" \t")
-    return "\n".join(lines)
+    return "\n".join(_escape_line_start(ln) for ln in lines)
 
 
 def _escape_block_start_ambiguity(text: str) -> str:
