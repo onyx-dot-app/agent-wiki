@@ -181,6 +181,45 @@ def test_a_move_rekeys_the_registry_and_the_row_follows(page_id):
     assert after["ydoc_snapshot"] == b"snap0"
 
 
+def test_move_window_checkpoint_is_repaired_by_the_session_rekey(page_id):
+    # The mid-move race, replayed in hook order: the registry re-keys first;
+    # a dirty checkpoint lands before the session re-key, resolves the old
+    # path, and skips its mirror (leaving the session clean — nothing further
+    # would write); then coedit.on_path_moved re-keys the session and
+    # re-mirrors its snapshot state, repairing the row without another edit.
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.set_initial_snapshot(s.id, b"snap0", "hello")
+    coedit.apply_update(s.id, update_bytes=b"up1", author_user_id="usr_a")
+    new_path = "guides/install.md"
+    doc_ids.on_path_moved([PathMove(old=_PATH, new=new_path)])
+    coedit.advance_checkpoint(s.id, seq=1, snapshot=b"snap1", body="moved", base_sha="sha2")
+    stale = wiki_documents.get(new_path)
+    assert stale is not None
+    assert stale["ydoc_snapshot"] == b"snap0"  # the checkpoint's mirror skipped
+    coedit.on_path_moved([PathMove(old=_PATH, new=new_path)])
+    repaired = wiki_documents.get(new_path)
+    assert repaired is not None
+    assert repaired["doc_id"] == page_id
+    assert repaired["ydoc_snapshot"] == b"snap1"
+    assert repaired["ydoc_snapshot_seq"] == 1
+    assert repaired["base_sha"] == "sha2"
+    assert count_rows(WikiDocument) == 1
+
+
+def test_trash_rekey_does_not_recreate_the_row(page_id):
+    # after_doc_trashed order: sessions re-key into .trash first, then the
+    # row drops, then ids tombstone. The re-key's resync must not resurrect
+    # a row for the trashed page — .trash paths resolve no live id, so the
+    # mirror skips itself.
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.set_initial_snapshot(s.id, b"snap0", "hello")
+    trash_path = ".trash/abc123/setup.md"
+    coedit.on_path_moved([PathMove(old=_PATH, new=trash_path)])
+    wiki_documents.on_pages_deleted([_PATH])
+    doc_ids.on_deleted(_PATH)
+    assert count_rows(WikiDocument) == 0
+
+
 def test_on_pages_deleted_drops_the_row(page_id):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")

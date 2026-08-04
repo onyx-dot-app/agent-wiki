@@ -18,9 +18,11 @@ on read, page creation mints in the lifecycle hook), so a failed resolution
 means the path is *transiently wrong*, not the page unknown — the window
 during a move where the registry is re-keyed but the session row isn't yet.
 Minting there would stamp a phantom live id (and a stray document row) onto
-a path the page just left. Instead the mirror write is skipped; the next
-checkpoint, running after the session re-key, resolves the real id and
-carries complete state, so the row self-heals.
+a path the page just left. Instead the mirror write is skipped, and the
+session re-key itself repairs it: ``coedit.on_path_moved`` re-mirrors each
+re-keyed page's newest session snapshot (``mirror_session_state``) in the
+same transaction, so a skipped write is restored by the move fan-out that
+caused it — not left waiting on a further edit.
 
 Two kinds of entry point, split by transaction ownership:
 
@@ -102,8 +104,8 @@ def _upsert(
     doc_id = doc_ids.id_for_path_in(s, path)
     if doc_id is None:
         # Mid-move window (registry re-keyed, session row not yet) — skip
-        # rather than mint a phantom id at the old path; the next checkpoint
-        # self-heals (see the module docstring).
+        # rather than mint a phantom id at the old path; the move's session
+        # re-key re-mirrors the row (see the module docstring).
         log.info("wiki_documents: no live doc id at %r; mirror write skipped", path)
         return
     now = _now_iso()
@@ -130,6 +132,18 @@ def _upsert(
             },
         )
     )
+
+
+def mirror_session_state(
+    s: Session, path: str, *, seq: int, snapshot: bytes, body: str, base_sha: str | None
+) -> None:
+    """Re-mirror a session's snapshot state wholesale — the move re-key's
+    repair for the window where a checkpoint resolved the page's old path,
+    found no live id, and skipped its mirror write (see
+    ``coedit.on_path_moved``). Runs after the registry re-key, so ``path``
+    is the page's live location and resolves its real id.
+    """
+    _upsert(s, path, snapshot=snapshot, seq=seq, body=body, base_sha=base_sha)
 
 
 def mirror_base_sha(s: Session, path: str, base_sha: str) -> None:

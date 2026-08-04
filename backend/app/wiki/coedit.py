@@ -774,6 +774,35 @@ def on_path_moved(moves: list[PathMove]) -> list[int]:
                         .where(CoeditSession.path == mv.old)
                         .values(path=mv.new)
                     )
+                    # Re-mirror the re-keyed page's document row from its
+                    # newest snapshot-bearing session, in this same
+                    # transaction. A checkpoint can land between the registry
+                    # re-key (which runs before this hook) and this session
+                    # re-key: it resolves the old path, finds no live doc id,
+                    # and skips its mirror write — and if the session never
+                    # edits again, nothing else would repair the row. This
+                    # resync closes that window deterministically. For a
+                    # trash move the destination resolves no live id (ids
+                    # never re-key into .trash), so the mirror skips itself
+                    # and the trashed page correctly gets no row.
+                    newest = s.scalar(
+                        select(CoeditSession)
+                        .where(
+                            CoeditSession.path == mv.new,
+                            CoeditSession.ydoc_snapshot.is_not(None),
+                        )
+                        .order_by(CoeditSession.id.desc())
+                        .limit(1)
+                    )
+                    if newest is not None and newest.ydoc_snapshot is not None:
+                        wiki_documents.mirror_session_state(
+                            s,
+                            mv.new,
+                            seq=newest.ydoc_snapshot_seq,
+                            snapshot=newest.ydoc_snapshot,
+                            body=newest.ydoc_snapshot_body,
+                            base_sha=newest.base_sha,
+                        )
             except IntegrityError:
                 # A racing open_session won the unique index between our check
                 # and the update — same outcome as the dirty-collision skip.
