@@ -4,6 +4,11 @@ import { SWR_KEYS } from "@/lib/swr-keys";
 
 export interface QueueHealth {
   name: string;
+  // Human name + what a backlog means, served from the queue's own
+  // definition (backend `app/tasks/queues.py`). Optional so this page
+  // renders against a backend that predates them.
+  label?: string;
+  description?: string;
   // Per-state breakdown. `ready` is what a worker can pick up right now;
   // `delayed` is scheduled for a future fire time; `in_flight` is held
   // by a worker. `ready + delayed` is the figure the cap gates on. All
