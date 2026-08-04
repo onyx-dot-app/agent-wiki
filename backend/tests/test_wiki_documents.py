@@ -6,7 +6,9 @@ entry points that carry the mirror writes, so the tests pin the lockstep
 ("a session snapshot write and its document mirror land together"), not just
 the repo functions in isolation. Rows are keyed by ``wiki_doc_ids`` id —
 moves are covered by re-keying the *registry* and observing the row follow,
-since the table itself has no move hook to test.
+since the table itself has no move hook to test. The fixture mints the
+page's id up front, matching the production invariant the mirror relies on
+(every page a session can exist for was read first, and reads mint).
 """
 from __future__ import annotations
 
@@ -29,6 +31,11 @@ def users(tmp_db):
     return tmp_db
 
 
+@pytest.fixture
+def page_id(users) -> str:
+    return doc_ids.mint_for_page(_PATH)
+
+
 def _force_close(session_id: int) -> None:
     with db_session() as s:
         s.execute(
@@ -38,30 +45,36 @@ def _force_close(session_id: int) -> None:
         )
 
 
-def test_initial_snapshot_mirrors_a_document_row(users):
+def test_initial_snapshot_mirrors_a_document_row(page_id):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
     doc = wiki_documents.get(_PATH)
     assert doc is not None
+    assert doc["doc_id"] == page_id
     assert doc["ydoc_snapshot"] == b"snap0"
     assert doc["ydoc_snapshot_seq"] == 0
     assert doc["ydoc_snapshot_body"] == "hello"
     assert doc["ydoc_seq"] == 0
     assert doc["base_sha"] == "sha1"
-    # The mirror minted the page's registry id and keyed the row by it.
-    assert doc["doc_id"] == doc_ids.id_for_path(_PATH)
 
 
-def test_mirror_adopts_an_existing_registry_id(users):
-    minted = doc_ids.mint_for_page(_PATH)
+def test_mirror_without_a_registry_id_skips(users):
+    # The mirror resolves ids, never mints them: with no live registry row
+    # (the mid-move window), the write is skipped — no phantom id, no stray
+    # row — and the next checkpoint self-heals.
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
+    assert doc_ids.id_for_path(_PATH) is None
+    assert count_rows(WikiDocument) == 0
+    doc_ids.mint_for_page(_PATH)
+    coedit.apply_update(s.id, update_bytes=b"up1", author_user_id="usr_a")
+    coedit.advance_checkpoint(s.id, seq=1, snapshot=b"snap1", body="healed", base_sha="sha2")
     doc = wiki_documents.get(_PATH)
     assert doc is not None
-    assert doc["doc_id"] == minted
+    assert doc["ydoc_snapshot_body"] == "healed"
 
 
-def test_losing_seed_does_not_mirror(users):
+def test_losing_seed_does_not_mirror(page_id):
     # The conditional seed's loser corresponds to no durable lineage — the
     # mirror must reflect only the snapshot that won.
     s = coedit.open_session(_PATH, base_sha="sha1")
@@ -73,7 +86,7 @@ def test_losing_seed_does_not_mirror(users):
     assert doc["ydoc_snapshot_body"] == "one"
 
 
-def test_reseed_on_a_new_session_overwrites_the_mirror(users):
+def test_reseed_on_a_new_session_overwrites_the_mirror(page_id):
     # While sessions own document state the mirror follows them: a fresh
     # session minting a new lineage for the page replaces the row. (Seed-once
     # is a cutover-phase property, not a dual-write one.)
@@ -91,7 +104,7 @@ def test_reseed_on_a_new_session_overwrites_the_mirror(users):
     assert count_rows(WikiDocument) == 1
 
 
-def test_checkpoint_mirrors_advanced_state(users):
+def test_checkpoint_mirrors_advanced_state(page_id):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
     coedit.apply_update(s.id, update_bytes=b"up1", author_user_id="usr_a")
@@ -107,7 +120,7 @@ def test_checkpoint_mirrors_advanced_state(users):
     assert doc["base_sha"] == "sha2"
 
 
-def test_checkpoint_creates_the_row_for_a_pre_table_session(users):
+def test_checkpoint_creates_the_row_for_a_pre_table_session(page_id):
     # A session opened before the migration ran has no document row; its
     # first checkpoint after the deploy mirrors one in.
     s = coedit.open_session(_PATH, base_sha="sha1")
@@ -122,7 +135,7 @@ def test_checkpoint_creates_the_row_for_a_pre_table_session(users):
     assert doc["ydoc_snapshot"] == b"snap1"
 
 
-def test_regressed_checkpoint_does_not_mirror(users):
+def test_regressed_checkpoint_does_not_mirror(page_id):
     # advance_checkpoint's regression guard must gate the mirror too.
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
@@ -136,7 +149,7 @@ def test_regressed_checkpoint_does_not_mirror(users):
     assert doc["ydoc_snapshot_seq"] == 2
 
 
-def test_set_base_sha_mirrors_the_merge_base(users):
+def test_set_base_sha_mirrors_the_merge_base(page_id):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
     assert coedit.set_base_sha(s.id, "sha9")
@@ -145,33 +158,30 @@ def test_set_base_sha_mirrors_the_merge_base(users):
     assert doc["base_sha"] == "sha9"
 
 
-def test_set_base_sha_without_a_row_stays_absent(users):
+def test_set_base_sha_without_a_row_stays_absent(page_id):
     # A rebase can land before the snapshot seed; a document row can't exist
-    # before its snapshot does, so the mirror is update-if-exists only — it
-    # must not mint an id or create a row.
+    # before its snapshot does, so the mirror is update-if-exists only.
     s = coedit.open_session(_PATH, base_sha="sha1")
     assert coedit.set_base_sha(s.id, "sha9")
     assert wiki_documents.get(_PATH) is None
     assert count_rows(WikiDocument) == 0
 
 
-def test_a_move_rekeys_the_registry_and_the_row_follows(users):
+def test_a_move_rekeys_the_registry_and_the_row_follows(page_id):
     # No move hook on the table: the row is keyed by id, so re-keying the
     # registry (what after_path_move does via doc_ids.on_path_moved) is the
     # whole move.
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
-    before = wiki_documents.get(_PATH)
-    assert before is not None
     doc_ids.on_path_moved([PathMove(old=_PATH, new="guides/install.md")])
     assert wiki_documents.get(_PATH) is None
     after = wiki_documents.get("guides/install.md")
     assert after is not None
-    assert after["doc_id"] == before["doc_id"]
+    assert after["doc_id"] == page_id
     assert after["ydoc_snapshot"] == b"snap0"
 
 
-def test_on_pages_deleted_drops_the_row(users):
+def test_on_pages_deleted_drops_the_row(page_id):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
     wiki_documents.on_pages_deleted([_PATH])
@@ -179,21 +189,22 @@ def test_on_pages_deleted_drops_the_row(users):
     assert count_rows(WikiDocument) == 0
 
 
-def test_recreate_after_delete_is_a_fresh_document(users):
+def test_recreate_after_delete_is_a_fresh_document(page_id):
     # Registry semantics carry over: a page recreated at a deleted path is a
     # new document (fresh id), and the mirror keys the new lineage under it.
     s1 = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s1.id, b"old", "old")
-    old = wiki_documents.get(_PATH)
-    assert old is not None
     wiki_documents.on_pages_deleted([_PATH])
     doc_ids.on_deleted(_PATH)
     _force_close(s1.id)
+    # The recreate's read mints the fresh id before any session exists.
+    fresh_id = doc_ids.get_or_mint(_PATH)
+    assert fresh_id != page_id
     s2 = coedit.open_session(_PATH, base_sha="sha2")
     coedit.set_initial_snapshot(s2.id, b"new", "new")
     fresh = wiki_documents.get(_PATH)
     assert fresh is not None
-    assert fresh["doc_id"] != old["doc_id"]
+    assert fresh["doc_id"] == fresh_id
     assert fresh["ydoc_snapshot"] == b"new"
     assert count_rows(WikiDocument) == 1
 

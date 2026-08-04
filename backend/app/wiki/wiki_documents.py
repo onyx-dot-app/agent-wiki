@@ -12,14 +12,23 @@ re-key can't strand one. The registry is also why the delete/trash hook
 resolves ids *before* ``doc_ids`` tombstones them — see ``on_pages_deleted``
 and its call sites in ``app/wiki/notify.py``.
 
+The mirror **resolves ids, never mints them**. Every page a session can
+exist for already has a live registry row (``GET /wiki/file`` lazily mints
+on read, page creation mints in the lifecycle hook), so a failed resolution
+means the path is *transiently wrong*, not the page unknown — the window
+during a move where the registry is re-keyed but the session row isn't yet.
+Minting there would stamp a phantom live id (and a stray document row) onto
+a path the page just left. Instead the mirror write is skipped; the next
+checkpoint, running after the session re-key, resolves the real id and
+carries complete state, so the row self-heals.
+
 Two kinds of entry point, split by transaction ownership:
 
 - ``mirror_seed`` / ``mirror_checkpoint`` / ``mirror_base_sha`` take the
-  caller's open ORM ``Session`` and run inside *its* transaction — the mirror
-  (including the id mint for a page the registry hasn't seen, via
-  ``doc_ids.get_or_mint_in``) must commit or roll back atomically with the
-  session-row write it shadows, or the two stores could disagree about which
-  snapshot exists. Called only from ``app/wiki/coedit.py``.
+  caller's open ORM ``Session`` and run inside *its* transaction — the
+  mirror must commit or roll back atomically with the session-row write it
+  shadows, or the two stores could disagree about which snapshot exists.
+  Called only from ``app/wiki/coedit.py``.
 - ``on_pages_deleted`` / ``get`` open their own session per call, like every
   other repo.
 
@@ -90,7 +99,13 @@ def mirror_checkpoint(
 def _upsert(
     s: Session, path: str, *, snapshot: bytes, seq: int, body: str, base_sha: str | None
 ) -> None:
-    doc_id = doc_ids.get_or_mint_in(s, path)
+    doc_id = doc_ids.id_for_path_in(s, path)
+    if doc_id is None:
+        # Mid-move window (registry re-keyed, session row not yet) — skip
+        # rather than mint a phantom id at the old path; the next checkpoint
+        # self-heals (see the module docstring).
+        log.info("wiki_documents: no live doc id at %r; mirror write skipped", path)
+        return
     now = _now_iso()
     stmt = pg_insert(WikiDocument).values(
         doc_id=doc_id,

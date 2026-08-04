@@ -20,7 +20,6 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -189,35 +188,6 @@ def get_or_mint(path: str) -> str:
             return winner
         raise
     return new_id
-
-
-def get_or_mint_in(s: Session, path: str) -> str:
-    """:func:`get_or_mint`, but inside the caller's open ORM session.
-
-    For callers whose id lookup must commit or roll back atomically with
-    their own writes (the ``wiki_documents`` mirror keys its rows by this id,
-    in the same transaction as the session-snapshot write it shadows).
-    Race-safe without the exception dance: ``ON CONFLICT DO NOTHING`` against
-    the live-path partial unique index — an ``IntegrityError`` here would
-    poison the caller's whole transaction, so losing the race must not raise.
-    """
-    existing = id_for_path_in(s, path)
-    if existing is not None:
-        return existing
-    s.execute(
-        pg_insert(WikiDocId)
-        .values(id=_mint_id(), path=path, kind=_kind_for(path))
-        .on_conflict_do_nothing(
-            index_elements=[WikiDocId.path],
-            index_where=WikiDocId.deleted_at.is_(None),
-        )
-    )
-    # Re-read rather than RETURNING: on a lost race the insert returns
-    # nothing, and the winner's row is what this path's id *is*.
-    minted = id_for_path_in(s, path)
-    if minted is None:  # pragma: no cover - tombstoned between statements
-        raise RuntimeError(f"doc id for {path!r} vanished mid-mint")
-    return minted
 
 
 def mint_for_page(path: str) -> str:
