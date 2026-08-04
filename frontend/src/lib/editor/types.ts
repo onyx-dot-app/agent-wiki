@@ -5,6 +5,7 @@
  * not the old `lib/editor/types.ts` (CoeditSession, CoeditFrame, etc.) —
  * those are collab-wire-protocol shapes with no equivalent here yet.
  */
+import type { Ref } from "react";
 import type { Editor } from "@tiptap/core";
 import type { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
@@ -89,6 +90,9 @@ export interface TipTapEditorProps {
    * which covers the scroll/geometry surface other components actually
    * depend on. */
   onEditorReady?: (editor: Editor) => void;
+  /** Imperative handle exposing the editor's scroll/geometry surface
+   * (`CoeditorHandle`). A plain prop in React 19 — no `forwardRef` wrapper. */
+  ref?: Ref<CoeditorHandle>;
 }
 
 /** Imperative handle for scrolling the editor to a raw-doc position — used
