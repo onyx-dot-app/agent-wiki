@@ -102,11 +102,17 @@ export interface Proposal {
 export function useProposalsByPath(path: string, enabled = true) {
   const { data, error, isLoading, mutate } = useSWR<{ proposals: Proposal[] }>(
     enabled ? SWR_KEYS.automanageProposals(path) : null,
-    // Don't auto-revalidate on focus/reconnect: an acted-on proposal leaves
-    // `pending`, so a background revalidation would drop its row and cancel the
-    // in-flight applied/went-stale poll. The banner refreshes explicitly (via
-    // `refresh`) once a row has shown its outcome.
-    { revalidateOnFocus: false, revalidateOnReconnect: false },
+    // Background revalidation is what lets another reviewer's approve/reject
+    // reach every open view of the path — without it the card only ever
+    // changed for the person acting. Consumers that show per-row outcomes
+    // keep a local copy of acted rows (see SuggestionsCard), so a
+    // revalidation dropping a just-acted row from this list cannot yank it
+    // off screen mid-outcome.
+    {
+      refreshInterval: 30_000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+    },
   );
   return {
     proposals: data?.proposals ?? [],
