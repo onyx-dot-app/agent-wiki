@@ -5,7 +5,6 @@ import { cn } from "@onyx-ai/opal/utils";
 import { DM_Mono, Hanken_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
 
-import { ChatWidget } from "@/components/chat/ChatWidget";
 import { ConfirmProvider } from "@/components/common/ConfirmDialog";
 import { AuthProvider } from "@/lib/auth";
 import { DraftingProvider } from "@/lib/drafting";
@@ -76,7 +75,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 <Tooltip.Provider delayDuration={300}>
                   <ConfirmProvider>
                     {children}
-                    <ChatWidget />
                     <ToastContainer />
                   </ConfirmProvider>
                 </Tooltip.Provider>

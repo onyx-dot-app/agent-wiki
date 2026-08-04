@@ -12,7 +12,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import func, select
 
@@ -87,6 +87,67 @@ def list_for_user(user_id: str) -> list[dict[str, Any]]:
             .order_by(ChatSession.updated_at.desc())
         ).all()
         return [_session_to_dict(r) for r in rows]
+
+
+# Tools whose path argument means the turn actually worked on a wiki page.
+# Mirrors the frontend's source/edit derivation so the history menu's
+# "This Page" group and the transcript's chips agree on what "touched" means.
+_PATH_TOOLS = frozenset(
+    {
+        "read_doc",
+        "read_page",
+        "write_doc",
+        "edit_doc",
+        "multi_edit",
+        "apply_patch",
+        "update_doc_nl",
+    }
+)
+
+
+def _events_touch_path(events_json: str | None, path: str) -> bool:
+    """True when a persisted turn called a page tool against ``path``."""
+    if not events_json:
+        return False
+    try:
+        events: Any = json.loads(events_json)
+    except ValueError:
+        return False
+    if not isinstance(events, list):
+        return False
+    for ev in cast(list[Any], events):
+        if not isinstance(ev, dict):
+            continue
+        event = cast(dict[str, Any], ev)
+        if event.get("type") != "tool_call" or event.get("name") not in _PATH_TOOLS:
+            continue
+        args = event.get("arguments")
+        if isinstance(args, dict) and cast(dict[str, Any], args).get("path") == path:
+            return True
+    return False
+
+
+def ids_touching_path(user_id: str, path: str) -> set[str]:
+    """Sessions of ``user_id`` whose persisted turns worked on ``path``.
+
+    Recovered from persisted tool calls since per-turn context is ephemeral.
+    The LIKE only narrows candidates, ``_events_touch_path`` decides, so a
+    substring of another path never matches.
+    """
+    if not path:
+        return set()
+    escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    with session() as s:
+        rows = s.execute(
+            select(ChatMessage.session_id, ChatMessage.events_json)
+            .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+            .where(
+                ChatSession.user_id == user_id,
+                ChatSession.hidden.is_(False),
+                ChatMessage.events_json.like(f"%{escaped}%", escape="\\"),
+            )
+        ).all()
+    return {sid for sid, events in rows if _events_touch_path(events, path)}
 
 
 def delete(session_id: str, user_id: str) -> bool:
@@ -171,6 +232,53 @@ def append_message(
         return _message_to_dict(row)
 
 
+def append_assistant_if_user_tail(
+    session_id: str,
+    *,
+    user_content: str,
+    content: str,
+    events: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    """Persist an assistant turn only while the matching user row is still
+    the session tail. Tail check and insert share one transaction holding
+    the session row lock, so requests racing over the same turn serialize
+    and the loser returns None instead of storing a second answer."""
+    events_json = json.dumps(events) if events is not None else None
+    with session() as s:
+        s.scalar(
+            select(ChatSession).where(ChatSession.id == session_id).with_for_update()
+        )
+        tail = s.scalar(
+            select(ChatMessage)
+            .where(
+                ChatMessage.session_id == session_id,
+                ChatMessage.hidden.is_(False),
+            )
+            .order_by(ChatMessage.ordering.desc())
+            .limit(1)
+        )
+        if tail is None or tail.role != "user" or tail.content != user_content:
+            return None
+        max_order = s.scalar(
+            select(func.coalesce(func.max(ChatMessage.ordering), -1)).where(
+                ChatMessage.session_id == session_id
+            )
+        )
+        row = ChatMessage(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            ordering=(max_order if max_order is not None else -1) + 1,
+            role="assistant",
+            content=content,
+            events_json=events_json,
+            hidden=False,
+        )
+        s.add(row)
+        s.flush()
+        s.refresh(row)
+        return _message_to_dict(row)
+
+
 def get_messages(
     session_id: str, *, include_hidden: bool = False,
 ) -> list[dict[str, Any]]:
@@ -205,6 +313,21 @@ def set_feedback(message_id: str, user_id: str, value: str | None) -> bool:
             return False
         row.feedback = value
         return True
+
+
+def last_message(session_id: str) -> dict[str, Any] | None:
+    """The session's newest visible message, or None on an empty session."""
+    with session() as s:
+        row = s.scalar(
+            select(ChatMessage)
+            .where(
+                ChatMessage.session_id == session_id,
+                ChatMessage.hidden.is_(False),
+            )
+            .order_by(ChatMessage.ordering.desc())
+            .limit(1)
+        )
+        return _message_to_dict(row) if row else None
 
 
 def count_messages(session_id: str) -> int:

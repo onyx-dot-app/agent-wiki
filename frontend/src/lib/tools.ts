@@ -68,3 +68,23 @@ const TOOL_PRESENTATION: Record<string, ToolPresentation> = {
 export function presentTool(name: string): ToolPresentation {
   return TOOL_PRESENTATION[name] ?? { label: name };
 }
+
+// Which transcript affordance a call drives: a thinking-state query chip, a
+// source chip, or an edit card. Keyed off the same names as TOOL_PRESENTATION
+// so a tool is categorized where it is labelled. Uncategorized still labels.
+export const SEARCH_TOOLS = new Set([
+  "search_wiki",
+  "ask_nl_question",
+  "web_search",
+  "search_comments",
+]);
+
+export const SOURCE_TOOLS = new Set(["read_doc", "read_page"]);
+
+export const EDIT_TOOLS = new Set([
+  "write_doc",
+  "edit_doc",
+  "multi_edit",
+  "apply_patch",
+  "update_doc_nl",
+]);

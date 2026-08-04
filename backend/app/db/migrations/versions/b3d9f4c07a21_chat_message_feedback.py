@@ -1,4 +1,8 @@
-"""Add record-only feedback to chat messages."""
+"""Add record-only feedback to chat messages.
+
+Revision ID: b3d9f4c07a21
+Revises: b6f3a1d8c2e7
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,7 @@ from alembic import op
 
 
 revision: str = "b3d9f4c07a21"
-down_revision: str | None = "f2c9a41e7b06"
+down_revision: str | None = "b6f3a1d8c2e7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

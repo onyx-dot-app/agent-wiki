@@ -7,6 +7,9 @@
  * per-path, or query-string endpoints) are builder functions.
  */
 export const SWR_KEYS = {
+  // ── Chat ──────────────────────────────────────────────────────────────
+  chatSessions: (path?: string | null) =>
+    path ? `/chat/sessions?path=${encodeURIComponent(path)}` : "/chat/sessions",
   // ── Wiki ──────────────────────────────────────────────────────────────
   wikiTree: "/wiki",
   wikiTrash: "/wiki/trash",

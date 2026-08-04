@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class ChatMessage(BaseModel):
@@ -13,24 +13,17 @@ class ChatMessage(BaseModel):
 
 
 class SendChatRequest(BaseModel):
-    """Body for ``POST /api/chat/messages``.
-
-    The session must already exist (the frontend creates it via
-    ``POST /api/chat/sessions`` on first send). The backend loads the
-    full prior message history from the DB and runs the agent loop —
-    only the latest user content travels over the wire.
-
-    ``current_path`` is the wiki page the user has open when they send the
-    message (``None`` when they're not on a specific page). The backend feeds
-    it — plus who the user is — to the agent as ephemeral per-turn context so
-    the chat is aware of both.
-    """
+    """Body for ``POST /api/chat/messages``. The session must already exist,
+    only the latest user content travels over the wire, and ``context_paths``
+    are the composer's attached pages in chip order."""
 
     session_id: str
     content: str = Field(min_length=1)
-    # Bounded so a client can't bloat every prompt turn — real wiki paths are
-    # short; safe_rel_path caps them well under this.
-    current_path: str | None = Field(default=None, max_length=2048)
+    # Bounded on both axes so a client can't bloat the prompt: at most 16
+    # chips, each no longer than a real wiki path.
+    context_paths: list[Annotated[str, StringConstraints(max_length=2048)]] = Field(
+        default_factory=list, max_length=16
+    )
 
 
 class DraftingInitRequest(BaseModel):
@@ -57,6 +50,10 @@ class DraftingInitRequest(BaseModel):
 class ChatSessionOut(BaseModel):
     id: str
     title: str | None
+    # True when the session's persisted turns worked on the page named by the
+    # list request's ``path`` query, so the history menu can group it under
+    # "This Page". Always False when the request names no page.
+    touches_path: bool = False
     created_at: str
     updated_at: str
 

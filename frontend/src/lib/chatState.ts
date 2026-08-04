@@ -3,19 +3,26 @@
 // React, no network.
 import { ApiError } from "@/lib/api";
 import type { ChatFeedback, PersistedChatMessage } from "@/lib/chat";
-import { presentTool } from "@/lib/tools";
+import {
+  EDIT_TOOLS,
+  SEARCH_TOOLS,
+  SOURCE_TOOLS,
+  presentTool,
+} from "@/lib/tools";
 
 export type ToolState = "running" | "done" | "error";
 
 export type ChatItem =
-  | { kind: "user"; content: string }
+  | { kind: "user"; content: string; createdAt?: string }
   // id arrives with ``message_saved`` once the turn is persisted, and is
-  // what rating the turn addresses. Unrated turns carry feedback null.
+  // what rating addresses. createdAt on the assistant marks the first
+  // token, so the gap to the user turn is the thinking duration.
   | {
       kind: "assistant";
       content: string;
       id?: string;
       feedback?: ChatFeedback | null;
+      createdAt?: string;
     }
   // detail: the human-meaningful argument (search query, path, question)
   // shown in the thinking-state chips next to the tool's label.
@@ -50,7 +57,10 @@ export function reduceEvent(items: ChatItem[], ev: StreamEvent): ChatItem[] {
       next[next.length - 1] = { ...last, content: last.content + ev.text };
       return next;
     }
-    return [...items, { kind: "assistant", content: ev.text }];
+    return [
+      ...items,
+      { kind: "assistant", content: ev.text, createdAt: nowIso() },
+    ];
   }
   if (ev.type === "tool_call") {
     // Hidden tools (e.g. ``load_skill`` plumbing) never enter the
@@ -74,10 +84,13 @@ export function reduceEvent(items: ChatItem[], ev: StreamEvent): ChatItem[] {
     );
   }
   if (ev.type === "message_saved") {
-    const last = items[items.length - 1];
-    if (!last || last.kind !== "assistant") return items;
+    // A turn can end on a tool row, so the id belongs to the last assistant
+    // bubble rather than the last item. Rating is gated on that id.
+    const at = items.findLastIndex((i) => i.kind === "assistant");
+    const target = at === -1 ? null : items[at];
+    if (!target || target.kind !== "assistant") return items;
     const next = items.slice();
-    next[next.length - 1] = { ...last, id: ev.id };
+    next[at] = { ...target, id: ev.id };
     return next;
   }
   return items;
@@ -103,7 +116,10 @@ export function itemsFromPersisted(
   let out: ChatItem[] = [];
   for (const m of messages) {
     if (m.role === "user") {
-      out = [...out, { kind: "user", content: m.content }];
+      out = [
+        ...out,
+        { kind: "user", content: m.content, createdAt: m.created_at },
+      ];
       continue;
     }
     if (!m.events || m.events.length === 0) {
@@ -121,10 +137,16 @@ export function itemsFromPersisted(
     for (const raw of m.events) {
       out = reduceEvent(out, raw as StreamEvent);
     }
-    // The event log has no id of its own, so stamp the row's onto the
-    // bubble it just replayed to keep the turn rateable after a reload.
+    // The event log has no id or timestamp of its own, so stamp the row's
+    // onto the bubble it just replayed. Without the createdAt override a
+    // replayed bubble carries replay-time, not turn-time.
     out = reduceEvent(out, { type: "message_saved", id: m.id });
     out = setItemFeedback(out, m.id, m.feedback ?? null);
+    out = out.map((it) =>
+      it.kind === "assistant" && it.id === m.id
+        ? { ...it, createdAt: m.created_at }
+        : it,
+    );
   }
   return out;
 }
@@ -159,15 +181,61 @@ function toolDetail(args: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-// Chip strings for the thinking state ("Onyx", "Onyx features", +N more):
-// the tool's argument when it has one, its label otherwise.
+// Search terms for the thinking state's chips ("Onyx", "Onyx features").
+// Only searching tools qualify: the pages a turn read surface as source
+// chips, so including them here would show a path under a search icon.
 export function queryChipsFromItems(items: ChatItem[]): string[] {
   const out: string[] = [];
   for (const it of items) {
-    if (it.kind !== "tool") continue;
-    out.push(it.detail ?? presentTool(it.name).label);
+    if (it.kind !== "tool" || !SEARCH_TOOLS.has(it.name)) continue;
+    const query = it.detail ?? presentTool(it.name).label;
+    if (!out.includes(query)) out.push(query);
   }
   return out;
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+// Doc paths a turn's tools touched. detail carries the path argument for
+// these tools (toolDetail's extraction order).
+function toolPaths(items: ChatItem[], names: Set<string>): string[] {
+  const out: string[] = [];
+  for (const it of items) {
+    if (it.kind !== "tool" || !names.has(it.name) || !it.detail) continue;
+    if (!out.includes(it.detail)) out.push(it.detail);
+  }
+  return out;
+}
+
+export function sourcesFromItems(items: ChatItem[]): string[] {
+  return toolPaths(items, SOURCE_TOOLS);
+}
+
+export function editsFromItems(items: ChatItem[]): string[] {
+  return toolPaths(items, EDIT_TOOLS);
+}
+
+/** Seconds between a user turn and the reply that followed, for the
+ *  "Thought for Ns" header. Retries land fresh replies under old user
+ *  rows, so pairings beyond a plausible thinking window hide. */
+export function thinkingSeconds(
+  items: ChatItem[],
+  assistantIndex: number,
+): number | null {
+  const a = items[assistantIndex];
+  if (!a || a.kind !== "assistant" || !a.createdAt) return null;
+  for (let i = assistantIndex - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "user") {
+      if (!it.createdAt) return null;
+      const s = (Date.parse(a.createdAt) - Date.parse(it.createdAt)) / 1000;
+      if (!Number.isFinite(s) || s < 0 || s > 600) return null;
+      return Math.round(s);
+    }
+  }
+  return null;
 }
 
 export function formatChatError(err: unknown): string {

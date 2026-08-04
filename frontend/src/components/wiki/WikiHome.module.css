@@ -11,6 +11,7 @@
   position: relative;
   height: 100%;
 }
+
 .scroll {
   height: 100%;
   overflow-y: auto;
@@ -54,9 +55,12 @@
 }
 
 .column {
-  padding: 0 16px 64px;
+  /* 752px inner width per mock Doc Section 309:788398, the toolbar strip
+     spans all of it. Bottom padding is the mock's 4px strip inset, the
+     toolbar sits in flow so content needs no extra clearance. */
+  padding: 0 16px 4px;
   flex: 1;
-  max-width: 672px;
+  max-width: 784px;
   margin: 0 auto;
   box-sizing: border-box;
   display: flex;

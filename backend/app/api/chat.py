@@ -49,49 +49,57 @@ def _sse(event: dict[str, Any]) -> bytes:
     return f"data: {json.dumps(event)}\n\n".encode("utf-8")
 
 
-def _session_out(row: dict[str, Any]) -> ChatSessionOut:
+def _session_out(
+    row: dict[str, Any], *, touches_path: bool = False
+) -> ChatSessionOut:
     return ChatSessionOut(
         id=row["id"],
         title=row["title"],
+        touches_path=touches_path,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
 
 
-def _safe_current_path(current_path: str | None) -> str | None:
-    """Validate the client-supplied open-page path before it's embedded in the
-    prompt. It's an optional context hint, so a value that could break the
-    ``<system-reminder>`` framing (newlines / angle brackets) or isn't a valid
-    wiki path (traversal, ``.trash``) is dropped, not rejected — the turn still
-    runs, just without page context."""
-    if not current_path:
-        return None
-    if any(c in current_path for c in "\n\r<>"):
-        return None
-    try:
-        return filesystem.safe_rel_path(current_path)
-    except ValueError:
-        return None
+def _safe_context_paths(context_paths: list[str]) -> list[str]:
+    """Validate client-supplied context paths before prompt embedding. A value
+    that could break the reminder framing or fails ``safe_rel_path`` is
+    dropped, not rejected. Order is preserved and duplicates collapse."""
+    safe: list[str] = []
+    for path in context_paths:
+        if not path or any(c in path for c in "\n\r<>"):
+            continue
+        try:
+            rel = filesystem.safe_rel_path(path)
+        except ValueError:
+            continue
+        if rel not in safe:
+            safe.append(rel)
+    return safe
 
 
 def _inject_turn_context(
     messages: list[dict[str, Any]],
     user: User,
-    current_path: str | None,
+    context_paths: list[str],
     work_role: str | None,
 ) -> None:
-    """Give the chat agent per-turn awareness of who it's talking to and which
-    wiki page they have open, as a user-role ``<system-reminder>`` inserted just
-    before the latest user turn. Ephemeral — built fresh from the live request
-    each turn and never persisted, so a later navigation isn't frozen into
-    history."""
+    """Insert a user-role ``<system-reminder>`` naming the user and their
+    attached pages just before the latest turn. Ephemeral, built fresh per
+    request and never persisted."""
     who = f"{user.name} <{user.email}>" if user.name else user.email
     role = f", role: {work_role}" if work_role else ""
-    current_path = _safe_current_path(current_path)
-    if current_path:
+    paths = _safe_context_paths(context_paths)
+    if len(paths) == 1:
         where = (
-            f'They currently have the wiki page "{current_path}" open — read it '
+            f'They currently have the wiki page "{paths[0]}" open — read it '
             "with read_doc/read_page if their message is about it."
+        )
+    elif paths:
+        listed = ", ".join(f'"{p}"' for p in paths)
+        where = (
+            f"They attached these wiki pages as context: {listed} — read them "
+            "with read_doc/read_page if their message is about them."
         )
     else:
         where = "They are not on a specific wiki page right now."
@@ -107,9 +115,18 @@ def _inject_turn_context(
 
 
 @router.get("/sessions", response_model=list[ChatSessionOut])
-def list_sessions(user: User = Depends(require_user)) -> list[ChatSessionOut]:
+def list_sessions(
+    path: str | None = None,
+    user: User = Depends(require_user),
+) -> list[ChatSessionOut]:
+    """``path`` is the page the caller is viewing. Sessions whose turns worked
+    on it come back flagged so the client can group them separately."""
     rows = sessions_repo.list_for_user(user.id)
-    return [_session_out(r) for r in rows]
+    safe = _safe_context_paths([path] if path else [])
+    touching = (
+        sessions_repo.ids_touching_path(user.id, safe[0]) if safe else set[str]()
+    )
+    return [_session_out(r, touches_path=r["id"] in touching) for r in rows]
 
 
 @router.post(
@@ -198,24 +215,30 @@ async def send_message(
     if sess is None:
         raise HTTPException(status_code=404, detail="session not found")
 
-    # First turn? Used after the stream finishes to decide whether to
-    # enqueue title generation.
+    # Persist the user turn before streaming so a failed LLM call keeps it
+    # on the timeline. Retries re-send the same text, so an identical user
+    # row at the tail (no assistant after it) is reused, not duplicated.
     prior_count = await run_in_threadpool(
         sessions_repo.count_messages,
         req.session_id,
     )
-    is_first_turn = prior_count == 0
-
-    # Persist the user message before streaming. If the LLM call fails
-    # halfway, the user's turn is still on the timeline.
-    await run_in_threadpool(
-        lambda: sessions_repo.append_message(
-            req.session_id,
-            role="user",
-            content=req.content,
-            events=None,
-        ),
+    last = await run_in_threadpool(sessions_repo.last_message, req.session_id)
+    is_retry_of_tail = (
+        last is not None and last["role"] == "user" and last["content"] == req.content
     )
+    # Used after the stream finishes to decide whether to enqueue title
+    # generation. A retried first turn still counts as the first.
+    is_first_turn = prior_count == 0 or (is_retry_of_tail and prior_count == 1)
+
+    if not is_retry_of_tail:
+        await run_in_threadpool(
+            lambda: sessions_repo.append_message(
+                req.session_id,
+                role="user",
+                content=req.content,
+                events=None,
+            ),
+        )
 
     # Hydrate prior history (now including the just-saved user turn).
     # Hidden seed messages (e.g. drafting-from-template kickoffs) flow
@@ -244,7 +267,7 @@ async def send_message(
                 raw_settings = await run_in_threadpool(users_repo.get_settings, user_id)
                 user_prefs = UserSettings.model_validate(raw_settings or {})
                 _inject_turn_context(
-                    messages, user, req.current_path, user_prefs.work_role
+                    messages, user, req.context_paths, user_prefs.work_role
                 )
                 gen = run_chat_stream(
                     messages,
@@ -261,7 +284,10 @@ async def send_message(
                 # calls nor permits reset across them.
                 async for ev in iterate_in_threadpool(gen):
                     if await request.is_disconnected():
-                        break
+                        # Abort without persisting: the session tail must stay
+                        # on the user row so a retry of the same text reuses it
+                        # instead of appending a duplicate.
+                        return
                     events.append(ev)
                     if ev.get("type") == "text_delta":
                         text_parts.append(ev.get("text", ""))
@@ -280,16 +306,25 @@ async def send_message(
             )
             return
 
-        # Stream completed cleanly — persist the assistant turn.
+        # A stopped client's stream can complete without ever observing the
+        # disconnect mid-loop, so re-check before persisting.
+        if await request.is_disconnected():
+            return
+
         try:
+            # Tail check and insert share one locked transaction, so a
+            # stopped request racing its own retry can never store a
+            # second answer for the turn.
             saved = await run_in_threadpool(
-                lambda: sessions_repo.append_message(
+                lambda: sessions_repo.append_assistant_if_user_tail(
                     session_id,
-                    role="assistant",
+                    user_content=req.content,
                     content="".join(text_parts),
                     events=events,
                 ),
             )
+            if saved is None:
+                return
             await run_in_threadpool(sessions_repo.touch, session_id)
             # Emit after persistence so the client can rate the turn. Replay
             # reconstructs this event from the saved message row.
@@ -474,7 +509,8 @@ async def drafting_init(
                 gen = run_chat_stream(messages)
                 async for ev in iterate_in_threadpool(gen):
                     if await request.is_disconnected():
-                        break
+                        # Abort without persisting a partial kickoff turn.
+                        return
                     events.append(ev)
                     if ev.get("type") == "text_delta":
                         text_parts.append(ev.get("text", ""))
