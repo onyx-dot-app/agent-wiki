@@ -50,6 +50,32 @@ const HANDLED = new Set<Outcome>(["applied", "rejected", "stale"]);
 /** Row glyph per the mock (2236:78296): merges show the scope being
  * merged (pages icon for a page, folder for a folder), empty-folder
  * deletes the dashed folder. Unknown ops fall back to the page icon. */
+/** Short, path-free row title — the folder tag right under it already
+ * shows the path, so repeating it here (the backend summary quotes it in
+ * full) only forced long rows to overflow. Unknown ops fall back to the
+ * summary; the full summary always rides the row's hover tooltip. */
+function opTitle(op: string, sourcePath: string, summary: string): string {
+  const pageScope = pathKind(sourcePath) === "page";
+  switch (op) {
+    case "merge":
+      return pageScope ? "Merge pages" : "Merge folders";
+    case "split":
+      return pageScope ? "Split page" : "Split folder";
+    case "move":
+      return pageScope ? "Move page" : "Move folder";
+    case "rename":
+      return pageScope ? "Rename page" : "Rename folder";
+    case "create_folder":
+      return "Create folder";
+    case "delete_empty_folder":
+      return "Remove empty folder";
+    case "delete_page":
+      return "Remove page";
+    default:
+      return summary;
+  }
+}
+
 function opIcon(op: string, sourcePath: string): IconFunctionComponent {
   const pageScope = pathKind(sourcePath) === "page";
   switch (op) {
@@ -358,13 +384,32 @@ function SuggestionRow({
         height="fit"
         className="min-w-0 flex-1"
       >
-        {/* raw-ok: Text drops className, so the strikethrough state wraps it */}
-        <span className={struck ? "line-through opacity-60" : ""}>
-          <Text font="main-ui-action" color="text-04" maxLines={1}>
-            {proposal.summary}
+        {/* raw-ok: Text drops className, so the strikethrough/width state
+            wraps it. w-full is what lets long titles wrap inside the card:
+            this column aligns items start, which otherwise sizes children
+            to their content width and lets them run under the action
+            buttons and past the card edge. */}
+        <span
+          className={`block w-full min-w-0 ${struck ? "line-through opacity-60" : ""}`}
+          title={proposal.summary}
+        >
+          <Text font="main-ui-action" color="text-04">
+            {opTitle(
+              proposal.op,
+              proposal.source_paths[0] ?? "",
+              proposal.summary,
+            )}
           </Text>
         </span>
-        <Tag icon={SvgFolder} title={chipPath} color="gray" size="sm" />
+        <span className="block w-full min-w-0">
+          <Tag
+            icon={SvgFolder}
+            title={chipPath}
+            color="gray"
+            size="sm"
+            truncate
+          />
+        </span>
       </Section>
       <Section
         gap={0.125}
