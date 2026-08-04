@@ -304,6 +304,8 @@ export function useCoeditSession(opts: {
     useState<UseCoeditSession["saveStatus"]>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The post-reconnect save kick, cancellable on teardown/reconnect.
+  const reconnectKick = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRetries = useRef(0);
   // Counted apart from saveRetries: a timeout and a "not connected" cost two
   // very different amounts of wall-clock, so they can't share a budget.
@@ -413,7 +415,7 @@ export function useCoeditSession(opts: {
             ? "retrying"
             : "the server will commit it shortly"
           : connectionish
-            ? "saves automatically once reconnected — keep this tab open"
+            ? "retries once reconnected"
             : reason,
       );
       setSaveStatus(timedOut ? "unconfirmed" : "error");
@@ -485,6 +487,10 @@ export function useCoeditSession(opts: {
     if (!enabled) return;
     let cancelled = false;
     setJoinError(null);
+    // Per-connection-lifecycle state: without this, switching pages during
+    // an outage carries the old page's "Reconnecting…" onto the new one
+    // until its first successful join.
+    setReconnectAttempts(0);
 
     // One doc/awareness pair per effect run — that is, per path — reused across
     // every reconnect within it.
@@ -592,8 +598,20 @@ export function useCoeditSession(opts: {
         // A save that exhausted its retries during the outage stays failed
         // until something re-asks; make the reconnect be that something. A
         // clean session makes this a no-op server-side, so the cost is one
-        // frame per reconnect.
-        void checkpointRef.current?.();
+        // frame per reconnect. Two subtleties, both observed live:
+        // gate on the join's own can_write (the checkpoint closure still
+        // holds the previous render's value, so a read-only viewer's kick
+        // would earn a permanent "forbidden" error), and wait one autosave
+        // interval — edits typed while offline reach the server in the sync
+        // exchange *after* the join resolves, so an immediate kick finds a
+        // clean session and covers nothing.
+        if (reconnectKick.current) clearTimeout(reconnectKick.current);
+        if (snap.can_write) {
+          reconnectKick.current = setTimeout(() => {
+            reconnectKick.current = null;
+            void checkpointRef.current?.();
+          }, AUTOSAVE_IDLE_MS);
+        }
 
         const { expected } = await snap.closed;
         if (ownedConnection.current === snap.connectionId)
@@ -611,6 +629,10 @@ export function useCoeditSession(opts: {
     return () => {
       cancelled = true;
       clearAutosaveTimers();
+      if (reconnectKick.current) {
+        clearTimeout(reconnectKick.current);
+        reconnectKick.current = null;
+      }
       if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
       setActive(false);
       setPeers([]);

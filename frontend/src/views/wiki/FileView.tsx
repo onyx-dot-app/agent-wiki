@@ -1024,7 +1024,7 @@ export function FileView({ path }: FileViewProps) {
         {!viewingVersion &&
           (coedit.reconnectAttempts > 0 || coedit.saveStatus !== "saved") && (
             <span
-              className="mr-1 max-w-96 truncate text-[12px] text-(--text-03)"
+              className="mr-1 max-w-64 truncate text-[12px] text-(--text-03)"
               title={
                 coedit.reconnectAttempts > 0
                   ? "The connection dropped; reconnecting keeps running in the background. Unsaved edits live in this tab — keep it open and they save automatically once reconnected."
@@ -1035,11 +1035,12 @@ export function FileView({ path }: FileViewProps) {
                   during it: those failures are consequences of the drop, the
                   reconnect loop is already handling it, and a save is
                   re-fired automatically on the next successful join. The one
-                  action that would lose the edits is closing the tab, so
-                  that is the instruction given once the outage persists. */}
+                  action that would lose the edits is closing the tab, so that
+                  is the instruction given once the outage persists — short
+                  enough to never truncate; the tooltip carries the rest. */}
               {coedit.reconnectAttempts > 0
                 ? coedit.reconnectAttempts >= 4
-                  ? "Still reconnecting — keep this tab open; edits save automatically once back"
+                  ? "Reconnecting — keep this tab open"
                   : "Reconnecting…"
                 : coedit.saveStatus === "saving"
                   ? "Saving…"
