@@ -11,10 +11,6 @@ import { Extension } from "@tiptap/core";
 import { yCursorPlugin } from "@tiptap/y-tiptap";
 import type { Awareness } from "y-protocols/awareness";
 
-// Re-exported so existing importers keep working; the definition lives in one
-// place because the caret and the presence chip must agree (see identityColor).
-export { colorFor } from "@/lib/editor/identityColor";
-
 /** Registers `yCursorPlugin` — renders every other client's caret/selection
  * from `awareness`'s shared state as a `Decoration.widget` (colored bar +
  * name label) / `Decoration.inline` (selection highlight) pair, keyed by
