@@ -40,6 +40,7 @@ from app.ingest import entity_types
 from app.llm import client
 from app.llm.prompts import load_prompt
 from app.llm.settings import get as get_llm_settings
+from app.wiki import update_policy
 
 log = logging.getLogger(__name__)
 
@@ -131,6 +132,15 @@ class InformationNeed(BaseModel):
     # empty rather than inferred because a fabricated instruction would be obeyed as if a human
     # had written it.
     update_instruction: str = ""
+    # The admin's configured rule for this page, from ``app.wiki.update_policy``. NOT from the
+    # model: it is attached after extraction, and deliberately kept out of the prompt — shown the
+    # admin's rule, the model would echo it back as the page's own instruction and destroy the
+    # verbatim-from-page property of the field above. Two rules from two sources, kept apart.
+    #
+    # It is governance state, so it can change with the page untouched. That is why
+    # ``page_needs.content_sha256`` hashes it alongside the body: needs extracted under a
+    # superseded rule must not stay stored looking current.
+    policy_update_instruction: str = ""
     # The state the page holds right now — what an incoming document gets diffed against. A
     # description of what the page *tracks* is therefore a failure, not a shorter answer.
     current_content: str = ""
@@ -384,12 +394,35 @@ def run_extraction(
         entity_type_taxonomy_id if entity_type_taxonomy_id is not None else "(fallback)",
     )
 
-    pages = entity_types.read_corpus(prefix)
+    # Only pages the ingestion pipeline may auto-update. A need on a page that can never be
+    # updated is not merely wasted spend: it joins clusters and would present itself as somewhere
+    # a fact could be reconciled to, when nothing may write there. update_policy resolves the
+    # tri-state with folder inheritance and applies the ai_edits_disabled master override.
+    corpus = entity_types.read_corpus(prefix)
+    policies = update_policy.resolve_for_paths([path for path, _ in corpus])
+    disabled = {p for p, r in policies.items() if r.ingestion_auto_update_disabled}
+    pages = [(path, body) for path, body in corpus if path not in disabled]
+    # The admin's per-page rule, resolved through the same folder cascade. Part of the staleness
+    # guard, so editing it re-extracts the pages it governs.
+    instructions = {
+        path: (policies[path].update_instruction or "") for path, _ in pages if path in policies
+    }
+    if disabled:
+        log.info(
+            "needs: skipping %d of %d page(s) with ingestion auto-update disabled",
+            len(disabled),
+            len(corpus),
+        )
     by_path = dict(pages)
     stale = (
         [path for path, _ in pages]
         if force
-        else page_needs.stale_paths(pages, model=model, entity_type_taxonomy_id=entity_type_taxonomy_id)
+        else page_needs.stale_paths(
+            pages,
+            model=model,
+            entity_type_taxonomy_id=entity_type_taxonomy_id,
+            policy_instructions=instructions,
+        )
     )
     counts = {
         "pages": len(pages),
@@ -412,6 +445,9 @@ def run_extraction(
         # failure and send an operator to the database when the fault was in the model call.
         try:
             extracted = extract_page(path, by_path[path], type_defs=type_defs, model=model)
+            rule = instructions.get(path, "")
+            for need in extracted:
+                need.policy_update_instruction = rule
             payload = [need.model_dump(mode="json") for need in extracted]
         except Exception:
             # extract_page already absorbs a failed or unparseable completion and returns [], so
@@ -426,6 +462,7 @@ def run_extraction(
                 needs=payload,
                 model=model,
                 entity_type_taxonomy_id=entity_type_taxonomy_id,
+                policy_instruction=rule,
             )
         except Exception:
             log.warning("needs: storing needs failed for %s", path, exc_info=True)
@@ -452,7 +489,9 @@ def run_extraction(
 
     if pages:
         # Scoped to the prefix walked: ``by_path`` only describes that scope, so an unscoped
-        # prune would read every page outside it as deleted.
+        # prune would read every page outside it as deleted. Disabled pages are absent from
+        # ``by_path``, so this is also what retires the needs of a page that was turned off
+        # after it was last extracted.
         page_needs.prune(set(by_path), prefix=prefix)
     else:
         # A read that comes back empty is not evidence the wiki is empty — ``read_corpus``

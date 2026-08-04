@@ -52,14 +52,31 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def content_sha256(body: str) -> str:
-    """Hash of a page body — the re-extract guard. Uncapped, unlike the embedding store's:
-    extraction sends the page whole, so a change past any cap still changes the result."""
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+def content_sha256(body: str, policy_instruction: str = "") -> str:
+    """Hash of everything a page's needs are derived FROM — the re-extract guard.
+
+    Uncapped, unlike the embedding store's: extraction sends the page whole, so a change past any
+    cap still changes the result.
+
+    ``policy_instruction`` is hashed alongside the body because it is an INPUT to extraction, not
+    a property of the page: an admin can rewrite it without touching a word of content, and needs
+    extracted under the old rule would otherwise stay stored and look current forever. Governance
+    state changing has to invalidate what was derived from it, the same way a taxonomy change
+    does.
+    """
+    digest = hashlib.sha256(body.encode("utf-8"))
+    if policy_instruction:
+        digest.update(b"\x1fpolicy\x1f")
+        digest.update(policy_instruction.encode("utf-8"))
+    return digest.hexdigest()
 
 
 def stale_paths(
-    pages: list[tuple[str, str]], *, model: str | None = None, entity_type_taxonomy_id: int | None = None
+    pages: list[tuple[str, str]],
+    *,
+    model: str | None = None,
+    entity_type_taxonomy_id: int | None = None,
+    policy_instructions: dict[str, str] | None = None,
 ) -> list[str]:
     """Which of ``pages`` need extracting: never extracted, edited since, or extracted under a
     different model or taxonomy. Returns paths, since that is what the caller holds bodies by.
@@ -89,11 +106,17 @@ def stale_paths(
                 )
             )
         }
+    instructions = policy_instructions or {}
     return [
         path
         for path, body in pages
         if path not in ids
-        or stored.get(ids[path]) != (content_sha256(body), want_model, entity_type_taxonomy_id)
+        or stored.get(ids[path])
+        != (
+            content_sha256(body, instructions.get(path, "")),
+            want_model,
+            entity_type_taxonomy_id,
+        )
     ]
 
 
@@ -104,6 +127,7 @@ def store(
     needs: list[dict[str, Any]],
     model: str | None = None,
     entity_type_taxonomy_id: int | None = None,
+    policy_instruction: str = "",
 ) -> str:
     """Replace the needs of the page at ``path``. Returns the ``doc_id`` written.
 
@@ -119,7 +143,7 @@ def store(
         if row is None:
             row = PageNeeds(doc_id=doc_id)
             s.add(row)
-        row.content_sha256 = content_sha256(body)
+        row.content_sha256 = content_sha256(body, policy_instruction)
         row.model = model or ""
         row.entity_type_taxonomy_id = entity_type_taxonomy_id
         row.needs = needs
