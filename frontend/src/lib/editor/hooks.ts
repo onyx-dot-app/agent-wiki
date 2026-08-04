@@ -58,6 +58,10 @@ const AUTOSAVE_MAX_INTERVAL_MS = 30000;
 const TYPING_IDLE_MS = 1500;
 /** Ms to wait before re-opening a dropped connection. */
 const STREAM_RECONNECT_MS = 3000;
+/** Reconnect backoff ceiling. Attempts double from `STREAM_RECONNECT_MS` and
+ * park here, so a long outage costs one join attempt per half-minute while a
+ * deploy blip still recovers in seconds. */
+const RECONNECT_BACKOFF_MAX_MS = 30_000;
 /** Spacing and cap for retrying a failed save.
  *
  * Every failure mode except "forbidden" is transient: the save had no live
@@ -140,10 +144,11 @@ export interface UseCoeditSession {
   typing: string[];
   /** Peers' live cursors (excludes self), for presence UI. */
   peers: CoeditPeer[];
-  /** Set when the join handshake itself fails (network error, 4xx/5xx,
-   * expired auth) — `active` stays false forever unless the caller shows
-   * this and offers `retryJoin`. A drop *after* a successful join doesn't
-   * set this (the session is already usable; the reconnect loop heals it). */
+  /** Set only when joining fails for a reason retrying cannot fix (today: a
+   * page the live-editor codec can't encode). Transient failures — network
+   * errors, a dropped connection, a deploy window — never set this: the
+   * connect loop keeps retrying with backoff and reports progress through
+   * `reconnectAttempts` instead. */
   joinError: string | null;
   /** False when `joinError` is a real, distinguishable reason retrying
    * won't fix (today: a page the live-editor codec can't encode) — the
@@ -154,6 +159,13 @@ export interface UseCoeditSession {
   joinErrorRetryable: boolean;
   /** Clears `joinError` and re-runs the join handshake. */
   retryJoin: () => void;
+  /** 0 while connected; otherwise how many reconnect attempts have failed
+   * since the connection dropped (1 the moment the drop is noticed).
+   * Render this with precedence over `saveStatus`: during an outage the
+   * save machinery's failures are consequences of the drop, and recovery
+   * is already running — the truthful label is "Reconnecting…", with
+   * sterner guidance once the count grows. */
+  reconnectAttempts: number;
   /** Autosave state, for a "Saving…/Saved/Couldn't save" indicator.
    *
    * "unconfirmed" is distinct from "error" on purpose: the save's
@@ -276,6 +288,12 @@ export function useCoeditSession(opts: {
   const [active, setActive] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joinErrorRetryable, setJoinErrorRetryable] = useState(true);
+  // 0 while connected; otherwise how many reconnect attempts have failed
+  // since the connection dropped (1 the moment the drop is noticed). The
+  // indicator renders this state with precedence over save errors: during
+  // an outage the save machinery's rejections are consequences, and the
+  // recovery is already running.
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [retryToken, setRetryToken] = useState(0);
   const retryJoin = useCallback(() => {
     setJoinError(null);
@@ -286,6 +304,8 @@ export function useCoeditSession(opts: {
     useState<UseCoeditSession["saveStatus"]>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The post-reconnect save kick, cancellable on teardown/reconnect.
+  const reconnectKick = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveRetries = useRef(0);
   // Counted apart from saveRetries: a timeout and a "not connected" cost two
   // very different amounts of wall-clock, so they can't share a budget.
@@ -376,17 +396,27 @@ export function useCoeditSession(opts: {
       // the reconnect loop is already fixing.
       const terminal = reason.toLowerCase().includes("forbidden");
       const retrying = !terminal && armSaveRetry(timedOut);
+      // A rejection that just restates the outage ("connection closed", "not
+      // connected") gets instruction instead of diagnosis: the reconnect
+      // loop is already running, a fresh connection re-fires the save
+      // (see the kick after a successful join), and the one thing the user
+      // must know is that closing the tab is what would lose the edits.
+      const connectionish =
+        !timedOut &&
+        (reason === "connection closed" || reason === "not connected");
       // Reported as "unconfirmed", not "error": see saveStatus. The detail says
       // what happens next rather than what went wrong, and once the budget is
       // spent that is the server's periodic scan, which commits a dirty session
       // without the client's help. Neither string repeats the status label —
       // the indicator prefixes it.
       setSaveError(
-        !timedOut
-          ? reason
-          : retrying
+        timedOut
+          ? retrying
             ? "retrying"
-            : "the server will commit it shortly",
+            : "the server will commit it shortly"
+          : connectionish
+            ? "retries once reconnected"
+            : reason,
       );
       setSaveStatus(timedOut ? "unconfirmed" : "error");
     } finally {
@@ -457,6 +487,10 @@ export function useCoeditSession(opts: {
     if (!enabled) return;
     let cancelled = false;
     setJoinError(null);
+    // Per-connection-lifecycle state: without this, switching pages during
+    // an outage carries the old page's "Reconnecting…" onto the new one
+    // until its first successful join.
+    setReconnectAttempts(0);
 
     // One doc/awareness pair per effect run — that is, per path — reused across
     // every reconnect within it.
@@ -498,6 +532,7 @@ export function useCoeditSession(opts: {
     sessionAwareness.on("change", recomputeForThisAwareness);
 
     void (async () => {
+      let failedAttempts = 0;
       while (!cancelled) {
         let snap;
         try {
@@ -510,25 +545,43 @@ export function useCoeditSession(opts: {
             },
           );
         } catch (e) {
-          if (!cancelled) {
-            // A 422 is svc.ts's join_error frame — a real, distinguishable
-            // reason retrying won't fix (e.g. a codec-unsupported page),
-            // unlike every other failure here (network error, expired
-            // auth, a plain dropped connection), which really is worth
-            // retrying.
-            setJoinErrorRetryable(!(e instanceof ApiError && e.status === 422));
+          if (cancelled) return;
+          // A 422 is svc.ts's join_error frame — a real, distinguishable
+          // reason retrying won't fix (e.g. a codec-unsupported page). Only
+          // that ends the loop. Every other failure here — network error, a
+          // dropped connection, the few seconds a backend deploy is
+          // unreachable — used to end it too, stranding the tab behind a
+          // Retry button for an outage that had already passed; now it backs
+          // off and tries again, and the indicator says so.
+          if (e instanceof ApiError && e.status === 422) {
+            setJoinErrorRetryable(false);
             setJoinError(
               e instanceof Error
                 ? e.message
                 : "Failed to join the editing session.",
             );
+            return;
           }
-          return;
+          failedAttempts += 1;
+          setReconnectAttempts(failedAttempts);
+          await new Promise((r) =>
+            setTimeout(
+              r,
+              Math.min(
+                RECONNECT_BACKOFF_MAX_MS,
+                STREAM_RECONNECT_MS * 2 ** Math.min(failedAttempts - 1, 4),
+              ),
+            ),
+          );
+          continue;
         }
         if (cancelled) {
           closeSession(snap.connectionId);
           return;
         }
+        failedAttempts = 0;
+        setReconnectAttempts(0);
+        setJoinError(null);
 
         sessionId.current = snap.session_id;
         ownedConnection.current = snap.connectionId;
@@ -542,11 +595,33 @@ export function useCoeditSession(opts: {
         setCanWrite(snap.can_write);
         setParticipants(snap.participants);
         setActive(true);
+        // A save that exhausted its retries during the outage stays failed
+        // until something re-asks; make the reconnect be that something. A
+        // clean session makes this a no-op server-side, so the cost is one
+        // frame per reconnect. Two subtleties, both observed live:
+        // gate on the join's own can_write (the checkpoint closure still
+        // holds the previous render's value, so a read-only viewer's kick
+        // would earn a permanent "forbidden" error), and wait one autosave
+        // interval — edits typed while offline reach the server in the sync
+        // exchange *after* the join resolves, so an immediate kick finds a
+        // clean session and covers nothing.
+        if (reconnectKick.current) clearTimeout(reconnectKick.current);
+        if (snap.can_write) {
+          reconnectKick.current = setTimeout(() => {
+            reconnectKick.current = null;
+            void checkpointRef.current?.();
+          }, AUTOSAVE_IDLE_MS);
+        }
 
         const { expected } = await snap.closed;
         if (ownedConnection.current === snap.connectionId)
           ownedConnection.current = null;
         if (cancelled || expected) return;
+        // The connection dropped: the whole gap until the next successful
+        // join renders as "Reconnecting…", not as a save failure — the save
+        // machinery's rejections during this window are consequences of the
+        // drop, and the recovery is already in motion.
+        setReconnectAttempts((n) => Math.max(n, 1));
         await new Promise((r) => setTimeout(r, STREAM_RECONNECT_MS));
       }
     })();
@@ -554,6 +629,10 @@ export function useCoeditSession(opts: {
     return () => {
       cancelled = true;
       clearAutosaveTimers();
+      if (reconnectKick.current) {
+        clearTimeout(reconnectKick.current);
+        reconnectKick.current = null;
+      }
       if (typingIdleTimer.current) clearTimeout(typingIdleTimer.current);
       setActive(false);
       setPeers([]);
@@ -605,6 +684,7 @@ export function useCoeditSession(opts: {
     joinError,
     joinErrorRetryable,
     retryJoin,
+    reconnectAttempts,
     saveStatus,
     saveError,
     onEditorReady,

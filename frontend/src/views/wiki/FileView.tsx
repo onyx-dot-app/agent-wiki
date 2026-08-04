@@ -1021,25 +1021,41 @@ export function FileView({ path }: FileViewProps) {
         {/* Save-in-flight and failure feedback only. The mock's header
             carries no idle "Saved" label, so the saved state renders
             nothing. */}
-        {!viewingVersion && coedit.saveStatus !== "saved" && (
-          <span
-            className="mr-1 max-w-64 truncate text-[12px] text-(--text-03)"
-            title={coedit.saveError ?? undefined}
-          >
-            {coedit.saveStatus === "saving"
-              ? "Saving…"
-              : coedit.saveStatus === "unconfirmed"
-                ? // Not a failure: the acknowledgement went missing, so whether
-                  // the commit happened is unknown. Saying "couldn't save"
-                  // here would claim more than we know.
-                  coedit.saveError
-                  ? `Couldn't confirm the save — ${coedit.saveError}`
-                  : "Couldn't confirm the save"
-                : coedit.saveError
-                  ? `Couldn't save: ${coedit.saveError}`
-                  : "Couldn't save"}
-          </span>
-        )}
+        {!viewingVersion &&
+          (coedit.reconnectAttempts > 0 || coedit.saveStatus !== "saved") && (
+            <span
+              className="mr-1 max-w-64 truncate text-[12px] text-(--text-03)"
+              title={
+                coedit.reconnectAttempts > 0
+                  ? "The connection dropped; reconnecting keeps running in the background. Unsaved edits live in this tab — keep it open and they save automatically once reconnected."
+                  : (coedit.saveError ?? undefined)
+              }
+            >
+              {/* An outage outranks whatever the save machinery reports
+                  during it: those failures are consequences of the drop, the
+                  reconnect loop is already handling it, and a save is
+                  re-fired automatically on the next successful join. The one
+                  action that would lose the edits is closing the tab, so that
+                  is the instruction given once the outage persists — short
+                  enough to never truncate; the tooltip carries the rest. */}
+              {coedit.reconnectAttempts > 0
+                ? coedit.reconnectAttempts >= 4
+                  ? "Reconnecting — keep this tab open"
+                  : "Reconnecting…"
+                : coedit.saveStatus === "saving"
+                  ? "Saving…"
+                  : coedit.saveStatus === "unconfirmed"
+                    ? // Not a failure: the acknowledgement went missing, so
+                      // whether the commit happened is unknown. Saying
+                      // "couldn't save" here would claim more than we know.
+                      coedit.saveError
+                      ? `Couldn't confirm the save — ${coedit.saveError}`
+                      : "Couldn't confirm the save"
+                    : coedit.saveError
+                      ? `Couldn't save: ${coedit.saveError}`
+                      : "Couldn't save"}
+            </span>
+          )}
         {!viewingVersion && !isMobile && (
           <PresenceAvatars
             path={path}
