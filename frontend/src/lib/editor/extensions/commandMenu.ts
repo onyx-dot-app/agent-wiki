@@ -32,7 +32,10 @@ import {
   SvgQuoteStart,
   SvgTextLines,
 } from "@onyx-ai/opal/icons";
-import { CommandList, type CommandListHandle } from "@/lib/editor/components";
+import {
+  CommandMenu as CommandMenuComponent,
+  type CommandMenuyHandle,
+} from "@/lib/editor/components";
 import {
   canUploadImages,
   promptImageUpload,
@@ -171,13 +174,13 @@ export const CommandMenu = Extension.create({
         command: ({ editor, range, props }) => props.run(editor, range),
         render: () => {
           let component: ReactRenderer<
-            CommandListHandle,
+            CommandMenuyHandle,
             SuggestionProps<CommandItem>
           >;
           let unmount: (() => void) | undefined;
           return {
             onStart: (props) => {
-              component = new ReactRenderer(CommandList, {
+              component = new ReactRenderer(CommandMenuComponent, {
                 props,
                 editor: props.editor,
               });

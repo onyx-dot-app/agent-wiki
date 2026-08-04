@@ -116,7 +116,6 @@ export interface TipTapEditorProps {
    * (`CoeditorHandle`). A plain prop in React 19 — no `forwardRef` wrapper. */
   ref?: Ref<CoeditorHandle>;
 }
-
 export function TipTapEditor({
   doc: docProp,
   awareness: awarenessProp,
@@ -421,7 +420,13 @@ export function TipTapEditor({
   );
 }
 
-interface CoeditPresenceBarProps {
+/* Live-session presence: who else is on the page — labeled "editing" while
+   their cursor is rendered in the content (yCursorPlugin), "viewing"
+   otherwise — and who's typing right now. The label is derived from the
+   same peers list that renders the carets, so bar and doc can never
+   disagree. Renders nothing when you're alone. Ported verbatim from
+   `lib/editor/components.tsx`'s component of the same name. */
+export interface CoeditPresenceBarProps {
   participants: CoeditParticipant[];
   /** Peers with a live cursor (from `useCoeditSession`) — a participant
    * with an entry here is "editing", the rest are "viewing". */
@@ -429,13 +434,6 @@ interface CoeditPresenceBarProps {
   typing: string[];
   selfUserId: string | null;
 }
-
-// Live-session presence: who else is on the page — labeled "editing" while
-// their cursor is rendered in the content (yCursorPlugin), "viewing"
-// otherwise — and who's typing right now. The label is derived from the
-// same peers list that renders the carets, so bar and doc can never
-// disagree. Renders nothing when you're alone. Ported verbatim from
-// `lib/editor/components.tsx`'s component of the same name.
 export function CoeditPresenceBar({
   participants,
   peers,
@@ -468,15 +466,13 @@ export function CoeditPresenceBar({
   );
 }
 
-export interface CommandListHandle {
+export interface CommandMenuyHandle {
   onKeyDown: (props: SuggestionKeyDownProps) => boolean;
 }
-
-export function CommandList({
-  items,
-  command,
-  ref,
-}: SuggestionProps<CommandItem> & { ref?: Ref<CommandListHandle> }) {
+export type CommandMenuProps = {
+  ref?: Ref<CommandMenuyHandle>;
+} & SuggestionProps<CommandItem>;
+export function CommandMenu({ ref, items, command }: CommandMenuProps) {
   const [selected, setSelected] = useState(0);
   useEffect(() => setSelected(0), [items]);
 
