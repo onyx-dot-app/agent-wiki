@@ -7,9 +7,9 @@
  * hand-rolled popup; positioning is Floating UI via `SuggestionProps.mount`,
  * confirmed against the installed package's own documented API.
  *
- * The menu UI (`CommandList`), its command set (`filterCommands`/`COMMANDS`)
- * and their types live in `components.tsx`; this module is only the Tiptap
- * `Suggestion` wiring that drives them.
+ * The command set and its filtering live here; the menu UI (`CommandList`) is
+ * a plain React component in `components.tsx` (which keeps this a JSX-free
+ * `.ts` extension), and the shared `CommandItem` type is in `./types`.
  *
  * Table isn't offered here: there's no "insert a blank table" flow (the
  * backend's opaque-row table shape has no per-cell editing to seed —
@@ -19,14 +19,138 @@
  * user should hand-author.
  */
 import { Extension } from "@tiptap/core";
+import type { Editor } from "@tiptap/core";
 import { ReactRenderer } from "@tiptap/react";
 import Suggestion, { type SuggestionProps } from "@tiptap/suggestion";
 import {
-  CommandList,
-  filterCommands,
-  type CommandItem,
-  type CommandListHandle,
-} from "@/lib/editor/components";
+  SvgCheckSquare,
+  SvgCode,
+  SvgHash,
+  SvgImage,
+  SvgListTree,
+  SvgMinus,
+  SvgQuoteStart,
+  SvgTextLines,
+} from "@onyx-ai/opal/icons";
+import { CommandList, type CommandListHandle } from "@/lib/editor/components";
+import {
+  canUploadImages,
+  promptImageUpload,
+} from "@/lib/editor/extensions/images";
+import type { CommandItem } from "@/lib/editor/extensions/types";
+
+const COMMANDS: CommandItem[] = [
+  {
+    title: "Text",
+    icon: SvgTextLines,
+    run: (editor, range) =>
+      editor.chain().focus().deleteRange(range).setNode("paragraph").run(),
+  },
+  {
+    title: "Heading 1",
+    icon: SvgHash,
+    run: (editor, range) =>
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .setNode("heading", { level: 1 })
+        .run(),
+  },
+  {
+    title: "Heading 2",
+    icon: SvgHash,
+    run: (editor, range) =>
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .setNode("heading", { level: 2 })
+        .run(),
+  },
+  {
+    title: "Heading 3",
+    icon: SvgHash,
+    run: (editor, range) =>
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .setNode("heading", { level: 3 })
+        .run(),
+  },
+  {
+    title: "Bullet List",
+    icon: SvgListTree,
+    run: (editor, range) =>
+      editor.chain().focus().deleteRange(range).toggleBulletList().run(),
+  },
+  {
+    title: "Numbered List",
+    icon: SvgListTree,
+    run: (editor, range) =>
+      editor.chain().focus().deleteRange(range).toggleOrderedList().run(),
+  },
+  {
+    title: "Task List",
+    icon: SvgCheckSquare,
+    run: (editor, range) =>
+      editor.chain().focus().deleteRange(range).toggleTaskList().run(),
+  },
+  {
+    title: "Blockquote",
+    icon: SvgQuoteStart,
+    run: (editor, range) =>
+      editor.chain().focus().deleteRange(range).toggleBlockquote().run(),
+  },
+  {
+    title: "Code Block",
+    icon: SvgCode,
+    run: (editor, range) =>
+      editor.chain().focus().deleteRange(range).toggleCodeBlock().run(),
+  },
+  {
+    title: "Divider",
+    icon: SvgMinus,
+    run: (editor, range) => {
+      const node = editor.schema.nodes.thematic_break!.create(
+        // _raw: "1" matches what the backend stamps on every opaque block
+        // (see blocks.ts's own Enter-conversion path) — serialize_block's
+        // opaque-block fallback requires this exact attr, so a divider
+        // created without it fails every checkpoint from here on with
+        // NotImplementedError, permanently stranding edits in the update log.
+        { _raw: "1" },
+        editor.schema.text("---\n"),
+      );
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        .insertContent(node.toJSON())
+        .run();
+    },
+  },
+  {
+    title: "Image",
+    icon: SvgImage,
+    // A view with no page path cannot upload, so the picker would discard the
+    // file it collected.
+    available: (editor) => canUploadImages(editor.view),
+    run: (editor, range) => {
+      // Close the menu first: the OS dialog steals focus, and the leftover
+      // "/image" text would otherwise survive in the doc behind it.
+      editor.chain().focus().deleteRange(range).run();
+      promptImageUpload(editor.view);
+    },
+  },
+];
+
+function filterCommands(query: string, editor: Editor): CommandItem[] {
+  const available = COMMANDS.filter((c) => c.available?.(editor) ?? true);
+  const q = query.trim().toLowerCase();
+  if (!q) return available;
+  return available.filter((c) => c.title.toLowerCase().includes(q));
+}
 
 export const CommandMenu = Extension.create({
   name: "commandMenu",
