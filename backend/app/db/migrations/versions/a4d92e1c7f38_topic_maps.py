@@ -59,6 +59,10 @@ def upgrade() -> None:
         ),
         sa.Column("triggered_by", sa.Text(), nullable=True),
         sa.Column("created_at", sa.Text(), server_default=_NOW, nullable=False),
+        # A run is patched in place as pages change; a full re-derivation makes a new one and
+        # freezes this. patch_count is how far it has drifted from what the derivation produced.
+        sa.Column("patched_at", sa.Text(), nullable=True),
+        sa.Column("patch_count", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.ForeignKeyConstraint(
             ["entity_type_taxonomy_id"], ["entity_type_taxonomies.id"], ondelete="SET NULL"
         ),
@@ -95,7 +99,9 @@ def upgrade() -> None:
         sa.Column("run_id", sa.Integer(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("description", sa.Text(), server_default=sa.text("''"), nullable=False),
-        sa.Column("need_kind", sa.Text(), server_default=sa.text("''"), nullable=False),
+        # The dominant value across this aspect's pages, for retrieval and triage. The
+        # authoritative per-page value lives on aspect_pages.
+        sa.Column("aspect_kind", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.Column("detail_level", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.Column("focus", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.ForeignKeyConstraint(["run_id"], ["topic_map_runs.id"], ondelete="CASCADE"),
@@ -122,6 +128,12 @@ def upgrade() -> None:
         sa.Column("doc_id", sa.Text(), nullable=False),
         sa.Column("entity", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.Column("need_name", sa.Text(), server_default=sa.text("''"), nullable=False),
+        # How THIS page maintains the facet — it differs per page, so it lives here rather than
+        # on the aspect. "kind" because the vocabulary is closed, matching the codebase's split
+        # between kind (enumerated) and type (open, derived).
+        sa.Column("aspect_kind", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("detail_level", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("focus", sa.Text(), server_default=sa.text("''"), nullable=False),
         sa.ForeignKeyConstraint(["aspect_id"], ["aspects.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["doc_id"], ["wiki_doc_ids.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("aspect_id", "doc_id", "entity"),

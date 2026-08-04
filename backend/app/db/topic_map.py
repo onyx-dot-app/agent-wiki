@@ -43,6 +43,10 @@ class PageRef(NamedTuple):
     doc_id: str
     need_name: str
     entity: str
+    # How THIS page maintains the facet — authoritative for writing to it.
+    aspect_kind: str
+    detail_level: str
+    focus: str
 
 
 class AspectRecord(NamedTuple):
@@ -55,7 +59,9 @@ class AspectRecord(NamedTuple):
     aspect_id: int
     name: str
     description: str
-    need_kind: str
+    # The dominant value across this aspect's pages — for triage. The authoritative per-page
+    # value is on ``PageRef``.
+    aspect_kind: str
     detail_level: str
     focus: str
     pages: list[PageRef]
@@ -120,7 +126,14 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
             .order_by(AspectPage.aspect_id, AspectPage.doc_id, AspectPage.entity)
         ):
             pages_by_aspect.setdefault(row.aspect_id, []).append(
-                PageRef(doc_id=row.doc_id, need_name=row.need_name, entity=row.entity)
+                PageRef(
+                    doc_id=row.doc_id,
+                    need_name=row.need_name,
+                    entity=row.entity,
+                    aspect_kind=row.aspect_kind,
+                    detail_level=row.detail_level,
+                    focus=row.focus,
+                )
             )
 
     records = {
@@ -128,7 +141,7 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
             aspect_id=a.id,
             name=a.name,
             description=a.description,
-            need_kind=a.need_kind,
+            aspect_kind=a.aspect_kind,
             detail_level=a.detail_level,
             focus=a.focus,
             pages=pages_by_aspect.get(a.id, []),
@@ -207,14 +220,21 @@ def aspects_for_page(doc_id: str) -> list[AspectRecord]:
             select(AspectPage).where(AspectPage.aspect_id.in_([a.id for a in found]))
         ):
             pages_by_aspect.setdefault(page.aspect_id, []).append(
-                PageRef(doc_id=page.doc_id, need_name=page.need_name, entity=page.entity)
+                PageRef(
+                    doc_id=page.doc_id,
+                    need_name=page.need_name,
+                    entity=page.entity,
+                    aspect_kind=page.aspect_kind,
+                    detail_level=page.detail_level,
+                    focus=page.focus,
+                )
             )
         return [
             AspectRecord(
                 aspect_id=a.id,
                 name=a.name,
                 description=a.description,
-                need_kind=a.need_kind,
+                aspect_kind=a.aspect_kind,
                 detail_level=a.detail_level,
                 focus=a.focus,
                 pages=pages_by_aspect.get(a.id, []),
@@ -283,7 +303,7 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
                         run_id=run.id,
                         name=str(aspect.get("name") or ""),
                         description=str(aspect.get("description") or ""),
-                        need_kind=str(aspect.get("need_kind") or ""),
+                        aspect_kind=str(aspect.get("aspect_kind") or ""),
                         detail_level=str(aspect.get("detail_level") or ""),
                         focus=str(aspect.get("focus") or ""),
                     )
@@ -315,6 +335,9 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
                                 doc_id=doc_id,
                                 need_name=str(page.get("need_name") or ""),
                                 entity=entity,
+                                aspect_kind=str(page.get("aspect_kind") or aspect.get("aspect_kind") or ""),
+                                detail_level=str(page.get("detail_level") or aspect.get("detail_level") or ""),
+                                focus=str(page.get("focus") or aspect.get("focus") or ""),
                             )
                         )
                         n_pages += 1

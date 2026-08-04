@@ -24,7 +24,7 @@ def _aspect(name: str, pages: list[str], *, key: str | None = None, **over) -> d
         "key": key or name,
         "name": name,
         "description": "what is tracked",
-        "need_kind": "entity_status",
+        "aspect_kind": "entity_status",
         "detail_level": "one line each",
         "focus": "specific",
         "pages": [{"doc_id": d, "need_name": name, "entity": ""} for d in pages],

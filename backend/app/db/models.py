@@ -2208,6 +2208,17 @@ class TopicMapRun(Base):
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+    # A run is the one MUTABLE map: page edits patch it in place — a reworded need updates a row,
+    # a vanished one deletes it, a new one joins the nearest aspect — so ids stay stable and
+    # nothing needs re-naming. A full re-derivation instead creates a NEW active run, and freezes
+    # this one. So at most one run is live at a time; the rest are history.
+    #
+    # patch_count is what says how far the map has drifted from what the derivation produced.
+    # Incremental assignment never rebalances — centroids drift and a facet that should have split
+    # stays merged — so this is the trigger for re-deriving, and the honest signal that a run
+    # patched four hundred times is not the same object a fresh one is.
+    patched_at: Mapped[str | None] = mapped_column(Text)
+    patch_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     __table_args__ = (
         Index("uq_topic_map_runs_active", "active", unique=True, postgresql_where=text("active")),
@@ -2256,11 +2267,22 @@ class Aspect(Base):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    # How a fact applies: a timeline appends an entry, an entity_status replaces a cell. When the
-    # contributing needs disagree, the producer decides — see app/db/topic_map.py.
-    need_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+
+    # The three below are the DOMINANT value across the pages holding this facet, for retrieval
+    # and triage — filtering to timeline aspects, or judging whether a document fits, happens
+    # here, before any page row is loaded.
+    #
+    # They are NOT authoritative for writing. The same value lives on ``AspectPage`` and differs
+    # per page: observed in the real corpus, one page kept "implementation status" as a
+    # chronological log (timeline) and another as a current-state checklist (entity_status).
+    # Applying a page's write with the wrong one appends where it should replace. A summary here
+    # and the truth there is the point — not duplication for its own sake.
+    #
+    # ``kind`` not ``type``: a closed enumerated set, matching every other closed vocabulary here
+    # (UserKind, BlockKind, TriggerKind), while ``type`` is reserved for open derived ones like
+    # ``entity_type``.
+    aspect_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     detail_level: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    # "specific" = a closed entity set; "generic" = an open roster admitting new instances.
     focus: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
 
     __table_args__ = (Index("ix_aspects_run_id", "run_id"),)
@@ -2307,6 +2329,14 @@ class AspectPage(Base):
         Text, primary_key=True, nullable=False, server_default=text("''")
     )
     need_name: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # How THIS page maintains the facet, carried from the need it came from — and AUTHORITATIVE
+    # for writing to it, unlike the aspect-level summary of the same name. A timeline APPENDS an
+    # entry; an entity_status REPLACES a cell. Getting it wrong writes to the page the wrong way,
+    # and two pages holding one facet genuinely disagree in the real corpus.
+    aspect_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    detail_level: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # "specific" = a closed entity set; "generic" = an open roster admitting new instances.
+    focus: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
 
     __table_args__ = (
         # The reverse lookup a reconciler needs: given a page, which aspects does it hold? The
