@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from app.db.session import session
 from app.models.wiki import ChangeKind
+from app.wiki import update_policy
 from app.wiki.git import commit_file, list_paths
 from app.wiki.notify import after_doc_write
 import logging
@@ -119,6 +120,27 @@ def _stamp_seed_marker() -> None:
     log.info("wiki_seed_state marker stamped at %s", now_iso)
 
 
+def _seed_root_policy_defaults() -> None:
+    """Org-policy defaults for a brand-new wiki: the AI may organize pages
+    everywhere, and connector ingestion updates are opt-in per scope.
+
+    A visible root policy row rather than a code default, so a customer
+    changes it like any folder policy and the choice sticks — this runs
+    only on the boot that seeds the wiki, never on a restored or
+    pre-existing install. It runs *before* the pages are written: an
+    interrupted first boot then recovers on the next one — either the
+    seed branch re-runs (the ``get("")`` guard skips the existing row) or
+    the committed pages route the boot down the pre-existing-content
+    branch with the row already durably in place. After the pages or the
+    marker, a crash could strand the wiki seeded but defaultless."""
+    if update_policy.get("") is not None:
+        return
+    update_policy.set_policy(
+        "", ingestion_auto_update_disabled=True, ai_management_allowed=True
+    )
+    log.info("seeded root update-policy defaults (organize on, auto-update off)")
+
+
 def seed_if_empty(target_dir: str) -> bool:
     """If this DB has never been seeded, populate the wiki from the bundled seed.
 
@@ -149,6 +171,7 @@ def seed_if_empty(target_dir: str) -> bool:
         _stamp_seed_marker()
         return False
     log.info("seeding empty wiki at %s from %s", target_dir, SEED_SOURCE_DIR)
+    _seed_root_policy_defaults()
     written = write_seed_pages(Path(target_dir), overwrite_existing=False)
     if written > 0:
         _stamp_seed_marker()

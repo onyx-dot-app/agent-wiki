@@ -45,6 +45,14 @@ def test_seed_if_empty_writes_pages_and_stamps_marker(tmp_repo):
     assert sorted(_list_md_paths()) == sorted(expected_paths)
     assert _read_marker() is not None
 
+    # A seeded wiki carries the org-policy defaults on the root scope:
+    # AI organization allowed, ingestion auto-update opt-in per scope.
+    from app.wiki import update_policy
+
+    resolved = update_policy.resolve_for_path("Any Folder/any-page.md")
+    assert resolved.ai_management_allowed is True
+    assert resolved.ingestion_auto_update_disabled is True
+
 
 def test_seed_if_empty_is_idempotent_when_marker_set(tmp_repo):
     """Second call must skip without writing anything new."""
@@ -87,6 +95,18 @@ def test_seed_does_not_run_again_after_user_wipes_wiki(tmp_repo):
 
     assert re_seeded is False
     assert _list_md_paths() == []
+
+
+def test_pre_existing_wiki_defaults_untouched(tmp_repo):
+    """A boot over pre-existing content must not install the root policy
+    defaults — an upgraded or restored deployment keeps its behavior."""
+    from app.wiki import update_policy
+    from app.wiki.git import commit_file
+    from app.wiki.seed import seed_if_empty
+
+    commit_file("existing.md", "hello", "pre-existing page")
+    assert seed_if_empty(tmp_repo.wiki_dir) is False
+    assert update_policy.get("") is None
 
 
 def test_pre_existing_wiki_content_just_stamps_marker(tmp_repo):
