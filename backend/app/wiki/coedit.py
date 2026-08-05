@@ -441,6 +441,44 @@ def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> bool:
         return row is not None
 
 
+def transplant_snapshot(
+    session_id: int, *, snapshot: bytes, body: str, base_sha: str | None
+) -> bool:
+    """Adopt the page's persistent document as this session's own seq-0 state
+    — the attach path of the one-lineage-per-page model.
+
+    A pure byte copy from the ``wiki_documents`` row (no ``Doc`` is built):
+    the transplanted snapshot *is* the page's CRDT lineage, so a client
+    reconnecting with a retained document answers the sync handshake on the
+    lineage it already holds and nothing duplicates — for every reconnect
+    shape, not just the same-``base_sha`` clean case ``open_session``'s reuse
+    rule covers. ``base_sha`` is the document's, not the opener's HEAD: it is
+    what the snapshot actually represents, and any drift between it and HEAD
+    is folded in afterwards as an ordinary live-rebase (see
+    ``_seed_snapshot_sync`` in ``app/api/coedit.py``).
+
+    Same conditionality as ``set_initial_snapshot`` (``ydoc_snapshot IS
+    NULL``), so concurrent connectors race harmlessly — and unlike a markdown
+    seed, even the loser lost nothing: both transplant the same lineage.
+
+    No mirror write here, deliberately: the ``wiki_documents`` row is the
+    *source* of this state, already current.
+    """
+    with session() as s:
+        row = s.scalars(
+            update(CoeditSession)
+            .where(CoeditSession.id == session_id, CoeditSession.ydoc_snapshot.is_(None))
+            .values(
+                ydoc_snapshot=snapshot,
+                ydoc_snapshot_seq=0,
+                ydoc_snapshot_body=body,
+                base_sha=base_sha,
+            )
+            .returning(CoeditSession.id)
+        ).one_or_none()
+        return row is not None
+
+
 class UpdateRow(BaseModel):
     """One logged Yjs update from `coedit_updates`."""
 
