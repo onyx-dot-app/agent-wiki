@@ -58,8 +58,9 @@ def _duplicated_block_ids(doc: Doc) -> list[str]:
 
     Two top-level blocks sharing an id is not a thing editing can produce — it
     means the document holds the same block twice under two CRDT lineages that
-    share no item ids and therefore cannot dedupe (``open_session``'s reuse rule
-    exists to stop that arising; this catches any other route to it). Freshly
+    share no item ids and therefore cannot dedupe (the attach path exists to
+    stop that arising: every open transplants the page's one lineage from its
+    ``wiki_documents`` row; this catches any other route to it). Freshly
     typed content carries no id at all and takes ``checkpoint_body``'s
     ``orig is None`` path, so it can't collide.
 
@@ -82,8 +83,25 @@ def _duplicated_block_ids(doc: Doc) -> list[str]:
     return dupes
 
 
-def drop_duplicate_blocks(doc: Doc) -> list[str]:
-    """Repair repeats of a top-level ``_blockId``; return the repeated ids.
+class DuplicateRepair(BaseModel):
+    """What ``drop_duplicate_blocks`` did, split by what the repeat *meant* —
+    the two cases carry very different weight (see that docstring): a deleted
+    identical copy is the "one page, one lineage" invariant broken, while a
+    reidentified differing copy is an ordinary editor race."""
+
+    model_config = ConfigDict(frozen=True)
+
+    deleted: list[str] = []
+    reidentified: list[str] = []
+
+
+def drop_duplicate_blocks(doc: Doc) -> DuplicateRepair:
+    """Repair repeats of a top-level ``_blockId``; return what was repaired.
+
+    A tripwire more than a defense since the attach cutover: every open
+    transplants the page's one lineage from its ``wiki_documents`` row, so
+    the lineage-collision case below should be unreachable — it firing means
+    that invariant broke somewhere, which is exactly why the repair stays.
 
     Two different situations produce a repeated id, and they need different
     repairs:
@@ -120,7 +138,7 @@ def drop_duplicate_blocks(doc: Doc) -> list[str]:
     """
     dupes = _duplicated_block_ids(doc)
     if not dupes:
-        return []
+        return DuplicateRepair()
     root = doc.get(markdown_yjs.ROOT_XML_KEY, type=XmlFragment)
     occurrences: dict[str, list[tuple[int, str]]] = {}
     for i, child in enumerate(root.children):
@@ -129,20 +147,27 @@ def drop_duplicate_blocks(doc: Doc) -> list[str]:
             occurrences.setdefault(block_id, []).append((i, markdown_yjs.serialize_block(child)))
     stale: list[int] = []
     reidentify: list[int] = []
-    for members in occurrences.values():
+    deleted_ids: list[str] = []
+    reidentified_ids: list[str] = []
+    for block_id, members in occurrences.items():
         if len(members) == 1:
             continue
         anchor_text = members[0][1]
         identical = [i for i, text in members if text == anchor_text]
+        differing = [i for i, text in members if text != anchor_text]
         stale.extend(identical[:-1])  # the last identical copy keeps the id
-        reidentify.extend(i for i, text in members if text != anchor_text)
+        reidentify.extend(differing)
+        if len(identical) > 1:
+            deleted_ids.append(block_id)
+        if differing:
+            reidentified_ids.append(block_id)
     # Descending, so each deletion can't shift the index of one still pending.
     with doc.transaction():
         for i in reidentify:
             root.children[i].attributes[markdown_yjs.BLOCK_ID_ATTR] = None
         for i in sorted(stale, reverse=True):
             del root.children[i]
-    return dupes
+    return DuplicateRepair(deleted=deleted_ids, reidentified=reidentified_ids)
 
 
 # A lineage collision restates most of the page; a person can legitimately
@@ -447,28 +472,44 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         # Repaired in place and then committed normally, rather than refused:
         # the checkpoint's closing broadcast carries the deletion to every
         # connected client, so their documents converge too. Refusing instead
-        # would leave the duplication in the browsers that hold it, to be
-        # re-sent on their next reconnect — and closing the session wouldn't
-        # help, since the next one can't reuse a dirty session and would seed
-        # yet another lineage for that same retained document to merge into.
-        dupes = drop_duplicate_blocks(doc)
-        if dupes:
+        # would leave the duplication in the browsers that hold it — and in
+        # the document row the next open transplants from, once a checkpoint
+        # finally did commit it.
+        repair = drop_duplicate_blocks(doc)
+        if repair.deleted:
+            # Tripwire: an identical-copy repeat is two lineages holding the
+            # same block, which the attach path (every open transplants the
+            # page's one lineage) is supposed to make unreachable.
             log.error(
-                "coedit checkpoint: %s (session %s) held duplicate top-level block ids "
-                "%s; dropped the repeats and committing the repaired document. This "
-                "should be unreachable — see open_session's lineage reuse rule.",
+                "coedit checkpoint: %s (session %s) held identical duplicate "
+                "top-level blocks %s; dropped the repeats and committing the "
+                "repaired document. The one-lineage-per-page invariant broke — "
+                "see transplant_snapshot / _seed_snapshot_sync.",
                 path,
                 session_id,
-                dupes,
+                repair.deleted,
+            )
+        elif repair.reidentified:
+            # Benign: ProseMirror's node split copied an id onto both halves
+            # and this checkpoint raced the editor's own fix-up; clearing the
+            # later id is that fix-up. No lineage involvement.
+            log.warning(
+                "coedit checkpoint: %s (session %s) re-identified split block(s) "
+                "%s ahead of the client's own repair",
+                path,
+                session_id,
+                repair.reidentified,
             )
 
         restated = drop_restated_blocks(doc, base_body)
         if restated:
+            # Tripwire, same invariant as above: restatement at this scale is
+            # a second lineage's content re-serialized onto the page.
             log.error(
                 "coedit checkpoint: %s (session %s) held %d block(s) restating the "
                 "page back onto itself; dropped them and committing the repaired "
-                "document. Indicates a second Yjs lineage reached the doc — see "
-                "open_session's reuse rule and purge_viewer_sessions' retention.",
+                "document. The one-lineage-per-page invariant broke — see "
+                "transplant_snapshot / _seed_snapshot_sync.",
                 path,
                 session_id,
                 restated,

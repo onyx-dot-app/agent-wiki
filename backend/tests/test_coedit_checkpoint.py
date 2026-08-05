@@ -725,7 +725,8 @@ def test_drop_duplicate_blocks_repairs_the_doc_and_the_client() -> None:
     # The server rebuilds that same state, then repairs it.
     server = seed_doc_from_markdown(body)
     server.apply_update(client.get_update(server.get_state()))
-    assert drop_duplicate_blocks(server) == ["b0"]
+    repair = drop_duplicate_blocks(server)
+    assert repair.deleted == ["b0"] and repair.reidentified == []
     assert _duplicated_block_ids(server) == []
     assert reconstruct_body(server) == body
 
@@ -767,7 +768,8 @@ def test_drop_duplicate_blocks_reidentifies_a_split_instead_of_deleting_it() -> 
         para.children[0].insert(0, "typed ")  # pyright: ignore[reportAttributeAccessIssue]
         para.attributes[BLOCK_ID_ATTR] = dict(lst.attributes)[BLOCK_ID_ATTR]  # pyright: ignore[reportAttributeAccessIssue]
 
-    assert drop_duplicate_blocks(doc) == ["b0"]
+    repair = drop_duplicate_blocks(doc)
+    assert repair.reidentified == ["b0"] and repair.deleted == []
     assert _duplicated_block_ids(doc) == []
     rt = reconstruct_body(doc)
     assert "typed after" in rt  # the person's text survived
@@ -809,7 +811,8 @@ def test_drop_duplicate_blocks_keeps_the_last_identical_copy() -> None:
     with doc.transaction():
         root.children[1].attributes["_probe"] = "later"  # pyright: ignore[reportIndexIssue]
 
-    assert drop_duplicate_blocks(doc) == ["b0"]
+    repair = drop_duplicate_blocks(doc)
+    assert repair.deleted == ["b0"]
     assert _duplicated_block_ids(doc) == []
     assert reconstruct_body(doc) == "a\n"
     survivors = list(root.children)
@@ -848,12 +851,12 @@ def test_drop_duplicate_blocks_repair_converges_across_checkpoints() -> None:
 
 
 def test_drop_duplicate_blocks_is_a_no_op_on_a_healthy_doc() -> None:
-    from app.wiki.coedit_checkpoint import drop_duplicate_blocks
+    from app.wiki.coedit_checkpoint import DuplicateRepair, drop_duplicate_blocks
     from app.wiki.markdown_yjs import reconstruct_body, seed_doc_from_markdown
 
     body = "\n\n".join(f"- line {i}" for i in range(50)) + "\n"
     doc = seed_doc_from_markdown(body)
-    assert drop_duplicate_blocks(doc) == []
+    assert drop_duplicate_blocks(doc) == DuplicateRepair()
     assert reconstruct_body(doc) == body
 
 

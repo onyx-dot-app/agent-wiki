@@ -38,7 +38,6 @@ from sqlalchemy import Text as SAText, cast, delete, func, literal, or_, select,
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased
 
 from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User
 from app.models.wiki import PathMove
@@ -266,46 +265,6 @@ def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
         )
 
 
-def _reusable_closed_session(
-    s: Session, path: str, base_sha: str | None
-) -> CoeditSession | None:
-    """The newest closed session for ``path`` whose document still describes
-    the page as committed, or ``None`` when reactivating would be unsafe and
-    the caller should seed a fresh one.
-
-    Three conditions, each ruling out a way the old lineage could disagree with
-    what the next reader expects:
-
-    ``base_sha`` matches the caller's current HEAD for the path
-        A session stamps its own ``base_sha`` with the commit its last
-        checkpoint produced, so equality means nothing has touched the file
-        since — no agent write, no API PUT, no other session. Any commit moves
-        HEAD and disqualifies the row, which is what keeps this from reviving a
-        document that no longer matches the page. ``None`` (a page with no
-        commit of its own yet) never matches.
-    a snapshot exists
-        Without one there is no lineage to preserve, so reuse buys nothing.
-    the session is clean
-        ``ydoc_seq == ydoc_checkpointed_seq``, i.e. every update it holds is
-        already committed. A dirty session was closed with work outstanding
-        (the missing-path close is the one that does this) and reactivating it
-        would resurrect updates against a page state nobody has verified.
-    """
-    if base_sha is None:
-        return None
-    return s.scalar(
-        select(CoeditSession)
-        .where(
-            CoeditSession.path == path,
-            CoeditSession.status == SessionStatus.CLOSED.value,
-            CoeditSession.base_sha == base_sha,
-            CoeditSession.ydoc_snapshot.is_not(None),
-            CoeditSession.ydoc_seq == CoeditSession.ydoc_checkpointed_seq,
-        )
-        .order_by(CoeditSession.id.desc())
-    )
-
-
 def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     """Get-or-create the active session row for ``path``.
 
@@ -316,17 +275,13 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     history. Concurrent opens race on the partial unique index; the loser
     re-reads the winner's row.
 
-    When no active session exists, a closed one for the same path is
-    *reactivated* in preference to inserting a fresh row, provided it still
-    describes the page as committed (see ``_reusable_closed_session``). This is
-    a correctness requirement, not an optimization: a session's document
-    identity is its Yjs lineage, and a new row means a new snapshot seeded by
-    ``seed_doc_from_markdown``, whose ``Doc()`` carries a fresh random client
-    id. A client that reconnects onto a new lineage answers the server's
-    SYNC_STEP1 with its entire retained document — the two lineages share no
-    item ids, so nothing dedupes and every block ends up in the page twice,
-    compounding on each cycle. Reactivating keeps the lineage, which makes that
-    reply a no-op and also preserves anything typed while disconnected.
+    A fresh row is otherwise inserted — never a reactivated closed one. The
+    page's CRDT lineage doesn't live here: the attach path transplants it
+    from the page's ``wiki_documents`` row into the new session
+    (``transplant_snapshot``; ``_seed_snapshot_sync`` in
+    ``app/api/coedit.py``), so a reconnecting client's retained document
+    always meets the lineage it already holds, whatever became of the old
+    session row.
     """
     with session() as s:
         # The session's binding to the page's document identity, stamped on
@@ -345,28 +300,6 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
                 existing.doc_id = doc_id
             return _session_row(existing)
         now = _iso(_now())
-        reusable = _reusable_closed_session(s, path, base_sha)
-        if reusable is not None:
-            reusable.status = SessionStatus.ACTIVE.value
-            reusable.updated_at = now
-            if reusable.doc_id is None and doc_id is not None:
-                reusable.doc_id = doc_id
-            try:
-                s.flush()
-            except IntegrityError:
-                # Another opener activated a row for this path first — same
-                # race the insert path below handles, same resolution.
-                s.rollback()
-                winner = s.scalar(
-                    select(CoeditSession).where(
-                        CoeditSession.path == path,
-                        CoeditSession.status == SessionStatus.ACTIVE.value,
-                    )
-                )
-                if winner is None:  # pragma: no cover - winner closed in the gap
-                    raise
-                return _session_row(winner)
-            return _session_row(reusable)
         # `now` is stamped in _iso (T-separated, +00:00) rather than letting the
         # space-separated server_default fill it: sessions_due_for_checkpoint
         # compares these against _iso cutoffs, and mixing the two string formats
@@ -938,69 +871,33 @@ def close_abandoned_sessions() -> list[int]:
         )
 
 
-def purge_viewer_sessions(*, retain_seconds: int, limit: int = 500) -> int:
-    """Delete closed sessions that never received an update. Returns the count.
+def purge_closed_sessions(*, limit: int = 500) -> int:
+    """Delete closed sessions whose work is fully checkpointed. Returns the count.
 
-    With join-on-landing, every page view mints a session — a closed
-    ``ydoc_seq == 0`` row carries no updates, no participants (removed on
-    leave; FK cascade catches stragglers), so it is pure dead weight. Runs
-    against *closed* rows only: deleting at the close point instead would
-    race a concurrent join into an FK violation, while a closed session is a
-    soft state joins already tolerate. Bounded so the periodic scan stays
-    cheap; the backlog drains across successive runs.
+    A closed *clean* row is pure dead weight: its updates were pruned by its
+    final checkpoint, its participants left (FK cascade catches stragglers),
+    and the page's lineage lives on its ``wiki_documents`` row — the next
+    open transplants from there (``transplant_snapshot``), so nothing ever
+    reactivates or rebuilds from a closed session. That is what lets this be
+    unconditional: the age gate and the keep-the-newest-row-per-path subquery
+    that used to live here protected the row session *reuse* needed, and
+    reuse is gone with the attach cutover.
 
-    Two conditions keep this off rows ``_reusable_closed_session`` still
-    needs. A deleted row cannot be reactivated, so purging one whose client
-    is about to reconnect forces ``open_session`` to seed a fresh
-    ``Doc()`` — a new Yjs lineage against the retained document the client
-    answers SYNC_STEP1 with, which is exactly the whole-page duplication
-    ``open_session`` describes. The scan closes and purges in the *same*
-    pass, so without these the window was the ~3s a client takes to
-    reconnect, and a "never edited" row is precisely a viewer's — someone
-    with the page merely open.
+    Dirty closed rows are kept — a session closed with uncommitted work (the
+    missing-path close) still holds its unpruned updates for manual recovery,
+    and those are the one thing the document row does not carry.
 
-    ``updated_at`` older than ``retain_seconds``
-        ``close_session``/``close_abandoned_sessions`` both stamp it, so
-        this is time since close.
-    not the row ``_reusable_closed_session`` would pick for its path
-        Kept regardless of age, so a reconnect after any delay still has a
-        lineage to adopt. Bounded at one row per page.
-
-        This mirrors that function's predicate rather than taking the highest
-        id outright: a newer row that is dirty or has no snapshot is *not*
-        reusable, and protecting it would leave an older, eligible row exposed
-        to the age cutoff — deleting the very lineage a reconnect would have
-        adopted. Its ``base_sha == HEAD`` condition has no SQL equivalent
-        (HEAD is per-path git state), but it needs none here: a row's
-        ``base_sha`` is HEAD as of its creation or its last checkpoint, so of
-        two candidates the newer one's is never the staler, and the newest is
-        always the best available match.
+    Runs against *closed* rows only: deleting at the close point instead
+    would race a concurrent join into an FK violation, while a closed session
+    is a soft state joins already tolerate. Bounded so the periodic scan
+    stays cheap; the backlog drains across successive runs.
     """
-    cutoff = _iso(_now() - timedelta(seconds=retain_seconds))
-    newest = aliased(CoeditSession)
-    reusable_for_path = (
-        select(func.max(newest.id))
-        .where(
-            newest.path == CoeditSession.path,
-            newest.status == SessionStatus.CLOSED.value,
-            newest.ydoc_snapshot.is_not(None),
-            newest.ydoc_seq == newest.ydoc_checkpointed_seq,
-        )
-        .correlate(CoeditSession)
-        .scalar_subquery()
-    )
     with session() as s:
         ids = s.scalars(
             select(CoeditSession.id)
             .where(
                 CoeditSession.status == SessionStatus.CLOSED.value,
-                CoeditSession.ydoc_seq == 0,
-                CoeditSession.ydoc_checkpointed_seq == 0,
-                CoeditSession.updated_at <= cutoff,
-                or_(
-                    CoeditSession.id != reusable_for_path,
-                    reusable_for_path.is_(None),
-                ),
+                CoeditSession.ydoc_seq == CoeditSession.ydoc_checkpointed_seq,
             )
             .limit(limit)
         ).all()

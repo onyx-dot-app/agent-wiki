@@ -56,7 +56,9 @@ def test_reopen_backfills_a_null_binding(users):
     assert again.doc_id == minted
 
 
-def test_reactivation_backfills_a_null_binding(users):
+def test_open_after_close_stamps_the_fresh_row(users):
+    # A closed session is never reactivated (lineage continuity is the attach
+    # path's job) — the open after a close is a fresh row, stamped from birth.
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
     with db_session() as db:
@@ -64,9 +66,9 @@ def test_reactivation_backfills_a_null_binding(users):
             update(CoeditSession).where(CoeditSession.id == s.id).values(status="closed")
         )
     minted = doc_ids.mint_for_page(_PATH)
-    reused = coedit.open_session(_PATH, base_sha="sha1")
-    assert reused.id == s.id  # reactivated, not fresh
-    assert reused.doc_id == minted
+    fresh = coedit.open_session(_PATH, base_sha="sha1")
+    assert fresh.id != s.id
+    assert fresh.doc_id == minted
 
 
 def test_updates_carry_the_session_binding(users):

@@ -413,89 +413,44 @@ def test_rename_path(users):
     assert moved.id == s.id
 
 
-def test_purge_viewer_sessions_deletes_only_closed_never_edited(users):
-    # Two viewer-only sessions on one path: opened, seeded, no updates, closed.
-    # Only the older is purgeable — the newest is the row
-    # _reusable_closed_session would reactivate.
-    older = coedit.open_session("viewed.md", base_sha=None)
-    coedit.set_initial_snapshot(older.id, b"snap", "body")
-    coedit.join(older.id, "usr_a")
-    coedit.leave(older.id, "usr_a")
-    coedit.close_session(older.id)
-    newest = coedit.open_session("viewed.md", base_sha=None)
-    coedit.set_initial_snapshot(newest.id, b"snap", "body")
-    coedit.close_session(newest.id)
+def test_purge_closed_sessions_deletes_clean_rows_unconditionally(users):
+    # Closed clean rows purge regardless of age or edit history: the page's
+    # lineage lives on its wiki_documents row and the next open transplants
+    # from there, so nothing ever reactivates a closed session.
+    viewer = coedit.open_session("viewed.md", base_sha=None)
+    coedit.set_initial_snapshot(viewer.id, b"snap", "body")
+    coedit.join(viewer.id, "usr_a")
+    coedit.leave(viewer.id, "usr_a")
+    coedit.close_session(viewer.id)
 
-    # Edited session: has an update, closed after checkpoint — must be
-    # retained (ydoc_seq != 0, regardless of whether advance_checkpoint has
-    # since pruned its coedit_updates rows).
+    # Edited, checkpointed, closed — clean, so equally dead weight.
     edited = coedit.open_session("edited.md", base_sha=None)
     coedit.apply_update(edited.id, update_bytes=b"x", author_user_id="usr_a")
     coedit.advance_checkpoint(edited.id, seq=1, snapshot=b"snap", body="body", base_sha="sha")
     coedit.close_session(edited.id)
 
-    # Active viewer-only session: still occupied — must be retained.
+    # Active session: still occupied — must be retained.
     active = coedit.open_session("open.md", base_sha=None)
 
-    assert coedit.purge_viewer_sessions(retain_seconds=0) == 1
-    assert coedit.get_session(older.id) is None
-    assert coedit.get_session(newest.id) is not None
-    assert coedit.get_session(edited.id) is not None
+    assert coedit.purge_closed_sessions() == 2
+    assert coedit.get_session(viewer.id) is None
+    assert coedit.get_session(edited.id) is None
     assert coedit.get_session(active.id) is not None
     # Idempotent: nothing left to purge.
-    assert coedit.purge_viewer_sessions(retain_seconds=0) == 0
+    assert coedit.purge_closed_sessions() == 0
 
 
-def test_purge_viewer_sessions_retains_recently_closed(users):
-    """A reconnecting client adopts its old row's Yjs lineage, so a row closed
-    moments ago has to survive — deleting it forces a fresh seed and the
-    retained document is then duplicated into the page."""
-    older = coedit.open_session("viewed.md", base_sha=None)
-    coedit.close_session(older.id)
-    newest = coedit.open_session("viewed.md", base_sha=None)
-    coedit.close_session(newest.id)
+def test_purge_closed_sessions_keeps_dirty_rows_for_recovery(users):
+    # A session closed with uncommitted work (the missing-path close) holds
+    # unpruned updates for manual recovery — the one thing the page's
+    # document row does not carry.
+    dirty = coedit.open_session("dirty.md", base_sha=None)
+    coedit.set_initial_snapshot(dirty.id, b"snap", "body")
+    coedit.apply_update(dirty.id, update_bytes=b"lost-work", author_user_id="usr_a")
+    coedit.close_session(dirty.id)
 
-    assert coedit.purge_viewer_sessions(retain_seconds=3600) == 0
-    assert coedit.get_session(older.id) is not None
-    assert coedit.get_session(newest.id) is not None
-
-
-def test_purge_viewer_sessions_protects_the_row_reuse_would_pick(users):
-    """Retention has to mirror ``_reusable_closed_session``, not just take the
-    highest id: a newer snapshotless row isn't reusable, and protecting it
-    instead would expose the older eligible row to the age cutoff — deleting
-    the lineage a reconnect would have adopted."""
-    reusable = coedit.open_session("viewed.md", base_sha=None)
-    coedit.set_initial_snapshot(reusable.id, b"snap", "body")
-    coedit.close_session(reusable.id)
-    # Newer, but never seeded — _reusable_closed_session skips it.
-    snapshotless = coedit.open_session("viewed.md", base_sha=None)
-    coedit.close_session(snapshotless.id)
-
-    assert coedit.purge_viewer_sessions(retain_seconds=0) == 1
-    assert coedit.get_session(reusable.id) is not None
-    assert coedit.get_session(snapshotless.id) is None
-
-
-def test_purge_viewer_sessions_keeps_newest_closed_row_however_old(users):
-    """The reuse candidate is kept regardless of age: a client can reconnect
-    long after closing (a suspended laptop), and one row per page is bounded."""
-    only = coedit.open_session("viewed.md", base_sha=None)
-    coedit.set_initial_snapshot(only.id, b"snap", "body")
-    coedit.close_session(only.id)
-
-    assert coedit.purge_viewer_sessions(retain_seconds=0) == 0
-    assert coedit.get_session(only.id) is not None
-
-
-def test_purge_viewer_sessions_purges_a_never_seeded_row(users):
-    """A row that never got a snapshot holds no lineage, so there is nothing
-    for a reconnect to adopt and nothing to protect."""
-    only = coedit.open_session("viewed.md", base_sha=None)
-    coedit.close_session(only.id)
-
-    assert coedit.purge_viewer_sessions(retain_seconds=0) == 1
-    assert coedit.get_session(only.id) is None
+    assert coedit.purge_closed_sessions() == 0
+    assert coedit.get_session(dirty.id) is not None
 
 
 def test_close_abandoned_sessions_closes_only_clean_empty_ones(users):
@@ -593,54 +548,22 @@ def _close_clean(session_id: int) -> None:
         )
 
 
-def test_open_session_reactivates_a_matching_closed_session(users):
-    """A closed session whose document still describes the committed page is
-    reactivated rather than replaced.
-
-    Replacing it would seed a new Yjs lineage from markdown, and a client that
-    reconnects still holding the old lineage answers the server's sync offer
-    with its whole document — which cannot dedupe against content carrying
-    different item ids, so the page ends up in the doc twice.
-    """
+def test_open_session_never_reactivates_a_closed_session(users):
+    """A closed session stays closed — every open gets a fresh row. Lineage
+    continuity is not this function's job anymore: the attach path
+    transplants the page's document from its wiki_documents row into the new
+    session, whatever became of the old one."""
     first = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(first.id, b"snap0", "hello")
     _close_clean(first.id)
 
     again = coedit.open_session(_PATH, base_sha="sha1")
-    assert again.id == first.id
-    assert again.status == "active"
-    kept = coedit.get_session_for_checkpoint(again.id)
-    assert kept is not None and kept.ydoc_snapshot == b"snap0"
-    assert count_rows(CoeditSession) == 1
-
-
-def test_open_session_does_not_reuse_when_the_page_moved_on(users):
-    """A commit since that session's last checkpoint means its document no
-    longer describes the page, so it must not be revived."""
-    first = coedit.open_session(_PATH, base_sha="sha1")
-    coedit.set_initial_snapshot(first.id, b"snap0", "hello")
-    _close_clean(first.id)
-
-    again = coedit.open_session(_PATH, base_sha="sha2")
     assert again.id != first.id
-    assert again.base_sha == "sha2"
+    assert again.status == "active"
+    assert again.base_sha == "sha1"
+    kept = coedit.get_session_for_checkpoint(again.id)
+    assert kept is not None and kept.ydoc_snapshot is None  # awaits the attach
     assert count_rows(CoeditSession) == 2
-
-
-def test_open_session_does_not_reuse_a_dirty_or_snapshotless_session(users):
-    # Never seeded — no lineage to preserve, nothing to reuse.
-    bare = coedit.open_session(_PATH, base_sha="sha1")
-    _close_clean(bare.id)
-    after_bare = coedit.open_session(_PATH, base_sha="sha1")
-    assert after_bare.id != bare.id
-
-    # Dirty: holds updates that were never committed. Reviving it would
-    # resurrect them against a page state nobody verified.
-    coedit.set_initial_snapshot(after_bare.id, b"snap0", "hello")
-    coedit.apply_update(after_bare.id, update_bytes=b"upd", author_user_id="usr_a")
-    _close_clean(after_bare.id)
-    after_dirty = coedit.open_session(_PATH, base_sha="sha1")
-    assert after_dirty.id != after_bare.id
 
 
 def test_open_session_ignores_a_closed_session_on_another_path(users):
