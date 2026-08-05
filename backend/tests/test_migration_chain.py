@@ -60,3 +60,47 @@ def test_provenance_migrations_round_trip(tmp_db):
     command.upgrade(cfg, "head")
     assert _current_revision() == head
     assert all(_has_table(t) for t in _PROVENANCE_TABLES)
+
+
+# The topic map. Its upgrade() short-circuits when the tables already exist, because ``0001``
+# builds fresh databases from the models — so CI never runs the body, and only a rewind does.
+_TOPIC_MAP = "a4d92e1c7f38"
+_TOPIC_MAP_TABLES = ("need_maps", "topics", "aspects", "aspect_pages")
+
+
+def test_topic_map_migration_round_trips(tmp_db):
+    """Downgrade past the topic map then upgrade back, and check the shape it rebuilds.
+
+    Two things this catches that nothing else does. The guard means ``upgrade()`` is dead code on
+    a fresh database, so a create that drifted from the model would never surface; and the
+    downgrade has to drop the tables in dependency order, which broke twice while these tables
+    were gaining foreign keys.
+    """
+    cfg = _alembic_config()
+    script = ScriptDirectory.from_config(cfg)
+    head = script.get_heads()[0]
+    parent = script.get_revision(_TOPIC_MAP).down_revision
+    assert isinstance(parent, str)  # linear parent, not a merge point
+
+    assert all(_has_table(t) for t in _TOPIC_MAP_TABLES)
+
+    command.downgrade(cfg, parent)
+    assert not any(_has_table(t) for t in _TOPIC_MAP_TABLES)
+
+    command.upgrade(cfg, "head")
+    assert _current_revision() == head
+    assert all(_has_table(t) for t in _TOPIC_MAP_TABLES)
+
+    inspector = sa.inspect(get_engine())
+    # The columns the schema argues for: an aspect belongs to one topic, and the join to a need
+    # carries no copy of it.
+    assert {c["name"] for c in inspector.get_columns("aspects")} == {
+        "id", "need_map_id", "topic_id", "name", "description",
+    }
+    assert {c["name"] for c in inspector.get_columns("aspect_pages")} == {
+        "aspect_id", "doc_id", "need_name",
+    }
+    assert inspector.get_pk_constraint("aspect_pages")["constrained_columns"] == [
+        "aspect_id", "doc_id", "need_name",
+    ]
+    assert "topic_aspects" not in inspector.get_table_names()

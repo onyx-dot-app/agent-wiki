@@ -2157,6 +2157,171 @@ class EntityTypeTaxonomy(Base):
     )
 
 
+class NeedMap(Base):
+    """One derivation of the topic layer — the version header its rows hang from.
+
+    Needs are per page, so no page can see that four of them track one subject. Clustering plus a
+    naming pass can, and this is the result:
+
+        topic   the SUBJECT ("Wiki Auto Management")
+        aspect  a FACET ("implementation status")
+        pages   the documents holding that facet — the fan-out
+
+    Fan-out is a property of the ASPECT, not the topic: reconcile a fact into one aspect and it
+    applies to every page under it.
+
+    Relational rather than one JSONB document, for two reasons that are not about size. An aspect
+    can belong to more than one topic — "implementation status" is a facet of several subjects —
+    which nesting cannot express at all; and a page reference can be a real foreign key, so a
+    deleted page cannot leave a dangling row the way it could inside a blob.
+
+    Everything is scoped to a run and cascades from it, so a derivation is one insert and a prune
+    is one delete. One run is ``active``; the rest stay readable, because topic and aspect ids are
+    only stable WITHIN a run — a re-derivation mints new ones, so a consumer that recorded a
+    decision against an aspect must resolve it through the run it belongs to.
+
+    A run is written whole and replaced whole today. Patching one in place as pages change — a
+    reworded need updating a row, a new need joining the nearest aspect — is the obvious next step
+    and would keep ids stable between derivations, but nothing does it yet, so nothing here
+    records that a run has drifted from what produced it.
+    """
+
+    __tablename__ = "need_maps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Exactly one run is in force. Enforced by the partial unique index below.
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    # sha256 over the (doc_id, content_sha256) of every contributing need set. Answers "have the
+    # needs moved since this was derived?" — which decides whether re-deriving is worth an LLM
+    # pass. Built from the needs' own guard hash rather than page bodies, so a page edit that
+    # leaves its needs unchanged does not make the map look stale.
+    corpus_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    # The entity-type taxonomy in force when this map was derived. PROVENANCE, not a live
+    # dependency: nothing here stores a type name any more, so nothing needs it to resolve one.
+    # It records which vocabulary the underlying needs were labelled against, which is what makes
+    # two runs comparable when a re-derivation renamed types underneath them. SET NULL rather
+    # than CASCADE — losing the taxonomy costs that context, not the map.
+    entity_type_taxonomy_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("entity_type_taxonomies.id", ondelete="SET NULL")
+    )
+    # Model, thresholds, embed key. Kept so a human can judge whether a run is trustworthy
+    # without re-running it.
+    provenance: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    stats: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    triggered_by: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+    __table_args__ = (
+        Index("uq_need_maps_active", "active", unique=True, postgresql_where=text("active")),
+    )
+
+
+class Topic(Base):
+    """A subject the wiki tracks, named from a cluster of needs."""
+
+    __tablename__ = "topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    need_map_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("need_maps.id", ondelete="CASCADE"), nullable=False
+    )
+    # The subject, named abstractly so another page tracking it would plausibly produce the same
+    # name: "Wiki Auto Management", not "the auto-management PRD".
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    # One line on what the subject IS. A thin aspect name ("implementation status") is ambiguous
+    # alone; this anchors it for anything embedding or reasoning over the aspect. Same role as
+    # ``Aspect.description`` one level up, so it carries the same name — unlike
+    # ``EntityTypeTaxonomy``'s ``definition``, which states a DECIDABLE membership criterion
+    # rather than explaining what a thing is.
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+
+    __table_args__ = (Index("ix_topics_need_map_id", "need_map_id"),)
+
+
+class Aspect(Base):
+    """A facet that is tracked — one column of what a subject records.
+
+    Belongs to exactly one topic. An earlier revision made this many-to-many through an
+    association table, on the theory that "implementation status" is a facet of several subjects
+    at once. That was never observed: no producer emits a shared aspect, because any pipeline that
+    partitions a cluster into topics and then groups within a topic yields topic-local aspects by
+    construction — and nothing downstream consults the topic anyway, since reconciliation happens
+    at the aspect, which carries its own pages. A second topic link would have changed no
+    behaviour. If topics later become a retrieval unit, where reaching an aspect through the other
+    subject matters, restoring the join table is a backfill from this column.
+    """
+
+    __tablename__ = "aspects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    need_map_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("need_maps.id", ondelete="CASCADE"), nullable=False
+    )
+    # Denormalized against ``need_map_id`` only in the sense that a topic already knows its run; the
+    # column is the parent link, and CASCADE from the topic keeps a run's teardown a single delete.
+    topic_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("topics.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+
+    # Deliberately absent: aspect_kind, detail_level, focus. They describe how a page maintains
+    # this facet, they differ BETWEEN the pages holding it, and they live on ``AspectPage`` where
+    # they are authoritative for the write. A summary copy here would be a value that can drift
+    # from the rows it claims to summarize, with nothing to notice — and for ``detail_level``,
+    # free text, there is no summary to take: every page phrases the same granularity its own way,
+    # so a stored value is only "whichever page was inserted first" wearing a summary's clothes.
+    #
+    # Triage still gets its headline: both loaders fetch an aspect's full page list before
+    # returning it, so ``AspectRecord`` computes these on read (see ``app.db.need_map``) — always
+    # consistent with the rows, never stale.
+
+    __table_args__ = (Index("ix_aspects_need_map_id", "need_map_id"), Index("ix_aspects_topic_id", "topic_id"))
+
+
+class AspectPage(Base):
+    """Which needs make up an aspect — the connection, and nothing else.
+
+    A join table between an aspect and the needs composing it. A need has no id of its own (they
+    are a JSONB list on ``page_needs``), so it is addressed by the page holding it plus its name.
+    That pair is the whole row: the fan-out is how many distinct ``doc_id`` values an aspect has.
+
+    Carries no copy of the need. ``need_kind``, ``detail_level``, ``focus`` and the entity list
+    belong to the need and are read from ``page_needs``, which is current-valued — re-extracted
+    when a page changes — while this map is a snapshot. A copy here would drift the moment a page
+    was edited, and drift in exactly the field that decides whether a write appends or replaces.
+
+    ``doc_id`` is a real foreign key, which is the second reason for tables over a blob: a deleted
+    page cannot leave this row pointing at nothing.
+    """
+
+    __tablename__ = "aspect_pages"
+
+    # A natural key rather than a surrogate id: it says what the row IS, and makes a duplicate
+    # link impossible instead of merely unlikely. ``need_name`` is part of it because the unit is
+    # the NEED, not the page — clustering can legitimately put two of one page's needs in the
+    # same aspect, and keying on the page alone would silently drop the second.
+    aspect_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("aspects.id", ondelete="CASCADE"), primary_key=True
+    )
+    doc_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("wiki_doc_ids.id", ondelete="CASCADE"), primary_key=True
+    )
+    need_name: Mapped[str] = mapped_column(Text, primary_key=True)
+
+    __table_args__ = (
+        # The reverse lookup a reconciler needs: given a page, which aspects does it hold? The
+        # aspect side is already covered by the primary key's leading column.
+        Index("ix_aspect_pages_doc_id", "doc_id"),
+    )
+
+
 class PageNeeds(Base):
     """What one wiki page keeps track of — its information needs.
 

@@ -1,0 +1,372 @@
+"""Read and write the derived topic layer.
+
+    topic   the SUBJECT ("Wiki Auto Management")
+    aspect  a FACET ("implementation status")
+    pages   the documents holding that facet — the fan-out
+
+An aspect belongs to one topic and is composed of needs, which live on their pages. A real foreign
+key from a page reference to ``wiki_doc_ids`` is why this is tables and not one JSONB document: a
+deleted page cannot leave a row pointing at nothing.
+
+A derivation is written whole: ``record()`` inserts a map and everything under it in one
+transaction, then flips ``active``. Nothing is updated in place, because clustering is global —
+one need changing can move cluster membership anywhere, so there is no such thing as revising one
+topic. Superseded maps stay readable; ids are stable only WITHIN a map, so a consumer that
+records a decision against an aspect must keep the map id with it.
+
+Reads return detached records, not ORM rows, per the repo convention: the rest of the app should
+not depend on SQLAlchemy, and a read must not become a lazy load against a closed session.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from datetime import datetime, timezone
+from typing import Any, NamedTuple, cast
+
+from sqlalchemy import delete as sa_delete, select, update
+
+from app.db.models import Aspect, AspectPage, Topic, NeedMap
+from app.db.session import advisory_xact_lock, session
+
+log = logging.getLogger(__name__)
+
+# Serializes record(). The whole DB shares one 64-bit advisory keyspace (see triggers/repo.py's
+# _REBUILD_ADVISORY_LOCK), so this is a distinct constant. Spells "tmap".
+_RECORD_ADVISORY_LOCK = 0x746D6170
+
+
+class NeedLink(NamedTuple):
+    """One need making up an aspect, addressed the only way a need can be: the page holding it
+    plus its name. Read the need itself with ``page_needs.get_by_doc_id`` — it is deliberately not
+    copied here, because ``page_needs`` is re-extracted when a page changes and this map is not.
+    """
+
+    doc_id: str
+    need_name: str
+
+
+class AspectRecord(NamedTuple):
+    """One facet, with the pages holding it. ``pages`` of length > 1 is the fan-out.
+
+    ``aspect_id``, not ``id``: the same value is called ``aspect_id`` in every table that
+    references it, and one name for one thing is worth more than brevity here.
+    """
+
+    aspect_id: int
+    name: str
+    description: str
+    needs: list[NeedLink]
+
+    @property
+    def spans_pages(self) -> bool:
+        return len({n.doc_id for n in self.needs}) > 1
+
+    @property
+    def doc_ids(self) -> list[str]:
+        """The distinct pages this facet reaches — the fan-out, and the argument list for a bulk
+        ``page_needs`` read. Sorted, so a caller's own output does not depend on row order."""
+        return sorted({n.doc_id for n in self.needs})
+
+
+class TopicRecord(NamedTuple):
+    topic_id: int
+    name: str
+    description: str
+    aspects: list[AspectRecord]
+
+
+class NeedMapHeader(NamedTuple):
+    """One derivation's metadata, without its contents. What ``history`` returns."""
+
+    need_map_id: int
+    active: bool
+    corpus_fingerprint: str
+    entity_type_taxonomy_id: int | None
+    provenance: dict[str, Any]
+    stats: dict[str, Any]
+    triggered_by: str | None
+    created_at: str
+
+
+class NeedMapRecord(NamedTuple):
+    """One derivation's whole topic layer."""
+
+    need_map_id: int
+    corpus_fingerprint: str
+    entity_type_taxonomy_id: int | None
+    provenance: dict[str, Any]
+    stats: dict[str, Any]
+    created_at: str
+    topics: list[TopicRecord]
+
+
+def _header(row: NeedMap) -> NeedMapHeader:
+    return NeedMapHeader(
+        need_map_id=row.id,
+        active=row.active,
+        corpus_fingerprint=row.corpus_fingerprint,
+        entity_type_taxonomy_id=row.entity_type_taxonomy_id,
+        provenance=dict(row.provenance or {}),
+        stats=dict(row.stats or {}),
+        triggered_by=row.triggered_by,
+        created_at=row.created_at,
+    )
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def corpus_fingerprint(pages: list[tuple[str, str]]) -> str:
+    """Fingerprint the needs a map was derived from, as ``(doc_id, content_sha256)`` pairs.
+
+    Answers "have the needs moved since this was derived?", which decides whether re-deriving is
+    worth an LLM pass — and matters because the naming step is a sampled call, so re-deriving on
+    unchanged needs would churn topic names for nothing. Sorted, so the answer does not depend on
+    read order.
+    """
+    digest = hashlib.sha256()
+    for doc_id, sha in sorted(pages):
+        digest.update(doc_id.encode("utf-8"))
+        digest.update(b"\x1f")
+        digest.update(sha.encode("utf-8"))
+        digest.update(b"\x1e")
+    return digest.hexdigest()
+
+
+def _load(db: Any, stored: NeedMap) -> NeedMapRecord:
+    """Assemble one map into detached records. Three queries, not one per topic."""
+    topics = list(db.scalars(select(Topic).where(Topic.need_map_id == stored.id).order_by(Topic.id)))
+    aspects = list(db.scalars(select(Aspect).where(Aspect.need_map_id == stored.id).order_by(Aspect.id)))
+    aspect_ids = [a.id for a in aspects]
+
+    needs_by_aspect: dict[int, list[NeedLink]] = {}
+    if aspect_ids:
+        for row in db.scalars(
+            select(AspectPage)
+            .where(AspectPage.aspect_id.in_(aspect_ids))
+            .order_by(AspectPage.aspect_id, AspectPage.doc_id, AspectPage.need_name)
+        ):
+            needs_by_aspect.setdefault(row.aspect_id, []).append(
+                NeedLink(doc_id=row.doc_id, need_name=row.need_name)
+            )
+
+    records = {
+        a.id: AspectRecord(
+            aspect_id=a.id,
+            name=a.name,
+            description=a.description,
+            needs=needs_by_aspect.get(a.id, []),
+        )
+        for a in aspects
+    }
+
+    by_topic: dict[int, list[AspectRecord]] = {}
+    for a in aspects:
+        by_topic.setdefault(a.topic_id, []).append(records[a.id])
+
+    return NeedMapRecord(
+        need_map_id=stored.id,
+        corpus_fingerprint=stored.corpus_fingerprint,
+        entity_type_taxonomy_id=stored.entity_type_taxonomy_id,
+        provenance=dict(stored.provenance or {}),
+        stats=dict(stored.stats or {}),
+        created_at=stored.created_at,
+        topics=[
+            TopicRecord(
+                topic_id=t.id,
+                name=t.name,
+                description=t.description,
+                aspects=by_topic.get(t.id, []),
+            )
+            for t in topics
+        ],
+    )
+
+
+def active() -> NeedMapRecord | None:
+    """The map in force, or None when nothing has been derived.
+
+    None is a normal state: a deployment that has never derived has no topic layer, and callers
+    fall back to per-page needs rather than failing.
+    """
+    with session() as db:
+        row = db.scalars(select(NeedMap).where(NeedMap.active)).one_or_none()
+        return _load(db, row) if row else None
+
+
+def get(need_map_id: int) -> NeedMapRecord | None:
+    """A specific map — how a consumer resolves the aspect it recorded a decision against, since
+    ids are only stable within a map."""
+    with session() as db:
+        row = db.get(NeedMap, need_map_id)
+        return _load(db, row) if row else None
+
+
+def aspects_for_page(doc_id: str) -> list[AspectRecord]:
+    """Which aspects the active map says this page holds — the reverse lookup a reconciler needs.
+
+    An indexed query rather than a scan, which is the practical reason this is tables and not a
+    document: at ten thousand pages the equivalent blob is ~8.5 MB, fine to load once and cache
+    but not to read per incoming document.
+    """
+    with session() as db:
+        row = db.scalars(select(NeedMap).where(NeedMap.active)).one_or_none()
+        if row is None:
+            return []
+        rows = db.execute(
+            select(Aspect, AspectPage)
+            .join(AspectPage, AspectPage.aspect_id == Aspect.id)
+            .where(Aspect.need_map_id == row.id, AspectPage.doc_id == doc_id)
+            .order_by(Aspect.id)
+        ).all()
+        found = [a for a, _ in rows]
+        if not found:
+            return []
+        needs_by_aspect: dict[int, list[NeedLink]] = {}
+        for row in db.scalars(
+            select(AspectPage)
+            .where(AspectPage.aspect_id.in_([a.id for a in found]))
+            .order_by(AspectPage.doc_id, AspectPage.need_name)
+        ):
+            needs_by_aspect.setdefault(row.aspect_id, []).append(
+                NeedLink(doc_id=row.doc_id, need_name=row.need_name)
+            )
+        return [
+            AspectRecord(
+                aspect_id=a.id,
+                name=a.name,
+                description=a.description,
+                needs=needs_by_aspect.get(a.id, []),
+            )
+            for a in found
+        ]
+
+
+def history(limit: int = 20) -> list[NeedMapHeader]:
+    """Version headers, newest first — for seeing what a re-derivation changed without loading
+    each map in full. Detached records, like every other read here: an ORM row escaping its
+    session couples callers to SQLAlchemy and lets a mutation look like it worked."""
+    with session() as db:
+        return [
+            _header(row)
+            for row in db.scalars(
+                select(NeedMap).order_by(NeedMap.id.desc()).limit(limit)
+            )
+        ]
+
+
+def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
+    """Store a derived topic map and make it active. Returns the map id.
+
+    The artifact's ``topics`` carry their aspects inline; an aspect appearing under more than one
+    topic is written ONCE and linked twice, keyed by the producer's ``key`` (its identity within
+    this map). That is the shape nesting could not express.
+
+    Whole-map insert under an advisory lock. The partial unique index alone is not enough to make
+    concurrent recorders safe: two workers would each deactivate the row their statement could
+    see, both insert active rows, and the second would roll back — losing a derivation that had
+    already paid for its LLM calls. The lock makes the second WAIT and then succeed.
+    """
+    topics = cast(list[dict[str, Any]], artifact.get("topics") or [])
+    if not topics:
+        raise ValueError("refusing to record a topic map with no topics")
+
+    with session() as db:
+        advisory_xact_lock(db, _RECORD_ADVISORY_LOCK)
+        db.execute(update(NeedMap).where(NeedMap.active).values(active=False))
+        row = NeedMap(
+            active=True,
+            corpus_fingerprint=str(artifact.get("corpus_fingerprint") or ""),
+            entity_type_taxonomy_id=artifact.get("entity_type_taxonomy_id"),
+            provenance=artifact.get("provenance") or {},
+            stats=artifact.get("stats") or {},
+            triggered_by=triggered_by,
+            created_at=_now(),
+        )
+        db.add(row)
+        db.flush()
+
+        n_aspects = n_pages = 0
+        for topic in topics:
+            topic_row = Topic(
+                need_map_id=row.id,
+                name=str(topic.get("name") or ""),
+                description=str(topic.get("description") or ""),
+            )
+            db.add(topic_row)
+            db.flush()
+
+            # Scoped to this topic, not the map: an aspect belongs to one topic, so the same
+            # facet named under two topics is two rows. Keyed by the producer's own identity for
+            # it, falling back to the name, so a producer that repeats one within a topic gets
+            # de-duplication rather than two rows saying the same thing.
+            seen_aspects: dict[str, int] = {}
+            for aspect in cast(list[dict[str, Any]], topic.get("aspects") or []):
+                key = str(aspect.get("key") or aspect.get("name") or "")
+                aspect_id = seen_aspects.get(key)
+                if aspect_id is None:
+                    aspect_row = Aspect(
+                        need_map_id=row.id,
+                        topic_id=topic_row.id,
+                        name=str(aspect.get("name") or ""),
+                        description=str(aspect.get("description") or ""),
+                    )
+                    db.add(aspect_row)
+                    db.flush()
+                    aspect_id = aspect_row.id
+                    seen_aspects[key] = aspect_id
+                    n_aspects += 1
+                    # Deduped here as well as constrained in the schema. The key alone would
+                    # abort the whole map on a repeated need — losing a derivation that already
+                    # paid for its LLM calls — so a producer listing one twice loses the
+                    # duplicate, not the map. The constraint stays as the backstop.
+                    #
+                    # Keyed by (page, need name), because the unit is the need: two needs from
+                    # ONE page can belong to the same facet, and both must survive.
+                    seen: set[tuple[str, str]] = set()
+                    for page in cast(list[dict[str, Any]], aspect.get("pages") or []):
+                        doc_id = str(page.get("doc_id") or "")
+                        need_name = str(page.get("need_name") or "")
+                        if (doc_id, need_name) in seen:
+                            log.debug(
+                                "need_map: dropping repeated need %r on page %s of aspect %r",
+                                need_name,
+                                doc_id,
+                                aspect.get("name"),
+                            )
+                            continue
+                        seen.add((doc_id, need_name))
+                        db.add(
+                            AspectPage(aspect_id=aspect_id, doc_id=doc_id, need_name=need_name)
+                        )
+                        n_pages += 1
+
+        db.commit()
+        need_map_id = row.id
+
+    log.info(
+        "need_map: recorded map %d — %d topic(s), %d aspect(s), %d need link(s)",
+        need_map_id,
+        len(topics),
+        n_aspects,
+        n_pages,
+    )
+    return need_map_id
+
+
+def prune(keep: int = 5) -> int:
+    """Drop all but the newest ``keep`` runs. Returns how many went.
+
+    Everything cascades from the map, so this is one delete. Old maps are kept at all so a
+    re-derivation's effect can be compared — the naming step is sampled, and topic names have been
+    observed to churn between runs over an unchanged corpus.
+    """
+    with session() as db:
+        ids = list(db.scalars(select(NeedMap.id).order_by(NeedMap.id.desc()).offset(keep)))
+        if not ids:
+            return 0
+        db.execute(sa_delete(NeedMap).where(NeedMap.id.in_(ids)))
+        return len(ids)
