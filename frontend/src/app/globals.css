@@ -552,3 +552,157 @@ body {
     background-color: transparent;
   }
 }
+
+/* Wiki AI toolbar mode tabs (Figma 2288:88250 / 2361:65090): Opal's
+   contained variant pinned to the mock's values. Trigger is 36px total
+   padded 8px with the 1px edge as an inset ring so content stays 20px,
+   label 14/20 semibold in text-04, icon a step lighter in text-03. */
+.chat-mode-tabs .opal-tabs-trigger[data-variant="contained"] {
+  box-sizing: border-box;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-12);
+  padding: 8px;
+  gap: 4px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+.chat-mode-tabs .opal-tabs-trigger[data-variant="contained"] svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-03);
+}
+/* The mock carries one 2px text pad. Opal stacks a second on the label. */
+.chat-mode-tabs .opal-tabs-trigger[data-variant="contained"] span {
+  padding-inline: 0;
+}
+/* Tabs size to content (labeled 75px, icon-only 36px). Opal's grid
+   template hands every trigger the widest column instead. */
+.chat-mode-tabs .opal-tabs-list {
+  display: flex;
+  width: fit-content;
+  border-radius: var(--radius-12);
+}
+.chat-mode-tabs
+  .opal-tabs-trigger[data-variant="contained"][data-state="active"] {
+  box-shadow:
+    inset 0 0 0 1px var(--border-01),
+    0px 0px 2px 1px var(--shadow-01);
+}
+
+/* Watch and Launch sub-tabs (mock 2348:387962): equal-width columns at
+   radius 12, active tab in text-04 with the border ring inside, inactive
+   in text-03. Opal's contained variant supplies the grid. */
+.chat-form-tabs .opal-tabs-list {
+  border-radius: var(--radius-12);
+}
+.chat-form-tabs .opal-tabs-trigger[data-variant="contained"] {
+  box-sizing: border-box;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius-12);
+  padding: 8px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--text-03);
+}
+.chat-form-tabs .opal-tabs-trigger[data-variant="contained"] span {
+  padding-inline: 2px;
+}
+.chat-form-tabs
+  .opal-tabs-trigger[data-variant="contained"][data-state="active"] {
+  color: var(--text-04);
+  box-shadow:
+    inset 0 0 0 1px var(--border-01),
+    0px 0px 2px 1px var(--shadow-01);
+}
+
+/* Composer CTA (mock 2361:65107 idle, 2293:92515 armed): grey until the
+   draft has content, near-black once armed, glyph always inverted. */
+.chat-cta {
+  background: var(--background-neutral-04);
+  border-radius: var(--radius-12);
+}
+.chat-cta.chat-cta-on {
+  background: var(--background-tint-inverted-00);
+}
+.chat-cta svg {
+  color: var(--text-inverted-05);
+}
+
+/* Model pill (mock Model Bar 2288:88266): white wrapper with the soft
+   ring, painted here because Opal's variant styling owns the button bg. */
+.chat-model-pill {
+  background: var(--background-tint-00);
+  border-radius: var(--radius-12);
+  box-shadow: 0px 0px 2px 1px var(--shadow-01);
+}
+
+/* Edit card's View action (mock 1828:61808): selection-blue chip. Tokens
+   rename to action-selection at the next Opal bump. */
+.chat-edit-view button {
+  background: var(--action-link-01);
+  border-radius: var(--radius-12);
+}
+.chat-edit-view button,
+.chat-edit-view button svg,
+.chat-edit-view button span {
+  color: var(--action-link-05);
+}
+
+/* Folded chat pill while a turn runs (mock 2385:73979): selection tint
+   behind Opal's IconLoader spinner. */
+.chat-fold-progress {
+  border-radius: var(--radius-12);
+  background: var(--action-link-01);
+}
+
+/* "Thinking…" gradient text (Figma 2293:92303) with a slow shimmer sweep. */
+.chat-thinking-shimmer {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  background: linear-gradient(
+    90deg,
+    var(--theme-gradient-05) 10%,
+    var(--theme-gradient-00) 40%,
+    var(--theme-gradient-05) 70%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: chat-thinking-shimmer 2.4s linear infinite;
+}
+@keyframes chat-thinking-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* History rows keep the mock's single line (2365:65782): Opal's ContentMd
+   title wraps by default and exposes no truncation prop, so the row shows an
+   ellipsis and carries the full title in its hover tooltip. */
+.chat-history-menu .opal-content-md-title-row > span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tooltip chrome per the Figma tooltip component (2385:75343, 2365:65549):
+   radius 4, 6/4 padding, 12/16 text. Opal's default draws it a size larger
+   (radius 8, 12/8 padding, 14px), which reads as a chunky box beside the
+   28px icon buttons the toolbar uses. */
+.opal-tooltip {
+  border-radius: var(--radius-04);
+  padding: 4px 6px;
+  font-size: 12px;
+  line-height: 16px;
+}

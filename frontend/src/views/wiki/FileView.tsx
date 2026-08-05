@@ -13,7 +13,7 @@ import {
   PopoverMenu,
   SelectButton,
 } from "@onyx-ai/opal/components";
-import { Content } from "@onyx-ai/opal/layouts";
+import { Content, Section } from "@onyx-ai/opal/layouts";
 import { cn } from "@onyx-ai/opal/utils";
 import {
   SvgChevronLeft,
@@ -50,6 +50,7 @@ import { SuggestionsCard } from "@/components/wiki/SuggestionsCard";
 import { UpdatePolicyPanel } from "@/components/wiki/UpdatePolicyPanel";
 import { type OpenUpdatesPanelOpts } from "@/components/wiki/policyPanels";
 import { CommentMarginRail } from "@/components/wiki/CommentMarginRail";
+import { WikiToolbarDock } from "@/components/wiki/toolbar/WikiToolbar";
 import { PresenceAvatars } from "@/components/wiki/PresenceAvatars";
 import { toast } from "@/hooks/useToast";
 import { useLeftPanel } from "@/providers/LeftPanelProvider";
@@ -694,14 +695,13 @@ export function FileView({ path }: FileViewProps) {
 
   // ``?new=1`` is set by NewDocView after first-create. The doc body
   // was already chosen there, so we land in the rendered view (not
-  // edit mode); the param's only remaining job is to expand the chat
-  // widget so the assistant is right there on the freshly-created doc.
+  // edit mode). The param's only remaining job is to expand the toolbar.
   const isFreshDoc = searchParams?.get("new") === "1";
 
   // Drafting state: per-doc template-seeded draft tracked server-side.
   // We re-fetch when the path changes and after each save (the server
   // clears the row once the body diverges from the template snapshot).
-  // ``?new=1`` triggers a one-shot expand of the chat widget so the
+  // ``?new=1`` triggers a one-shot expansion of the toolbar so the
   // assistant is immediately available while drafting.
   const refreshDraftState = useCallback(async () => {
     try {
@@ -916,10 +916,10 @@ export function FileView({ path }: FileViewProps) {
     setError(null);
     try {
       await setDraftTemplate(path, null);
-      // Don't go through ``refreshDraftState`` — the server only knows
+      // Don't go through ``refreshDraftState``. The server only knows
       // about template-backed drafts (``document_drafts``), so it would
       // return null and clear drafting. Set blank-drafting locally
-      // instead so the chat widget spins up a generic kickoff session.
+      // instead so the toolbar starts a generic kickoff session.
       setDrafting({ kind: "blank", path });
     } catch (e) {
       setError(e instanceof Error ? e.message : "failed to clear template");
@@ -1325,25 +1325,22 @@ export function FileView({ path }: FileViewProps) {
                 </div>
               </div>
             ) : (
-              // Live editor: the full-width editor owns the scroll, so its
-              // scrollbar sits flush at the far-right edge while the text stays
-              // capped + centered by the editor theme. `--cm-gutter` mirrors the
-              // negative margin (which cancels `<main>`'s padding) so the editor
-              // text keeps the same side gutter as the DocTitle at every
-              // breakpoint. The banners stay capped + centered above it, aligned
-              // with the text and DocTitle (`empty:hidden` drops the gap when
-              // none render).
-              <div
-                className={`flex min-h-0 flex-1 flex-col gap-3 ${
-                  isMobile
-                    ? "-mx-3 [--cm-gutter:0.75rem]"
-                    : "-mx-8 [--cm-gutter:2rem]"
-                }`}
+              // Live editor inside `<main>`'s page gutter, so the capped
+              // column, banners, and anchored toolbar share one padded
+              // containing block. The editor still owns the vertical scroll.
+              <Section
+                gap={0.75}
+                padding={0}
+                alignItems="stretch"
+                className="min-h-0 flex-1"
               >
-                <div
-                  className={`rail-inset mx-auto flex w-full max-w-(--app-container-sm-md) min-w-0 shrink-0 flex-col gap-3 empty:hidden ${
-                    isMobile ? "px-3" : ""
-                  }`}
+                <Section
+                  gap={0.75}
+                  padding={0}
+                  width="full"
+                  height="fit"
+                  alignItems="stretch"
+                  className="rail-inset mx-auto max-w-(--app-container-sm-md) min-w-0 shrink-0 empty:hidden"
                 >
                   {(() => {
                     // Cards visible while the body is still "empty enough"
@@ -1383,7 +1380,7 @@ export function FileView({ path }: FileViewProps) {
                       />
                     );
                   })()}
-                </div>
+                </Section>
                 {coedit.active ? (
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                     <TipTapEditor
@@ -1432,7 +1429,7 @@ export function FileView({ path }: FileViewProps) {
                     Connecting…
                   </div>
                 )}
-              </div>
+              </Section>
             )}
             {/* Desktop side panels dock at the app's right edge (full height,
               beside the header) by portaling into the shell's right-panel host,
@@ -1476,6 +1473,15 @@ export function FileView({ path }: FileViewProps) {
             run={runMargin}
             onSubmitDraft={(body) => void submitMarginDraft(body)}
             onCancelDraft={() => setCommentDraft(null)}
+          />
+        )}
+        {/* The page itself is the toolbar's context, so a chat turn can act
+            on what the reader is looking at without them attaching it. */}
+        {!viewingVersion && (
+          <WikiToolbarDock
+            tabs={["chat", "watch", "launch"]}
+            context={path ? { path, kind: "doc" } : null}
+            anchorSelector=".editor-prose .ProseMirror"
           />
         )}
       </div>

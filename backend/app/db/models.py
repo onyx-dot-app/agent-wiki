@@ -617,6 +617,9 @@ class ChatMessage(Base):
     hidden: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("FALSE")
     )
+    # Reader's thumbs up/down on an assistant turn. NULL means no rating.
+    # Recorded only: nothing reads it back into retrieval or prompting.
+    feedback: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
@@ -624,6 +627,10 @@ class ChatMessage(Base):
     __table_args__ = (
         CheckConstraint(
             "role IN ('user', 'assistant')", name="chat_messages_role_check"
+        ),
+        CheckConstraint(
+            "feedback IS NULL OR feedback IN ('up', 'down')",
+            name="chat_messages_feedback_check",
         ),
         Index("idx_chat_messages_session_order", "session_id", "ordering"),
     )

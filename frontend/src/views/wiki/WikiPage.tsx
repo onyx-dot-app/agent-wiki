@@ -55,6 +55,7 @@ import {
 } from "@/components/wiki/EdgeScrollbar";
 import { SuggestionsCard } from "@/components/wiki/SuggestionsCard";
 import { WatchingPanel } from "@/components/wiki/WatchingPanel";
+import { WikiToolbarDock } from "@/components/wiki/toolbar/WikiToolbar";
 import {
   AnchoredPanel,
   AutoGlyph,
@@ -920,6 +921,13 @@ function Explorer({ dir }: ExplorerProps) {
           </div>
         </>
       )}
+      {/* The folder is the toolbar's context, so a chat turn can act on the
+          subtree the reader is browsing. Float until the explorer column
+          hosts it directly, sticky sits mid-page on short listings. */}
+      <WikiToolbarDock
+        tabs={["chat", "watch", "launch"]}
+        context={dir ? { path: dir, kind: "dir" } : null}
+      />
     </main>
   );
 }
@@ -997,8 +1005,8 @@ function NewDocView({ dir }: NewDocViewProps) {
     return () => registerDraftBridge(null);
   }, [registerDraftBridge]);
 
-  // Pop the chat widget open once on mount — the assistant can help while the
-  // user drafts. For an AI-seeded draft the chat seeds with the user's prompt.
+  // Publish one toolbar expansion request on mount. AI-seeded drafts retain
+  // the user's prompt in the drafting context.
   useEffect(() => {
     requestExpand();
   }, [requestExpand]);
@@ -1017,11 +1025,8 @@ function NewDocView({ dir }: NewDocViewProps) {
     };
   }, []);
 
-  // Sync drafting context with the current pick — including the
-  // initial "no template chosen yet" state, which maps to ``blank``
-  // drafting so the chat kicks off the moment +New routes into this
-  // view. Picking a template later swaps ``desiredKey`` from "blank"
-  // to "tpl:<id>" and the chat widget re-inits a fresh session for it.
+  // Sync drafting context with the current pick, including the initial blank
+  // state. Picking a template later changes the drafting identity.
   useEffect(() => {
     if (appliedTemplateId) {
       if (!templates) return; // wait until we can resolve the name
@@ -1036,12 +1041,8 @@ function NewDocView({ dir }: NewDocViewProps) {
       setDrafting({ kind: "blank", path: null, prompt: aiSeed?.prompt });
     }
   }, [appliedTemplateId, templates, setDrafting, aiSeed]);
-  // Clear drafting on unmount (cancel, sidebar nav, …) — the chat widget
-  // tears its drafting session down synchronously on null, so the collapse
-  // happens in the same paint as the page change. The one exception is
-  // Create: it navigates to the doc it just made and FileView re-syncs
-  // drafting from the server-side draft row, so passing through null there
-  // would collapse the chat only to re-init it a moment later.
+  // Clear drafting on unmount except during create handoff. FileView re-syncs
+  // drafting from the saved document's server-side draft row.
   const createHandoffRef = useRef(false);
   useEffect(() => {
     return () => {
@@ -1077,10 +1078,7 @@ function NewDocView({ dir }: NewDocViewProps) {
     setDraft("");
     setAppliedTemplateBody(null);
     setAppliedTemplateId(null);
-    // Kick the chat widget into blank-drafting mode so it spins up a
-    // hidden session with the generic "what would you like to work on"
-    // prime, the same way a template pick spins up a template-aware
-    // session.
+    // Switch the shared drafting context to a blank document.
     setDrafting({ kind: "blank", path: null });
   }
 
@@ -1119,20 +1117,18 @@ function NewDocView({ dir }: NewDocViewProps) {
           ...(appliedTemplateId ? { template_id: appliedTemplateId } : {}),
         }),
       });
-      // If a template was applied, record the draft row so the chat
-      // banner + template system prompt persist on the saved doc.
+      // If a template was applied, persist its drafting context on the doc.
       if (appliedTemplateId) {
         await setDraftTemplate(fullPath, appliedTemplateId);
       }
       // Revalidate every wiki cache so the persistent Directory sidebar (and
       // any open folder listing) shows the new page without a full reload.
       void revalidateWiki();
-      // Hand-off: keep the drafting state (and the chat's drafting
-      // session) alive across the navigation — see the unmount cleanup.
+      // Keep drafting state set while navigating to the created document.
       createHandoffRef.current = true;
       // Land on the new page's id URL directly (the create response carries
       // the minted id), so it's a clean /app/wiki/<id> like every other page.
-      // Keep ?new=1 — FileView reads it to auto-open the assistant on a
+      // Keep ?new=1 so FileView auto-opens the assistant on a
       // freshly-created doc.
       const base = created.id ? wikiHref(created.id) : `/app/wiki/${fullPath}`;
       router.push(`${base}?new=1`);
@@ -1172,7 +1168,7 @@ function NewDocView({ dir }: NewDocViewProps) {
   return (
     <main
       className={cn(
-        "box-border flex h-full flex-col gap-3",
+        "relative box-border flex h-full flex-col gap-3",
         isMobile ? "px-3 py-4" : "px-8 py-6",
       )}
     >
@@ -1225,6 +1221,10 @@ function NewDocView({ dir }: NewDocViewProps) {
         }
         className="box-border min-h-0 w-full flex-1 resize-none rounded-(--radius-08) border border-(--border-01) p-4 font-mono text-sm leading-[1.6] outline-none"
       />
+      {/* The drafting flow expands the toolbar on this view, so it must
+          exist here. No context chip: the doc has no path yet. In-column
+          so it shares the composer column's box. */}
+      <WikiToolbarDock tabs={["chat"]} variant="column" />
     </main>
   );
 }
@@ -1338,14 +1338,8 @@ function Row({
     if (renaming) setDraft(label);
   }, [renaming, label]);
 
-  // The whole row acts as the click target *and* the drag source.
-  // Clicks navigate via router.push(href) instead of relying on a
-  // child <Link>, which previously left a dead zone around the icon
-  // and trailing whitespace where the cursor showed "grab" but didn't
-  // navigate. Drags from the action buttons (rename/delete) are
-  // suppressed so a careless drag near the right edge doesn't kick off
-  // a move operation; their clicks stop propagation so they don't
-  // double-fire row navigation.
+  // The row owns navigation and dragging. Action buttons stop click and drag
+  // propagation so rename and delete cannot navigate or start a move.
   return (
     <li
       data-wiki-row={path}

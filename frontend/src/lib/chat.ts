@@ -1,8 +1,13 @@
+import useSWR from "swr";
+
 import { apiFetch, apiStream } from "@/lib/api";
+import { SWR_KEYS } from "@/lib/swr-keys";
 
 export interface ChatSession {
   id: string;
   title: string | null;
+  /** Set when the list was requested with a page and this chat worked on it. */
+  touches_path: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -11,11 +16,14 @@ export interface ChatStreamEventBase {
   type: string;
 }
 
+export type ChatFeedback = "up" | "down";
+
 export interface PersistedChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   events: ChatStreamEventBase[] | null;
+  feedback?: ChatFeedback | null;
   created_at: string;
 }
 
@@ -24,12 +32,18 @@ export interface ChatSessionDetail {
   messages: PersistedChatMessage[];
 }
 
-export function listSessions(): Promise<ChatSession[]> {
-  return apiFetch<ChatSession[]>("/chat/sessions");
-}
-
 export function createSession(): Promise<ChatSession> {
   return apiFetch<ChatSession>("/chat/sessions", { method: "POST" });
+}
+
+/** History-menu sessions. ``path`` marks rows that worked on that page,
+ *  ``enabled`` gates the fetch, and the key is the request path so the
+ *  global fetcher serves it. */
+export function useChatSessions(path: string | null, enabled: boolean) {
+  const { data } = useSWR<ChatSession[]>(
+    enabled ? SWR_KEYS.chatSessions(path) : null,
+  );
+  return { sessions: data };
 }
 
 export function getSession(id: string): Promise<ChatSessionDetail> {
@@ -38,28 +52,34 @@ export function getSession(id: string): Promise<ChatSessionDetail> {
   );
 }
 
-export function deleteSession(id: string): Promise<void> {
-  return apiFetch<void>(`/chat/sessions/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
+/** Rate an assistant turn, or pass ``null`` to clear the rating. Ratings are
+ *  message metadata and do not change later agent answers. */
+export function setMessageFeedback(
+  messageId: string,
+  feedback: ChatFeedback | null,
+): Promise<void> {
+  return apiFetch<void>(
+    `/chat/messages/${encodeURIComponent(messageId)}/feedback`,
+    { method: "PUT", body: JSON.stringify({ feedback }) },
+  );
 }
 
 export function streamMessage(
   sessionId: string,
   content: string,
   onEvent: (data: unknown) => void,
-  options?: { signal?: AbortSignal; currentPath?: string | null },
+  options?: { signal?: AbortSignal; contextPaths?: string[] },
 ): Promise<void> {
   return apiStream(
     "/chat/messages",
     {
       method: "POST",
-      // current_path: the wiki page the user has open, so the agent knows
-      // what they're looking at (null when not on a page).
+      // context_paths: the wiki pages on the composer's chips, so the agent
+      // knows what the turn is about (empty when nothing is attached).
       body: JSON.stringify({
         session_id: sessionId,
         content,
-        current_path: options?.currentPath ?? null,
+        context_paths: options?.contextPaths ?? [],
       }),
     },
     onEvent,

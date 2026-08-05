@@ -32,6 +32,7 @@ import type { RecentPage } from "@/lib/wiki/types";
 import { wikiHref, wikiPath } from "@/lib/wikiHref";
 import { StartNewPage } from "@/components/wiki/StartNewPage";
 import WikiItemMenu from "@/components/wiki/WikiItemActions";
+import { WikiToolbarDock } from "@/components/wiki/toolbar/WikiToolbar";
 import styles from "@/components/wiki/WikiHome.module.css";
 
 export function WikiHome() {
@@ -149,6 +150,15 @@ export function WikiHome() {
               ))}
             </div>
           )}
+          {/* Wiki-wide chat, last child of the column so it shares its
+              exact box (mock 2361:65086). Chat-only: nothing is in view
+              to attach, and watching or launching needs a scope. */}
+          <WikiToolbarDock
+            tabs={["chat"]}
+            variant="column"
+            defaultFolded={false}
+            surface="home"
+          />
         </div>
       </div>
       {/* Same thumb as the doc surfaces — native bar hidden in the module
