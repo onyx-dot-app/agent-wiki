@@ -92,11 +92,9 @@ def upgrade() -> None:
         sa.Column("run_id", sa.Integer(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("description", sa.Text(), server_default=sa.text("''"), nullable=False),
-        # The dominant value across this aspect's pages, for retrieval and triage. The
-        # authoritative per-page value lives on aspect_pages.
-        sa.Column("aspect_kind", sa.Text(), server_default=sa.text("''"), nullable=False),
-        sa.Column("detail_level", sa.Text(), server_default=sa.text("''"), nullable=False),
-        sa.Column("focus", sa.Text(), server_default=sa.text("''"), nullable=False),
+        # No aspect_kind / detail_level / focus here: they differ between the pages holding a
+        # facet and are authoritative on aspect_pages. A summary copy could drift from its rows,
+        # and for free-text detail_level there is no summary to take. Computed on read instead.
         sa.ForeignKeyConstraint(["run_id"], ["topic_map_runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )

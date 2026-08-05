@@ -59,16 +59,52 @@ class AspectRecord(NamedTuple):
     aspect_id: int
     name: str
     description: str
-    # The dominant value across this aspect's pages — for triage. The authoritative per-page
-    # value is on ``PageRef``.
-    aspect_kind: str
-    detail_level: str
-    focus: str
     pages: list[PageRef]
 
     @property
     def spans_pages(self) -> bool:
         return len({p.doc_id for p in self.pages}) > 1
+
+    # The three below summarize the pages for triage — filtering to timeline aspects, or deciding
+    # whether an aspect is worth loading. Computed rather than stored: both loaders fetch an
+    # aspect's full page list before building this record, so a column would buy nothing except
+    # the chance to disagree with the rows it summarizes. The authoritative value for writing to a
+    # page is always that page's own, on ``PageRef``.
+
+    @property
+    def dominant_kind(self) -> str:
+        """The most common ``aspect_kind`` among the pages; "" when there are none.
+
+        A mode is meaningful here and only here: the vocabulary is a closed four-value set, so
+        pages genuinely land on the same value. Ties break by name, so the answer does not depend
+        on row order — the point of a summary is that it is the same summary twice.
+        """
+        counts: dict[str, int] = {}
+        for page in self.pages:
+            counts[page.aspect_kind] = counts.get(page.aspect_kind, 0) + 1
+        return min(counts, key=lambda k: (-counts[k], k)) if counts else ""
+
+    @property
+    def shared_detail_level(self) -> str:
+        """The granularity, when every page states the same one; "" when they differ.
+
+        Free text, so there is no mode to take — two pages can describe identical granularity in
+        words that do not match, and picking one would present an arbitrary page's phrasing as the
+        aspect's. Empty says what is true: read the page rows.
+        """
+        levels = {p.detail_level for p in self.pages}
+        return levels.pop() if len(levels) == 1 else ""
+
+    @property
+    def shared_focus(self) -> str:
+        """The entity-set focus, when unanimous; "" when the pages disagree.
+
+        Unanimity rather than a mode, because this one gates admission: ``generic`` here while one
+        page is ``specific`` would summarize the aspect as open when a page holding it is closed.
+        Disagreement reads as "" — never as "generic" — matching the fail-safe on the need itself.
+        """
+        focuses = {p.focus for p in self.pages}
+        return focuses.pop() if len(focuses) == 1 else ""
 
 
 class TopicRecord(NamedTuple):
@@ -140,9 +176,6 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
             aspect_id=a.id,
             name=a.name,
             description=a.description,
-            aspect_kind=a.aspect_kind,
-            detail_level=a.detail_level,
-            focus=a.focus,
             pages=pages_by_aspect.get(a.id, []),
         )
         for a in aspects
@@ -232,9 +265,6 @@ def aspects_for_page(doc_id: str) -> list[AspectRecord]:
                 aspect_id=a.id,
                 name=a.name,
                 description=a.description,
-                aspect_kind=a.aspect_kind,
-                detail_level=a.detail_level,
-                focus=a.focus,
                 pages=pages_by_aspect.get(a.id, []),
             )
             for a in found
@@ -296,13 +326,13 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
                 key = str(aspect.get("key") or aspect.get("name") or "")
                 aspect_id = aspect_ids.get(key)
                 if aspect_id is None:
+                    # aspect_kind / detail_level / focus are read from the artifact but not stored
+                    # on the aspect: they serve as the per-page default below, so a producer can
+                    # state a facet's shape once instead of repeating it on every page.
                     aspect_row = Aspect(
                         run_id=run.id,
                         name=str(aspect.get("name") or ""),
                         description=str(aspect.get("description") or ""),
-                        aspect_kind=str(aspect.get("aspect_kind") or ""),
-                        detail_level=str(aspect.get("detail_level") or ""),
-                        focus=str(aspect.get("focus") or ""),
                     )
                     db.add(aspect_row)
                     db.flush()

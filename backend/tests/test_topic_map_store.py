@@ -219,6 +219,106 @@ class TestNaturalKey:
         assert sorted(p.entity for p in loaded.topics[0].aspects[0].pages) == ["Acme", "Globex"]
 
 
+class TestAspectSummary:
+    """The headline values for triage. Computed from the page rows, never stored — so they cannot
+    drift from what they summarize, and a producer cannot assert one the rows disagree with."""
+
+    @staticmethod
+    def _with_pages(pages: list[dict]) -> topic_map.AspectRecord:
+        aspect = _aspect("implementation status", [])
+        aspect["pages"] = pages
+        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
+        loaded = topic_map.active()
+        assert loaded is not None
+        return loaded.topics[0].aspects[0]
+
+    def test_the_aspect_table_stores_no_summary_columns(self) -> None:
+        """The decision itself, pinned. Re-adding a column here brings back a value that can go
+        stale against its rows — and for detail_level, one that cannot be computed at all."""
+        from app.db.models import Aspect
+
+        assert {"aspect_kind", "detail_level", "focus"} & set(Aspect.__table__.columns.keys()) == set()
+
+    def test_dominant_kind_is_the_majority_across_pages(self, tmp_repo) -> None:
+        d1, d2, d3 = _page("a.md"), _page("b.md"), _page("c.md")
+        aspect = self._with_pages(
+            [
+                {"doc_id": d1, "entity": "", "aspect_kind": "entity_status"},
+                {"doc_id": d2, "entity": "", "aspect_kind": "entity_status"},
+                {"doc_id": d3, "entity": "", "aspect_kind": "timeline"},
+            ]
+        )
+
+        assert aspect.dominant_kind == "entity_status"
+
+    def test_a_tied_kind_resolves_the_same_way_every_time(self, tmp_repo) -> None:
+        """The real case from production: one page keeps "implementation status" as a dated log,
+        another as a current-state checklist. A summary that depended on row order would report a
+        different kind run to run for an unchanged corpus."""
+        d1, d2 = _page("a.md"), _page("b.md")
+        aspect = self._with_pages(
+            [
+                {"doc_id": d1, "entity": "", "aspect_kind": "timeline"},
+                {"doc_id": d2, "entity": "", "aspect_kind": "entity_status"},
+            ]
+        )
+
+        assert aspect.dominant_kind == "entity_status"  # tie broken by name, not by insertion
+
+    def test_shared_detail_level_survives_when_pages_agree(self, tmp_repo) -> None:
+        d1, d2 = _page("a.md"), _page("b.md")
+        aspect = self._with_pages(
+            [
+                {"doc_id": d1, "entity": "", "detail_level": "one line per feature"},
+                {"doc_id": d2, "entity": "", "detail_level": "one line per feature"},
+            ]
+        )
+
+        assert aspect.shared_detail_level == "one line per feature"
+
+    def test_the_same_granularity_in_different_words_summarizes_to_nothing(self, tmp_repo) -> None:
+        """Free text, so there is no mode: both pages want one entry per feature, phrased their
+        own way. Empty is the honest answer — read the page rows. Picking one would present an
+        arbitrary page's wording as the aspect's, wrong for every other page under it."""
+        d1, d2 = _page("a.md"), _page("b.md")
+        aspect = self._with_pages(
+            [
+                {"doc_id": d1, "entity": "", "detail_level": "one line per feature"},
+                {"doc_id": d2, "entity": "", "detail_level": "a checklist entry per feature"},
+            ]
+        )
+
+        assert aspect.shared_detail_level == ""
+        # ...and neither page loses its own, which is what the write actually uses.
+        assert sorted(p.detail_level for p in aspect.pages) == [
+            "a checklist entry per feature",
+            "one line per feature",
+        ]
+
+    def test_disagreeing_focus_never_summarizes_as_open(self, tmp_repo) -> None:
+        """Unanimity rather than a mode: "generic" here while a page is "specific" would advertise
+        the aspect as admitting new entities when a page holding it admits none."""
+        d1, d2, d3 = _page("a.md"), _page("b.md"), _page("c.md")
+        aspect = self._with_pages(
+            [
+                {"doc_id": d1, "entity": "", "focus": "generic"},
+                {"doc_id": d2, "entity": "", "focus": "generic"},
+                {"doc_id": d3, "entity": "", "focus": "specific"},
+            ]
+        )
+
+        assert aspect.shared_focus == ""
+
+    def test_the_producer_supplies_a_default_the_pages_inherit(self, tmp_repo) -> None:
+        """The artifact still carries aspect-level values — not stored, but used as the per-page
+        default, so a producer states a facet's shape once instead of on every page."""
+        d1 = _page("a.md")
+        aspect = self._with_pages([{"doc_id": d1, "entity": ""}])
+
+        assert aspect.pages[0].aspect_kind == "entity_status"  # from _aspect()'s aspect level
+        assert aspect.dominant_kind == "entity_status"
+
+
 class TestReverseLookup:
     def test_finds_the_aspects_a_page_holds(self, tmp_repo) -> None:
         """The query a reconciler runs per incoming document — indexed, not a scan over the map."""

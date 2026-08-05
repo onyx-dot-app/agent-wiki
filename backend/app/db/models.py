@@ -2260,22 +2260,16 @@ class Aspect(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
 
-    # The three below are the DOMINANT value across the pages holding this facet, for retrieval
-    # and triage — filtering to timeline aspects, or judging whether a document fits, happens
-    # here, before any page row is loaded.
+    # Deliberately absent: aspect_kind, detail_level, focus. They describe how a page maintains
+    # this facet, they differ BETWEEN the pages holding it, and they live on ``AspectPage`` where
+    # they are authoritative for the write. A summary copy here would be a value that can drift
+    # from the rows it claims to summarize, with nothing to notice — and for ``detail_level``,
+    # free text, there is no summary to take: every page phrases the same granularity its own way,
+    # so a stored value is only "whichever page was inserted first" wearing a summary's clothes.
     #
-    # They are NOT authoritative for writing. The same value lives on ``AspectPage`` and differs
-    # per page: observed in the real corpus, one page kept "implementation status" as a
-    # chronological log (timeline) and another as a current-state checklist (entity_status).
-    # Applying a page's write with the wrong one appends where it should replace. A summary here
-    # and the truth there is the point — not duplication for its own sake.
-    #
-    # ``kind`` not ``type``: a closed enumerated set, matching every other closed vocabulary here
-    # (UserKind, BlockKind, TriggerKind), while ``type`` is reserved for open derived ones like
-    # ``entity_type``.
-    aspect_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    detail_level: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    focus: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # Triage still gets its headline: both loaders fetch an aspect's full page list before
+    # returning it, so ``AspectRecord`` computes these on read (see ``app.db.topic_map``) — always
+    # consistent with the rows, never stale.
 
     __table_args__ = (Index("ix_aspects_run_id", "run_id"),)
 
