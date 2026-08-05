@@ -489,10 +489,12 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 session_id,
                 repair.deleted,
             )
-        elif repair.reidentified:
+        if repair.reidentified:
             # Benign: ProseMirror's node split copied an id onto both halves
             # and this checkpoint raced the editor's own fix-up; clearing the
-            # later id is that fix-up. No lineage involvement.
+            # later id is that fix-up. No lineage involvement. Logged even
+            # when a deletion fired above — the two repairs hit different ids
+            # and operators need the complete account.
             log.warning(
                 "coedit checkpoint: %s (session %s) re-identified split block(s) "
                 "%s ahead of the client's own repair",
