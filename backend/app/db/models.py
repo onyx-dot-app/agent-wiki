@@ -2179,6 +2179,11 @@ class TopicMapRun(Base):
     is one delete. One run is ``active``; the rest stay readable, because topic and aspect ids are
     only stable WITHIN a run — a re-derivation mints new ones, so a consumer that recorded a
     decision against an aspect must resolve it through the run it belongs to.
+
+    A run is written whole and replaced whole today. Patching one in place as pages change — a
+    reworded need updating a row, a new need joining the nearest aspect — is the obvious next step
+    and would keep ids stable between derivations, but nothing does it yet, so nothing here
+    records that a run has drifted from what produced it.
     """
 
     __tablename__ = "topic_map_runs"
@@ -2191,8 +2196,11 @@ class TopicMapRun(Base):
     # pass. Built from the needs' own guard hash rather than page bodies, so a page edit that
     # leaves its needs unchanged does not make the map look stale.
     corpus_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
-    # The taxonomy whose type names appear in ``Topic.subject_entity_type``. SET NULL rather than
-    # CASCADE: losing it costs the ability to resolve those names, not the topics.
+    # The entity-type taxonomy in force when this map was derived. PROVENANCE, not a live
+    # dependency: nothing here stores a type name any more, so nothing needs it to resolve one.
+    # It records which vocabulary the underlying needs were labelled against, which is what makes
+    # two runs comparable when a re-derivation renamed types underneath them. SET NULL rather
+    # than CASCADE — losing the taxonomy costs that context, not the map.
     entity_type_taxonomy_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("entity_type_taxonomies.id", ondelete="SET NULL")
     )
@@ -2208,17 +2216,6 @@ class TopicMapRun(Base):
         Text, ForeignKey("users.id", ondelete="SET NULL")
     )
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
-    # A run is the one MUTABLE map: page edits patch it in place — a reworded need updates a row,
-    # a vanished one deletes it, a new one joins the nearest aspect — so ids stay stable and
-    # nothing needs re-naming. A full re-derivation instead creates a NEW active run, and freezes
-    # this one. So at most one run is live at a time; the rest are history.
-    #
-    # patch_count is what says how far the map has drifted from what the derivation produced.
-    # Incremental assignment never rebalances — centroids drift and a facet that should have split
-    # stays merged — so this is the trigger for re-deriving, and the honest signal that a run
-    # patched four hundred times is not the same object a fresh one is.
-    patched_at: Mapped[str | None] = mapped_column(Text)
-    patch_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     __table_args__ = (
         Index("uq_topic_map_runs_active", "active", unique=True, postgresql_where=text("active")),
@@ -2243,11 +2240,15 @@ class Topic(Base):
     # ``EntityTypeTaxonomy``'s ``definition``, which states a DECIDABLE membership criterion
     # rather than explaining what a thing is.
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    # The entity type keying this topic's rows, from the run's taxonomy. "" = not entity-keyed,
-    # meaning one un-keyed cell per aspect rather than one per entity.
-    subject_entity_type: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''")
-    )
+
+    # Deliberately absent: the entity type keying this topic's rows (the upstream eval calls it
+    # subject_entity_type). It is DERIVABLE from the primary entities on the contributing needs,
+    # which ``page_needs`` retains — so storing it saves nothing, unlike a need's own entity_type,
+    # which cost an LLM call. The obvious rule for populating it, the modal primary type, is also
+    # wrong more often than right on the real corpus: it marks "target use cases" as keyed by
+    # software when that topic merely mentions software most. A wrong key type is worse than an
+    # absent one, since a consumer would mint a row per entity of a type that never keyed
+    # anything. Compute it where it is needed, with a rule that knows what it is for.
 
     __table_args__ = (Index("ix_topics_run_id", "run_id"),)
 

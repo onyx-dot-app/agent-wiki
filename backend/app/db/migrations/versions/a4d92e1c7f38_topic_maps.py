@@ -59,10 +59,6 @@ def upgrade() -> None:
         ),
         sa.Column("triggered_by", sa.Text(), nullable=True),
         sa.Column("created_at", sa.Text(), server_default=_NOW, nullable=False),
-        # A run is patched in place as pages change; a full re-derivation makes a new one and
-        # freezes this. patch_count is how far it has drifted from what the derivation produced.
-        sa.Column("patched_at", sa.Text(), nullable=True),
-        sa.Column("patch_count", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.ForeignKeyConstraint(
             ["entity_type_taxonomy_id"], ["entity_type_taxonomies.id"], ondelete="SET NULL"
         ),
@@ -85,9 +81,6 @@ def upgrade() -> None:
         sa.Column("run_id", sa.Integer(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("description", sa.Text(), server_default=sa.text("''"), nullable=False),
-        sa.Column(
-            "subject_entity_type", sa.Text(), server_default=sa.text("''"), nullable=False
-        ),
         sa.ForeignKeyConstraint(["run_id"], ["topic_map_runs.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )

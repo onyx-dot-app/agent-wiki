@@ -50,7 +50,6 @@ class TestRecord:
                     {
                         "name": "Wiki Auto Management",
                         "description": "AI-managed wiki structure.",
-                        "subject_entity_type": "",
                         "aspects": [_aspect("implementation status", [d1, d2])],
                     }
                 ]
