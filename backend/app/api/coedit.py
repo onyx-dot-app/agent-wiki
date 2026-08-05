@@ -59,7 +59,8 @@ from app.models.coedit import (
     ParticipantOut,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
-from app.wiki import acl, coedit, coedit_channel, coedit_live, git
+from app.tasks.coedit_rebase import rebase_coedit_session
+from app.wiki import acl, coedit, coedit_channel, coedit_live, git, wiki_documents
 from app.wiki.markdown_yjs import seed_doc_from_markdown
 
 router = APIRouter()
@@ -442,20 +443,43 @@ def _seed_snapshot_sync(session_id: int, path: str, base_sha: str | None) -> boo
     """Give a brand-new session its initial snapshot; True if the page is
     representable (or already has one).
 
-    Runs entirely in one thread hop, and that is deliberate: the ``Doc`` built
-    here is a PyO3 unsendable type, so it is created, read (``get_update``) and
-    dropped without ever leaving this call. Nothing keeps it — the snapshot
-    bytes plus the update log are the document from here on. The
-    already-seeded check belongs in here for the same reason: it keeps the
-    common case (every connection after the first) to one hop and skips the
-    git read.
+    **Attach first**: when the page has a ``wiki_documents`` row, its snapshot
+    transplants as this session's seq-0 state — a pure byte copy that carries
+    the page's one CRDT lineage across sessions, so a reconnecting client's
+    retained document syncs onto the lineage it already holds and nothing
+    duplicates (see ``coedit.transplant_snapshot``). If the document's
+    ``base_sha`` is behind the page's HEAD (out-of-band commits landed while
+    nobody had the page open), the drift is folded in as an ordinary
+    live-rebase — the same queued fold an agent commit gets mid-session, so
+    the first client may briefly see pre-fold content and then integrate the
+    delta as normal traffic.
 
-    ``set_initial_snapshot`` is conditional on ``ydoc_snapshot IS NULL``, so
-    two processes connecting at once race harmlessly: the loser's snapshot is
-    discarded and both then rebuild from the winner's, which is the same
-    lineage either way.
+    Seeding from markdown is the fallback for a page with no document row
+    (never co-edited, or its row was dropped by delete/trash). The ``Doc``
+    built for it is a PyO3 unsendable type, created, read (``get_update``)
+    and dropped without leaving this call — and the slice-1 mirror creates
+    the page's document row from this seed, so the next session transplants.
+
+    Both writes are conditional on ``ydoc_snapshot IS NULL``, so two
+    processes connecting at once race harmlessly: the loser rebuilds from the
+    winner's snapshot. The already-seeded check keeps the common case (every
+    connection after the first) to one hop.
     """
     if coedit.has_snapshot(session_id):
+        return True
+    doc_row = wiki_documents.get(path)
+    if doc_row is not None:
+        doc_snapshot = doc_row["ydoc_snapshot"]
+        doc_body = doc_row["ydoc_snapshot_body"]
+        doc_base = doc_row["base_sha"]
+        assert isinstance(doc_snapshot, bytes) and isinstance(doc_body, str)
+        assert doc_base is None or isinstance(doc_base, str)
+        coedit.transplant_snapshot(
+            session_id, snapshot=doc_snapshot, body=doc_body, base_sha=doc_base
+        )
+        head = git.head_sha_for_path(path)
+        if head is not None and doc_base != head:
+            rebase_coedit_session(session_id, head)
         return True
     body = git.read_file_opt(path, base_sha or "HEAD") or ""
     try:
