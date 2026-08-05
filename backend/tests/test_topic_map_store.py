@@ -1,9 +1,9 @@
 """Storage for the derived topic layer.
 
-Five tables rather than one document because of two properties nesting cannot give: an aspect
-belongs to more than one topic, and a page reference is a real foreign key. Both are pinned here,
-along with the ones a re-derivation could quietly break — exactly one run in force, superseded
-runs still readable, and a fingerprint that answers "have the needs moved?".
+Tables rather than one document because a page reference is a real foreign key — pinned here,
+along with the properties a re-derivation could quietly break: exactly one run in force,
+superseded runs still readable, a join table that carries no copy of the need it points at, and a
+fingerprint that answers "have the needs moved?".
 """
 
 from __future__ import annotations
@@ -62,16 +62,18 @@ class TestRecord:
         assert sorted(p.doc_id for p in aspect.needs) == sorted([d1, d2])
         assert aspect.spans_pages
 
-    def test_an_aspect_can_belong_to_two_topics(self, tmp_repo) -> None:
-        """The reason this is tables and not nested JSON: one facet, two subjects, ONE row — not
-        two copies with duplicated page lists and no link between them."""
+    def test_an_aspect_belongs_to_exactly_one_topic(self, tmp_repo) -> None:
+        """One facet named under two subjects is two aspects, not one shared row. An earlier
+        revision made this many-to-many; nothing ever produced a shared aspect, and nothing
+        downstream reads the topic — reconciliation happens at the aspect, which carries its own
+        pages — so the second link changed no behaviour and the join table went."""
         d1 = _page("a.md")
-        shared = _aspect("implementation status", [d1], key="impl")
+        same = _aspect("implementation status", [d1], key="impl")
         topic_map.record(
             _artifact(
                 topics=[
-                    {"name": "Wiki Auto Management", "aspects": [shared]},
-                    {"name": "Craft Integration", "aspects": [shared]},
+                    {"name": "Wiki Auto Management", "aspects": [same]},
+                    {"name": "Craft Integration", "aspects": [same]},
                 ]
             )
         )
@@ -80,8 +82,20 @@ class TestRecord:
         assert loaded is not None
         assert len(loaded.topics) == 2
         first, second = (t.aspects[0] for t in loaded.topics)
-        assert first.aspect_id == second.aspect_id  # the same aspect, not a copy
-        assert first.needs == second.needs
+        assert first.aspect_id != second.aspect_id
+        assert first.name == second.name == "implementation status"
+
+    def test_a_repeated_aspect_within_one_topic_is_one_row(self, tmp_repo) -> None:
+        """De-duplication is scoped to the topic, keyed by the producer's own identity for the
+        aspect — so listing it twice under one subject does not create two rows saying the same
+        thing."""
+        d1 = _page("a.md")
+        same = _aspect("implementation status", [d1], key="impl")
+        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [same, same]}]))
+
+        loaded = topic_map.active()
+        assert loaded is not None
+        assert len(loaded.topics[0].aspects) == 1
 
     def test_a_single_page_aspect_is_not_a_failure(self, tmp_repo) -> None:
         """Most of what a page tracks is its own; only a minority of facets span pages."""
@@ -229,6 +243,7 @@ class TestCarriesNoNeedPayload:
         owned_by_the_need = {"aspect_kind", "need_kind", "detail_level", "focus", "entity"}
         assert set(AspectPage.__table__.columns.keys()) == {"aspect_id", "doc_id", "need_name"}
         assert owned_by_the_need & set(Aspect.__table__.columns.keys()) == set()
+        assert "topic_aspects" not in Aspect.metadata.tables
 
     def test_the_fan_out_is_the_distinct_pages(self, tmp_repo) -> None:
         """What a consumer actually wants from an aspect: the pages to read needs for, deduped —

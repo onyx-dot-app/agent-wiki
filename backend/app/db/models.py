@@ -2247,8 +2247,14 @@ class Topic(Base):
 class Aspect(Base):
     """A facet that is tracked — one column of what a subject records.
 
-    Belongs to a run, not to a topic: an aspect can be a facet of several subjects, so the link is
-    the association table. That is the whole reason this is not nested JSON.
+    Belongs to exactly one topic. An earlier revision made this many-to-many through an
+    association table, on the theory that "implementation status" is a facet of several subjects
+    at once. That was never observed: no producer emits a shared aspect, because any pipeline that
+    partitions a cluster into topics and then groups within a topic yields topic-local aspects by
+    construction — and nothing downstream consults the topic anyway, since reconciliation happens
+    at the aspect, which carries its own pages. A second topic link would have changed no
+    behaviour. If topics later become a retrieval unit, where reaching an aspect through the other
+    subject matters, restoring the join table is a backfill from this column.
     """
 
     __tablename__ = "aspects"
@@ -2256,6 +2262,11 @@ class Aspect(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("topic_map_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    # Denormalized against ``run_id`` only in the sense that a topic already knows its run; the
+    # column is the parent link, and CASCADE from the topic keeps a run's teardown a single delete.
+    topic_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("topics.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
@@ -2271,22 +2282,7 @@ class Aspect(Base):
     # returning it, so ``AspectRecord`` computes these on read (see ``app.db.topic_map``) — always
     # consistent with the rows, never stale.
 
-    __table_args__ = (Index("ix_aspects_run_id", "run_id"),)
-
-
-class TopicAspect(Base):
-    """Which topics an aspect is a facet of. Many-to-many by design."""
-
-    __tablename__ = "topic_aspects"
-
-    topic_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("topics.id", ondelete="CASCADE"), primary_key=True
-    )
-    aspect_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("aspects.id", ondelete="CASCADE"), primary_key=True
-    )
-
-    __table_args__ = (Index("ix_topic_aspects_aspect_id", "aspect_id"),)
+    __table_args__ = (Index("ix_aspects_run_id", "run_id"), Index("ix_aspects_topic_id", "topic_id"))
 
 
 class AspectPage(Base):

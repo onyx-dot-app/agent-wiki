@@ -2,10 +2,10 @@
 
 The derived topic layer: subjects, their facets, and which pages hold each facet.
 
-Relational rather than one JSONB document for two reasons that are not about size. An aspect can
-belong to more than one topic — "implementation status" is a facet of several subjects — which
-nesting cannot express; and a page reference can be a real foreign key, so a deleted page cannot
-leave a dangling row.
+Relational rather than one JSONB document because a page reference is a real foreign key: a
+deleted page cannot leave a row pointing at nothing, which inside a blob would need filtering at
+every read. Size is not the argument — at ten thousand pages the equivalent document is ~8.5 MB,
+fine to cache but wrong to read per incoming document, while the reverse lookup stays indexed.
 
 Everything is scoped to a run and cascades from it, so a derivation is one insert and a prune is
 one delete. One run is ``active``; the rest stay readable, because topic and aspect ids are only
@@ -90,25 +90,21 @@ def upgrade() -> None:
         "aspects",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("run_id", sa.Integer(), nullable=False),
+        # One topic per aspect. A join table here would let a facet belong to several subjects,
+        # which no producer emits and nothing downstream reads: reconciliation happens at the
+        # aspect, which carries its own pages, so the topic is never consulted.
+        sa.Column("topic_id", sa.Integer(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("description", sa.Text(), server_default=sa.text("''"), nullable=False),
         # No aspect_kind / detail_level / focus here: they differ between the pages holding a
         # facet and are authoritative on aspect_pages. A summary copy could drift from its rows,
         # and for free-text detail_level there is no summary to take. Computed on read instead.
         sa.ForeignKeyConstraint(["run_id"], ["topic_map_runs.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["topic_id"], ["topics.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_aspects_run_id", "aspects", ["run_id"])
-
-    op.create_table(
-        "topic_aspects",
-        sa.Column("topic_id", sa.Integer(), nullable=False),
-        sa.Column("aspect_id", sa.Integer(), nullable=False),
-        sa.ForeignKeyConstraint(["topic_id"], ["topics.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["aspect_id"], ["aspects.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("topic_id", "aspect_id"),
-    )
-    op.create_index("ix_topic_aspects_aspect_id", "topic_aspects", ["aspect_id"])
+    op.create_index("ix_aspects_topic_id", "aspects", ["topic_id"])
 
     # Which needs make up an aspect — the connection, nothing else. A need has no id of its own
     # (a JSONB list on page_needs), so it is addressed by page + name, and that pair is the key:
@@ -132,7 +128,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("aspect_pages")
-    op.drop_table("topic_aspects")
     op.drop_table("aspects")
     op.drop_table("topics")
     op.drop_index("uq_topic_map_runs_active", table_name="topic_map_runs")

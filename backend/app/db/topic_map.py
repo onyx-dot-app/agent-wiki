@@ -4,9 +4,9 @@
     aspect  a FACET ("implementation status")
     pages   the documents holding that facet — the fan-out
 
-An aspect can be a facet of more than one topic, so the link is an association table rather than
-nesting. That, and a real foreign key from a page reference to ``wiki_doc_ids``, are why this is
-five tables and not one JSONB document.
+An aspect belongs to one topic and is composed of needs, which live on their pages. A real foreign
+key from a page reference to ``wiki_doc_ids`` is why this is tables and not one JSONB document: a
+deleted page cannot leave a row pointing at nothing.
 
 A derivation is written whole: ``record()`` inserts a run and everything under it in one
 transaction, then flips ``active``. Nothing is updated in place, because clustering is global —
@@ -27,7 +27,7 @@ from typing import Any, NamedTuple, cast
 
 from sqlalchemy import delete as sa_delete, select, update
 
-from app.db.models import Aspect, AspectPage, Topic, TopicAspect, TopicMapRun
+from app.db.models import Aspect, AspectPage, Topic, TopicMapRun
 from app.db.session import advisory_xact_lock, session
 
 log = logging.getLogger(__name__)
@@ -111,7 +111,7 @@ def corpus_fingerprint(pages: list[tuple[str, str]]) -> str:
 
 
 def _load(db: Any, run: TopicMapRun) -> TopicMap:
-    """Assemble one run into detached records. Four queries, not one per topic."""
+    """Assemble one run into detached records. Three queries, not one per topic."""
     topics = list(db.scalars(select(Topic).where(Topic.run_id == run.id).order_by(Topic.id)))
     aspects = list(db.scalars(select(Aspect).where(Aspect.run_id == run.id).order_by(Aspect.id)))
     aspect_ids = [a.id for a in aspects]
@@ -137,12 +137,9 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
         for a in aspects
     }
 
-    links: dict[int, list[int]] = {}
-    if topics:
-        for link in db.scalars(
-            select(TopicAspect).where(TopicAspect.topic_id.in_([t.id for t in topics]))
-        ):
-            links.setdefault(link.topic_id, []).append(link.aspect_id)
+    by_topic: dict[int, list[AspectRecord]] = {}
+    for a in aspects:
+        by_topic.setdefault(a.topic_id, []).append(records[a.id])
 
     return TopicMap(
         run_id=run.id,
@@ -156,7 +153,7 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
                 topic_id=t.id,
                 name=t.name,
                 description=t.description,
-                aspects=[records[i] for i in links.get(t.id, []) if i in records],
+                aspects=by_topic.get(t.id, []),
             )
             for t in topics
         ],
@@ -259,11 +256,7 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
         db.add(run)
         db.flush()
 
-        # An aspect shared by two topics is one row with two links. Keyed by the producer's own
-        # identity for it; falling back to the name means a producer that omits keys still gets
-        # sane de-duplication rather than silent duplicates.
-        aspect_ids: dict[str, int] = {}
-        n_aspects = n_pages = n_links = 0
+        n_aspects = n_pages = 0
         for topic in topics:
             topic_row = Topic(
                 run_id=run.id,
@@ -273,19 +266,25 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
             db.add(topic_row)
             db.flush()
 
+            # Scoped to this topic, not the run: an aspect belongs to one topic, so the same
+            # facet named under two topics is two rows. Keyed by the producer's own identity for
+            # it, falling back to the name, so a producer that repeats one within a topic gets
+            # de-duplication rather than two rows saying the same thing.
+            seen_aspects: dict[str, int] = {}
             for aspect in cast(list[dict[str, Any]], topic.get("aspects") or []):
                 key = str(aspect.get("key") or aspect.get("name") or "")
-                aspect_id = aspect_ids.get(key)
+                aspect_id = seen_aspects.get(key)
                 if aspect_id is None:
                     aspect_row = Aspect(
                         run_id=run.id,
+                        topic_id=topic_row.id,
                         name=str(aspect.get("name") or ""),
                         description=str(aspect.get("description") or ""),
                     )
                     db.add(aspect_row)
                     db.flush()
                     aspect_id = aspect_row.id
-                    aspect_ids[key] = aspect_id
+                    seen_aspects[key] = aspect_id
                     n_aspects += 1
                     # Deduped here as well as constrained in the schema. The key alone would
                     # abort the whole run on a repeated need — losing a derivation that already
@@ -311,18 +310,15 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
                             AspectPage(aspect_id=aspect_id, doc_id=doc_id, need_name=need_name)
                         )
                         n_pages += 1
-                db.add(TopicAspect(topic_id=topic_row.id, aspect_id=aspect_id))
-                n_links += 1
 
         db.commit()
         run_id = run.id
 
     log.info(
-        "topic_map: recorded run %d — %d topic(s), %d aspect(s), %d link(s), %d page ref(s)",
+        "topic_map: recorded run %d — %d topic(s), %d aspect(s), %d need link(s)",
         run_id,
         len(topics),
         n_aspects,
-        n_links,
         n_pages,
     )
     return run_id
