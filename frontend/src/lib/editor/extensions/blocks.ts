@@ -61,28 +61,6 @@ import { isSameOriginSrc } from "./media";
 const THEMATIC_BREAK_LINE_RE =
   /^ {0,3}(?:-[ \t]*){3,}$|^ {0,3}(?:_[ \t]*){3,}$|^ {0,3}(?:\*[ \t]*){3,}$/;
 
-/** `[text](url)` → a real link, on typing the closing paren (used by
- * `MarkdownLink` below).
- *
- * StarterKit ships the `link` mark and autolinks a bare URL as you type, but
- * nothing converted markdown link *syntax*, so `[bo](https://…)` just sat
- * there as literal text — the one link form someone writing markdown will
- * reach for first.
- *
- * Safe to author because the backend codec round-trips the mark: it reads
- * `link_open`/`link_close` into a `link` format run carrying href (and title)
- * and serializes it back to `[text](href)` — see `app/wiki/markdown_yjs.py`.
- *
- * `markInputRule` can't express this: it keeps `match[match.length - 1]` as
- * the surviving text, and here the text to keep is the *first* group, so the
- * replacement is done explicitly.
- *
- * Titled links (`[text](url "title")`) are deliberately NOT matched. Tiptap's
- * `link` mark has no `title` attribute, so converting one would drop the title
- * silently; left as literal text it round-trips through the codec intact and
- * still renders as a titled link wherever the markdown is read. */
-const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\((\S+)\)$/;
-
 /** Internal bookkeeping attrs never rendered into the DOM (`rendered:
  * false`) — they exist purely for the Yjs XML round trip, not for display
  * or HTML paste/import. */
@@ -788,9 +766,8 @@ const MarkdownLink = Extension.create({
   },
 
   /** Mod-k strips the link from the selection (or from the link under the
-   * caret), which is the missing half of authoring: typing `[text](url)`
-   * creates one, and nothing could undo or retarget it afterwards. Removing it
-   * leaves the text, so retyping the markdown is how you change a URL.
+   * caret) — the retarget/undo half of authoring, since links now come only
+   * from the `/URL` command (see `linkInput.ts`). Removing it leaves the text.
    *
    * Returns false when there's no link involved, so the shortcut falls through
    * to the browser instead of silently swallowing Cmd-K. */
@@ -806,30 +783,6 @@ const MarkdownLink = Extension.create({
           .run();
       },
     };
-  },
-
-  addInputRules() {
-    return [
-      new InputRule({
-        find: MARKDOWN_LINK_RE,
-        handler: ({ state, range, match }) => {
-          const text = match[1];
-          const href = match[2];
-          const linkType = state.schema.marks.link;
-          // No link mark in the schema (StarterKit's `link: false`) would make
-          // this rule a no-op rather than a crash.
-          if (!text || !href || !linkType) return null;
-          state.tr.replaceWith(
-            range.from,
-            range.to,
-            state.schema.text(text, [linkType.create({ href })]),
-          );
-          // Otherwise the mark stays "open" and the next characters typed
-          // after the paren join the link.
-          state.tr.removeStoredMark(linkType);
-        },
-      }),
-    ];
   },
 });
 

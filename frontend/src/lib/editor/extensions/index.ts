@@ -47,7 +47,15 @@ export function tiptapExtensions(
       // history extension binds the same Cmd+Z/Cmd+Shift+Z keys and would
       // conflict with it, not coexist alongside it.
       undoRedo: false,
-      link: { openOnClick: false },
+      // Links come only from the deliberate `/URL` command (see
+      // `linkInput.ts`), never from raw text: `autolink` would style a bare
+      // URL the instant you typed it, and `linkOnPaste` would do the same on
+      // paste — both are exactly the "raw link-styling" we're suppressing.
+      // The `[text](url)` typing shortcut is dropped too (see `MarkdownLink`).
+      // Literal bracket/URL text stays literal across a round-trip: the codec
+      // escapes `[`/`]` (`markdown_yjs.py:_escape_inline_text`) and its
+      // commonmark parser has linkify off, so nothing re-links on reload.
+      link: { openOnClick: false, autolink: false, linkOnPaste: false },
       // Replaced by InlineCode below — same mark name ("code"), but keeps
       // its flanking backticks as literal rendered text instead of hidden
       // syntax; see blocks.ts for why.
