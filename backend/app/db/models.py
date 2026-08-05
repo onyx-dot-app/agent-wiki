@@ -2241,15 +2241,6 @@ class Topic(Base):
     # rather than explaining what a thing is.
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
 
-    # Deliberately absent: the entity type keying this topic's rows (the upstream eval calls it
-    # subject_entity_type). It is DERIVABLE from the primary entities on the contributing needs,
-    # which ``page_needs`` retains — so storing it saves nothing, unlike a need's own entity_type,
-    # which cost an LLM call. The obvious rule for populating it, the modal primary type, is also
-    # wrong more often than right on the real corpus: it marks "target use cases" as keyed by
-    # software when that topic merely mentions software most. A wrong key type is worse than an
-    # absent one, since a consumer would mint a row per entity of a type that never keyed
-    # anything. Compute it where it is needed, with a rule that knows what it is for.
-
     __table_args__ = (Index("ix_topics_run_id", "run_id"),)
 
 
