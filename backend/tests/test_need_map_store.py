@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.db import topic_map
+from app.db import need_map
 from app.wiki import doc_ids, git as wiki_git
 
 
@@ -41,7 +41,7 @@ def _artifact(*, topics=None, fingerprint="abc123", taxonomy_id=None) -> dict:
 class TestRecord:
     def test_stores_a_topic_with_its_aspects_and_pages(self, tmp_repo) -> None:
         d1, d2 = _page("a.md"), _page("b.md")
-        run_id = topic_map.record(
+        need_map_id = need_map.record(
             _artifact(
                 topics=[
                     {
@@ -53,9 +53,9 @@ class TestRecord:
             )
         )
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
-        assert loaded.run_id == run_id
+        assert loaded.need_map_id == need_map_id
         assert [t.name for t in loaded.topics] == ["Wiki Auto Management"]
         aspect = loaded.topics[0].aspects[0]
         assert aspect.name == "implementation status"
@@ -69,7 +69,7 @@ class TestRecord:
         pages — so the second link changed no behaviour and the join table went."""
         d1 = _page("a.md")
         same = _aspect("implementation status", [d1], key="impl")
-        topic_map.record(
+        need_map.record(
             _artifact(
                 topics=[
                     {"name": "Wiki Auto Management", "aspects": [same]},
@@ -78,7 +78,7 @@ class TestRecord:
             )
         )
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         assert len(loaded.topics) == 2
         first, second = (t.aspects[0] for t in loaded.topics)
@@ -91,56 +91,56 @@ class TestRecord:
         thing."""
         d1 = _page("a.md")
         same = _aspect("implementation status", [d1], key="impl")
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [same, same]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [same, same]}]))
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         assert len(loaded.topics[0].aspects) == 1
 
     def test_a_single_page_aspect_is_not_a_failure(self, tmp_repo) -> None:
         """Most of what a page tracks is its own; only a minority of facets span pages."""
         d1 = _page("a.md")
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("solo", [d1])]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("solo", [d1])]}]))
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         assert not loaded.topics[0].aspects[0].spans_pages
 
     def test_only_the_newest_run_is_active(self, tmp_repo) -> None:
         d1 = _page("a.md")
-        topic_map.record(_artifact(fingerprint="first", topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}]))
-        second = topic_map.record(
+        need_map.record(_artifact(fingerprint="first", topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}]))
+        second = need_map.record(
             _artifact(fingerprint="second", topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}])
         )
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
-        assert (loaded.run_id, loaded.corpus_fingerprint) == (second, "second")
+        assert (loaded.need_map_id, loaded.corpus_fingerprint) == (second, "second")
 
     def test_a_superseded_run_stays_readable(self, tmp_repo) -> None:
         """Ids are stable only WITHIN a run, so a consumer that recorded a decision against an
         aspect resolves it through the run it belongs to."""
         d1 = _page("a.md")
-        first = topic_map.record(_artifact(topics=[{"name": "Auto Management", "aspects": [_aspect("x", [d1])]}]))
-        topic_map.record(_artifact(topics=[{"name": "Wiki Auto Management", "aspects": [_aspect("x", [d1])]}]))
+        first = need_map.record(_artifact(topics=[{"name": "Auto Management", "aspects": [_aspect("x", [d1])]}]))
+        need_map.record(_artifact(topics=[{"name": "Wiki Auto Management", "aspects": [_aspect("x", [d1])]}]))
 
-        old = topic_map.get(first)
+        old = need_map.get(first)
         assert old is not None
         assert [t.name for t in old.topics] == ["Auto Management"]
 
     def test_refuses_a_run_with_no_topics(self, tmp_repo) -> None:
         """An empty derivation is a failure, and recording it would deactivate a good run."""
         with pytest.raises(ValueError):
-            topic_map.record(_artifact(topics=[]))
-        assert topic_map.active() is None
+            need_map.record(_artifact(topics=[]))
+        assert need_map.active() is None
 
     def test_a_failed_record_leaves_the_previous_run_in_force(self, tmp_repo) -> None:
         d1 = _page("a.md")
-        topic_map.record(_artifact(fingerprint="good", topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}]))
+        need_map.record(_artifact(fingerprint="good", topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}]))
         with pytest.raises(ValueError):
-            topic_map.record(_artifact(topics=[]))
+            need_map.record(_artifact(topics=[]))
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         assert loaded.corpus_fingerprint == "good"
 
@@ -155,22 +155,22 @@ class TestForeignKeys:
         from app.db.session import session
 
         d1, d2 = _page("a.md"), _page("b.md")
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("x", [d1, d2])]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("x", [d1, d2])]}]))
 
         with session() as s:
             s.execute(sa_delete(WikiDocId).where(WikiDocId.id == d2))
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         assert [p.doc_id for p in loaded.topics[0].aspects[0].needs] == [d1]
 
     def test_dropping_a_run_takes_everything_under_it(self, tmp_repo) -> None:
         d1 = _page("a.md")
         for _ in range(3):
-            topic_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}]))
+            need_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}]))
 
-        assert topic_map.prune(keep=1) == 2
-        assert len(topic_map.history()) == 1
+        assert need_map.prune(keep=1) == 2
+        assert len(need_map.history()) == 1
 
     def test_losing_the_taxonomy_keeps_the_run(self, tmp_repo) -> None:
         """SET NULL, not CASCADE: it costs the ability to resolve the type names a topic is keyed
@@ -185,14 +185,14 @@ class TestForeignKeys:
         taxonomy_id = entity_type_taxonomy.record(
             {"corpus_fingerprint": "c", "entity_types": [{"name": "person", "definition": "d"}]}
         )
-        topic_map.record(
+        need_map.record(
             _artifact(taxonomy_id=taxonomy_id, topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}])
         )
 
         with session() as s:
             s.execute(sa_delete(EntityTypeTaxonomy).where(EntityTypeTaxonomy.id == taxonomy_id))
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         assert loaded.entity_type_taxonomy_id is None
         assert [t.name for t in loaded.topics] == ["T"]
@@ -210,9 +210,9 @@ class TestNaturalKey:
             {"doc_id": d1, "need_name": "deferred work"},
         ]
 
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         found = loaded.topics[0].aspects[0]
         assert sorted(n.need_name for n in found.needs) == ["deferred work", "shipped features"]
@@ -225,9 +225,9 @@ class TestNaturalKey:
         dupe = _aspect("x", [d1])
         dupe["pages"] = dupe["pages"] * 2
 
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [dupe]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [dupe]}]))
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         assert len(loaded.topics[0].aspects[0].needs) == 1
 
@@ -255,9 +255,9 @@ class TestCarriesNoNeedPayload:
             {"doc_id": d1, "need_name": "deferred work"},
             {"doc_id": d2, "need_name": "implementation status"},
         ]
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
 
-        loaded = topic_map.active()
+        loaded = need_map.active()
         assert loaded is not None
         found = loaded.topics[0].aspects[0]
         assert found.doc_ids == sorted([d1, d2])
@@ -269,7 +269,7 @@ class TestReverseLookup:
     def test_finds_the_aspects_a_page_holds(self, tmp_repo) -> None:
         """The query a reconciler runs per incoming document — indexed, not a scan over the map."""
         d1, d2 = _page("a.md"), _page("b.md")
-        topic_map.record(
+        need_map.record(
             _artifact(
                 topics=[
                     {
@@ -283,38 +283,38 @@ class TestReverseLookup:
             )
         )
 
-        assert [a.name for a in topic_map.aspects_for_page(d1)] == ["shared status"]
-        assert sorted(a.name for a in topic_map.aspects_for_page(d2)) == ["only on b", "shared status"]
+        assert [a.name for a in need_map.aspects_for_page(d1)] == ["shared status"]
+        assert sorted(a.name for a in need_map.aspects_for_page(d2)) == ["only on b", "shared status"]
 
     def test_a_page_in_no_aspect_returns_nothing(self, tmp_repo) -> None:
         d1, d2 = _page("a.md"), _page("b.md")
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("x", [d1])]}]))
 
-        assert topic_map.aspects_for_page(d2) == []
+        assert need_map.aspects_for_page(d2) == []
 
     def test_it_reads_the_active_run_only(self, tmp_repo) -> None:
         """A superseded run's page references must not answer for the current one."""
         d1 = _page("a.md")
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("old name", [d1])]}]))
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("new name", [d1])]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("old name", [d1])]}]))
+        need_map.record(_artifact(topics=[{"name": "T", "aspects": [_aspect("new name", [d1])]}]))
 
-        assert [a.name for a in topic_map.aspects_for_page(d1)] == ["new name"]
+        assert [a.name for a in need_map.aspects_for_page(d1)] == ["new name"]
 
     def test_nothing_derived_yet_is_not_an_error(self, tmp_repo) -> None:
-        assert topic_map.aspects_for_page(_page("a.md")) == []
-        assert topic_map.active() is None
+        assert need_map.aspects_for_page(_page("a.md")) == []
+        assert need_map.active() is None
 
 
 class TestCorpusFingerprint:
     def test_read_order_does_not_change_it(self, tmp_db) -> None:
         """Otherwise the map would look stale purely because pages came back in another order."""
-        assert topic_map.corpus_fingerprint(
+        assert need_map.corpus_fingerprint(
             [("d2", "sha2"), ("d1", "sha1")]
-        ) == topic_map.corpus_fingerprint([("d1", "sha1"), ("d2", "sha2")])
+        ) == need_map.corpus_fingerprint([("d1", "sha1"), ("d2", "sha2")])
 
     def test_a_changed_need_set_changes_it(self, tmp_db) -> None:
-        before = topic_map.corpus_fingerprint([("d1", "sha1")])
+        before = need_map.corpus_fingerprint([("d1", "sha1")])
 
-        assert topic_map.corpus_fingerprint([("d1", "sha2")]) != before
-        assert topic_map.corpus_fingerprint([("d1", "sha1"), ("d2", "sha2")]) != before
-        assert topic_map.corpus_fingerprint([("d9", "sha1")]) != before
+        assert need_map.corpus_fingerprint([("d1", "sha2")]) != before
+        assert need_map.corpus_fingerprint([("d1", "sha1"), ("d2", "sha2")]) != before
+        assert need_map.corpus_fingerprint([("d9", "sha1")]) != before

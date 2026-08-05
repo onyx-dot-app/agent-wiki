@@ -2157,7 +2157,7 @@ class EntityTypeTaxonomy(Base):
     )
 
 
-class TopicMapRun(Base):
+class NeedMap(Base):
     """One derivation of the topic layer — the version header its rows hang from.
 
     Needs are per page, so no page can see that four of them track one subject. Clustering plus a
@@ -2186,7 +2186,7 @@ class TopicMapRun(Base):
     records that a run has drifted from what produced it.
     """
 
-    __tablename__ = "topic_map_runs"
+    __tablename__ = "need_maps"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     # Exactly one run is in force. Enforced by the partial unique index below.
@@ -2218,7 +2218,7 @@ class TopicMapRun(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
 
     __table_args__ = (
-        Index("uq_topic_map_runs_active", "active", unique=True, postgresql_where=text("active")),
+        Index("uq_need_maps_active", "active", unique=True, postgresql_where=text("active")),
     )
 
 
@@ -2228,8 +2228,8 @@ class Topic(Base):
     __tablename__ = "topics"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    run_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("topic_map_runs.id", ondelete="CASCADE"), nullable=False
+    need_map_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("need_maps.id", ondelete="CASCADE"), nullable=False
     )
     # The subject, named abstractly so another page tracking it would plausibly produce the same
     # name: "Wiki Auto Management", not "the auto-management PRD".
@@ -2241,7 +2241,7 @@ class Topic(Base):
     # rather than explaining what a thing is.
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
 
-    __table_args__ = (Index("ix_topics_run_id", "run_id"),)
+    __table_args__ = (Index("ix_topics_need_map_id", "need_map_id"),)
 
 
 class Aspect(Base):
@@ -2260,10 +2260,10 @@ class Aspect(Base):
     __tablename__ = "aspects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    run_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("topic_map_runs.id", ondelete="CASCADE"), nullable=False
+    need_map_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("need_maps.id", ondelete="CASCADE"), nullable=False
     )
-    # Denormalized against ``run_id`` only in the sense that a topic already knows its run; the
+    # Denormalized against ``need_map_id`` only in the sense that a topic already knows its run; the
     # column is the parent link, and CASCADE from the topic keeps a run's teardown a single delete.
     topic_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("topics.id", ondelete="CASCADE"), nullable=False
@@ -2279,10 +2279,10 @@ class Aspect(Base):
     # so a stored value is only "whichever page was inserted first" wearing a summary's clothes.
     #
     # Triage still gets its headline: both loaders fetch an aspect's full page list before
-    # returning it, so ``AspectRecord`` computes these on read (see ``app.db.topic_map``) — always
+    # returning it, so ``AspectRecord`` computes these on read (see ``app.db.need_map``) — always
     # consistent with the rows, never stale.
 
-    __table_args__ = (Index("ix_aspects_run_id", "run_id"), Index("ix_aspects_topic_id", "topic_id"))
+    __table_args__ = (Index("ix_aspects_need_map_id", "need_map_id"), Index("ix_aspects_topic_id", "topic_id"))
 
 
 class AspectPage(Base):

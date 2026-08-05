@@ -41,7 +41,7 @@ def _rewind_to_the_old_name(seed_row: bool = False) -> None:
         s.execute(sa.text("DROP TABLE IF EXISTS topic_aspects"))
         s.execute(sa.text("DROP TABLE IF EXISTS aspects"))
         s.execute(sa.text("DROP TABLE IF EXISTS topics"))
-        s.execute(sa.text("DROP TABLE IF EXISTS topic_map_runs"))
+        s.execute(sa.text("DROP TABLE IF EXISTS need_maps"))
         s.execute(sa.text("DROP TABLE IF EXISTS page_needs"))
         s.execute(sa.text("DROP TABLE IF EXISTS entity_type_taxonomies"))
         s.execute(sa.text(_CREATE_OLD))
