@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session, aliased
 from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User
 from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
-from app.wiki import wiki_documents
+from app.wiki import doc_ids, wiki_documents
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ class SessionRow(BaseModel):
     ydoc_seq: int
     ydoc_checkpointed_seq: int
     base_sha: str | None
+    doc_id: str | None
     status: str
     created_at: str
     updated_at: str
@@ -120,6 +121,7 @@ def _session_row(s: CoeditSession) -> SessionRow:
         ydoc_seq=s.ydoc_seq,
         ydoc_checkpointed_seq=s.ydoc_checkpointed_seq,
         base_sha=s.base_sha,
+        doc_id=s.doc_id,
         status=s.status,
         created_at=s.created_at,
         updated_at=s.updated_at,
@@ -233,6 +235,7 @@ class CheckpointSessionRow(BaseModel):
     path: str
     status: str
     base_sha: str | None
+    doc_id: str | None
     ydoc_seq: int
     ydoc_checkpointed_seq: int
     ydoc_snapshot: bytes | None
@@ -254,6 +257,7 @@ def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
             path=row.path,
             status=row.status,
             base_sha=row.base_sha,
+            doc_id=row.doc_id,
             ydoc_seq=row.ydoc_seq,
             ydoc_checkpointed_seq=row.ydoc_checkpointed_seq,
             ydoc_snapshot=row.ydoc_snapshot,
@@ -325,18 +329,28 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     reply a no-op and also preserves anything typed while disconnected.
     """
     with session() as s:
+        # The session's binding to the page's document identity, stamped on
+        # every open (see the ``doc_id`` column comment): fresh rows carry it
+        # from birth, and rows predating the column pick it up on their next
+        # open. Resolve-only, like the ``wiki_documents`` mirror — an open on
+        # a page the registry has never seen leaves NULL rather than minting.
+        doc_id = doc_ids.id_for_path_in(s, path)
         existing = s.scalar(
             select(CoeditSession).where(
                 CoeditSession.path == path, CoeditSession.status == SessionStatus.ACTIVE.value
             )
         )
         if existing is not None:
+            if existing.doc_id is None and doc_id is not None:
+                existing.doc_id = doc_id
             return _session_row(existing)
         now = _iso(_now())
         reusable = _reusable_closed_session(s, path, base_sha)
         if reusable is not None:
             reusable.status = SessionStatus.ACTIVE.value
             reusable.updated_at = now
+            if reusable.doc_id is None and doc_id is not None:
+                reusable.doc_id = doc_id
             try:
                 s.flush()
             except IntegrityError:
@@ -361,6 +375,7 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
             path=path,
             ydoc_seq=0,
             base_sha=base_sha,
+            doc_id=doc_id,
             status=SessionStatus.ACTIVE.value,
             created_at=now,
             updated_at=now,
@@ -494,25 +509,29 @@ def apply_update(
     """
     now = _iso(_now())
     with session() as s:
-        new_seq = s.scalars(
+        bumped = s.execute(
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.status == SessionStatus.ACTIVE.value)
             .values(ydoc_seq=CoeditSession.ydoc_seq + 1, updated_at=now)
-            .returning(CoeditSession.ydoc_seq)
+            .returning(CoeditSession.ydoc_seq, CoeditSession.doc_id)
             .execution_options(synchronize_session=False)
         ).one_or_none()
-        if new_seq is None:
+        if bumped is None:
             return None
         s.add(
             CoeditUpdate(
                 session_id=session_id,
-                seq=new_seq,
+                seq=bumped.ydoc_seq,
                 author_user_id=author_user_id,
                 client_id=client_id,
+                # The row's document-keyed identity, carried from the session's
+                # own binding rather than re-resolved through the path (which
+                # can be transiently wrong mid-move).
+                doc_id=bumped.doc_id,
                 update_payload=update_bytes,
             )
         )
-        return new_seq
+        return bumped.ydoc_seq
 
 
 def updates_since(session_id: int, after_seq: int) -> UpdatesSince:

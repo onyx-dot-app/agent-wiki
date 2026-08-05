@@ -989,6 +989,14 @@ class CoeditSession(Base):
     # checkpoint 3-way merge. Null until the session is seeded from a page's
     # HEAD (or, for a brand-new page, until the first checkpoint).
     base_sha: Mapped[str | None] = mapped_column(Text)
+    # ``wiki_doc_ids.id`` of the page this session serves, stamped at open —
+    # the session's binding to the page's document identity (see
+    # ``wiki_documents``). Resolved once, so later readers don't re-resolve
+    # through the path (which can be transiently wrong mid-move). Nullable:
+    # rows predating the column, and sessions whose path had no live registry
+    # row at open (never-read pages in tests/seed scripts), carry NULL until
+    # the next open stamps them.
+    doc_id: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
@@ -1078,6 +1086,15 @@ class CoeditUpdate(Base):
     # (a user with two tabs shares one user id). Nullable: non-collab writers
     # don't set it.
     client_id: Mapped[str | None] = mapped_column(Text)
+    # ``wiki_doc_ids.id`` of the page whose document this update belongs to,
+    # copied from the session's own ``doc_id`` at write time. The document-
+    # keyed view of this log: cutover re-reads updates by document rather
+    # than by session, so the lineage survives session churn. Nullable for
+    # rows written before the column (or under a NULL session ``doc_id``);
+    # ``seq`` stays session-scoped until cutover, so (doc_id, seq) is
+    # deliberately NOT unique — surviving rows from two sessions of one page
+    # can share a seq.
+    doc_id: Mapped[str | None] = mapped_column(Text)
     update_payload: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
@@ -1087,6 +1104,9 @@ class CoeditUpdate(Base):
         # One update per produced seq, in order — also the lookup for
         # "updates since seq N" catch-up.
         UniqueConstraint("session_id", "seq", name="idx_coedit_updates_session_seq"),
+        # The document-keyed catch-up/rebuild lookup ("updates for doc since
+        # seq N"), live once cutover reads this log by document.
+        Index("idx_coedit_updates_doc_seq", "doc_id", "seq"),
     )
 
 
@@ -1155,6 +1175,10 @@ class WikiDocument(Base):
     # Git HEAD the document was last seeded from / checkpointed against —
     # the merge base for the checkpoint 3-way merge.
     base_sha: Mapped[str | None] = mapped_column(Text)
+    # When the document last checkpointed to git — the overdue-detection
+    # input once the checkpoint scan reads document state (cutover). NULL for
+    # a document that has never checkpointed.
+    last_checkpoint_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
     )
