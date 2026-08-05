@@ -25,6 +25,7 @@ import {
 import { CommandMenu } from "@/lib/editor/extensions/commandMenu";
 import { AnchoredHighlights } from "@/lib/editor/extensions/highlights";
 import { imageSupport } from "@/lib/editor/extensions/images";
+import { LinkInput } from "@/lib/editor/extensions/linkInput";
 import { presenceExtension } from "@/lib/editor/extensions/presence";
 
 /**
@@ -116,6 +117,7 @@ export function tiptapExtensions(
     AnchoredHighlights,
     presenceExtension(awareness),
     CommandMenu,
+    LinkInput,
     imageSupport(pagePath),
   ];
 }
