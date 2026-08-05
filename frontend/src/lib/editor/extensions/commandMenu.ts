@@ -27,6 +27,7 @@ import {
   SvgCode,
   SvgHash,
   SvgImage,
+  SvgLink,
   SvgListTree,
   SvgMinus,
   SvgQuoteStart,
@@ -40,6 +41,7 @@ import {
   canUploadImages,
   promptImageUpload,
 } from "@/lib/editor/extensions/images";
+import { openLinkInput } from "@/lib/editor/extensions/linkInput";
 import type { CommandItem } from "@/lib/editor/extensions/types";
 
 const COMMANDS: CommandItem[] = [
@@ -144,6 +146,17 @@ const COMMANDS: CommandItem[] = [
       // "/image" text would otherwise survive in the doc behind it.
       editor.chain().focus().deleteRange(range).run();
       promptImageUpload(editor.view);
+    },
+  },
+  {
+    title: "URL",
+    icon: SvgLink,
+    run: (editor, range) => {
+      // Clear the "/URL" text first so the caret sits on a clean block, then
+      // open the link popover anchored at that caret — the same delete-then-
+      // prompt shape as Image above.
+      editor.chain().focus().deleteRange(range).run();
+      openLinkInput(editor);
     },
   },
 ];
