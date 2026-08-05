@@ -24,10 +24,7 @@ def _aspect(name: str, pages: list[str], *, key: str | None = None, **over) -> d
         "key": key or name,
         "name": name,
         "description": "what is tracked",
-        "aspect_kind": "entity_status",
-        "detail_level": "one line each",
-        "focus": "specific",
-        "pages": [{"doc_id": d, "need_name": name, "entity": ""} for d in pages],
+        "pages": [{"doc_id": d, "need_name": name} for d in pages],
     } | over
 
 
@@ -62,7 +59,7 @@ class TestRecord:
         assert [t.name for t in loaded.topics] == ["Wiki Auto Management"]
         aspect = loaded.topics[0].aspects[0]
         assert aspect.name == "implementation status"
-        assert sorted(p.doc_id for p in aspect.pages) == sorted([d1, d2])
+        assert sorted(p.doc_id for p in aspect.needs) == sorted([d1, d2])
         assert aspect.spans_pages
 
     def test_an_aspect_can_belong_to_two_topics(self, tmp_repo) -> None:
@@ -84,7 +81,7 @@ class TestRecord:
         assert len(loaded.topics) == 2
         first, second = (t.aspects[0] for t in loaded.topics)
         assert first.aspect_id == second.aspect_id  # the same aspect, not a copy
-        assert first.pages == second.pages
+        assert first.needs == second.needs
 
     def test_a_single_page_aspect_is_not_a_failure(self, tmp_repo) -> None:
         """Most of what a page tracks is its own; only a minority of facets span pages."""
@@ -151,7 +148,7 @@ class TestForeignKeys:
 
         loaded = topic_map.active()
         assert loaded is not None
-        assert [p.doc_id for p in loaded.topics[0].aspects[0].pages] == [d1]
+        assert [p.doc_id for p in loaded.topics[0].aspects[0].needs] == [d1]
 
     def test_dropping_a_run_takes_everything_under_it(self, tmp_repo) -> None:
         d1 = _page("a.md")
@@ -188,10 +185,28 @@ class TestForeignKeys:
 
 
 class TestNaturalKey:
-    def test_the_same_page_cannot_be_attached_twice(self, tmp_repo) -> None:
-        """Nothing upstream guarantees a producer lists a page once. The duplicate is dropped
-        rather than raised: the key alone would abort the whole run, losing a derivation that
-        already paid for its LLM calls."""
+    def test_one_page_can_contribute_two_needs_to_one_aspect(self, tmp_repo) -> None:
+        """Why ``need_name`` is IN the key rather than ``entity``: the unit is the NEED. Clustering
+        can put two of one page's needs in the same facet, and keying on the page alone dropped the
+        second silently — losing a link the derivation had already paid an LLM call to find."""
+        d1 = _page("roadmap.md")
+        aspect = _aspect("delivery state", [])
+        aspect["pages"] = [
+            {"doc_id": d1, "need_name": "shipped features"},
+            {"doc_id": d1, "need_name": "deferred work"},
+        ]
+
+        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
+
+        loaded = topic_map.active()
+        assert loaded is not None
+        found = loaded.topics[0].aspects[0]
+        assert sorted(n.need_name for n in found.needs) == ["deferred work", "shipped features"]
+        assert not found.spans_pages  # two needs, one page — reach is still one
+
+    def test_a_genuinely_repeated_need_is_dropped_not_raised(self, tmp_repo) -> None:
+        """Nothing upstream guarantees a producer lists a need once. The duplicate goes; the run
+        survives, because the key alone would abort a derivation already paid for."""
         d1 = _page("a.md")
         dupe = _aspect("x", [d1])
         dupe["pages"] = dupe["pages"] * 2
@@ -200,123 +215,39 @@ class TestNaturalKey:
 
         loaded = topic_map.active()
         assert loaded is not None
-        assert [p.doc_id for p in loaded.topics[0].aspects[0].pages] == [d1]
+        assert len(loaded.topics[0].aspects[0].needs) == 1
 
-    def test_one_page_can_hold_several_entities_rows(self, tmp_repo) -> None:
-        """Why ``entity`` is IN the key: a customer-tracker page carries a deal-status row per
-        customer, so the same (aspect, page) legitimately repeats."""
-        d1 = _page("customers.md")
-        aspect = _aspect("deal status", [])
+
+class TestCarriesNoNeedPayload:
+    """The join table stores the connection and nothing else. Pinned, because the fields that used
+    to sit here are owned by ``page_needs`` — which is re-extracted when a page changes while this
+    map is a snapshot, so a copy drifts in exactly the field that decides append-vs-replace."""
+
+    def test_neither_table_stores_a_copy_of_the_need(self) -> None:
+        from app.db.models import Aspect, AspectPage
+
+        owned_by_the_need = {"aspect_kind", "need_kind", "detail_level", "focus", "entity"}
+        assert set(AspectPage.__table__.columns.keys()) == {"aspect_id", "doc_id", "need_name"}
+        assert owned_by_the_need & set(Aspect.__table__.columns.keys()) == set()
+
+    def test_the_fan_out_is_the_distinct_pages(self, tmp_repo) -> None:
+        """What a consumer actually wants from an aspect: the pages to read needs for, deduped —
+        two needs on one page are one page of reach, not two."""
+        d1, d2 = _page("a.md"), _page("b.md")
+        aspect = _aspect("delivery state", [])
         aspect["pages"] = [
-            {"doc_id": d1, "need_name": "deal status", "entity": "Acme"},
-            {"doc_id": d1, "need_name": "deal status", "entity": "Globex"},
+            {"doc_id": d1, "need_name": "shipped features"},
+            {"doc_id": d1, "need_name": "deferred work"},
+            {"doc_id": d2, "need_name": "implementation status"},
         ]
-
         topic_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
 
         loaded = topic_map.active()
         assert loaded is not None
-        assert sorted(p.entity for p in loaded.topics[0].aspects[0].pages) == ["Acme", "Globex"]
-
-
-class TestAspectSummary:
-    """The headline values for triage. Computed from the page rows, never stored — so they cannot
-    drift from what they summarize, and a producer cannot assert one the rows disagree with."""
-
-    @staticmethod
-    def _with_pages(pages: list[dict]) -> topic_map.AspectRecord:
-        aspect = _aspect("implementation status", [])
-        aspect["pages"] = pages
-        topic_map.record(_artifact(topics=[{"name": "T", "aspects": [aspect]}]))
-        loaded = topic_map.active()
-        assert loaded is not None
-        return loaded.topics[0].aspects[0]
-
-    def test_the_aspect_table_stores_no_summary_columns(self) -> None:
-        """The decision itself, pinned. Re-adding a column here brings back a value that can go
-        stale against its rows — and for detail_level, one that cannot be computed at all."""
-        from app.db.models import Aspect
-
-        assert {"aspect_kind", "detail_level", "focus"} & set(Aspect.__table__.columns.keys()) == set()
-
-    def test_dominant_kind_is_the_majority_across_pages(self, tmp_repo) -> None:
-        d1, d2, d3 = _page("a.md"), _page("b.md"), _page("c.md")
-        aspect = self._with_pages(
-            [
-                {"doc_id": d1, "entity": "", "aspect_kind": "entity_status"},
-                {"doc_id": d2, "entity": "", "aspect_kind": "entity_status"},
-                {"doc_id": d3, "entity": "", "aspect_kind": "timeline"},
-            ]
-        )
-
-        assert aspect.dominant_kind == "entity_status"
-
-    def test_a_tied_kind_resolves_the_same_way_every_time(self, tmp_repo) -> None:
-        """The real case from production: one page keeps "implementation status" as a dated log,
-        another as a current-state checklist. A summary that depended on row order would report a
-        different kind run to run for an unchanged corpus."""
-        d1, d2 = _page("a.md"), _page("b.md")
-        aspect = self._with_pages(
-            [
-                {"doc_id": d1, "entity": "", "aspect_kind": "timeline"},
-                {"doc_id": d2, "entity": "", "aspect_kind": "entity_status"},
-            ]
-        )
-
-        assert aspect.dominant_kind == "entity_status"  # tie broken by name, not by insertion
-
-    def test_shared_detail_level_survives_when_pages_agree(self, tmp_repo) -> None:
-        d1, d2 = _page("a.md"), _page("b.md")
-        aspect = self._with_pages(
-            [
-                {"doc_id": d1, "entity": "", "detail_level": "one line per feature"},
-                {"doc_id": d2, "entity": "", "detail_level": "one line per feature"},
-            ]
-        )
-
-        assert aspect.shared_detail_level == "one line per feature"
-
-    def test_the_same_granularity_in_different_words_summarizes_to_nothing(self, tmp_repo) -> None:
-        """Free text, so there is no mode: both pages want one entry per feature, phrased their
-        own way. Empty is the honest answer — read the page rows. Picking one would present an
-        arbitrary page's wording as the aspect's, wrong for every other page under it."""
-        d1, d2 = _page("a.md"), _page("b.md")
-        aspect = self._with_pages(
-            [
-                {"doc_id": d1, "entity": "", "detail_level": "one line per feature"},
-                {"doc_id": d2, "entity": "", "detail_level": "a checklist entry per feature"},
-            ]
-        )
-
-        assert aspect.shared_detail_level == ""
-        # ...and neither page loses its own, which is what the write actually uses.
-        assert sorted(p.detail_level for p in aspect.pages) == [
-            "a checklist entry per feature",
-            "one line per feature",
-        ]
-
-    def test_disagreeing_focus_never_summarizes_as_open(self, tmp_repo) -> None:
-        """Unanimity rather than a mode: "generic" here while a page is "specific" would advertise
-        the aspect as admitting new entities when a page holding it admits none."""
-        d1, d2, d3 = _page("a.md"), _page("b.md"), _page("c.md")
-        aspect = self._with_pages(
-            [
-                {"doc_id": d1, "entity": "", "focus": "generic"},
-                {"doc_id": d2, "entity": "", "focus": "generic"},
-                {"doc_id": d3, "entity": "", "focus": "specific"},
-            ]
-        )
-
-        assert aspect.shared_focus == ""
-
-    def test_the_producer_supplies_a_default_the_pages_inherit(self, tmp_repo) -> None:
-        """The artifact still carries aspect-level values — not stored, but used as the per-page
-        default, so a producer states a facet's shape once instead of on every page."""
-        d1 = _page("a.md")
-        aspect = self._with_pages([{"doc_id": d1, "entity": ""}])
-
-        assert aspect.pages[0].aspect_kind == "entity_status"  # from _aspect()'s aspect level
-        assert aspect.dominant_kind == "entity_status"
+        found = loaded.topics[0].aspects[0]
+        assert found.doc_ids == sorted([d1, d2])
+        assert len(found.needs) == 3
+        assert found.spans_pages
 
 
 class TestReverseLookup:

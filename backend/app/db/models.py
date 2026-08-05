@@ -2290,39 +2290,34 @@ class TopicAspect(Base):
 
 
 class AspectPage(Base):
-    """A page that holds an aspect — one unit of fan-out.
+    """Which needs make up an aspect — the connection, and nothing else.
+
+    A join table between an aspect and the needs composing it. A need has no id of its own (they
+    are a JSONB list on ``page_needs``), so it is addressed by the page holding it plus its name.
+    That pair is the whole row: the fan-out is how many distinct ``doc_id`` values an aspect has.
+
+    Carries no copy of the need. ``need_kind``, ``detail_level``, ``focus`` and the entity list
+    belong to the need and are read from ``page_needs``, which is current-valued — re-extracted
+    when a page changes — while this map is a snapshot. A copy here would drift the moment a page
+    was edited, and drift in exactly the field that decides whether a write appends or replaces.
 
     ``doc_id`` is a real foreign key, which is the second reason for tables over a blob: a deleted
-    page cannot leave this row pointing at nothing. ``need_name`` is provenance only; the live
-    need is read from ``page_needs``, so a rule stored there cannot go stale here.
+    page cannot leave this row pointing at nothing.
     """
 
     __tablename__ = "aspect_pages"
 
     # A natural key rather than a surrogate id: it says what the row IS, and makes a duplicate
-    # page-link impossible instead of merely unlikely. ``entity`` is part of it because one page
-    # legitimately holds many entities' rows for one aspect — a customer-tracker page carries a
-    # deal-status row per customer.
+    # link impossible instead of merely unlikely. ``need_name`` is part of it because the unit is
+    # the NEED, not the page — clustering can legitimately put two of one page's needs in the
+    # same aspect, and keying on the page alone would silently drop the second.
     aspect_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("aspects.id", ondelete="CASCADE"), primary_key=True
     )
     doc_id: Mapped[str] = mapped_column(
         Text, ForeignKey("wiki_doc_ids.id", ondelete="CASCADE"), primary_key=True
     )
-    # Which entity's row this page holds, when the topic is entity-keyed. "" otherwise — and part
-    # of the key, so the un-keyed case is naturally one row per (aspect, page).
-    entity: Mapped[str] = mapped_column(
-        Text, primary_key=True, nullable=False, server_default=text("''")
-    )
-    need_name: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    # How THIS page maintains the facet, carried from the need it came from — and AUTHORITATIVE
-    # for writing to it, unlike the aspect-level summary of the same name. A timeline APPENDS an
-    # entry; an entity_status REPLACES a cell. Getting it wrong writes to the page the wrong way,
-    # and two pages holding one facet genuinely disagree in the real corpus.
-    aspect_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    detail_level: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
-    # "specific" = a closed entity set; "generic" = an open roster admitting new instances.
-    focus: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    need_name: Mapped[str] = mapped_column(Text, primary_key=True)
 
     __table_args__ = (
         # The reverse lookup a reconciler needs: given a page, which aspects does it hold? The

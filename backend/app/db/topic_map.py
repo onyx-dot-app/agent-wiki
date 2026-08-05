@@ -37,16 +37,14 @@ log = logging.getLogger(__name__)
 _RECORD_ADVISORY_LOCK = 0x746D6170
 
 
-class PageRef(NamedTuple):
-    """A page holding an aspect. ``need_name`` is provenance; the live need lives in page_needs."""
+class NeedLink(NamedTuple):
+    """One need making up an aspect, addressed the only way a need can be: the page holding it
+    plus its name. Read the need itself with ``page_needs.get_by_doc_id`` — it is deliberately not
+    copied here, because ``page_needs`` is re-extracted when a page changes and this map is not.
+    """
 
     doc_id: str
     need_name: str
-    entity: str
-    # How THIS page maintains the facet — authoritative for writing to it.
-    aspect_kind: str
-    detail_level: str
-    focus: str
 
 
 class AspectRecord(NamedTuple):
@@ -59,52 +57,17 @@ class AspectRecord(NamedTuple):
     aspect_id: int
     name: str
     description: str
-    pages: list[PageRef]
+    needs: list[NeedLink]
 
     @property
     def spans_pages(self) -> bool:
-        return len({p.doc_id for p in self.pages}) > 1
-
-    # The three below summarize the pages for triage — filtering to timeline aspects, or deciding
-    # whether an aspect is worth loading. Computed rather than stored: both loaders fetch an
-    # aspect's full page list before building this record, so a column would buy nothing except
-    # the chance to disagree with the rows it summarizes. The authoritative value for writing to a
-    # page is always that page's own, on ``PageRef``.
+        return len({n.doc_id for n in self.needs}) > 1
 
     @property
-    def dominant_kind(self) -> str:
-        """The most common ``aspect_kind`` among the pages; "" when there are none.
-
-        A mode is meaningful here and only here: the vocabulary is a closed four-value set, so
-        pages genuinely land on the same value. Ties break by name, so the answer does not depend
-        on row order — the point of a summary is that it is the same summary twice.
-        """
-        counts: dict[str, int] = {}
-        for page in self.pages:
-            counts[page.aspect_kind] = counts.get(page.aspect_kind, 0) + 1
-        return min(counts, key=lambda k: (-counts[k], k)) if counts else ""
-
-    @property
-    def shared_detail_level(self) -> str:
-        """The granularity, when every page states the same one; "" when they differ.
-
-        Free text, so there is no mode to take — two pages can describe identical granularity in
-        words that do not match, and picking one would present an arbitrary page's phrasing as the
-        aspect's. Empty says what is true: read the page rows.
-        """
-        levels = {p.detail_level for p in self.pages}
-        return levels.pop() if len(levels) == 1 else ""
-
-    @property
-    def shared_focus(self) -> str:
-        """The entity-set focus, when unanimous; "" when the pages disagree.
-
-        Unanimity rather than a mode, because this one gates admission: ``generic`` here while one
-        page is ``specific`` would summarize the aspect as open when a page holding it is closed.
-        Disagreement reads as "" — never as "generic" — matching the fail-safe on the need itself.
-        """
-        focuses = {p.focus for p in self.pages}
-        return focuses.pop() if len(focuses) == 1 else ""
+    def doc_ids(self) -> list[str]:
+        """The distinct pages this facet reaches — the fan-out, and the argument list for a bulk
+        ``page_needs`` read. Sorted, so a caller's own output does not depend on row order."""
+        return sorted({n.doc_id for n in self.needs})
 
 
 class TopicRecord(NamedTuple):
@@ -153,22 +116,15 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
     aspects = list(db.scalars(select(Aspect).where(Aspect.run_id == run.id).order_by(Aspect.id)))
     aspect_ids = [a.id for a in aspects]
 
-    pages_by_aspect: dict[int, list[PageRef]] = {}
+    needs_by_aspect: dict[int, list[NeedLink]] = {}
     if aspect_ids:
         for row in db.scalars(
             select(AspectPage)
             .where(AspectPage.aspect_id.in_(aspect_ids))
-            .order_by(AspectPage.aspect_id, AspectPage.doc_id, AspectPage.entity)
+            .order_by(AspectPage.aspect_id, AspectPage.doc_id, AspectPage.need_name)
         ):
-            pages_by_aspect.setdefault(row.aspect_id, []).append(
-                PageRef(
-                    doc_id=row.doc_id,
-                    need_name=row.need_name,
-                    entity=row.entity,
-                    aspect_kind=row.aspect_kind,
-                    detail_level=row.detail_level,
-                    focus=row.focus,
-                )
+            needs_by_aspect.setdefault(row.aspect_id, []).append(
+                NeedLink(doc_id=row.doc_id, need_name=row.need_name)
             )
 
     records = {
@@ -176,7 +132,7 @@ def _load(db: Any, run: TopicMapRun) -> TopicMap:
             aspect_id=a.id,
             name=a.name,
             description=a.description,
-            pages=pages_by_aspect.get(a.id, []),
+            needs=needs_by_aspect.get(a.id, []),
         )
         for a in aspects
     }
@@ -246,26 +202,21 @@ def aspects_for_page(doc_id: str) -> list[AspectRecord]:
         found = [a for a, _ in rows]
         if not found:
             return []
-        pages_by_aspect: dict[int, list[PageRef]] = {}
-        for page in db.scalars(
-            select(AspectPage).where(AspectPage.aspect_id.in_([a.id for a in found]))
+        needs_by_aspect: dict[int, list[NeedLink]] = {}
+        for row in db.scalars(
+            select(AspectPage)
+            .where(AspectPage.aspect_id.in_([a.id for a in found]))
+            .order_by(AspectPage.doc_id, AspectPage.need_name)
         ):
-            pages_by_aspect.setdefault(page.aspect_id, []).append(
-                PageRef(
-                    doc_id=page.doc_id,
-                    need_name=page.need_name,
-                    entity=page.entity,
-                    aspect_kind=page.aspect_kind,
-                    detail_level=page.detail_level,
-                    focus=page.focus,
-                )
+            needs_by_aspect.setdefault(row.aspect_id, []).append(
+                NeedLink(doc_id=row.doc_id, need_name=row.need_name)
             )
         return [
             AspectRecord(
                 aspect_id=a.id,
                 name=a.name,
                 description=a.description,
-                pages=pages_by_aspect.get(a.id, []),
+                needs=needs_by_aspect.get(a.id, []),
             )
             for a in found
         ]
@@ -326,9 +277,6 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
                 key = str(aspect.get("key") or aspect.get("name") or "")
                 aspect_id = aspect_ids.get(key)
                 if aspect_id is None:
-                    # aspect_kind / detail_level / focus are read from the artifact but not stored
-                    # on the aspect: they serve as the per-page default below, so a producer can
-                    # state a facet's shape once instead of repeating it on every page.
                     aspect_row = Aspect(
                         run_id=run.id,
                         name=str(aspect.get("name") or ""),
@@ -340,32 +288,27 @@ def record(artifact: dict[str, Any], *, triggered_by: str | None = None) -> int:
                     aspect_ids[key] = aspect_id
                     n_aspects += 1
                     # Deduped here as well as constrained in the schema. The key alone would
-                    # abort the whole run on a repeated page — losing a derivation that already
-                    # paid for its LLM calls — so a producer listing a page twice loses the
+                    # abort the whole run on a repeated need — losing a derivation that already
+                    # paid for its LLM calls — so a producer listing one twice loses the
                     # duplicate, not the run. The constraint stays as the backstop.
+                    #
+                    # Keyed by (page, need name), because the unit is the need: two needs from
+                    # ONE page can belong to the same facet, and both must survive.
                     seen: set[tuple[str, str]] = set()
                     for page in cast(list[dict[str, Any]], aspect.get("pages") or []):
                         doc_id = str(page.get("doc_id") or "")
-                        entity = str(page.get("entity") or "")
-                        if (doc_id, entity) in seen:
+                        need_name = str(page.get("need_name") or "")
+                        if (doc_id, need_name) in seen:
                             log.debug(
-                                "topic_map: dropping repeated page %s (entity %r) on aspect %r",
+                                "topic_map: dropping repeated need %r on page %s of aspect %r",
+                                need_name,
                                 doc_id,
-                                entity,
                                 aspect.get("name"),
                             )
                             continue
-                        seen.add((doc_id, entity))
+                        seen.add((doc_id, need_name))
                         db.add(
-                            AspectPage(
-                                aspect_id=aspect_id,
-                                doc_id=doc_id,
-                                need_name=str(page.get("need_name") or ""),
-                                entity=entity,
-                                aspect_kind=str(page.get("aspect_kind") or aspect.get("aspect_kind") or ""),
-                                detail_level=str(page.get("detail_level") or aspect.get("detail_level") or ""),
-                                focus=str(page.get("focus") or aspect.get("focus") or ""),
-                            )
+                            AspectPage(aspect_id=aspect_id, doc_id=doc_id, need_name=need_name)
                         )
                         n_pages += 1
                 db.add(TopicAspect(topic_id=topic_row.id, aspect_id=aspect_id))

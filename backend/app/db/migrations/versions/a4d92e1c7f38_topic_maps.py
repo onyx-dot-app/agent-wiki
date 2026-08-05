@@ -110,24 +110,20 @@ def upgrade() -> None:
     )
     op.create_index("ix_topic_aspects_aspect_id", "topic_aspects", ["aspect_id"])
 
-    # Natural key rather than a surrogate id: it says what the row is, and makes a duplicate
-    # page-link impossible. ``entity`` is part of it because one page legitimately holds many
-    # entities' rows for one aspect.
+    # Which needs make up an aspect — the connection, nothing else. A need has no id of its own
+    # (a JSONB list on page_needs), so it is addressed by page + name, and that pair is the key:
+    # the unit is the NEED, since clustering can put two of one page's needs in one aspect.
+    #
+    # No copy of the need's kind / detail_level / focus / entities. page_needs is current-valued
+    # and this map is a snapshot, so a copy would drift as soon as a page was edited.
     op.create_table(
         "aspect_pages",
         sa.Column("aspect_id", sa.Integer(), nullable=False),
         sa.Column("doc_id", sa.Text(), nullable=False),
-        sa.Column("entity", sa.Text(), server_default=sa.text("''"), nullable=False),
-        sa.Column("need_name", sa.Text(), server_default=sa.text("''"), nullable=False),
-        # How THIS page maintains the facet — it differs per page, so it lives here rather than
-        # on the aspect. "kind" because the vocabulary is closed, matching the codebase's split
-        # between kind (enumerated) and type (open, derived).
-        sa.Column("aspect_kind", sa.Text(), server_default=sa.text("''"), nullable=False),
-        sa.Column("detail_level", sa.Text(), server_default=sa.text("''"), nullable=False),
-        sa.Column("focus", sa.Text(), server_default=sa.text("''"), nullable=False),
+        sa.Column("need_name", sa.Text(), nullable=False),
         sa.ForeignKeyConstraint(["aspect_id"], ["aspects.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["doc_id"], ["wiki_doc_ids.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("aspect_id", "doc_id", "entity"),
+        sa.PrimaryKeyConstraint("aspect_id", "doc_id", "need_name"),
     )
     # The reverse lookup a reconciler needs: given a page, which aspects does it hold? The aspect
     # side is already served by the primary key's leading column.
