@@ -81,7 +81,7 @@ def complete_json(
         try:
             result = client.complete(convo, model=model, max_tokens=max_tokens)
         except Exception:
-            log.warning("%s: completion failed for %s", module, label, exc_info=True)
+            log.exception("%s: completion failed for %s", module, label)
             return None
 
         text = (result.text or "").strip()
@@ -130,6 +130,11 @@ def member_indices(entry: dict[str, Any], upper: int) -> list[int]:
 
     Out-of-range and non-integer values are dropped rather than raising: a model that hallucinates
     one index should cost that member, not the whole response.
+
+    A FRACTIONAL index is dropped rather than truncated. ``int(1.5)`` is 1, a perfectly valid
+    position — so truncating would silently attach a DIFFERENT member than any the model named,
+    which is worse than losing one: the response looks well-formed and the mistake is invisible.
+    ``1.0`` is kept, because JSON has one number type and that is how an integer arrives.
     """
     raw = entry.get("member_indices")
     if not isinstance(raw, list):
@@ -138,6 +143,8 @@ def member_indices(entry: dict[str, Any], upper: int) -> list[int]:
     for value in cast(list[Any], raw):
         # ``bool`` is an ``int`` in Python, so ``True`` would silently claim member 1.
         if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if isinstance(value, float) and not value.is_integer():
             continue
         index = int(value)
         if 1 <= index <= upper:

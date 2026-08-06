@@ -155,7 +155,7 @@ def cluster_needs(
     return clusters
 
 
-def load_needs() -> list[NeedRef]:
+def load_needs(rows: list[page_needs.StoredNeeds] | None = None) -> list[NeedRef]:
     """Every stored need that belongs to a page the ingestion pipeline may auto-update.
 
     Extraction already skips disabled pages and prunes ones turned off since, so this filter is
@@ -164,8 +164,15 @@ def load_needs() -> list[NeedRef]:
     here rather than trusted from extraction so the result does not depend on when that last ran.
 
     Deleted and trashed pages are already excluded by ``load_all``.
+
+    ``rows`` lets a caller supply the read instead of taking its own. A derivation needs the same
+    snapshot twice — once to cluster, once to fingerprint what it clustered — and two independent
+    reads can straddle an extraction, which would record a fingerprint describing a corpus the map
+    was not derived from. That makes the staleness answer wrong in whichever direction the write
+    fell.
     """
-    rows = page_needs.load_all()
+    if rows is None:
+        rows = page_needs.load_all()
     disabled = update_policy.disabled_paths([row.path for row in rows])
     if disabled:
         log.info("topics: excluding %d page(s) with ingestion auto-update disabled", len(disabled))
@@ -375,10 +382,8 @@ def name_clusters(
         try:
             return name_cluster(cluster, model=model)
         except Exception:
-            log.warning(
-                "need_map: naming failed for a cluster of %d need(s)",
-                len(cluster.members),
-                exc_info=True,
+            log.exception(
+                "need_map: naming failed for a cluster of %d need(s)", len(cluster.members)
             )
             return []
 
@@ -414,7 +419,7 @@ def run_derivation(
     # not exist.
     model = model or llm.ingest_selector_model or llm.model or None
     rows = page_needs.load_all()
-    refs = load_needs()
+    refs = load_needs(rows)
     if not refs:
         log.info("need_map: no stored needs; nothing to derive")
         return None

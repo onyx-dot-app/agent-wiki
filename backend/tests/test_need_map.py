@@ -285,6 +285,32 @@ class TestNameCluster:
         assert [a.name for a in drafts[0].aspects] == ["ok"]
 
 
+class TestMemberIndices:
+    """The index list is the only thing tying a model's output back to real needs. Every rule here
+    exists because the alternative is not an error but a WRONG assignment."""
+
+    def test_a_fractional_index_is_dropped_not_truncated(self, monkeypatch) -> None:
+        """``int(1.5)`` is 1 — a perfectly valid position. Truncating would attach a need the
+        model never named, and the response would look well-formed while doing it."""
+        _stub(monkeypatch, {"topics": [_topic("T", _aspect("status", [1.5]))]})
+
+        assert need_map.name_cluster(_cluster(_ref("a", "one"), _ref("b", "two"))) == []
+
+    def test_a_whole_float_is_kept(self, monkeypatch) -> None:
+        """JSON has one number type, so an integer can arrive as 1.0."""
+        _stub(monkeypatch, {"topics": [_topic("T", _aspect("status", [1.0]))]})
+
+        drafts = need_map.name_cluster(_cluster(_ref("a", "one")))
+
+        assert [m.doc_id for m in drafts[0].aspects[0].members] == ["a"]
+
+    def test_a_boolean_does_not_claim_the_first_need(self, monkeypatch) -> None:
+        """``True`` is an ``int`` in Python and would otherwise resolve to index 1."""
+        _stub(monkeypatch, {"topics": [_topic("T", _aspect("status", [True]))]})
+
+        assert need_map.name_cluster(_cluster(_ref("a", "one"))) == []
+
+
 class TestListing:
     def test_names_the_page_so_fan_out_is_visible(self) -> None:
         """Two pages wording a need identically IS the fan-out. Without the page the model cannot
@@ -338,7 +364,7 @@ class TestRunConsolidation:
 
     def test_no_needs_records_nothing(self, tmp_db, monkeypatch) -> None:
         recorded = self._refuse(monkeypatch)
-        monkeypatch.setattr(need_map, "load_needs", list)
+        monkeypatch.setattr(need_map, "load_needs", lambda rows=None: [])
 
         assert need_map.run_derivation() is None
         assert recorded == []
@@ -347,7 +373,7 @@ class TestRunConsolidation:
         """``cluster_needs`` returns None when it cannot embed. Recording then would store a map
         derived from no signal at all."""
         recorded = self._refuse(monkeypatch)
-        monkeypatch.setattr(need_map, "load_needs", lambda: [_ref("a", "one")])
+        monkeypatch.setattr(need_map, "load_needs", lambda rows=None: [_ref("a", "one")])
         monkeypatch.setattr(need_map, "cluster_needs", lambda refs: None)
 
         assert need_map.run_derivation() is None
@@ -355,7 +381,7 @@ class TestRunConsolidation:
 
     def test_naming_that_produced_nothing_records_nothing(self, tmp_db, monkeypatch) -> None:
         recorded = self._refuse(monkeypatch)
-        monkeypatch.setattr(need_map, "load_needs", lambda: [_ref("a", "one")])
+        monkeypatch.setattr(need_map, "load_needs", lambda rows=None: [_ref("a", "one")])
         monkeypatch.setattr(
             need_map, "cluster_needs", lambda refs: [_cluster(*refs)]
         )
@@ -457,6 +483,39 @@ class TestEndToEnd:
         assert loaded.provenance["cluster_similarity"] == need_map.CLUSTER_SIMILARITY
         assert "model" in loaded.provenance
         assert loaded.corpus_fingerprint
+
+    def test_the_fingerprint_describes_what_was_actually_clustered(
+        self, tmp_repo, monkeypatch
+    ) -> None:
+        """One read feeds both clustering and the fingerprint. Two independent reads could
+        straddle an extraction, recording a fingerprint for a corpus the map was not derived
+        from — which makes the staleness answer wrong in whichever direction the write fell."""
+        from app.db import need_map as store, page_needs
+        from app.wiki import git as wiki_git
+
+        wiki_git.commit_file("a.md", "# P\n\nbody\n", "seed", author=None)
+        page_needs.store("a.md", body="body", needs=[_need("deal status")])
+
+        reads: list[int] = []
+        real = page_needs.load_all
+
+        def counting_load_all():
+            reads.append(1)
+            return real()
+
+        monkeypatch.setattr(need_map.page_needs, "load_all", counting_load_all)
+        monkeypatch.setattr(need_map, "cluster_needs", lambda refs: [_cluster(*refs)])
+        _stub(monkeypatch, {"topics": [_topic("Customers", _aspect("deal status", [1]))]})
+
+        assert need_map.run_derivation(workers=1) is not None
+
+        assert len(reads) == 1, "the corpus must be read once, not once per use"
+        loaded = store.active()
+        assert loaded is not None
+        rows = real()
+        assert loaded.corpus_fingerprint == store.corpus_fingerprint(
+            [(r.doc_id, r.content_sha256) for r in rows]
+        )
 
     def test_the_reverse_lookup_finds_a_page_after_a_derivation(self, tmp_repo, monkeypatch) -> None:
         """The query a reconciler runs per incoming document. It is the only reason the map is
