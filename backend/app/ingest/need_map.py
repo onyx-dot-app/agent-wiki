@@ -1,22 +1,30 @@
-"""Consolidate per-page needs into the need map — topics, their aspects, and the needs composing
-each aspect.
+"""Derive the NEED MAP: what the wiki tracks, grouped into subjects and their facets.
 
-``topics.cluster_needs`` finds which needs *might* belong together, by embedding. It cannot say
-what they are, and it is imprecise in a specific way: it pulls together needs that merely share a
-subject area. The widest real cluster held 19 needs across 18 pages joined only by being *about
-Agent Wiki* — a subject, not a facet. This step imposes the structure the embedding could not,
-with one LLM call per cluster that does two things at once:
+Need extraction is per page, so it cannot see that eleven pages all track implementation status.
+This module is the step that can, in two halves that are separate functions for a reason but one
+module because nothing sits between them:
+
+    cluster_needs   embed every need and group them          — deterministic, no LLM
+    name_cluster    impose topics and aspects on a group     — one LLM call per cluster
+
+Clustering finds which needs MIGHT belong together. It cannot say what they are, and it is
+imprecise in a specific way: it pulls together needs that merely share a subject area. The widest
+real cluster held 19 needs across 18 pages joined only by being *about Agent Wiki* — a subject,
+not a facet. Naming imposes the structure the embedding could not:
 
     partition by SUBJECT   -> topics    (splitting a cluster the embedding over-merged)
     group by FACET         -> aspects   (the unit of fan-out)
 
-Both levels come from one call because they need the same context — you cannot decide which
-needs share a facet without first deciding which share a subject, and re-supplying the cluster to
-a second call would pay for the same tokens twice.
+Both levels come from one call because they need the same context — you cannot decide which needs
+share a facet without first deciding which share a subject, and re-supplying the cluster to a
+second call would pay for the same tokens twice.
 
-The partition half is measured: one call over that 19-need cluster returned 11 topics with 19/19
-coverage, including an ``implementation status`` aspect spanning two pages that the embedding had
-buried. The aspect half runs here for the first time.
+Measured on 238 needs from a 149-page production wiki: 42% land in a cluster spanning more than
+one page, the widest reaching 24. So the fan-out is real, and so is the half that is genuinely
+page-local — a map claiming everything was shared would be wrong. The partition half is measured
+too: one call over that 19-need cluster returned 11 topics with 19/19 coverage, including an
+``implementation status`` aspect spanning two pages that the embedding had buried. The aspect half
+runs here for the first time.
 
 Deliberately NOT here: the current STATE of each aspect. It changes with every relevant document
 while the need map is a snapshot, so it belongs in its own current-valued store — and keying it
@@ -29,13 +37,145 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, NamedTuple, cast
 
-from app.db import need_map, page_needs
-from app.ingest import entity_types, json_completion, topics
+from app.db import need_map as store, page_needs
+from app.ingest import entity_types, json_completion
+from app.ingest.clustering import leader_cluster, normalize
 from app.llm import embeddings
-from app.llm.settings import get as get_llm_settings
 from app.llm.prompts import load_prompt
+from app.llm.settings import get as get_llm_settings
+from app.wiki import update_policy
 
 log = logging.getLogger(__name__)
+
+
+# Cosine floor for "the same facet". Tuned for leader clustering and for the key below — both
+# together, since neither transfers alone.
+#
+# Measured against two labels held OUT of the key (a need's kind, and its primary entity's type):
+# real facet clusters should agree with signals they never saw. At ~150 clusters over 238 needs,
+# name+description at 0.60 scores 71% kind / 73% entity-type agreement, against 68% / 65% for a
+# name-only key at its own matched granularity.
+#
+# Comparing keys at a FIXED threshold is the trap: adding description raises every pairwise
+# similarity, so the same number buys coarser clusters and looks worse for reasons that have
+# nothing to do with the key's quality. Compare at matched cluster counts instead.
+CLUSTER_SIMILARITY = 0.60
+
+
+class NeedRef(NamedTuple):
+    """One need, with the page it came from. ``doc_id`` rather than a path because a page can be
+    renamed between clustering and anything acting on the result."""
+
+    doc_id: str
+    path: str
+    need: dict[str, Any]
+
+
+class Cluster(NamedTuple):
+    """Needs believed to be the same facet.
+
+    ``pages`` is the fan-out: the distinct documents this facet reaches. A single-page cluster is
+    a normal outcome, not a failure — most of what a page tracks is its own.
+    """
+
+    members: list[NeedRef]
+
+    @property
+    def pages(self) -> set[str]:
+        return {m.doc_id for m in self.members}
+
+    @property
+    def spans_pages(self) -> bool:
+        return len(self.pages) > 1
+
+
+def embed_key(need: dict[str, Any]) -> str:
+    """The text that decides which cluster a need joins.
+
+    ``need_name`` and ``description`` — what the page tracks and how it frames it. Everything
+    else is left out deliberately:
+
+    ``current_content``  the STATE, which churns on every page edit. Including it would move a
+                         need between clusters when its content changed rather than when what it
+                         tracks changed, and a need exists precisely because the spec outlives
+                         the content.
+    ``need_kind``        a closed four-value vocabulary. Appending it pulled 113 "reference"
+                         needs together and produced a 70-page cluster: grouping by kind rather
+                         than by subject, which is the opposite of the point. (An open-vocabulary
+                         type does discriminate, which is why the upstream eval could use one.)
+    ``entities``         the other axis. An entity is the ROW and a facet is the COLUMN, so
+                         embedding entities would cluster by subject — "everything about Scania"
+                         — instead of across subjects — "deal status, for every customer" — and
+                         collapse exactly the fan-out this step exists to find.
+    ``detail_level`` / ``update_instruction`` / ``focus``
+                         how the need is maintained, not what it is about.
+    """
+    description = (need.get("description") or "").strip()
+    name = (need.get("need_name") or "").strip()
+    return f"{name}. {description}" if description else name
+
+
+def cluster_needs(
+    needs: list[NeedRef], *, similarity: float = CLUSTER_SIMILARITY
+) -> list[Cluster] | None:
+    """Group needs into facets. ``None`` when embeddings are unavailable.
+
+    ``None`` rather than one-cluster-per-need: with no embeddings every need looks unrelated to
+    every other, which is indistinguishable from a corpus that genuinely shares nothing. A caller
+    must not record that as a finding.
+
+    Needs are seeded in page order so the result is deterministic — the same corpus clusters the
+    same way twice, which a downstream naming step depends on to be reproducible.
+    """
+    if not needs:
+        return []
+
+    vectors = embeddings.embed_texts([embed_key(m.need) for m in needs])
+    if vectors is None:
+        log.warning("topics: embeddings unavailable; cannot cluster %d need(s)", len(needs))
+        return None
+
+    unit = [normalize(v) for v in vectors]
+    groups = leader_cluster(unit, list(range(len(unit))), similarity)
+    clusters = [Cluster(members=[needs[i] for i in group]) for group in groups]
+    clusters.sort(key=lambda c: (-len(c.pages), -len(c.members)))
+
+    spanning = [c for c in clusters if c.spans_pages]
+    reached = sum(len(c.members) for c in spanning)
+    log.info(
+        "topics: %d need(s) -> %d cluster(s); %d span >1 page, holding %d need(s) (%.0f%%), "
+        "widest reaches %d page(s)",
+        len(needs),
+        len(clusters),
+        len(spanning),
+        reached,
+        100 * reached / len(needs),
+        len(clusters[0].pages) if clusters else 0,
+    )
+    return clusters
+
+
+def load_needs() -> list[NeedRef]:
+    """Every stored need that belongs to a page the ingestion pipeline may auto-update.
+
+    Extraction already skips disabled pages and prunes ones turned off since, so this filter is
+    for the window between the two: a page disabled after the last extraction still has needs
+    stored, and clustering must not offer it as somewhere a fact could be reconciled to. Checked
+    here rather than trusted from extraction so the result does not depend on when that last ran.
+
+    Deleted and trashed pages are already excluded by ``load_all``.
+    """
+    rows = page_needs.load_all()
+    disabled = update_policy.disabled_paths([row.path for row in rows])
+    if disabled:
+        log.info("topics: excluding %d page(s) with ingestion auto-update disabled", len(disabled))
+    return [
+        NeedRef(doc_id=row.doc_id, path=row.path, need=need)
+        for row in rows
+        if row.path not in disabled
+        for need in row.needs
+    ]
+
 
 # One call per cluster, and the calls are independent. Entity-type derivation learned this the
 # expensive way: run sequentially, 147 pages took ~1.5 hours in production and a pod restart
@@ -53,7 +193,7 @@ class AspectDraft(NamedTuple):
 
     name: str
     description: str
-    members: list[topics.NeedRef]
+    members: list[NeedRef]
 
 
 class TopicDraft(NamedTuple):
@@ -64,7 +204,7 @@ class TopicDraft(NamedTuple):
     aspects: list[AspectDraft]
 
 
-def _listing(members: list[topics.NeedRef]) -> str:
+def _listing(members: list[NeedRef]) -> str:
     """The cluster as the model sees it: one line per need, numbered from 1.
 
     The page is named because two needs with the same wording on different pages are the fan-out
@@ -82,7 +222,7 @@ def _listing(members: list[topics.NeedRef]) -> str:
 
 
 def name_cluster(
-    cluster: topics.Cluster, *, model: str | None = None
+    cluster: Cluster, *, model: str | None = None
 ) -> list[TopicDraft]:
     """Turn one cluster into topics and their aspects. Empty when the call fails.
 
@@ -95,7 +235,7 @@ def name_cluster(
         return []
     if len(members) > LARGE_CLUSTER:
         log.info(
-            "consolidate: naming an unusually large cluster of %d need(s) across %d page(s)",
+            "need_map: naming an unusually large cluster of %d need(s) across %d page(s)",
             len(members),
             len(cluster.pages),
         )
@@ -105,7 +245,7 @@ def name_cluster(
         f"Needs in this group:\n\n{_listing(members)}",
         model=model,
         ctx=f"a cluster of {len(members)} need(s) across {len(cluster.pages)} page(s)",
-        module="consolidate",
+        module="need_map",
     )
 
     # The prompt requires a partition: every need in exactly one aspect of exactly one topic.
@@ -137,7 +277,7 @@ def name_cluster(
             fresh = [i for i in indices if i not in claimed]
             if len(fresh) != len(indices):
                 log.warning(
-                    "consolidate: %r claimed %d already-assigned need(s); keeping the first "
+                    "need_map: %r claimed %d already-assigned need(s); keeping the first "
                     "assignment",
                     aspect_name,
                     len(indices) - len(fresh),
@@ -165,7 +305,7 @@ def name_cluster(
     missing = len(members) - len(claimed)
     if missing:
         log.warning(
-            "consolidate: %d of %d need(s) in a cluster were left unplaced and are absent from "
+            "need_map: %d of %d need(s) in a cluster were left unplaced and are absent from "
             "the map",
             missing,
             len(members),
@@ -181,7 +321,7 @@ def _artifact(
     model: str | None,
     stats: dict[str, Any],
 ) -> dict[str, Any]:
-    """The drafts in the shape ``need_map.record`` takes.
+    """The drafts in the shape ``store.record`` takes.
 
     Aspect ``key`` is scoped to its topic, because an aspect belongs to one topic — two subjects
     can each have an "implementation status" and they are different facets, not one shared row.
@@ -193,7 +333,7 @@ def _artifact(
             # "" when nothing is configured — the client resolved its own default, and we
             # cannot name what that was. Informational here; nothing compares it.
             "model": model or "",
-            "cluster_similarity": topics.CLUSTER_SIMILARITY,
+            "cluster_similarity": CLUSTER_SIMILARITY,
             "embed_model": embeddings.model_name(),
         },
         "stats": stats,
@@ -219,8 +359,8 @@ def _artifact(
     }
 
 
-def consolidate(
-    clusters: list[topics.Cluster], *, model: str | None = None, workers: int | None = None
+def name_clusters(
+    clusters: list[Cluster], *, model: str | None = None, workers: int | None = None
 ) -> list[TopicDraft]:
     """Name every cluster, in parallel. Clusters the model could not structure are simply absent.
 
@@ -231,12 +371,12 @@ def consolidate(
         return []
     count = workers or DEFAULT_WORKERS
 
-    def one(cluster: topics.Cluster) -> list[TopicDraft]:
+    def one(cluster: Cluster) -> list[TopicDraft]:
         try:
             return name_cluster(cluster, model=model)
         except Exception:
             log.warning(
-                "consolidate: naming failed for a cluster of %d need(s)",
+                "need_map: naming failed for a cluster of %d need(s)",
                 len(cluster.members),
                 exc_info=True,
             )
@@ -249,14 +389,14 @@ def consolidate(
     failed = sum(1 for result in results if not result)
     if failed:
         log.warning(
-            "consolidate: %d of %d cluster(s) produced no topics and are absent from the map",
+            "need_map: %d of %d cluster(s) produced no topics and are absent from the map",
             failed,
             len(clusters),
         )
     return named
 
 
-def run_consolidation(
+def run_derivation(
     *, model: str | None = None, triggered_by: str | None = None, workers: int | None = None
 ) -> int | None:
     """Derive a need map from the stored needs and record it. Returns the map id, or None.
@@ -274,19 +414,19 @@ def run_consolidation(
     # not exist.
     model = model or llm.ingest_selector_model or llm.model or None
     rows = page_needs.load_all()
-    refs = topics.load_needs()
+    refs = load_needs()
     if not refs:
-        log.info("consolidate: no stored needs; nothing to consolidate")
+        log.info("need_map: no stored needs; nothing to derive")
         return None
 
-    clusters = topics.cluster_needs(refs)
+    clusters = cluster_needs(refs)
     if clusters is None:
-        log.warning("consolidate: embeddings unavailable; refusing to record a map")
+        log.warning("need_map: embeddings unavailable; refusing to record a map")
         return None
 
-    drafts = consolidate(clusters, model=model, workers=workers)
+    drafts = name_clusters(clusters, model=model, workers=workers)
     if not drafts:
-        log.warning("consolidate: no cluster produced a topic; refusing to record an empty map")
+        log.warning("need_map: no cluster produced a topic; refusing to record an empty map")
         return None
 
     n_aspects = sum(len(topic.aspects) for topic in drafts)
@@ -307,7 +447,7 @@ def run_consolidation(
         ),
     }
     log.info(
-        "consolidate: %d need(s) -> %d cluster(s) -> %d topic(s), %d aspect(s); %d span >1 page, "
+        "need_map: %d need(s) -> %d cluster(s) -> %d topic(s), %d aspect(s); %d span >1 page, "
         "widest reaches %d",
         len(refs),
         len(clusters),
@@ -321,10 +461,10 @@ def run_consolidation(
     # excluded by policy is not part of what this map was derived from, so re-enabling it must
     # read as a change.
     clustered = {ref.doc_id for ref in refs}
-    fingerprint = need_map.corpus_fingerprint(
+    fingerprint = store.corpus_fingerprint(
         [(row.doc_id, row.content_sha256) for row in rows if row.doc_id in clustered]
     )
-    return need_map.record(
+    return store.record(
         _artifact(
             drafts,
             fingerprint=fingerprint,

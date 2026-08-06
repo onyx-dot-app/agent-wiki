@@ -1,6 +1,6 @@
 """Need-map derivation — a whole-corpus, unattended pass over the stored needs.
 
-Thin binding, like the other task modules: the work lives in ``app.ingest.consolidate``; this only
+Thin binding, like the other task modules: the work lives in ``app.ingest.need_map``; this only
 says which queue it runs on.
 
 ``automanage_offline_queue`` for the same reason as entity-type derivation: batch, nobody waiting,
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 
-from app.ingest import consolidate
+from app.ingest import need_map
 from app.tasks.queues import automanage_offline_queue
 
 log = logging.getLogger(__name__)
@@ -36,4 +36,4 @@ def derive_need_map(
     ``model`` overrides the default for this run. Unset, ``run_consolidation`` uses the
     ingestion-pipeline model.
     """
-    consolidate.run_consolidation(triggered_by=triggered_by_user_id, model=model)
+    need_map.run_derivation(triggered_by=triggered_by_user_id, model=model)
