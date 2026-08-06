@@ -52,8 +52,8 @@ def process_instruction(wiki_path: str, current_body: str, payload: dict[str, An
         if instruction
         else ""
     )
-    system = load_prompt("wiki_updater.mcp.system")
-    input = load_prompt("wiki_updater.mcp.input").format(
+    system = load_prompt("wiki_updater_mcp.system")
+    input = load_prompt("wiki_updater_mcp.input").format(
         wiki_path=wiki_path,
         source=source,
         today=today_str(),
