@@ -248,7 +248,7 @@ def name_cluster(
         )
 
     data = json_completion.complete_json(
-        load_prompt("need_map.name"),
+        load_prompt("need_map.system"),
         f"Needs in this group:\n\n{_listing(members)}",
         model=model,
         ctx=f"a cluster of {len(members)} need(s) across {len(cluster.pages)} page(s)",
