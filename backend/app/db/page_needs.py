@@ -43,6 +43,10 @@ class StoredNeeds(NamedTuple):
     doc_id: str
     path: str
     needs: list[dict[str, Any]]
+    # The guard these needs were extracted under — body plus governance state. Exposed because
+    # the need-map derivation fingerprints its input with it, to answer "have the needs moved
+    # since this map was built?" without re-reading every page.
+    content_sha256: str
     model: str
     entity_type_taxonomy_id: int | None
     updated_at: str
@@ -157,6 +161,7 @@ def _select_stored():
         PageNeeds.doc_id,
         WikiDocId.path,
         PageNeeds.needs,
+        PageNeeds.content_sha256,
         PageNeeds.model,
         PageNeeds.entity_type_taxonomy_id,
         PageNeeds.updated_at,
