@@ -173,7 +173,7 @@ def build_prompt(type_defs: dict[str, str]) -> str:
         "'<customer>'). If a need is a pure facet matching NONE of the types above (a 'status "
         "tracker', a 'timeline'), return no entities for it."
     )
-    return load_prompt("needs.extract").replace("ENTITY_TYPES", block)
+    return load_prompt("needs.extract.system").replace("ENTITY_TYPES", block)
 
 
 def _text(value: object, *, field: str, ctx: str) -> str:

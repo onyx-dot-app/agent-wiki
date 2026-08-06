@@ -261,7 +261,7 @@ def _complete_json(
 
 def extract_page(path: str, body: str, *, model: str | None = None) -> list[Mention]:
     """Open extraction over one whole page. No type menu — see module docstring."""
-    system = load_prompt("entity_types.extract")
+    system = load_prompt("entity_types.extract.system")
     data = _complete_json(
         system, f"path:\n{path}\ncontent:\n{body}", model=model, ctx=path
     )
@@ -304,7 +304,7 @@ def _placeholder_name(members: list[Referent]) -> str:
 
 def name_group(group: list[Referent], *, model: str | None = None) -> list[EntityType]:
     """Name the kind a group shares. May split a group that turns out to be mixed."""
-    system = load_prompt("entity_types.name")
+    system = load_prompt("entity_types.name.system")
     listing = "\n".join(
         f"[{i}] {r.canonical}"
         + (f" -- {r.roles[0]}" if r.roles else "")
@@ -438,7 +438,7 @@ def _merge_once(types: list[EntityType], *, model: str | None) -> list[EntityTyp
     be persisted as a stable answer when it was only the point the failure happened."""
     if len(types) < 3:
         return types
-    system = load_prompt("entity_types.merge")
+    system = load_prompt("entity_types.merge.system")
     listing = "\n".join(
         f"[{i}] {t.name}  ({t.n_referents} referents, {t.n_docs} pages)\n"
         f"     {t.definition}\n"
