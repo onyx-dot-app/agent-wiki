@@ -4,6 +4,8 @@
  * CodeMirror/OT-era editor, deleted once this cutover lands). */
 import { posToDOMRect, type Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { TableGrips } from "@/lib/editor/table/TableGrips";
+import { cellSelectionRange } from "@/lib/editor/table/tableCommands";
 import {
   useEffect,
   useImperativeHandle,
@@ -239,7 +241,10 @@ export function TipTapEditor({
   useEffect(() => {
     if (!editor) return;
     const report = () => {
-      const { from, to } = editor.state.selection;
+      // A cell selection reports its anchor and head cell positions, which quote
+      // a run starting and ending mid-cell. Comment on what was marked instead.
+      const cells = cellSelectionRange(editor.state);
+      const { from, to } = cells ?? editor.state.selection;
       const selKey = `${from}:${to}`;
       if (selKey !== lastSelectionForComment.current) {
         lastSelectionForComment.current = selKey;
@@ -410,6 +415,7 @@ export function TipTapEditor({
   return (
     <div ref={scrollRef} className="editor-prose">
       <EditorContent editor={editor} />
+      <TableGrips editor={editor} />
     </div>
   );
 }
