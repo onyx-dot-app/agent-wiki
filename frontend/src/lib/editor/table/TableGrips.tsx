@@ -11,6 +11,7 @@ import { SvgTrash } from "@onyx-ai/opal/icons";
 
 import {
   cellRectAt,
+  isHeaderRow,
   clearTrack,
   duplicateTrack,
   hoveredCell,
@@ -151,6 +152,7 @@ export function TableGrips({ editor }: { editor: Editor | null }) {
         return i === rects.length - 1 && pos > end;
       });
       if (found === -1) return;
+      if (axis === "row" && isHeaderRow(found)) return;
       const current = dragRef.current;
       if (!current || current.to === found) return;
       // Written straight to the ref as well as to state: `up` reads the ref,
@@ -182,6 +184,7 @@ export function TableGrips({ editor }: { editor: Editor | null }) {
     axis === "row" ? geo.cell.rowIndex : geo.cell.colIndex;
 
   const startDrag = (axis: Axis) => (e: React.PointerEvent) => {
+    if (axis === "row" && isHeaderRow(geo.cell.rowIndex)) return;
     e.preventDefault();
     const rects = trackRects(editor, geo.cell, axis);
     if (rects.length) {
@@ -258,17 +261,21 @@ export function TableGrips({ editor }: { editor: Editor | null }) {
                     />
                   ))
                 : []),
-              <LineItemButton
-                key="before"
-                title={axis === "row" ? "Insert above" : "Insert left"}
-                sizePreset="main-ui"
-                variant="section"
-                onClick={onTrack(() =>
-                  axis === "row"
-                    ? editor.commands.addRowBefore()
-                    : editor.commands.addColumnBefore(),
-                )}
-              />,
+              ...(axis === "row" && isHeaderRow(geo.cell.rowIndex)
+                ? []
+                : [
+                    <LineItemButton
+                      key="before"
+                      title={axis === "row" ? "Insert above" : "Insert left"}
+                      sizePreset="main-ui"
+                      variant="section"
+                      onClick={onTrack(() =>
+                        axis === "row"
+                          ? editor.commands.addRowBefore()
+                          : editor.commands.addColumnBefore(),
+                      )}
+                    />,
+                  ]),
               <LineItemButton
                 key="after"
                 title={axis === "row" ? "Insert below" : "Insert right"}
@@ -294,18 +301,22 @@ export function TableGrips({ editor }: { editor: Editor | null }) {
                 variant="section"
                 onClick={act(() => clearTrack(editor, geo.cell, axis))}
               />,
-              <LineItemButton
-                key="delete"
-                title={axis === "row" ? "Delete row" : "Delete column"}
-                icon={SvgTrash}
-                sizePreset="main-ui"
-                variant="section"
-                onClick={onTrack(() =>
-                  axis === "row"
-                    ? editor.commands.deleteRow()
-                    : editor.commands.deleteColumn(),
-                )}
-              />,
+              ...(axis === "row" && isHeaderRow(geo.cell.rowIndex)
+                ? []
+                : [
+                    <LineItemButton
+                      key="delete"
+                      title={axis === "row" ? "Delete row" : "Delete column"}
+                      icon={SvgTrash}
+                      sizePreset="main-ui"
+                      variant="section"
+                      onClick={onTrack(() =>
+                        axis === "row"
+                          ? editor.commands.deleteRow()
+                          : editor.commands.deleteColumn(),
+                      )}
+                    />,
+                  ]),
             ]}
           </Popover.Menu>
         </Popover.Content>

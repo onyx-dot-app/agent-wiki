@@ -18,6 +18,8 @@ import { CellSelection, TableMap, moveTableRow } from "@tiptap/pm/tables";
 import {
   cellSelectionRange,
   duplicateTrack,
+  moveTrack,
+  setColumnAlign,
   type HoveredCell,
 } from "@/lib/editor/table/tableCommands";
 
@@ -192,6 +194,58 @@ describe("cellSelectionRange", () => {
   it("is null outside a cell selection, so ordinary text keeps its own range", () => {
     const editor = wideEditor();
     expect(cellSelectionRange(editor.state)).toBeNull();
+    editor.destroy();
+  });
+});
+
+describe("the header row is fixed at index 0", () => {
+  it("refuses to move the header out of position", () => {
+    const editor = wideEditor();
+    const moved = moveTrack(editor, cellAt(editor, 0, 0), 0, 2, "row");
+    expect(moved).toBe(false);
+    expect(grid(editor)[0]).toEqual(["H1", "H2"]);
+    editor.destroy();
+  });
+
+  it("refuses to drop a body row onto the header", () => {
+    const editor = wideEditor();
+    const moved = moveTrack(editor, cellAt(editor, 2, 0), 2, 0, "row");
+    expect(moved).toBe(false);
+    expect(grid(editor)[0]).toEqual(["H1", "H2"]);
+    editor.destroy();
+  });
+
+  it("still reorders body rows", () => {
+    const editor = wideEditor();
+    expect(moveTrack(editor, cellAt(editor, 1, 0), 1, 2, "row")).toBe(true);
+    expect(grid(editor)).toEqual([
+      ["H1", "H2"],
+      ["b1", "b2"],
+      ["a1", "a2"],
+    ]);
+    editor.destroy();
+  });
+});
+
+describe("setColumnAlign", () => {
+  it("writes align onto every cell of the column, header included", () => {
+    const editor = wideEditor();
+    const cell = cellAt(editor, 1, 1);
+    editor.commands.setTextSelection(cell.cellPos + 1);
+    setColumnAlign(editor.state, editor.view.dispatch, "center");
+
+    const aligns: (string | null)[] = [];
+    editor.state.doc.descendants((node) => {
+      const name = node.type.name;
+      if (name === "tableCell" || name === "tableHeader") {
+        aligns.push(node.attrs.align);
+        return false;
+      }
+      return true;
+    });
+    // Column 1 of each of the three rows. The header's value is the one the
+    // backend reads to regenerate the delimiter.
+    expect(aligns.filter((a) => a === "center")).toHaveLength(3);
     editor.destroy();
   });
 });

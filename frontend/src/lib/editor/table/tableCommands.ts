@@ -15,6 +15,16 @@ import type { Editor } from "@tiptap/core";
 
 export type ColumnAlign = "left" | "center" | "right" | null;
 
+/** GFM has no table without a header, and the serializer takes row 0 as it.
+ * Letting a body row reach index 0 would promote its content to the header and
+ * drop the alignment the delimiter is regenerated from. */
+export const HEADER_ROW = 0;
+
+/** Whether a row may be moved, deleted, or inserted above. */
+export function isHeaderRow(index: number): boolean {
+  return index === HEADER_ROW;
+}
+
 interface TableContext {
   table: PMNode;
   /** Position of the table node itself. */
@@ -231,6 +241,8 @@ export function moveTrack(
   axis: "row" | "column",
 ): boolean {
   if (from === to) return false;
+  // Neither end may be the header: see `HEADER_ROW`.
+  if (axis === "row" && (isHeaderRow(from) || isHeaderRow(to))) return false;
   // The upstream commands resolve the table from the current selection, so a
   // grip drag has to seat the caret in the dragged track first. Without this
   // they find no table and refuse.
