@@ -290,13 +290,13 @@
   overflow-x: auto;
 }
 
+/* Deliberately no width floor. A table is the sum of its column widths and
+   stays as narrow as its content. A floor fights the `<col>` widths a drag
+   writes, because `table-layout: fixed` spreads the surplus evenly, which
+   turns one column's handle into a resize of every column. */
 .editor-prose table {
   border-collapse: collapse;
   margin: 0.75rem 0;
-  /* `min-width`, never `width`: the resize node view sets an explicit inline
-     width once every column is sized, and a `width: 100%` here would fight it
-     mid-drag, displacing a cell out of the grid. */
-  min-width: 100%;
   /* Widths land on `<col>` elements, and under `auto` layout a browser treats
      those as suggestions its content may override, so a column would refuse to
      shrink below its text. */
