@@ -37,6 +37,36 @@ function modeIcon(m: ToolbarMode) {
   return SvgBubbleText;
 }
 
+/** Publishes an overlay dock's measured height as `--wiki-dock-height`, which
+ *  `.dock-clearance` reserves so a document can scroll clear of the strip.
+ *  Column docks stay in flow and take their own room, so they publish nothing. */
+function useOverlayDockHeight(overlay: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Callers republish on every render, since the strip resizes for reasons no
+  // dependency list spans. The observer catches what no render reports, a
+  // window resize above all.
+  const publish = useCallback(() => {
+    const el = ref.current;
+    if (!overlay || !el) return;
+    document.documentElement.style.setProperty(
+      "--wiki-dock-height",
+      `${el.offsetHeight}px`,
+    );
+  }, [overlay]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!overlay || !el) return;
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty("--wiki-dock-height");
+    };
+  }, [overlay, publish]);
+  return { ref, publish };
+}
+
 /** Bottom-docked toolbar strip. `column` renders in flow as the column's
  *  last child, sticky-pinned, sharing its exact box (the mock's strip is a
  *  Doc Section child). `float` overlays hosts without a parent column. */
@@ -94,11 +124,17 @@ export function WikiToolbarDock({
     };
   }, [anchorSelector]);
 
+  const { ref: overlayDockRef, publish: republishDockHeight } =
+    useOverlayDockHeight(
+      anchorSelector ? anchorBox !== null : variant === "float",
+    );
+
   if (anchorSelector) {
     if (!anchorBox) return null;
     return (
       // raw-ok: style-only fixed shell, geometry comes from the measured anchor column, no layout classes.
       <div
+        ref={overlayDockRef}
         style={{
           // The panel's own 4px margin supplies the mock's bottom gap.
           position: "fixed",
@@ -121,6 +157,7 @@ export function WikiToolbarDock({
             context={context}
             defaultFolded={defaultFolded}
             surface={surface}
+            onGeometryChange={republishDockHeight}
           />
         </Section>
       </div>
@@ -154,6 +191,7 @@ export function WikiToolbarDock({
   }
   return (
     <Section
+      ref={overlayDockRef}
       alignItems="center"
       justifyContent="end"
       gap={0}
@@ -177,6 +215,7 @@ export function WikiToolbarDock({
           context={context}
           defaultFolded={defaultFolded}
           surface={surface}
+          onGeometryChange={republishDockHeight}
         />
       </Section>
     </Section>
@@ -191,6 +230,9 @@ interface WikiToolbarProps {
   /** Fold preference is remembered per surface, so folding on a doc
    *  page never folds home. */
   surface?: string;
+  /** Overlay docks reserve this strip's height as scroll space. Folding,
+   *  attaching context, and a turn arriving all resize it. */
+  onGeometryChange?: () => void;
 }
 
 export function WikiToolbar({
@@ -198,6 +240,7 @@ export function WikiToolbar({
   context,
   defaultFolded = true,
   surface = "wiki",
+  onGeometryChange,
 }: WikiToolbarProps) {
   const [folded, setFolded] = useState(defaultFolded);
   const [mode, setMode] = useState<ToolbarMode>("chat");
@@ -228,6 +271,13 @@ export function WikiToolbar({
     },
     [storageKey],
   );
+
+  // Deliberately every render: the strip's height is a function of fold state,
+  // mode, context chips, and the live turn, and no single dependency list
+  // spans them.
+  useEffect(() => {
+    onGeometryChange?.();
+  });
 
   const unfold = useCallback(
     () => setFoldedPersistent(false),

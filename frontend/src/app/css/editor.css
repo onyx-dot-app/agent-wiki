@@ -282,6 +282,14 @@
 }
 /* Values mirror `.markdown table` in globals.css so the same page reads the
    same in the editor and in the history diff. */
+/* prosemirror-tables' `draggedWidth` has no upper bound and Tiptap writes the
+   resulting sum onto `table.style.width`, so capping the wrapper is what holds
+   a resized grid inside the reading column. Wider grids scroll. */
+.editor-prose .tableWrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .editor-prose table {
   border-collapse: collapse;
   margin: 0.75rem 0;
