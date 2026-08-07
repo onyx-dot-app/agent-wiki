@@ -48,7 +48,14 @@ import { Fragment } from "@tiptap/pm/model";
 import { Plugin, TextSelection, type Transaction } from "@tiptap/pm/state";
 import { canJoin } from "@tiptap/pm/transform";
 import { TaskList } from "@tiptap/extension-task-list";
+import {
+  Table,
+  TableCell,
+  TableHeader,
+  TableRow,
+} from "@tiptap/extension-table";
 import { isSameOriginSrc } from "./media";
+import { clearSelectedCells } from "@/lib/editor/table/tableCommands";
 
 /** A line consisting of nothing but 3+ of the same `-`/`_`/`*` character
  * (each optionally followed by spaces/tabs), 0-3 leading spaces — the
@@ -701,56 +708,45 @@ const HtmlBlock = createOpaqueBlock("html_block");
  * the backend's catch-all, kept opaque here for the same reason. */
 const OtherBlock = createOpaqueBlock("other");
 
-/** A GFM table's header row is required, immediately followed by its
- * required delimiter row, then zero or more data rows — the shape
- * `markdown_yjs.py`'s TABLE branch always produces (a table with no header
- * isn't valid GFM to begin with). Stricter than a loose `tableRow+` on
- * purpose: there's no row-insert/delete UI for this opaque-row node (see
- * the module docstring), so the doc should never legitimately reach any
- * other shape. */
-const Table = Node.create({
-  name: "table",
-  group: "block",
-  content: "tableRow tableSeparator tableRow*",
-  defining: true,
-  addAttributes() {
-    return { _blockId: hiddenAttr() };
-  },
-  renderHTML({ HTMLAttributes }) {
+/** Re-declares `_blockId`/`_rowId`, which `@tiptap/extension-table` does not.
+ * `computeAttrs` drops an undeclared attribute on the first edit, breaking
+ * per-row byte stability at the next checkpoint. */
+const TableIdentity = Extension.create({
+  name: "tableIdentity",
+  addGlobalAttributes() {
     return [
-      "div",
-      mergeAttributes(HTMLAttributes, { "data-type": "table" }),
-      0,
+      { types: ["table"], attributes: { _blockId: hiddenAttr() } },
+      { types: ["tableRow"], attributes: { _rowId: hiddenAttr() } },
     ];
   },
 });
 
-function createTableRowNode(name: string) {
-  return Node.create({
-    name,
-    content: "text*",
-    marks: "",
-    code: true,
-    defining: true,
-    addAttributes() {
-      return { _rowId: hiddenAttr() };
-    },
-    renderHTML({ HTMLAttributes }) {
-      return ["div", mergeAttributes(HTMLAttributes, { "data-type": name }), 0];
-    },
-  });
-}
+/** GFM cells are inline-only, so the schema says so rather than a renderer
+ * stripping blocks after the fact. */
+const GfmCell = TableCell.extend({ content: "inline*" });
+const GfmHeader = TableHeader.extend({ content: "inline*" });
 
-/** A table row's raw source line (pipes included), verbatim — not
- * decomposed into cells. */
-const TableRow = createTableRowNode("tableRow");
-
-/** The `| --- | --- |`-style delimiter row between a table's header and
- * its body, equally opaque — editing it is possible (it's still just
- * text) but not a supported/validated interaction; nothing stops a user
- * from breaking their own table's syntax here, same as they could in raw
- * markdown. */
-const TableSeparator = createTableRowNode("tableSeparator");
+/** Widths live on each cell's `colwidth` in the document, so a drag survives
+ * reload but not a reseed: markdown has no width syntax. `cellMinWidth` is
+ * also the floor for a column never sized. */
+const WikiTable = Table.extend({
+  addKeyboardShortcuts() {
+    const clear = () =>
+      clearSelectedCells(this.editor.state, this.editor.view.dispatch);
+    return {
+      ...this.parent?.(),
+      Backspace: clear,
+      Delete: clear,
+      "Mod-Backspace": clear,
+      "Mod-Delete": clear,
+    };
+  },
+}).configure({
+  resizable: true,
+  handleWidth: 6,
+  cellMinWidth: 64,
+  lastColumnResizable: true,
+});
 
 const MarkdownLink = Extension.create({
   name: "markdownLink",
@@ -883,9 +879,11 @@ export {
   ThematicBreak,
   HtmlBlock,
   OtherBlock,
-  Table,
+  TableIdentity,
+  WikiTable,
   TableRow,
-  TableSeparator,
+  GfmCell,
+  GfmHeader,
   MarkdownLink,
   Image,
 };

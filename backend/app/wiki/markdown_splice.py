@@ -43,6 +43,7 @@ from app.wiki.markdown_yjs import (
     ROW_ID_ATTR,
     build_block_element,
     serialize_block,
+    serialize_delimiter,
     serialize_row,
 )
 
@@ -280,18 +281,29 @@ def _splice_table(
 ) -> str:
     """Row-level splice for an untouched-at-the-structure table: rows not in
     ``touched_row_ids`` are sliced verbatim from ``base_body``; touched rows
-    (and the header separator, if touched) are re-serialized."""
+    are re-serialized from their cells.
+
+    The delimiter row has no node of its own. It is re-emitted after the header
+    from the header's own alignment when that header was touched, and sliced
+    verbatim otherwise, so an untouched table keeps its original column padding.
+    """
     orig_rows = {r.row_id: r for r in orig.rows}
-    if orig.separator is not None:
-        orig_rows[orig.separator.row_id] = orig.separator
     parts: list[str] = []
-    for row_el in table_el.children:
+    for index, row_el in enumerate(table_el.children):
         row_id = dict(row_el.attributes).get(ROW_ID_ATTR)
         orig_row = orig_rows.get(row_id) if row_id else None
         if orig_row is None or row_id in touched_row_ids:
+            touched = True
             parts.append(serialize_row(row_el))
         else:
+            touched = False
             parts.append(base_body[orig_row.start : orig_row.end])
+        if index == 0:
+            parts.append(
+                serialize_delimiter(row_el)
+                if touched or orig.separator is None
+                else base_body[orig.separator.start : orig.separator.end]
+            )
     return "".join(parts)
 
 

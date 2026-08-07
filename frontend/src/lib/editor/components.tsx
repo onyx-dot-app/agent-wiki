@@ -4,6 +4,7 @@
  * CodeMirror/OT-era editor, deleted once this cutover lands). */
 import { posToDOMRect, type Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { TableGrips } from "@/lib/editor/table/TableGrips";
 import {
   useEffect,
   useImperativeHandle,
@@ -410,6 +411,7 @@ export function TipTapEditor({
   return (
     <div ref={scrollRef} className="editor-prose">
       <EditorContent editor={editor} />
+      <TableGrips editor={editor} />
     </div>
   );
 }

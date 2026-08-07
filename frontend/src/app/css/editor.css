@@ -280,26 +280,71 @@
   white-space: pre-wrap;
   color: var(--text-03);
 }
-.editor-prose [data-type="table"] {
-  margin: 0.5rem 0;
-  border-radius: var(--radius-08);
-  border: 1px solid var(--border-02);
-  overflow: hidden;
+/* Values mirror `.markdown table` in globals.css so the same page reads the
+   same in the editor and in the history diff. */
+.editor-prose table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  /* `min-width`, never `width`: the resize node view sets an explicit inline
+     width once every column is sized, and a `width: 100%` here would fight it
+     mid-drag, displacing a cell out of the grid. */
+  min-width: 100%;
+  /* Widths land on `<col>` elements, and under `auto` layout a browser treats
+     those as suggestions its content may override, so a column would refuse to
+     shrink below its text. */
+  table-layout: fixed;
 }
-.editor-prose [data-type="tableRow"] {
-  font-family: var(--font-dm-mono), ui-monospace;
-  white-space: pre-wrap;
-  padding: 0.25rem 0.5rem;
+.editor-prose th,
+.editor-prose td {
+  border: 1px solid var(--border-01);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
 }
-.editor-prose [data-type="tableSeparator"] {
-  font-family: var(--font-dm-mono), ui-monospace;
-  white-space: pre-wrap;
-  padding: 0.25rem 0.5rem;
-  color: var(--text-02);
-  background: var(--background-tint-01);
+.editor-prose th {
+  background: var(--background-tint-02);
+  font-weight: 600;
+  color: var(--text-05);
 }
-.editor-prose [data-type="tableRow"] + [data-type="tableRow"] {
-  border-top: 1px solid var(--border-02);
+.editor-prose td {
+  color: var(--text-03);
+}
+/* prosemirror-tables' own selection class, its only styling hook. Uses the
+   app's selection token: a cell tint is otherwise indistinguishable from the
+   page, and a range you cannot see reads as a range you cannot make. */
+.editor-prose .selectedCell {
+  background: var(--highlight-selection);
+}
+
+/* Column resizing. prosemirror-tables emits the handle and the cursor class
+   but ships no stylesheet through Tiptap, so an unstyled handle is invisible
+   and reads as "resizing does not work". The cell must be positioned for the
+   handle to sit on its edge. */
+.editor-prose th,
+.editor-prose td {
+  position: relative;
+}
+.editor-prose .column-resize-handle {
+  position: absolute;
+  right: -3px;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 20;
+  background: var(--action-link-05);
+  opacity: 0;
+  cursor: col-resize;
+}
+.editor-prose th:hover .column-resize-handle,
+.editor-prose td:hover .column-resize-handle,
+.editor-prose .column-resize-handle:hover,
+.editor-prose .resize-cursor .column-resize-handle {
+  opacity: 1;
+}
+/* Set on the editor root while a handle is live, so the whole surface shows
+   the resize cursor rather than only the 6px strip. */
+.editor-prose .resize-cursor {
+  cursor: col-resize;
 }
 
 /* Placeholder (@tiptap/extensions' Placeholder), keyed on `.is-empty` — any
@@ -483,4 +528,75 @@
   50% {
     opacity: 1;
   }
+}
+
+/* Row and column grips, the `+` on each far edge, and the drop indicator.
+   Positioning is inline beside the coordinates it belongs with; this is the
+   look only. */
+.wiki-table-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-04);
+  background: var(--background-tint-02);
+  border: 1px solid var(--border-01);
+  opacity: 0;
+  cursor: grab;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease;
+}
+.wiki-table-grip:active {
+  cursor: grabbing;
+}
+.editor-prose:hover .wiki-table-grip,
+.wiki-table-grip[data-state="open"] {
+  opacity: 1;
+}
+.wiki-table-grip:hover {
+  background: var(--background-tint-03);
+}
+.wiki-grip-dots {
+  display: grid;
+  gap: 1px;
+}
+.wiki-grip-dots-column {
+  grid-template-columns: repeat(3, 2px);
+  grid-template-rows: repeat(2, 2px);
+}
+.wiki-grip-dots-row {
+  grid-template-columns: repeat(2, 2px);
+  grid-template-rows: repeat(3, 2px);
+}
+.wiki-grip-dots i {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--text-03);
+}
+.wiki-table-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-04);
+  color: var(--text-03);
+  font-size: 11px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity 120ms ease,
+    background 120ms ease;
+}
+.editor-prose:hover .wiki-table-plus {
+  opacity: 0.6;
+}
+.wiki-table-plus:hover {
+  opacity: 1;
+  background: var(--background-tint-02);
+}
+.wiki-table-drop {
+  background: var(--action-link-05);
+  border-radius: 1px;
+  pointer-events: none;
 }

@@ -182,13 +182,13 @@ def test_editing_table_cell_only_touches_that_row() -> None:
     root = _root(doc)
 
     table = next(c for c in root.children if c.tag == "table")
-    row0 = table.children[0]  # header row "| a | b |"
+    row0 = table.children[0]  # header row, cells "a" and "b"
     with doc.transaction():
-        row0.children[0].insert(0, "EDITED ")
+        row0.children[0].children[0].insert(0, "EDITED ")
 
     new_body = checkpoint_body(_SAMPLE, doc, tracker)
 
-    assert "EDITED | a | b |" in new_body
+    assert "| EDITED a | b |" in new_body
     # The rest of the table (separator + both body rows) is untouched.
     assert "| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n" in new_body
     # Everything before and after the table is untouched too.

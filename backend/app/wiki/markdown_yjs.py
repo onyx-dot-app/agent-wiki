@@ -812,6 +812,72 @@ def _table_row_line(cells: list[str]) -> str:
     return "| " + " | ".join(cells) + " |\n"
 
 
+_ALIGN_FROM_STYLE = {
+    "text-align:left": "left",
+    "text-align:center": "center",
+    "text-align:right": "right",
+}
+
+_DELIMITER_FOR_ALIGN = {
+    "left": ":---",
+    "center": ":---:",
+    "right": "---:",
+    None: "---",
+}
+
+
+def _table_rows_from_tokens(
+    tokens: list[Any], start: int, end: int, row_ids: list[str] | None
+) -> tuple[list[XmlElement], list[Any]]:
+    """Build ``tableRow`` elements holding real cells, one per source row.
+
+    Cells carry their inline runs, so a cell's marks round-trip like any other
+    inline content. Column alignment rides the header cells' ``align`` rather
+    than a stored delimiter row, which is regenerated on the way out.
+    """
+    rows: list[XmlElement] = []
+    finishers: list[Any] = []
+    cells: list[XmlElement] = []
+    is_header = False
+    for i in range(start, end):
+        token = tokens[i]
+        if token.type == "tr_open":
+            cells = []
+            continue
+        if token.type == "tr_close":
+            row_id = row_ids[len(rows)] if row_ids and len(rows) < len(row_ids) else None
+            attrs = {ROW_ID_ATTR: row_id} if row_id else {}
+            rows.append(XmlElement("tableRow", attrs, contents=cells))
+            continue
+        if token.type in ("th_open", "td_open"):
+            is_header = token.type == "th_open"
+            align = _ALIGN_FROM_STYLE.get(str((token.attrs or {}).get("style", "")))
+            tag = "tableHeader" if is_header else "tableCell"
+            cell, cell_finishers = _element_from_segments(
+                tag, {"align": align} if align else {}, _inline_runs(tokens[i + 1])
+            )
+            cells.append(cell)
+            finishers.extend(cell_finishers)
+    return rows, finishers
+
+
+def _build_table(raw: str, block: BlockRange) -> tuple[XmlElement, list[Any]]:
+    """A top-level GFM table as ``table > tableRow > tableCell|tableHeader``.
+
+    Re-parses its own slice rather than threading tokens down from the caller:
+    a table's source is a standalone document, so the parse is exact and the
+    cell walk is shared with the nested path.
+    """
+    tokens = gfm_parser().parse(raw)
+    # Row ids stay positional and header-inclusive, matching the ids
+    # ``markdown_blocks`` derives, so ``markdown_splice`` keeps pairing a live
+    # row to its committed range.
+    row_ids = [row.row_id for row in block.rows]
+    rows, finishers = _table_rows_from_tokens(tokens, 0, len(tokens), row_ids)
+    el = XmlElement("table", {BLOCK_ID_ATTR: block.block_id}, contents=rows)
+    return el, finishers
+
+
 def _build_nested_table(tokens: list[Any], start: int, end: int) -> XmlElement:
     """A table nested in a list item or blockquote, as the same row-level
     ``table`` element the top-level path builds.
@@ -938,25 +1004,7 @@ def build_block_element(body: str, block: BlockRange) -> tuple[XmlElement, list[
         return el, []
 
     if block.kind is BlockKind.TABLE:
-        row_children: list[XmlElement] = []
-        for row in block.rows:
-            row_children.append(
-                XmlElement(
-                    "tableRow",
-                    {ROW_ID_ATTR: row.row_id},
-                    contents=[XmlText(body[row.start : row.end])],
-                )
-            )
-            if block.separator is not None and row.row_id == block.rows[0].row_id:
-                row_children.append(
-                    XmlElement(
-                        "tableSeparator",
-                        {ROW_ID_ATTR: block.separator.row_id},
-                        contents=[XmlText(body[block.separator.start : block.separator.end])],
-                    )
-                )
-        el = XmlElement("table", {BLOCK_ID_ATTR: block.block_id}, contents=row_children)
-        return el, []
+        return _build_table(raw, block)
 
     # Opaque verbatim passthrough: thematic_break, html_block, other.
     el = XmlElement(
@@ -1001,12 +1049,52 @@ def find_by_row_id(doc: Doc, row_id: str) -> XmlElement | None:
     return None
 
 
+def _cell_text(cell: XmlElement) -> str:
+    """A cell's inline markdown with its pipes escaped. A bare pipe would split
+    the cell in two on the next parse, which is the one way a cell edit can
+    silently become two cells."""
+    return _serialize_inline_children(list(cell.children)).replace("|", "\\|")
+
+
+def _serialize_table(node: XmlElement) -> str:
+    """Rows joined as GFM, with the delimiter row regenerated from the header
+    cells' alignment. The delimiter is derived rather than stored, so it can
+    never disagree with the columns it describes.
+
+    Rows whose children are text rather than cells are emitted verbatim: a
+    document seeded before cells existed still serializes, and still commits.
+    """
+    lines: list[str] = []
+    for index, row in enumerate(node.children):
+        if not isinstance(row, XmlElement):
+            continue
+        lines.append(serialize_row(row))
+        if index == 0 and any(isinstance(c, XmlElement) for c in row.children):
+            lines.append(serialize_delimiter(row))
+    return "".join(lines)
+
+
 def serialize_row(row: XmlElement) -> str:
-    """A row's verbatim source line. Empty-safe for the same reason as
+    """A row as a GFM line, from its cells.
+
+    Falls back to the child's own text for a row that still holds one: a
+    document seeded before cells existed keeps serializing, and keeps
+    committing, until its next reseed. Empty-safe for the same reason as
     ``_serialize_code_block``: delete a row's text and the XmlText child goes
-    with it, leaving a childless element whose ``children[0]`` raises."""
+    with it, leaving a childless element whose ``children[0]`` raises.
+    """
+    cells = [c for c in row.children if isinstance(c, XmlElement)]
+    if cells:
+        return _table_row_line([_cell_text(c) for c in cells])
     kids = list(row.children)
     return kids[0].to_py() if kids else ""  # type: ignore[return-value]
+
+
+def serialize_delimiter(header_row: XmlElement) -> str:
+    """The `| --- |` line for a header row, from its cells' own alignment."""
+    cells = [c for c in header_row.children if isinstance(c, XmlElement)]
+    aligns = [dict(c.attributes).get("align") for c in cells]
+    return _table_row_line([_DELIMITER_FOR_ALIGN.get(a, "---") for a in aligns])
 
 
 def _serialize_block_sequence(children: list[XmlElement], indent: str, sep: str = "\n\n") -> str:
@@ -1413,7 +1501,7 @@ def serialize_block(node: XmlElement) -> str:
     if node.tag == "codeBlock":
         return _serialize_code_block(node)
     if node.tag == "table":
-        return "".join(serialize_row(row) for row in node.children)
+        return _serialize_table(node)
     if attrs.get(_RAW_ATTR) == "1":
         return serialize_row(node)
 
