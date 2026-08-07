@@ -140,6 +140,17 @@ function cellAt(editor: Editor, row: number, col: number): HoveredCell {
   return context;
 }
 
+/** Each header cell's `align`, left to right. */
+function headerAligns(editor: Editor): (string | null)[] {
+  const aligns: (string | null)[] = [];
+  editor.state.doc.descendants((node) => {
+    if (node.type.name !== "tableHeader") return true;
+    aligns.push(node.attrs.align);
+    return false;
+  });
+  return aligns;
+}
+
 describe("duplicateTrack", () => {
   it("copies every cell of a row, not just the first", () => {
     const editor = wideEditor();
@@ -161,6 +172,51 @@ describe("duplicateTrack", () => {
       ["a1", "a1", "a2"],
       ["b1", "b1", "b2"],
     ]);
+    editor.destroy();
+  });
+
+  it("fills the duplicate of the last column, whose cells the insert moved", () => {
+    const editor = wideEditor();
+    duplicateTrack(editor, cellAt(editor, 1, 1), "column");
+    expect(grid(editor)).toEqual([
+      ["H1", "H2", "H2"],
+      ["a1", "a2", "a2"],
+      ["b1", "b2", "b2"],
+    ]);
+    editor.destroy();
+  });
+
+  it("carries the source column's alignment onto the duplicate", () => {
+    const editor = wideEditor();
+    const source = cellAt(editor, 1, 1);
+    editor.commands.setTextSelection(source.cellPos + 1);
+    setColumnAlign(editor.state, editor.view.dispatch, "center");
+
+    duplicateTrack(editor, cellAt(editor, 1, 1), "column");
+
+    // The delimiter is regenerated from the header cells, so a duplicate that
+    // arrives unaligned flattens that column to `---` at the next checkpoint.
+    expect(headerAligns(editor)).toEqual([null, "center", "center"]);
+    editor.destroy();
+  });
+
+  it("carries alignment onto a duplicated row's cells", () => {
+    const editor = wideEditor();
+    const source = cellAt(editor, 1, 1);
+    editor.commands.setTextSelection(source.cellPos + 1);
+    setColumnAlign(editor.state, editor.view.dispatch, "right");
+
+    duplicateTrack(editor, cellAt(editor, 1, 0), "row");
+
+    const aligns: (string | null)[] = [];
+    editor.state.doc.descendants((node) => {
+      if (node.type.name !== "tableCell") return true;
+      aligns.push(node.attrs.align);
+      return false;
+    });
+    // Column 1 of every body row, the duplicate included, or the new row
+    // renders unaligned against the column it sits in.
+    expect(aligns.filter((a) => a === "right")).toHaveLength(3);
     editor.destroy();
   });
 });

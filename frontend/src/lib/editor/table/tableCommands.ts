@@ -172,6 +172,18 @@ export function selectTrack(
   editor.view.dispatch(state.tr.setSelection(selection));
 }
 
+/** The same table re-read after a structural edit. Every cell position past the
+ * insertion point moves, so a context rebuilt from one taken beforehand
+ * resolves outside the table. */
+function tableContextAfterEdit(
+  editor: Editor,
+  ctx: TableContext,
+): TableContext | null {
+  const table = editor.state.doc.nodeAt(ctx.pos);
+  if (table?.type.name !== "table") return null;
+  return { ...ctx, table, map: TableMap.get(table) };
+}
+
 /** Copy a row or column into a new one after it. */
 export function duplicateTrack(
   editor: Editor,
@@ -190,9 +202,9 @@ export function duplicateTrack(
     .setTextSelection(cell.cellPos + 1);
   (axis === "row" ? chain.addRowAfter() : chain.addColumnAfter()).run();
 
-  // The fresh track is empty, so fill it from the source's content. Read the
-  // map again: inserting shifted every position after the insertion point.
-  const after = tableContextAt(editor, { ...cell, cellPos: cell.cellPos });
+  // The fresh track is empty, so fill it from the source's content. Re-read
+  // from the table's own position, which an insert inside it does not move.
+  const after = tableContextAfterEdit(editor, ctx);
   if (!after) return;
   const targets = trackCells(after, index + 1, axis);
   const tr = editor.state.tr;
@@ -204,8 +216,13 @@ export function duplicateTrack(
     // onward writes into the wrong place.
     const pos = tr.mapping.map(after.start + offset);
     const target = tr.doc.nodeAt(pos);
-    if (target)
-      tr.replaceWith(pos + 1, pos + target.nodeSize - 1, node.content);
+    if (!target) return;
+    // Alignment travels with the copy: the delimiter is regenerated from it.
+    tr.setNodeMarkup(pos, undefined, {
+      ...target.attrs,
+      align: node.attrs.align,
+    });
+    tr.replaceWith(pos + 1, pos + target.nodeSize - 1, node.content);
   });
   editor.view.dispatch(tr);
 }
