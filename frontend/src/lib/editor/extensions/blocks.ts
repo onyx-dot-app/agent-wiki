@@ -55,6 +55,7 @@ import {
   TableRow,
 } from "@tiptap/extension-table";
 import { isSameOriginSrc } from "./media";
+import { ScrollFollowTableView } from "@/lib/editor/table/ScrollFollowTableView";
 import { clearSelectedCells } from "@/lib/editor/table/tableCommands";
 
 /** A line consisting of nothing but 3+ of the same `-`/`_`/`*` character
@@ -747,6 +748,7 @@ const WikiTable = Table.extend({
   handleWidth: 6,
   cellMinWidth: 64,
   lastColumnResizable: true,
+  View: ScrollFollowTableView,
 });
 
 const MarkdownLink = Extension.create({

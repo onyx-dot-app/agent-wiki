@@ -324,6 +324,29 @@ export function TipTapEditor({
     };
   }, [editor]);
 
+  // A table may grow past the reading column, so it needs to know how much
+  // room there is on either side of that column to expand into (Google Docs
+  // does the same). Text stays capped; only `.tableWrapper` consumes this.
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const publish = () => {
+      const prose = scroller.querySelector(".ProseMirror");
+      if (!(prose instanceof HTMLElement)) return;
+      const cs = getComputedStyle(prose);
+      const proseContent =
+        prose.clientWidth -
+        parseFloat(cs.paddingLeft) -
+        parseFloat(cs.paddingRight);
+      const perSide = Math.max(0, (scroller.clientWidth - proseContent) / 2);
+      scroller.style.setProperty("--table-breakout", `${perSide}px`);
+    };
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(scroller);
+    return () => ro.disconnect();
+  }, [editor]);
+
   // Doc-space rect (top/height relative to the wrapper's own scroll origin,
   // not the current scroll position) for the region `[from, to]` — shared by
   // anchorLine and the scrollTo* methods below. `posToDOMRect` is Tiptap's

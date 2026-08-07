@@ -282,11 +282,14 @@
 }
 /* Values mirror `.markdown table` in globals.css so the same page reads the
    same in the editor and in the history diff. */
-/* prosemirror-tables' `draggedWidth` has no upper bound and Tiptap writes the
-   resulting sum onto `table.style.width`, so capping the wrapper is what holds
-   a resized grid inside the reading column. Wider grids scroll. */
+/* A grid outgrows prose long before prose outgrows the window, so a table may
+   run past the reading column into the empty gutter beside it
+   (--table-breakout, published by TipTapEditor) and scrolls once it outgrows
+   even that. `fit-content` keeps a narrow table narrow and every table on the
+   text's left edge, so only the width a grid actually needs is taken. */
 .editor-prose .tableWrapper {
-  max-width: 100%;
+  width: fit-content;
+  max-width: calc(100% + var(--table-breakout, 0px));
   overflow-x: auto;
 }
 
