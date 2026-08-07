@@ -299,3 +299,20 @@ export function clearSelectedCells(
   dispatch?.(tr);
   return true;
 }
+
+/** The range covering every cell of a cell selection. Its own `from`/`to` are
+ * anchor and head cell positions, so anything taking them quotes a run that
+ * starts and ends mid-cell. Null outside a cell selection. */
+export function cellSelectionRange(
+  state: EditorState,
+): { from: number; to: number } | null {
+  const { selection } = state;
+  if (!(selection instanceof CellSelection)) return null;
+  let from = Infinity;
+  let to = -Infinity;
+  selection.forEachCell((cell, pos) => {
+    from = Math.min(from, pos + 1);
+    to = Math.max(to, pos + cell.nodeSize - 1);
+  });
+  return Number.isFinite(from) && to > from ? { from, to } : null;
+}

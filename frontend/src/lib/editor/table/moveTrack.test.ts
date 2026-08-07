@@ -13,9 +13,10 @@ import {
   TableHeader,
   TableRow,
 } from "@tiptap/extension-table";
-import { TableMap, moveTableRow } from "@tiptap/pm/tables";
+import { CellSelection, TableMap, moveTableRow } from "@tiptap/pm/tables";
 
 import {
+  cellSelectionRange,
   duplicateTrack,
   type HoveredCell,
 } from "@/lib/editor/table/tableCommands";
@@ -161,6 +162,36 @@ describe("duplicateTrack", () => {
       ["a1", "a1", "a2"],
       ["b1", "b1", "b2"],
     ]);
+    editor.destroy();
+  });
+});
+
+describe("cellSelectionRange", () => {
+  it("spans every selected cell, not the anchor and head positions", () => {
+    const editor = wideEditor();
+    const anchor = cellAt(editor, 1, 0);
+    const head = cellAt(editor, 2, 1);
+    const { state } = editor;
+    editor.view.dispatch(
+      state.tr.setSelection(
+        CellSelection.create(state.doc, anchor.cellPos, head.cellPos),
+      ),
+    );
+
+    const range = cellSelectionRange(editor.state)!;
+    const quoted = editor.state.doc.textBetween(range.from, range.to, " ");
+
+    // Every cell of the 2x2 rectangle, which is what the user marked. The
+    // selection's own from/to would quote a run starting inside `a1`.
+    for (const cell of ["a1", "a2", "b1", "b2"]) {
+      expect(quoted).toContain(cell);
+    }
+    editor.destroy();
+  });
+
+  it("is null outside a cell selection, so ordinary text keeps its own range", () => {
+    const editor = wideEditor();
+    expect(cellSelectionRange(editor.state)).toBeNull();
     editor.destroy();
   });
 });
