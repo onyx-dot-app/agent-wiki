@@ -37,6 +37,7 @@ import {
   SourceChips,
   ThinkingShimmer,
   docBaseName,
+  usePublishedSize,
   type ToolbarContext,
   type ToolbarMode,
 } from "@/components/wiki/toolbar/chatParts";
@@ -96,6 +97,13 @@ export function ChatSidePanel({
   onClose,
 }: ChatSidePanelProps) {
   const router = useRouter();
+  // The doc column reserves this so its text stops at the panel's edge instead
+  // of running underneath. FileView cannot read `panelOpen`, which lives in the
+  // toolbar below it, so the panel announces its own width.
+  const { ref: panelRef, publish: republishPanelWidth } = usePublishedSize(
+    "--wiki-chat-panel-width",
+    "width",
+  );
   const [mode, setMode] = useState<ToolbarMode>("chat");
   const [draft, setDraft] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -119,6 +127,10 @@ export function ChatSidePanel({
   useEffect(() => {
     scroller?.scrollTo({ top: scroller.scrollHeight });
   }, [scroller, chat.items.length, chat.sending]);
+
+  useEffect(() => {
+    republishPanelWidth();
+  });
 
   function submit() {
     const text = draft.trim();
@@ -157,6 +169,7 @@ export function ChatSidePanel({
 
   return (
     <Section
+      ref={panelRef}
       gap={0}
       padding={0}
       height="full"

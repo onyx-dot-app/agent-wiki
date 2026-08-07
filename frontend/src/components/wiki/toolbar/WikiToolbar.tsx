@@ -13,6 +13,7 @@ import {
   ModeTabs,
   ModelBar,
   ToolbarPanel,
+  usePublishedSize,
   type ToolbarContext,
   type ToolbarMode,
 } from "@/components/wiki/toolbar/chatParts";
@@ -35,36 +36,6 @@ function modeIcon(m: ToolbarMode) {
   if (m === "watch") return SvgWorkflow;
   if (m === "launch") return SvgZap;
   return SvgBubbleText;
-}
-
-/** Publishes an overlay dock's measured height as `--wiki-dock-height`, which
- *  `.dock-clearance` reserves so a document can scroll clear of the strip.
- *  Column docks stay in flow and take their own room, so they publish nothing. */
-function useOverlayDockHeight(overlay: boolean) {
-  const ref = useRef<HTMLDivElement>(null);
-  // Callers republish on every render, since the strip resizes for reasons no
-  // dependency list spans. The observer catches what no render reports, a
-  // window resize above all.
-  const publish = useCallback(() => {
-    const el = ref.current;
-    if (!overlay || !el) return;
-    document.documentElement.style.setProperty(
-      "--wiki-dock-height",
-      `${el.offsetHeight}px`,
-    );
-  }, [overlay]);
-  useEffect(() => {
-    const el = ref.current;
-    if (!overlay || !el) return;
-    publish();
-    const ro = new ResizeObserver(publish);
-    ro.observe(el);
-    return () => {
-      ro.disconnect();
-      document.documentElement.style.removeProperty("--wiki-dock-height");
-    };
-  }, [overlay, publish]);
-  return { ref, publish };
 }
 
 /** Bottom-docked toolbar strip. `column` renders in flow as the column's
@@ -124,8 +95,12 @@ export function WikiToolbarDock({
     };
   }, [anchorSelector]);
 
+  // Column docks sit in flow and take their own room, so only the fixed and
+  // absolute variants publish a height for `.dock-clearance` to reserve.
   const { ref: overlayDockRef, publish: republishDockHeight } =
-    useOverlayDockHeight(
+    usePublishedSize(
+      "--wiki-dock-height",
+      "height",
       anchorSelector ? anchorBox !== null : variant === "float",
     );
 
