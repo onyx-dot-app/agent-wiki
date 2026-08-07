@@ -10,7 +10,7 @@ import {
   moveTableRow,
 } from "@tiptap/pm/tables";
 import type { EditorState, Transaction } from "@tiptap/pm/state";
-import type { Node as PMNode } from "@tiptap/pm/model";
+import type { Node as PMNode, ResolvedPos } from "@tiptap/pm/model";
 import type { Editor } from "@tiptap/core";
 
 export type ColumnAlign = "left" | "center" | "right" | null;
@@ -26,32 +26,29 @@ interface TableContext {
   rowIndex: number;
 }
 
-/** Resolve the table and cell the selection sits in, or null when it is
- * outside one. Indices come from `TableMap`, so a merged cell reports the
- * column it starts in rather than a DOM position that would be off by its span. */
-export function tableContext(state: EditorState): TableContext | null {
-  const { $from } = state.selection;
-  for (let depth = $from.depth; depth > 0; depth--) {
-    if ($from.node(depth).type.name !== "table") continue;
-    const table = $from.node(depth);
-    const pos = $from.before(depth);
-    const start = pos + 1;
-    const map = TableMap.get(table);
-    const cellPos = $from.before(depth + 2) - start;
-    const rect = map.findCell(cellPos);
-    return { table, pos, start, map, colIndex: rect.left, rowIndex: rect.top };
-  }
-  return null;
+/** Context for a resolved before-cell position. Indices come from `TableMap`,
+ * so a merged cell reports the column it starts in rather than a DOM position
+ * that would be off by its span. */
+function contextFromCell($cell: ResolvedPos): TableContext | null {
+  const table = $cell.node(-1);
+  if (table?.type.name !== "table") return null;
+  const start = $cell.start(-1);
+  const map = TableMap.get(table);
+  const rect = map.findCell($cell.pos - start);
+  return {
+    table,
+    pos: $cell.before(-1),
+    start,
+    map,
+    colIndex: rect.left,
+    rowIndex: rect.top,
+  };
 }
 
-/** Every distinct cell position in a column, deduplicated because a cell
- * spanning rows appears once per row it covers in the map. */
-function columnCellPositions(ctx: TableContext, colIndex: number): number[] {
-  const seen = new Set<number>();
-  for (let row = 0; row < ctx.map.height; row++) {
-    seen.add(ctx.map.map[row * ctx.map.width + colIndex]!);
-  }
-  return [...seen];
+/** The table and cell the selection sits in, or null when it is outside one. */
+export function tableContext(state: EditorState): TableContext | null {
+  const $cell = cellAround(state.selection.$from);
+  return $cell ? contextFromCell($cell) : null;
 }
 
 export function setColumnAlign(
@@ -63,7 +60,7 @@ export function setColumnAlign(
   if (!ctx) return false;
   if (!dispatch) return true;
   const tr = state.tr;
-  for (const offset of columnCellPositions(ctx, ctx.colIndex)) {
+  for (const offset of trackCells(ctx, ctx.colIndex, "column")) {
     const cellPos = ctx.start + offset;
     const cell = tr.doc.nodeAt(cellPos);
     if (cell) tr.setNodeMarkup(cellPos, undefined, { ...cell.attrs, align });
@@ -138,11 +135,7 @@ function trackCells(
   axis: "row" | "column",
 ): number[] {
   const seen = new Set<number>();
-  const { map, width, height } = {
-    map: ctx.map.map,
-    width: ctx.map.width,
-    height: ctx.map.height,
-  };
+  const { map, width, height } = ctx.map;
   if (axis === "row") {
     for (let col = 0; col < width; col++) seen.add(map[index * width + col]!);
   } else {
@@ -196,7 +189,10 @@ export function duplicateTrack(
   targets.forEach((offset, i) => {
     const node = source[i];
     if (!node) return;
-    const pos = after.start + offset;
+    // Mapped: each write resizes its cell, shifting every later position. The
+    // offsets come from one map snapshot, so without this the second cell
+    // onward writes into the wrong place.
+    const pos = tr.mapping.map(after.start + offset);
     const target = tr.doc.nodeAt(pos);
     if (target)
       tr.replaceWith(pos + 1, pos + target.nodeSize - 1, node.content);
@@ -215,7 +211,9 @@ export function clearTrack(
   const index = axis === "row" ? cell.rowIndex : cell.colIndex;
   const tr = editor.state.tr;
   for (const offset of trackCells(ctx, index, axis)) {
-    const pos = ctx.start + offset;
+    // Mapped for the same reason as `duplicateTrack`: offsets come from one
+    // map snapshot and each delete shifts every position after it.
+    const pos = tr.mapping.map(ctx.start + offset);
     const node = tr.doc.nodeAt(pos);
     if (node && node.content.size > 0)
       tr.delete(pos + 1, pos + node.nodeSize - 1);
