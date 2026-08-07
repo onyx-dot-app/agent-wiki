@@ -7,13 +7,10 @@ import { Editor } from "@tiptap/core";
 import { Document } from "@tiptap/extension-document";
 import { Paragraph } from "@tiptap/extension-paragraph";
 import { Text } from "@tiptap/extension-text";
-import {
-  Table,
-  TableCell,
-  TableHeader,
-  TableRow,
-} from "@tiptap/extension-table";
+import { Table, TableRow } from "@tiptap/extension-table";
 import { CellSelection, TableMap, moveTableRow } from "@tiptap/pm/tables";
+
+import { GfmCell, GfmHeader } from "@/lib/editor/extensions/blocks";
 
 import {
   cellSelectionRange,
@@ -31,8 +28,8 @@ function tableEditor() {
       Text,
       Table.configure({ resizable: false }),
       TableRow,
-      TableHeader.extend({ content: "inline*" }),
-      TableCell.extend({ content: "inline*" }),
+      GfmHeader,
+      GfmCell,
     ],
     content: {
       type: "doc",
@@ -63,8 +60,8 @@ function wideEditor() {
       Text,
       Table.configure({ resizable: false }),
       TableRow,
-      TableHeader.extend({ content: "inline*" }),
-      TableCell.extend({ content: "inline*" }),
+      GfmHeader,
+      GfmCell,
     ],
     content: {
       type: "doc",
@@ -223,6 +220,24 @@ describe("the header row is fixed at index 0", () => {
       ["b1", "b2"],
       ["a1", "a2"],
     ]);
+    editor.destroy();
+  });
+});
+
+describe("the shipped cell schema", () => {
+  // `align` is inherited, not declared here, and the checkpoint regenerates
+  // the delimiter from it. Losing it flattens every aligned column, silently.
+  it.each(["tableCell", "tableHeader"])("declares align on %s", (name) => {
+    const editor = wideEditor();
+    expect(editor.schema.nodes[name]!.spec.attrs).toHaveProperty("align");
+    editor.destroy();
+  });
+
+  it("keeps cells inline-only, since GFM cells cannot hold blocks", () => {
+    const editor = wideEditor();
+    for (const name of ["tableCell", "tableHeader"]) {
+      expect(editor.schema.nodes[name]!.spec.content).toBe("inline*");
+    }
     editor.destroy();
   });
 });

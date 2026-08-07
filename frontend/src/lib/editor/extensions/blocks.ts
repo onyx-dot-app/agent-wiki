@@ -722,7 +722,8 @@ const TableIdentity = Extension.create({
 });
 
 /** GFM cells are inline-only, so the schema says so rather than a renderer
- * stripping blocks after the fact. */
+ * stripping blocks after the fact. Overriding `content` alone keeps the
+ * upstream attributes, `align` among them, which the checkpoint reads. */
 const GfmCell = TableCell.extend({ content: "inline*" });
 const GfmHeader = TableHeader.extend({ content: "inline*" });
 
