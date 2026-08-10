@@ -97,9 +97,8 @@ export function ChatSidePanel({
   onClose,
 }: ChatSidePanelProps) {
   const router = useRouter();
-  // The doc column reserves this so its text stops at the panel's edge instead
-  // of running underneath. FileView cannot read `panelOpen`, which lives in the
-  // toolbar below it, so the panel announces its own width.
+  // The surfaces that reserve this width sit outside the panel's React tree,
+  // so the width travels as a CSS property rather than a prop.
   const { ref: panelRef, publish: republishPanelWidth } = usePublishedSize(
     "--wiki-chat-panel-width",
     "width",

@@ -598,7 +598,7 @@ function Explorer({ dir }: ExplorerProps) {
       />
       <div
         ref={dirScrollRef}
-        className={`scroll-y-hidden dock-clearance min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+        className={`scroll-y-hidden dock-clearance chat-panel-reserved min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
       >
         {/* Desktop docks the editor inside the Watching tab; the modal is
             the mobile path only. */}
@@ -926,7 +926,6 @@ function Explorer({ dir }: ExplorerProps) {
       <WikiToolbarDock
         tabs={["chat", "watch", "launch"]}
         context={dir ? { path: dir, kind: "dir" } : null}
-        defaultFolded={false}
       />
     </main>
   );
@@ -1196,7 +1195,7 @@ function NewDocView({ dir }: NewDocViewProps) {
       {/* The drafting flow expands the toolbar on this view, so it must
           exist here. No context chip: the doc has no path yet. In-column
           so it shares the composer column's box. */}
-      <WikiToolbarDock tabs={["chat"]} variant="column" defaultFolded={false} />
+      <WikiToolbarDock tabs={["chat"]} variant="column" />
     </main>
   );
 }

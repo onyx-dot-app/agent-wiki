@@ -49,16 +49,15 @@ import { updateUserSettings, useUserSettings } from "@/lib/userSettings";
 import { useWikiTree } from "@/lib/wiki/hooks";
 
 /** Publishes an element's measured size as a root CSS property, so surfaces
- *  that cannot see this component's state still reserve room for it. Both chat
- *  overlays open from state owned below the layout they cover. */
+ *  that cannot see this component's state still reserve room for it. */
 export function usePublishedSize(
   property: string,
   axis: "height" | "width",
   active = true,
 ) {
   const ref = useRef<HTMLDivElement>(null);
-  // Callers republish on every render, since these overlays resize for reasons
-  // no dependency list spans. The observer catches what no render reports.
+  // Returned so a caller can republish before the observer's first delivery,
+  // which lands after the strip has already painted at a stale size.
   const publish = useCallback(() => {
     const el = ref.current;
     if (!active || !el) return;

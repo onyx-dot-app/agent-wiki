@@ -118,9 +118,16 @@ export function TableGrips({ editor }: { editor: Editor | null }) {
    * edit cannot re-derive them from a spot the reader has scrolled away from. */
   useEffect(() => {
     if (!editor) return;
-    const clear = () => {
-      // A drag past the edge scrolls on purpose and owns its own affordances.
-      if (dragRef.current) return;
+    const clear = (event: Event) => {
+      // Same guard as the pointer and resync paths. Unmounting the popover
+      // never reports itself closed, so tearing one down here would strand
+      // `menuOpen` and the grips would stop appearing entirely.
+      if (menuOpen.current || dragRef.current) return;
+      // Only a scroll that carries the editor strands them. The chat panel
+      // scrolls itself on every streamed turn.
+      const target = event.target;
+      if (!(target instanceof Node) || !target.contains(editor.view.dom))
+        return;
       pointer.current = null;
       setGeo(null);
     };

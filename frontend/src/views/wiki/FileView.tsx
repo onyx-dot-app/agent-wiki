@@ -1482,7 +1482,6 @@ export function FileView({ path }: FileViewProps) {
             tabs={["chat", "watch", "launch"]}
             context={path ? { path, kind: "doc" } : null}
             anchorSelector=".editor-prose .ProseMirror"
-            defaultFolded={false}
           />
         )}
       </div>

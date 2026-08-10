@@ -39,9 +39,6 @@ export type DraftingState =
   | {
       kind: "blank";
       path: string | null;
-      /** "Start writing with AI" prompt — shown as the first user turn when the
-       *  chat seeds, instead of the generic blank prime. */
-      prompt?: string;
     };
 
 interface DraftingContextValue {

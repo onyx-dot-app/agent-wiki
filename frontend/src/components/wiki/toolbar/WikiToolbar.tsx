@@ -46,7 +46,6 @@ interface WikiToolbarDockProps {
   context?: ToolbarContext | null;
   /** Reading-column width for float mode. Column mode takes the parent's. */
   width?: "sm" | "sm-md";
-  defaultFolded?: boolean;
   surface?: string;
   variant?: "float" | "column";
   /** Anchored float: fixed strip spanning the matched, page-padded column. */
@@ -57,7 +56,6 @@ export function WikiToolbarDock({
   tabs,
   context,
   width = "sm-md",
-  defaultFolded,
   surface,
   variant = "float",
   anchorSelector,
@@ -139,7 +137,6 @@ export function WikiToolbarDock({
           <WikiToolbar
             tabs={tabs}
             context={context}
-            defaultFolded={defaultFolded}
             surface={surface}
             onGeometryChange={republishDockHeight}
           />
@@ -163,12 +160,7 @@ export function WikiToolbarDock({
           alignItems="center"
           className="pointer-events-auto w-full"
         >
-          <WikiToolbar
-            tabs={tabs}
-            context={context}
-            defaultFolded={defaultFolded}
-            surface={surface}
-          />
+          <WikiToolbar tabs={tabs} context={context} surface={surface} />
         </Section>
       </Section>
     );
@@ -197,7 +189,6 @@ export function WikiToolbarDock({
         <WikiToolbar
           tabs={tabs}
           context={context}
-          defaultFolded={defaultFolded}
           surface={surface}
           onGeometryChange={republishDockHeight}
         />
@@ -209,24 +200,20 @@ export function WikiToolbarDock({
 interface WikiToolbarProps {
   tabs?: ToolbarMode[];
   context?: ToolbarContext | null;
-  /** First-visit fold state. The surface's stored preference wins. */
-  defaultFolded?: boolean;
   /** Fold preference is remembered per surface, so folding on a doc
    *  page never folds home. */
   surface?: string;
-  /** Overlay docks reserve this strip's height as scroll space. Folding,
-   *  attaching context, and a turn arriving all resize it. */
+  /** Overlay docks reserve this strip's height as scroll space. */
   onGeometryChange?: () => void;
 }
 
 export function WikiToolbar({
   tabs = ["chat"],
   context,
-  defaultFolded = true,
   surface = "wiki",
   onGeometryChange,
 }: WikiToolbarProps) {
-  const [folded, setFolded] = useState(defaultFolded);
+  const [folded, setFolded] = useState(false);
   const [mode, setMode] = useState<ToolbarMode>("chat");
   const [panelOpen, setPanelOpen] = useState(false);
   const {
@@ -241,11 +228,11 @@ export function WikiToolbar({
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(storageKey);
-      setFolded(stored === null ? defaultFolded : stored === "1");
+      setFolded(stored === "1");
     } catch {
-      setFolded(defaultFolded);
+      setFolded(false);
     }
-  }, [defaultFolded, storageKey]);
+  }, [storageKey]);
   const setFoldedPersistent = useCallback(
     (next: boolean) => {
       setFolded(next);
@@ -256,9 +243,8 @@ export function WikiToolbar({
     [storageKey],
   );
 
-  // Deliberately every render: the strip's height is a function of fold state,
-  // mode, context chips, and the live turn, and no single dependency list
-  // spans them.
+  // Every render: the strip's height is derived from too much state for any
+  // dependency list to track, and a stale reservation is visible.
   useEffect(() => {
     onGeometryChange?.();
   });

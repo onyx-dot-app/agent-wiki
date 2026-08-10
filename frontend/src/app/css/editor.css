@@ -280,11 +280,8 @@
   white-space: pre-wrap;
   color: var(--text-03);
 }
-/* Values mirror `.markdown table` in globals.css so the same page reads the
-   same in the editor and in the history diff. */
-/* A table stops where the document stops. Wider than that it scrolls, so the
-   shell never exceeds the reading column and nothing is pushed into the
-   margin-comments lane beside it. `fit-content` keeps a narrow table narrow. */
+/* A table stops where the document stops and scrolls past it, so the shell
+   never exceeds the reading column nor reaches the margin-comments lane. */
 .editor-prose .tableShell {
   position: relative;
   width: fit-content;
@@ -298,22 +295,22 @@
 /* A hard cut reads as the table's real edge, so the side with more table past
    it fades out. Flags come from ScrollFollowTableView, since no selector can
    ask whether an element is scrolled. */
-.editor-prose .tableShell[data-fade-end="true"] .tableWrapper {
-  mask-image: linear-gradient(to right, #000 calc(100% - 1rem), transparent);
-}
-.editor-prose .tableShell[data-fade-start="true"] .tableWrapper {
-  mask-image: linear-gradient(to right, transparent, #000 1rem);
-}
 .editor-prose
-  .tableShell[data-fade-start="true"][data-fade-end="true"]
+  .tableShell:is([data-fade-start="true"], [data-fade-end="true"])
   .tableWrapper {
   mask-image: linear-gradient(
     to right,
-    transparent,
+    var(--table-fade-start, #000),
     #000 1rem,
     #000 calc(100% - 1rem),
-    transparent
+    var(--table-fade-end, #000)
   );
+}
+.editor-prose .tableShell[data-fade-start="true"] {
+  --table-fade-start: transparent;
+}
+.editor-prose .tableShell[data-fade-end="true"] {
+  --table-fade-end: transparent;
 }
 
 /* The fade alone leaves the grid trailing off into nothing, so the cut keeps a
@@ -336,10 +333,8 @@
   left: 0;
 }
 
-/* Deliberately no width floor. A table is the sum of its column widths and
-   stays as narrow as its content. A floor fights the `<col>` widths a drag
-   writes, because `table-layout: fixed` spreads the surplus evenly, which
-   turns one column's handle into a resize of every column. */
+/* Column widths are the table's width. `table-layout: fixed` spreads any
+   surplus evenly, so a width floor turns one column's drag into a resize of all. */
 .editor-prose table {
   border-collapse: collapse;
   margin: 0.75rem 0;
@@ -348,6 +343,8 @@
      shrink below its text. */
   table-layout: fixed;
 }
+/* Cell values mirror `.markdown table` in globals.css so a page reads the same
+   in the editor and in the history diff. */
 .editor-prose th,
 .editor-prose td {
   border: 1px solid var(--border-01);

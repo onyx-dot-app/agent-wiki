@@ -41,10 +41,6 @@ class DraftingInitRequest(BaseModel):
     """
 
     template_id: str | None = Field(default=None, min_length=1)
-    # The "Start writing with AI" prompt. When set, it becomes a VISIBLE first
-    # user turn (a draft was already generated into the editor for it) instead
-    # of the generic blank prime.
-    prompt: str | None = Field(default=None, min_length=1)
 
 
 class ChatSessionOut(BaseModel):

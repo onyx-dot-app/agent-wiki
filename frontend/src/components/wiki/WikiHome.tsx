@@ -34,7 +34,7 @@ export function WikiHome() {
 
   return (
     <main className={styles.view}>
-      <div className={styles.scroll} ref={scrollRef}>
+      <div className={`${styles.scroll} chat-panel-reserved`} ref={scrollRef}>
         <div className={styles.column}>
           {/* Hero */}
           <div className={styles.hero}>
@@ -78,12 +78,7 @@ export function WikiHome() {
           {/* Wiki-wide chat, last child of the column so it shares its
               exact box (mock 2361:65086). Chat-only: nothing is in view
               to attach, and watching or launching needs a scope. */}
-          <WikiToolbarDock
-            tabs={["chat"]}
-            variant="column"
-            defaultFolded={false}
-            surface="home"
-          />
+          <WikiToolbarDock tabs={["chat"]} variant="column" surface="home" />
         </div>
       </div>
       {/* Same thumb as the doc surfaces — native bar hidden in the module

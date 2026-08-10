@@ -59,7 +59,6 @@
      spans all of it. Bottom padding is the mock's 4px strip inset, the
      toolbar sits in flow so content needs no extra clearance. */
   padding: 0 16px 4px;
-  flex: 1;
   max-width: 784px;
   margin: 0 auto;
   box-sizing: border-box;
@@ -115,8 +114,6 @@
   color: var(--text-04);
 }
 
-/* AI input — box left edge aligns with the card grid (padding 8px); the octagon
-   mark hangs into the left gutter, vertically centered, out of the input flow. */
 /* Recent Pages grid */
 .recentGrid {
   display: grid;

@@ -1,6 +1,8 @@
 // Table node view that keeps the edge being dragged in view: a column drag
 // grows the table rightward while its wrapper stays scrolled left, so the edge
-// under the cursor is the first thing to leave the viewport.
+// under the cursor is the first thing to leave the viewport. It also owns the
+// `.tableShell` wrapper and the `data-fade-*` flags `editor.css` styles the cut
+// edge from.
 import { TableView } from "@tiptap/extension-table";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
@@ -10,10 +12,11 @@ export class ScrollFollowTableView extends TableView {
    *  cut edge can carry a border that the scroller's own fade would erase. */
   private scroller: HTMLElement;
   private widthObserver: ResizeObserver;
-  private lastWidth: number;
+  private lastWidth = 0;
   /** Mount reads as a grow from zero, and following it would open every
    *  document with its wide tables already scrolled off their first column. */
   private measured = false;
+  private firstMeasure: number;
 
   constructor(
     node: PMNode,
@@ -28,13 +31,12 @@ export class ScrollFollowTableView extends TableView {
     shell.appendChild(this.scroller);
     this.dom = shell;
 
-    this.lastWidth = this.table.offsetWidth;
     this.widthObserver = new ResizeObserver(() => this.followRightEdge());
     this.widthObserver.observe(this.table);
     this.scroller.addEventListener("scroll", this.markEdges, { passive: true });
     // The shell has no layout yet, so the first honest measurement is a frame
     // away. Without this the cut stays unmarked until something else resizes.
-    requestAnimationFrame(this.markEdges);
+    this.firstMeasure = requestAnimationFrame(this.markEdges);
   }
 
   // A drag paints straight to the DOM and only commits widths on mouseup, so
@@ -68,6 +70,7 @@ export class ScrollFollowTableView extends TableView {
   };
 
   destroy() {
+    cancelAnimationFrame(this.firstMeasure);
     this.widthObserver.disconnect();
     this.scroller.removeEventListener("scroll", this.markEdges);
   }
