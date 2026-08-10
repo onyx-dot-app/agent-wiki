@@ -17,6 +17,11 @@
      write against. */
   height: 100%;
   overflow-y: auto;
+  /* Containing block for the synthetic caret overlay (.editor-caret), which is
+     absolutely positioned in this scroller's scroll-origin space so it scrolls
+     with the text. Safe for the fixed-positioned TableGrips overlay — `relative`
+     (unlike `transform`) doesn't capture fixed descendants. */
+  position: relative;
   /* Reserves room for a peer's caret name-label, which renders 1.15em
      *above* its cursor line — with none, a caret on the doc's very first
      line gets its label clipped by overflow-y-auto (confirmed directly:
@@ -427,6 +432,61 @@
 }
 .editor-prose .ProseMirror-yjs-selection {
   opacity: 0.3;
+}
+
+/* Synthetic local caret. The native caret is hidden (it can't be animated —
+   only `caret-color` is stylable) and replaced by `.editor-caret`, a persistent
+   overlay the `caret` extension positions, so it can fade-blink and glide.
+   `caret-color: transparent` is restored to `auto` inline during IME
+   composition (see caret.ts). Peers are drawn separately (yCursorPlugin).
+
+   Gated to fine pointers: on touch/coarse devices the caret extension keeps the
+   native caret (selection handles / loupe / long-press anchor to it), so we
+   must not hide it there. Matches the `matchMedia("(pointer: fine)")` guard in
+   caret.ts. */
+@media (pointer: fine) {
+  .editor-prose .ProseMirror {
+    caret-color: transparent;
+  }
+}
+.editor-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  /* height is set inline to the caret line's measured height (caret.ts). */
+  border-radius: 1px;
+  background: var(--text-05);
+  pointer-events: none;
+  /* Above the peer caret (z-index: 1) and positioned image nodes. */
+  z-index: 2;
+  will-change: transform, opacity;
+  /* Glide between positions; disabled inline for line changes / big jumps. */
+  transition: transform 90ms ease;
+  animation: editor-caret-blink 1.06s ease-in-out infinite;
+}
+/* Solid while moving/typing; the fade-blink resumes once still (caret.ts). */
+.editor-caret.is-moving {
+  opacity: 1;
+  animation: none;
+}
+@keyframes editor-caret-blink {
+  0%,
+  40% {
+    opacity: 1;
+  }
+  50%,
+  90% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .editor-caret {
+    transition: none;
+  }
 }
 
 /* A draggable node is not user-selectable by default, so a selection covering

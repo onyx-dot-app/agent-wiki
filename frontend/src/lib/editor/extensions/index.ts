@@ -24,6 +24,7 @@ import {
   ThematicBreak,
   UniqueBlockIdentity,
 } from "@/lib/editor/extensions/blocks";
+import { Caret } from "@/lib/editor/extensions/caret";
 import { CommandMenu } from "@/lib/editor/extensions/commandMenu";
 import { AnchoredHighlights } from "@/lib/editor/extensions/highlights";
 import { imageSupport } from "@/lib/editor/extensions/images";
@@ -130,6 +131,7 @@ export function tiptapExtensions(
     MarkdownLink,
     AnchoredHighlights,
     presenceExtension(awareness),
+    Caret,
     CommandMenu,
     LinkInput,
     LinkHover,
