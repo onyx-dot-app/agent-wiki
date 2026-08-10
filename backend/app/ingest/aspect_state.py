@@ -54,7 +54,12 @@ class _Member(NamedTuple):
 
 
 class _Job(NamedTuple):
-    """One aspect with its resolved members — everything a state needs."""
+    """One aspect with its resolved members — everything a state needs.
+
+    ``links`` is kept alongside the resolved ``members`` because freshness is
+    judged against the links: a link whose need no longer resolves is itself
+    evidence the inputs moved (see ``_fresh``).
+    """
 
     aspect_id: int
     topic_name: str
@@ -62,6 +67,7 @@ class _Job(NamedTuple):
     name: str
     description: str
     members: list[_Member]
+    links: list[need_map.NeedLink]
 
 
 def _resolve_members(
@@ -139,19 +145,38 @@ def _unify(job: _Job, *, model: str | None) -> tuple[str, bool, str] | None:
     return state, conflict, note
 
 
-def _fresh(aspect_id: int, members: list[_Member], *, force: bool) -> bool:
+def _fresh(
+    aspect_id: int,
+    links: list[need_map.NeedLink],
+    by_doc: dict[str, page_needs.StoredNeeds],
+    *,
+    force: bool,
+) -> bool:
     """Whether the stored state already reflects every member's current needs.
 
-    Timestamp comparison, both sides written second-precision by the same clock discipline:
-    a state generated after every member's last re-extraction has seen everything the members
-    currently say.
+    Judged against the aspect's LINKS, not just the members that still resolve: a link whose
+    page has no stored needs anymore, or whose need was renamed away, dangles precisely
+    *because* that page was re-extracted — and a state generated before that re-extraction may
+    still be carrying the vanished need's claims. Any link whose page can't vouch for the
+    stored state means regenerate.
+
+    Strict ``<`` on the second-precision timestamps: a member re-extracted in the same second
+    the state was recorded is indistinguishable from one re-extracted just after it, so it
+    counts as moved. Worst case is one redundant regeneration, which stamps a later timestamp
+    and settles.
     """
     if force:
         return False
     existing = aspect_states.get(aspect_id)
     if existing is None:
         return False
-    return all(m.needs_updated_at <= existing.updated_at for m in members)
+    for link in links:
+        stored = by_doc.get(link.doc_id)
+        if stored is None:
+            return False
+        if not stored.updated_at < existing.updated_at:
+            return False
+    return True
 
 
 def run_generation(
@@ -192,6 +217,7 @@ def run_generation(
                     name=aspect.name,
                     description=aspect.description,
                     members=members,
+                    links=list(aspect.needs),
                 )
             )
     if dangling:
@@ -202,7 +228,7 @@ def run_generation(
             record.need_map_id,
         )
 
-    todo = [j for j in jobs if not _fresh(j.aspect_id, j.members, force=force)]
+    todo = [j for j in jobs if not _fresh(j.aspect_id, j.links, by_doc, force=force)]
     mech = [j for j in todo if len({m.doc_id for m in j.members}) == 1]
     fan = [j for j in todo if len({m.doc_id for m in j.members}) > 1]
     log.info(

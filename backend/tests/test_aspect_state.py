@@ -118,6 +118,11 @@ def test_fan_out_aspect_unifies_and_flags_conflict(corpus, monkeypatch):
 
 
 def test_fresh_states_are_skipped(corpus, monkeypatch):
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import AspectState
+    from app.db.session import session as db_session
+
     monkeypatch.setattr(
         aspect_state.json_completion,
         "complete_json",
@@ -125,6 +130,12 @@ def test_fresh_states_are_skipped(corpus, monkeypatch):
     )
     first = aspect_state.run_generation(corpus)
     assert first is not None and first["fresh"] == 0
+
+    # The whole test runs inside one second, and a same-second member counts
+    # as moved (see _fresh) — age the states one minute past the needs so the
+    # freshness this test is about is unambiguous.
+    with db_session() as s:
+        s.execute(sa_update(AspectState).values(updated_at="2999-01-01 00:00:00"))
 
     def boom(*_a, **_k):
         raise AssertionError("a fresh corpus must not reach the LLM")
@@ -176,3 +187,67 @@ def test_dangling_links_resolve_to_what_remains(corpus, monkeypatch):
     assert stored is not None
     assert stored.state == "slice 3 merged; watch until Friday"
     assert stored.model == ""
+
+
+def test_a_dangling_member_makes_the_stored_state_stale(corpus, monkeypatch):
+    # Generate a unified two-page state, then rename one member's need. The
+    # dropped member's page can no longer vouch for the stored state, so the
+    # next pass must regenerate (to the mechanical state of what remains) —
+    # not report the old unified state, which still carries the vanished
+    # need's claims, as fresh.
+    monkeypatch.setattr(
+        aspect_state.json_completion,
+        "complete_json",
+        lambda *a, **k: {"state": "old unified answer", "conflict": False, "conflict_note": ""},
+    )
+    assert aspect_state.run_generation(corpus) is not None
+    ids = _aspect_ids(corpus)
+    record = need_map.get(corpus)
+    assert record is not None
+    b_doc = next(
+        n.doc_id
+        for t in record.topics
+        for a in t.aspects
+        if a.name == "delivery status"
+        for n in a.needs
+        if n.need_name == "delivery progress"
+    )
+    b_row = page_needs.get_by_doc_id(b_doc)
+    assert b_row is not None
+    page_needs.store(
+        b_row.path, body="changed body", needs=[_need("renamed need", "different now")], model="test-model"
+    )
+    stats = aspect_state.run_generation(corpus)
+    assert stats is not None
+    stored = aspect_states.get(ids["delivery status"])
+    assert stored is not None
+    assert stored.state == "slice 3 merged; watch until Friday"  # regenerated, mechanical
+    assert stored.model == ""
+
+
+def test_same_second_reextraction_counts_as_moved(corpus, monkeypatch):
+    from sqlalchemy import update as sa_update
+
+    from app.db.models import AspectState
+    from app.db.session import session as db_session
+
+    monkeypatch.setattr(
+        aspect_state.json_completion,
+        "complete_json",
+        lambda *a, **k: {"state": "unified", "conflict": False, "conflict_note": ""},
+    )
+    assert aspect_state.run_generation(corpus) is not None
+    ids = _aspect_ids(corpus)
+    # Pin the stored state's timestamp to exactly a member's needs timestamp —
+    # the same-second race, made deterministic.
+    row = page_needs.get("eng/status.md")
+    assert row is not None
+    with db_session() as s:
+        s.execute(
+            sa_update(AspectState)
+            .where(AspectState.aspect_id == ids["delivery status"])
+            .values(updated_at=row.updated_at)
+        )
+    stats = aspect_state.run_generation(corpus)
+    assert stats is not None
+    assert stats["unified"] == 1  # regenerated, not reported fresh
