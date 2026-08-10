@@ -2322,6 +2322,46 @@ class AspectPage(Base):
     )
 
 
+class AspectState(Base):
+    """What one aspect's needs say right now, unified — the aspect's current state.
+
+    The comparison target reconciliation reads: an incoming fact is judged against this before
+    any page is touched, and no delta means no page write. One row per aspect, so identity is
+    scoped to the aspect's own run — the cross-derivation identity problem the need-map docstring
+    defers never arises here, because a re-derivation mints new aspects and their states are
+    generated fresh against the new rows.
+
+    Current-valued against a snapshot map, like ``page_needs`` against the page: the map says
+    which needs compose the aspect, this row says what they currently amount to. It goes stale
+    two ways — a member page's needs were re-extracted since this was generated (detected by
+    comparing ``updated_at`` against the members' ``page_needs.updated_at``; no stored
+    fingerprint, deliberately — it would duplicate what those timestamps already say), or the
+    map itself is replaced (caught by CASCADE: the aspect row dies and takes this with it).
+
+    ``conflict`` is the fan-out's free by-product: unifying needs that live on more than one page
+    is exactly where two pages can be found disagreeing about the same facet, and that
+    disagreement is a wiki inconsistency worth surfacing, not an error in the unification.
+    Single-page aspects are unified mechanically (their needs' snapshots verbatim) and can never
+    conflict.
+    """
+
+    __tablename__ = "aspect_states"
+
+    aspect_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("aspects.id", ondelete="CASCADE"), primary_key=True
+    )
+    # The unified current state, prose — same register as the member needs' ``current_content``.
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    # The member pages disagree about this facet. Only a multi-page unification can set it.
+    conflict: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
+    # What disagrees, when ``conflict`` — written for a human triaging the inconsistency.
+    conflict_note: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    # The completion model used for a unified (multi-page) state; empty for the mechanical
+    # single-page copy, which no model produced.
+    model: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=_NOW_TEXT_DEFAULT)
+
+
 class PageNeeds(Base):
     """What one wiki page keeps track of — its information needs.
 
