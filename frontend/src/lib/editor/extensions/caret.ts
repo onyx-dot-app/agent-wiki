@@ -28,9 +28,12 @@ import type { EditorView } from "@tiptap/pm/view";
 // Stay solid this long after a move, then resume blinking — so typing/arrowing
 // doesn't strobe.
 const IDLE_BLINK_MS = 500;
-// A vertical jump past this fraction of the caret's own height is a line change,
-// which should snap rather than glide diagonally across the page.
-const LINE_JUMP_RATIO = 0.6;
+// Glide duration scales with distance so every move animates *visibly*: a small
+// step stays snappy, a page jump is a longer (still quick) glide rather than an
+// imperceptible zip. Clamped at both ends.
+const GLIDE_MS_PER_PX = 0.5;
+const GLIDE_MIN_MS = 70;
+const GLIDE_MAX_MS = 240;
 
 interface CaretPos {
   x: number;
@@ -45,9 +48,13 @@ class CaretView {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private composing = false;
   private last: CaretPos | null = null;
-  // Set on mousedown so the render triggered by the click snaps (a click never
-  // glides) and can disambiguate the caret's side by the click's x.
+  // Set on mousedown to disambiguate the caret's side by the click's x.
   private clickX: number | null = null;
+  // Reconstructed caret affinity (the bit the browser keeps but hides from the
+  // DOM API): which side of an ambiguous position — a soft-wrap/bidi/mark
+  // boundary — the caret belongs to, inferred from the last input's direction.
+  // -1 = upstream (end of prev line), +1 = downstream (start of next line).
+  private bias: number | null = null;
   // Touch/coarse pointer: keep the native caret, render nothing.
   private readonly enabled: boolean;
 
@@ -80,6 +87,7 @@ class CaretView {
     this.view.dom.addEventListener("compositionstart", this.onComposeStart);
     this.view.dom.addEventListener("compositionend", this.onComposeEnd);
     this.view.dom.addEventListener("mousedown", this.onMouseDown);
+    this.view.dom.addEventListener("keydown", this.onKeyDown);
     this.view.dom.addEventListener("focus", this.render);
     this.view.dom.addEventListener("blur", this.render);
   }
@@ -100,15 +108,45 @@ class CaretView {
 
   private onMouseDown = (event: MouseEvent) => {
     this.clickX = event.clientX;
+    // The click's x is a more direct side signal than the last keyed direction.
+    this.bias = null;
   };
 
-  /** Doc position → the scroller's scroll-origin space. `clickX`, when a click
-   * just happened, picks the caret side (`coordsAtPos` bias -1 vs +1) whose x is
-   * nearer the click — the fix for a wrapped line's end/start rendering at the
-   * same doc position. Subtracts the scroller's border (`clientLeft/Top`) because
-   * `getBoundingClientRect` includes the border but absolute positioning is
-   * relative to the padding box. */
-  private caretPos(clickX: number | null): CaretPos | null {
+  /** Infer caret affinity from the input's direction, so the next render can
+   * paint an ambiguous boundary position (soft-wrap/bidi/mark edge) on the side
+   * the user meant. Backward motion → upstream; forward motion / a typed char →
+   * downstream. Not correct inside RTL (bidi) runs — the browser tracks the
+   * embedding level and we don't; left the obvious boundary rather than fake it. */
+  private onKeyDown = (event: KeyboardEvent) => {
+    const k = event.key;
+    if (
+      k === "ArrowLeft" ||
+      k === "ArrowUp" ||
+      k === "End" ||
+      k === "Backspace"
+    ) {
+      this.bias = -1;
+    } else if (
+      k === "ArrowRight" ||
+      k === "ArrowDown" ||
+      k === "Home" ||
+      k === "Enter" ||
+      k.length === 1 // a printable character
+    ) {
+      this.bias = 1;
+    }
+    // Modifiers, Escape, etc. leave the last inferred affinity in place.
+  };
+
+  /** Doc position → the scroller's scroll-origin space. The caret's side at an
+   * ambiguous boundary is chosen by, in order: the click x (most direct), then
+   * the reconstructed affinity `bias`, then `coordsAtPos`'s default. Subtracts
+   * the scroller's border (`clientLeft/Top`) because `getBoundingClientRect`
+   * includes the border but absolute positioning is relative to the padding box. */
+  private caretPos(
+    clickX: number | null,
+    bias: number | null,
+  ): CaretPos | null {
     if (!this.scroller) return null;
     const head = this.view.state.selection.head;
     let coords: { left: number; top: number; bottom: number };
@@ -120,6 +158,8 @@ class CaretView {
           Math.abs(before.left - clickX) <= Math.abs(after.left - clickX)
             ? before
             : after;
+      } else if (bias != null) {
+        coords = this.view.coordsAtPos(head, bias);
       } else {
         coords = this.view.coordsAtPos(head);
       }
@@ -153,6 +193,8 @@ class CaretView {
     this.clickX = null;
 
     const { selection } = this.view.state;
+    // `bias` persists across renders (it's the last known intent); `clickX` is
+    // one-shot, consumed above.
     // Only a plain collapsed text cursor gets a caret. A range selection shows
     // the native band; NodeSelection/GapCursor have their own rendering and
     // `coordsAtPos(head)` isn't meaningful for them.
@@ -164,7 +206,7 @@ class CaretView {
       selection instanceof TextSelection &&
       selection.empty;
 
-    const pos = active ? this.caretPos(clickX) : null;
+    const pos = active ? this.caretPos(clickX, this.bias) : null;
     if (!pos) {
       this.el.style.display = "none";
       // Re-appearance should snap, not glide from a stale position.
@@ -175,17 +217,21 @@ class CaretView {
     this.el.style.display = "";
     this.el.style.height = `${pos.height}px`;
 
-    // Snap (no glide) on first show, a click, or a line change.
-    const snap =
-      !this.last ||
-      clickX != null ||
-      Math.abs(pos.y - this.last.y) > pos.height * LINE_JUMP_RATIO;
-    if (snap) {
+    if (!this.last) {
+      // First appearance — snap in rather than glide from nowhere. Every actual
+      // move glides (below), regardless of distance. Reduced-motion is handled
+      // in CSS (transition-property: none), which no-ops the glide there.
       this.el.style.transition = "none";
       this.el.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
       void this.el.offsetWidth; // commit the un-transitioned move
       this.el.style.transition = "";
     } else {
+      const dist = Math.hypot(pos.x - this.last.x, pos.y - this.last.y);
+      const dur = Math.min(
+        GLIDE_MAX_MS,
+        Math.max(GLIDE_MIN_MS, dist * GLIDE_MS_PER_PX),
+      );
+      this.el.style.transitionDuration = `${dur}ms`;
       this.el.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
     }
     this.last = pos;
@@ -204,6 +250,7 @@ class CaretView {
     this.view.dom.removeEventListener("compositionstart", this.onComposeStart);
     this.view.dom.removeEventListener("compositionend", this.onComposeEnd);
     this.view.dom.removeEventListener("mousedown", this.onMouseDown);
+    this.view.dom.removeEventListener("keydown", this.onKeyDown);
     this.view.dom.removeEventListener("focus", this.render);
     this.view.dom.removeEventListener("blur", this.render);
     if (this.idleTimer) clearTimeout(this.idleTimer);
