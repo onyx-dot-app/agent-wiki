@@ -113,6 +113,24 @@ export function TableGrips({ editor }: { editor: Editor | null }) {
     };
   }, [editor, update]);
 
+  /** Placed from rects measured while hovering and rendered fixed, so a scroll
+   * strands them over whatever slid underneath. The pointer goes too, so an
+   * edit cannot re-derive them from a spot the reader has scrolled away from. */
+  useEffect(() => {
+    if (!editor) return;
+    const clear = () => {
+      // A drag past the edge scrolls on purpose and owns its own affordances.
+      if (dragRef.current) return;
+      pointer.current = null;
+      setGeo(null);
+    };
+    // Capture: scroll does not bubble, and it is a descendant that moves.
+    document.addEventListener("scroll", clear, true);
+    return () => {
+      document.removeEventListener("scroll", clear, true);
+    };
+  }, [editor]);
+
   /** Re-derived after every document change. Adding a row or column moves the
    * table, and a pointer that has not moved since would otherwise leave the
    * affordances sitting over the old layout. */
