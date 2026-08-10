@@ -766,8 +766,8 @@ const MarkdownLink = Extension.create({
   },
 
   /** Mod-k strips the link from the selection (or from the link under the
-   * caret) — the retarget/undo half of authoring, since links now come only
-   * from the `/URL` command (see `linkInput.ts`). Removing it leaves the text.
+   * caret), leaving the text — a keyboard peer of the hover editor's unlink
+   * (`linkHover.ts`), handy for clearing a promoted URL you didn't want.
    *
    * Returns false when there's no link involved, so the shortcut falls through
    * to the browser instead of silently swallowing Cmd-K. */

@@ -54,9 +54,9 @@ export function closeLinkInput(editor: Editor): void {
 /** Insert `text` linked to `href` at the stored anchor, then close. Builds the
  * run directly — `schema.text` with a `link` mark, `removeStoredMark` so the
  * next characters typed after the link don't join it — plus a caret move to
- * just past the inserted run. This is now the only path that creates a link
- * mark; raw-text triggers (autolink, the old `[text](url)` input rule) are all
- * off (see `extensions/index.ts`). */
+ * just past the inserted run. This is door 1 of link creation; doors 2–4
+ * (paste `<a>`, paste/typed bare URL) land on the same mark shape, all editable
+ * through the hover editor (`linkHover.ts`). */
 export function insertLink(
   editor: Editor,
   { href, text }: { href: string; text: string },
