@@ -80,7 +80,16 @@ export function WikiToolbarDock({
       }
       measure = () => {
         const r = el.getBoundingClientRect();
-        setAnchorBox({ left: r.left, width: r.width });
+        // Content box, not border box. The margin-comments lane is reserved as
+        // padding on this element, so the border box spans the lane too and
+        // anchoring to it stretches the strip out under the comment cards.
+        const cs = getComputedStyle(el);
+        const padLeft = parseFloat(cs.paddingLeft);
+        const padRight = parseFloat(cs.paddingRight);
+        setAnchorBox({
+          left: r.left + padLeft,
+          width: r.width - padLeft - padRight,
+        });
       };
       measure();
       ro = new ResizeObserver(() => measure());

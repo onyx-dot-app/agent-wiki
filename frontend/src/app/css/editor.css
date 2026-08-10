@@ -293,6 +293,25 @@
   overflow-x: auto;
 }
 
+/* A hard cut reads as the table's real edge, so the side with more table past
+   it fades out instead. Flags come from ScrollFollowTableView, since no
+   selector can ask whether an element is scrolled. */
+.editor-prose .tableWrapper[data-fade-end="true"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+}
+.editor-prose .tableWrapper[data-fade-start="true"] {
+  mask-image: linear-gradient(to right, transparent, #000 2rem);
+}
+.editor-prose .tableWrapper[data-fade-start="true"][data-fade-end="true"] {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 2rem,
+    #000 calc(100% - 2rem),
+    transparent
+  );
+}
+
 /* Deliberately no width floor. A table is the sum of its column widths and
    stays as narrow as its content. A floor fights the `<col>` widths a drag
    writes, because `table-layout: fixed` spreads the surplus evenly, which

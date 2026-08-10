@@ -22,6 +22,7 @@ export class ScrollFollowTableView extends TableView {
     this.lastWidth = this.table.offsetWidth;
     this.widthObserver = new ResizeObserver(() => this.followRightEdge());
     this.widthObserver.observe(this.table);
+    this.dom.addEventListener("scroll", this.markEdges, { passive: true });
   }
 
   // A drag paints straight to the DOM and only commits widths on mouseup, so
@@ -39,13 +40,23 @@ export class ScrollFollowTableView extends TableView {
     this.measured = true;
     // Only growth follows. Pinning right while a column narrows would scroll
     // the view away from the column the user is working on.
-    if (!grew) return;
-    if (this.dom.scrollWidth > this.dom.clientWidth) {
+    if (grew && this.dom.scrollWidth > this.dom.clientWidth) {
       this.dom.scrollLeft = this.dom.scrollWidth;
     }
+    this.markEdges();
   }
+
+  /** Flags which sides still have table past them, so the cut edge fades out
+   *  instead of stopping dead and reading as the table's real end. */
+  private markEdges = () => {
+    const max = this.dom.scrollWidth - this.dom.clientWidth;
+    // Sub-pixel scroll positions never reach `max` exactly.
+    this.dom.dataset.fadeStart = String(this.dom.scrollLeft > 1);
+    this.dom.dataset.fadeEnd = String(this.dom.scrollLeft < max - 1);
+  };
 
   destroy() {
     this.widthObserver.disconnect();
+    this.dom.removeEventListener("scroll", this.markEdges);
   }
 }

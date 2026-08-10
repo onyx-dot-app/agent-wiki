@@ -333,13 +333,14 @@ export function TipTapEditor({
     const publish = () => {
       const prose = scroller.querySelector(".ProseMirror");
       if (!(prose instanceof HTMLElement)) return;
-      const cs = getComputedStyle(prose);
-      const proseContent =
-        prose.clientWidth -
-        parseFloat(cs.paddingLeft) -
-        parseFloat(cs.paddingRight);
-      const perSide = Math.max(0, (scroller.clientWidth - proseContent) / 2);
-      scroller.style.setProperty("--table-breakout", `${perSide}px`);
+      // Mirror the empty space on the left. The right side can carry the
+      // reserved margin-comments lane, so measuring it directly would hand a
+      // table the room the comment cards sit in.
+      const free =
+        prose.getBoundingClientRect().left -
+        scroller.getBoundingClientRect().left +
+        parseFloat(getComputedStyle(prose).paddingLeft);
+      scroller.style.setProperty("--table-breakout", `${Math.max(0, free)}px`);
     };
     publish();
     const ro = new ResizeObserver(publish);
