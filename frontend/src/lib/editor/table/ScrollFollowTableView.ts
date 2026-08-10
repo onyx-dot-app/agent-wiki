@@ -6,6 +6,9 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import type { EditorView } from "@tiptap/pm/view";
 
 export class ScrollFollowTableView extends TableView {
+  /** The scrolling box TableView built. `dom` becomes a shell around it, so the
+   *  cut edge can carry a border that the scroller's own fade would erase. */
+  private scroller: HTMLElement;
   private widthObserver: ResizeObserver;
   private lastWidth: number;
   /** Mount reads as a grow from zero, and following it would open every
@@ -19,10 +22,19 @@ export class ScrollFollowTableView extends TableView {
     HTMLAttributes: Record<string, unknown> = {},
   ) {
     super(node, cellMinWidth, view, HTMLAttributes);
+    this.scroller = this.dom;
+    const shell = document.createElement("div");
+    shell.className = "tableShell";
+    shell.appendChild(this.scroller);
+    this.dom = shell;
+
     this.lastWidth = this.table.offsetWidth;
     this.widthObserver = new ResizeObserver(() => this.followRightEdge());
     this.widthObserver.observe(this.table);
-    this.dom.addEventListener("scroll", this.markEdges, { passive: true });
+    this.scroller.addEventListener("scroll", this.markEdges, { passive: true });
+    // The shell has no layout yet, so the first honest measurement is a frame
+    // away. Without this the cut stays unmarked until something else resizes.
+    requestAnimationFrame(this.markEdges);
   }
 
   // A drag paints straight to the DOM and only commits widths on mouseup, so
@@ -40,23 +52,23 @@ export class ScrollFollowTableView extends TableView {
     this.measured = true;
     // Only growth follows. Pinning right while a column narrows would scroll
     // the view away from the column the user is working on.
-    if (grew && this.dom.scrollWidth > this.dom.clientWidth) {
-      this.dom.scrollLeft = this.dom.scrollWidth;
+    if (grew && this.scroller.scrollWidth > this.scroller.clientWidth) {
+      this.scroller.scrollLeft = this.scroller.scrollWidth;
     }
     this.markEdges();
   }
 
   /** Flags which sides still have table past them, so the cut edge fades out
-   *  instead of stopping dead and reading as the table's real end. */
+   *  and takes a border instead of stopping dead. */
   private markEdges = () => {
-    const max = this.dom.scrollWidth - this.dom.clientWidth;
+    const max = this.scroller.scrollWidth - this.scroller.clientWidth;
     // Sub-pixel scroll positions never reach `max` exactly.
-    this.dom.dataset.fadeStart = String(this.dom.scrollLeft > 1);
-    this.dom.dataset.fadeEnd = String(this.dom.scrollLeft < max - 1);
+    this.dom.dataset.fadeStart = String(this.scroller.scrollLeft > 1);
+    this.dom.dataset.fadeEnd = String(this.scroller.scrollLeft < max - 1);
   };
 
   destroy() {
     this.widthObserver.disconnect();
-    this.dom.removeEventListener("scroll", this.markEdges);
+    this.scroller.removeEventListener("scroll", this.markEdges);
   }
 }

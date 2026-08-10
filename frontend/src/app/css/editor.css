@@ -282,34 +282,58 @@
 }
 /* Values mirror `.markdown table` in globals.css so the same page reads the
    same in the editor and in the history diff. */
-/* A grid outgrows prose long before prose outgrows the window, so a table may
-   run past the reading column into the empty gutter beside it
-   (--table-breakout, published by TipTapEditor) and scrolls once it outgrows
-   even that. `fit-content` keeps a narrow table narrow and every table on the
-   text's left edge, so only the width a grid actually needs is taken. */
-.editor-prose .tableWrapper {
+/* A table stops where the document stops. Wider than that it scrolls, so the
+   shell never exceeds the reading column and nothing is pushed into the
+   margin-comments lane beside it. `fit-content` keeps a narrow table narrow. */
+.editor-prose .tableShell {
+  position: relative;
   width: fit-content;
-  max-width: calc(100% + var(--table-breakout, 0px));
+  max-width: 100%;
+}
+
+.editor-prose .tableWrapper {
   overflow-x: auto;
 }
 
 /* A hard cut reads as the table's real edge, so the side with more table past
-   it fades out instead. Flags come from ScrollFollowTableView, since no
-   selector can ask whether an element is scrolled. */
-.editor-prose .tableWrapper[data-fade-end="true"] {
-  mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+   it fades out. Flags come from ScrollFollowTableView, since no selector can
+   ask whether an element is scrolled. */
+.editor-prose .tableShell[data-fade-end="true"] .tableWrapper {
+  mask-image: linear-gradient(to right, #000 calc(100% - 1rem), transparent);
 }
-.editor-prose .tableWrapper[data-fade-start="true"] {
-  mask-image: linear-gradient(to right, transparent, #000 2rem);
+.editor-prose .tableShell[data-fade-start="true"] .tableWrapper {
+  mask-image: linear-gradient(to right, transparent, #000 1rem);
 }
-.editor-prose .tableWrapper[data-fade-start="true"][data-fade-end="true"] {
+.editor-prose
+  .tableShell[data-fade-start="true"][data-fade-end="true"]
+  .tableWrapper {
   mask-image: linear-gradient(
     to right,
     transparent,
-    #000 2rem,
-    #000 calc(100% - 2rem),
+    #000 1rem,
+    #000 calc(100% - 1rem),
     transparent
   );
+}
+
+/* The fade alone leaves the grid trailing off into nothing, so the cut keeps a
+   hard edge. It sits on the shell because the fade would dissolve a border
+   drawn on the scroller itself. */
+.editor-prose .tableShell[data-fade-end="true"]::after,
+.editor-prose .tableShell[data-fade-start="true"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-01);
+  pointer-events: none;
+}
+.editor-prose .tableShell[data-fade-end="true"]::after {
+  right: 0;
+}
+.editor-prose .tableShell[data-fade-start="true"]::before {
+  left: 0;
 }
 
 /* Deliberately no width floor. A table is the sum of its column widths and
