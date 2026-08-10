@@ -51,10 +51,12 @@ export function closeLinkInput(editor: Editor): void {
   editor.view.focus();
 }
 
-/** Insert `text` linked to `href` at the stored anchor, then close. Mirrors
- * `MarkdownLink`'s `[text](url)` input rule exactly — `schema.text` with a
- * `link` mark, `removeStoredMark` so the next characters typed after the link
- * don't join it — plus a caret move to just past the inserted run. */
+/** Insert `text` linked to `href` at the stored anchor, then close. Builds the
+ * run directly — `schema.text` with a `link` mark, `removeStoredMark` so the
+ * next characters typed after the link don't join it — plus a caret move to
+ * just past the inserted run. This is door 1 of link creation; doors 2–4
+ * (paste `<a>`, paste/typed bare URL) land on the same mark shape, all editable
+ * through the hover editor (`linkHover.ts`). */
 export function insertLink(
   editor: Editor,
   { href, text }: { href: string; text: string },

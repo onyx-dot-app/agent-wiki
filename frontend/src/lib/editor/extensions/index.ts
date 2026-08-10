@@ -27,6 +27,7 @@ import {
 import { CommandMenu } from "@/lib/editor/extensions/commandMenu";
 import { AnchoredHighlights } from "@/lib/editor/extensions/highlights";
 import { imageSupport } from "@/lib/editor/extensions/images";
+import { LinkHover } from "@/lib/editor/extensions/linkHover";
 import { LinkInput } from "@/lib/editor/extensions/linkInput";
 import { presenceExtension } from "@/lib/editor/extensions/presence";
 
@@ -49,6 +50,15 @@ export function tiptapExtensions(
       // history extension binds the same Cmd+Z/Cmd+Shift+Z keys and would
       // conflict with it, not coexist alongside it.
       undoRedo: false,
+      // Four doors create a link, all converging on one internal `link` mark:
+      // (1) the `/URL` command (`linkInput.ts`); (2) pasting an <a> (parseHTML,
+      // default); (3) pasting a bare URL (`linkOnPaste`); (4) typing a bare URL
+      // (`autolink`). 3 and 4 promote a URL to a link where text == href — the
+      // hover editor (`linkHover.ts`) then lets you add a label or unlink a
+      // false positive. `openOnClick` stays off — Cmd/Ctrl-click-to-open is
+      // MarkdownLink's job. The one thing NOT a door is typed `[text](url)`
+      // markdown syntax (MarkdownLink drops that input rule): raw bracket text
+      // stays literal, escaped by the codec on the way to disk.
       link: { openOnClick: false },
       // Replaced by InlineCode below — same mark name ("code"), but keeps
       // its flanking backticks as literal rendered text instead of hidden
@@ -122,6 +132,7 @@ export function tiptapExtensions(
     presenceExtension(awareness),
     CommandMenu,
     LinkInput,
+    LinkHover,
     imageSupport(pagePath),
   ];
 }

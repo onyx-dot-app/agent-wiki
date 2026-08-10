@@ -1,8 +1,9 @@
 "use client";
 
 /** The editor extensions' React views — the components their `ReactRenderer`
- * bridges mount: the slash-command menu (`CommandMenu`, for `commandMenu.ts`)
- * and the `/URL` link-entry popover (`LinkInputPopover`, for `linkInput.ts`).
+ * bridges mount: the slash-command menu (`CommandMenu`, for `commandMenu.ts`),
+ * the `/URL` link-entry popover (`LinkInputPopover`, for `linkInput.ts`), and
+ * the link hover editor (`LinkHoverCard`, for `linkHover.ts`).
  * They live here, beside their extensions, rather than in the editor's shared
  * `components.tsx`: each is an implementation detail of one extension, not a
  * shared shell component. Keeping them in `extensions/` is also what stops
@@ -30,6 +31,7 @@ import {
   Popover,
   Text,
 } from "@onyx-ai/opal/components";
+import { SvgExternalLink, SvgTrash } from "@onyx-ai/opal/icons";
 import type { CommandItem } from "@/lib/editor/extensions/types";
 
 export interface CommandMenuHandle {
@@ -230,6 +232,154 @@ export function LinkInputPopover({
               onClick={submit}
             >
               Add
+            </Button>
+          </div>
+        </div>
+      </Popover.Content>
+    </Popover>
+  );
+}
+
+/** A link under the pointer: its mark's doc range, current text + href, and the
+ * live <a> element the card anchors to. Mirrors `linkHover.ts`'s own shape. */
+export interface HoveredLink {
+  from: number;
+  to: number;
+  href: string;
+  text: string;
+  el: HTMLElement;
+}
+
+export interface LinkHoverCardProps {
+  link: HoveredLink | null;
+  onApply: (from: number, to: number, href: string, text: string) => void;
+  onUnlink: (from: number, to: number) => void;
+  onOpen: (href: string) => void;
+  /** Pointer entered/left the card — the view cancels/schedules its hide. */
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
+  /** A field gained focus — pin the card open past a pointer leave. */
+  onPin: () => void;
+  onClose: () => void;
+}
+
+/** The link hover editor (see `linkHover.ts`). Anchored to the hovered <a>
+ * itself, it shows the href and lets you edit the text + URL, unlink, or open
+ * in a new tab. For a promoted link (text == href) the text field starts empty
+ * to invite a label. It opens on hover, so it must NOT steal focus — the
+ * pointer-enter/leave + pin callbacks keep it alive while you interact. */
+export function LinkHoverCard({
+  link,
+  onApply,
+  onUnlink,
+  onOpen,
+  onPointerEnter,
+  onPointerLeave,
+  onPin,
+  onClose,
+}: LinkHoverCardProps) {
+  const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
+
+  // Re-seed the fields whenever a different link is hovered. A promoted link
+  // (text == href) shows an empty label field rather than the raw URL twice.
+  useEffect(() => {
+    if (!link) return;
+    setUrl(link.href);
+    setText(link.text === link.href ? "" : link.text);
+  }, [link]);
+
+  const virtualRef = useMemo(
+    () => (link ? { current: link.el } : null),
+    [link],
+  );
+
+  const apply = () => {
+    if (!link) return;
+    const href = normalizeUrl(url);
+    if (!href) return;
+    onApply(link.from, link.to, href, text.trim() || href);
+  };
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      apply();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    }
+  };
+
+  return (
+    <Popover
+      open={link != null}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      {virtualRef ? <Popover.Anchor virtualRef={virtualRef} /> : null}
+      <Popover.Content
+        align="start"
+        sideOffset={6}
+        width="fit"
+        // Appears on hover — never yank focus from the doc; the user clicks a
+        // field to edit, and `onPin` keeps it open once they do.
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        onPointerEnter={onPointerEnter}
+        onPointerLeave={onPointerLeave}
+      >
+        <div className="flex w-[300px] flex-col gap-3 p-1">
+          <div className="flex flex-col gap-1.5">
+            <Text font="main-ui-muted" color="text-03">
+              Text
+            </Text>
+            <InputTypeIn
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={onKeyDown}
+              onFocus={onPin}
+              placeholder="Add a label…"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Text font="main-ui-muted" color="text-03">
+              URL
+            </Text>
+            <InputTypeIn
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={onKeyDown}
+              onFocus={onPin}
+              placeholder="https://…"
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex gap-1">
+              <Button
+                type="button"
+                prominence="secondary"
+                icon={SvgExternalLink}
+                tooltip="Open in new tab"
+                disabled={!link?.href}
+                onClick={() => link && onOpen(link.href)}
+              />
+              <Button
+                type="button"
+                prominence="secondary"
+                icon={SvgTrash}
+                tooltip="Remove link"
+                onClick={() => link && onUnlink(link.from, link.to)}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="action"
+              disabled={!url.trim()}
+              onClick={apply}
+            >
+              Save
             </Button>
           </div>
         </div>
