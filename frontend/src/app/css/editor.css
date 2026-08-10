@@ -300,10 +300,10 @@
   .tableWrapper {
   mask-image: linear-gradient(
     to right,
-    var(--table-fade-start, #000),
-    #000 1rem,
-    #000 calc(100% - 1rem),
-    var(--table-fade-end, #000)
+    var(--table-fade-start, var(--background-tint-inverted-00)),
+    var(--background-tint-inverted-00) 1rem,
+    var(--background-tint-inverted-00) calc(100% - 1rem),
+    var(--table-fade-end, var(--background-tint-inverted-00))
   );
 }
 .editor-prose .tableShell[data-fade-start="true"] {

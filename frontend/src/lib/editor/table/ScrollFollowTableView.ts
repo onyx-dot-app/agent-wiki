@@ -50,11 +50,20 @@ export class ScrollFollowTableView extends TableView {
   private followRightEdge() {
     const width = this.table.offsetWidth;
     const grew = this.measured && width > this.lastWidth;
+    // Where the end sat before this growth. Only a reader already there is
+    // watching the edge that moves. Following from anywhere else drags someone
+    // widening a left or middle column away from the handle they are holding.
+    const previousEnd = Math.max(0, this.lastWidth - this.scroller.clientWidth);
+    const wasAtEnd = this.scroller.scrollLeft >= previousEnd - 1;
     this.lastWidth = width;
     this.measured = true;
-    // Only growth follows. Pinning right while a column narrows would scroll
-    // the view away from the column the user is working on.
-    if (grew && this.scroller.scrollWidth > this.scroller.clientWidth) {
+    // Growth only. Pinning right while a column narrows would scroll the view
+    // away from the column the user is working on.
+    if (
+      grew &&
+      wasAtEnd &&
+      this.scroller.scrollWidth > this.scroller.clientWidth
+    ) {
       this.scroller.scrollLeft = this.scroller.scrollWidth;
     }
     this.markEdges();
