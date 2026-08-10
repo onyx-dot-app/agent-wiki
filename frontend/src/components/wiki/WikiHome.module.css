@@ -66,6 +66,9 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* Fills the scroller even on a short page, so the strip's `mt-auto` has room
+     to push it to the bottom rather than leaving it under the last card. */
+  min-height: 100%;
 }
 
 /* Hero */
@@ -114,29 +117,6 @@
 
 /* AI input — box left edge aligns with the card grid (padding 8px); the octagon
    mark hangs into the left gutter, vertically centered, out of the input flow. */
-.aiRow {
-  position: relative;
-  padding: 8px 8px;
-}
-.aiGutterIcon {
-  position: absolute;
-  left: -28px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  color: var(--text-03);
-}
-.aiInputWrap {
-  width: 100%;
-  min-width: 0;
-}
-.aiError {
-  margin: 0;
-  padding: 0 8px 4px;
-  font-size: 13px;
-  color: var(--status-text-error-05);
-}
-
 /* Recent Pages grid */
 .recentGrid {
   display: grid;

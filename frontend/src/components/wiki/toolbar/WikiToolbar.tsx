@@ -154,7 +154,7 @@ export function WikiToolbarDock({
         padding={0}
         height="fit"
         alignItems="center"
-        className="pointer-events-none sticky bottom-0 z-30"
+        className="pointer-events-none sticky bottom-0 z-30 mt-auto"
       >
         <Section
           gap={0}
