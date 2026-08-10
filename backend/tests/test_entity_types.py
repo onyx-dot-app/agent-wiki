@@ -109,7 +109,10 @@ class TestCompleteJson:
     contributing zero referents each."""
 
     def _stub(self, monkeypatch, *results):
-        from app.ingest import entity_types
+        # Patched where the call is MADE. ``_complete_json`` delegates to the shared
+        # ``json_completion`` helper, so patching ``entity_types.client`` would stub nothing and
+        # these tests would silently pass against the real client.
+        from app.ingest import json_completion
 
         seen: list[dict] = []
 
@@ -117,7 +120,7 @@ class TestCompleteJson:
             seen.append({"messages": messages, "kwargs": kwargs})
             return results[min(len(seen) - 1, len(results) - 1)]
 
-        monkeypatch.setattr(entity_types.client, "complete", fake_complete)
+        monkeypatch.setattr(json_completion.client, "complete", fake_complete)
         return seen
 
     def test_asks_for_more_than_the_client_default(self) -> None:

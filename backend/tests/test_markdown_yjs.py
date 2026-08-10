@@ -651,7 +651,10 @@ def test_table_inside_a_list_item_keeps_rows_and_alignment() -> None:
     item = _root(doc).children[0].children[0]
     table = list(item.children)[1]
     assert table.tag == "table"
-    assert [c.tag for c in table.children] == ["tableRow", "tableSeparator", "tableRow"]
+    # Same cell shape as a top-level table: the editor's schema knows one table
+    # vocabulary, and a nested table in any other shape is a node it drops.
+    assert [c.tag for c in table.children] == ["tableRow", "tableRow"]
+    assert [c.tag for c in table.children[0].children] == ["tableHeader", "tableHeader"]
     assert reconstruct_body(doc) == body
 
 

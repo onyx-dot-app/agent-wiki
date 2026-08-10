@@ -182,13 +182,13 @@ def test_editing_table_cell_only_touches_that_row() -> None:
     root = _root(doc)
 
     table = next(c for c in root.children if c.tag == "table")
-    row0 = table.children[0]  # header row "| a | b |"
+    row0 = table.children[0]  # header row, cells "a" and "b"
     with doc.transaction():
-        row0.children[0].insert(0, "EDITED ")
+        row0.children[0].children[0].insert(0, "EDITED ")
 
     new_body = checkpoint_body(_SAMPLE, doc, tracker)
 
-    assert "EDITED | a | b |" in new_body
+    assert "| EDITED a | b |" in new_body
     # The rest of the table (separator + both body rows) is untouched.
     assert "| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n" in new_body
     # Everything before and after the table is untouched too.
@@ -619,3 +619,42 @@ def test_editing_paragraph_after_link_reference_definition_preserves_it() -> Non
     assert new_body == (
         "See [spec][ref] here.\n\n[ref]: https://example.com/spec\n\nEDITED Trailing paragraph.\n"
     )
+
+
+def test_untouched_table_keeps_its_own_delimiter_padding() -> None:
+    """The delimiter row has no node of its own, so it is regenerated from the
+    header cells' alignment. An untouched table must still commit the exact
+    delimiter its source had, padding included, or every table with hand-aligned
+    columns reflows the first time any other block on the page is edited."""
+    body = "Intro.\n\n| a | b |\n|:---------|-----:|\n| 1 | 2 |\n\nOutro.\n"
+    doc = seed_doc_from_markdown(body)
+    tracker = TouchedTracker(doc)
+    root = _root(doc)
+
+    # Touch a different block entirely.
+    with doc.transaction():
+        root.children[0].children[0].insert(0, "EDITED ")
+
+    new_body = checkpoint_body(body, doc, tracker)
+
+    assert "|:---------|-----:|" in new_body, "delimiter was regenerated, not sliced"
+    assert new_body.endswith("| 1 | 2 |\n\nOutro.\n")
+
+
+def test_editing_a_header_cell_regenerates_the_delimiter_from_alignment() -> None:
+    """Touching the header means its cells are re-serialized, so the delimiter
+    has to come from their `align` attributes. It must still describe the same
+    columns rather than reverting them to default."""
+    body = "| a | b |\n|:---|---:|\n| 1 | 2 |\n"
+    doc = seed_doc_from_markdown(body)
+    tracker = TouchedTracker(doc)
+    root = _root(doc)
+
+    table = next(c for c in root.children if c.tag == "table")
+    with doc.transaction():
+        table.children[0].children[0].children[0].insert(0, "EDITED ")
+
+    new_body = checkpoint_body(body, doc, tracker)
+
+    assert "| :--- | ---: |" in new_body, "alignment lost when the header was touched"
+    assert "| EDITED a | b |" in new_body

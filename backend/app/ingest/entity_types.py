@@ -47,7 +47,6 @@ type list, the same degradation as the relevance scorer without its model file.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import re
 from collections import Counter, OrderedDict
@@ -61,7 +60,8 @@ from pydantic import BaseModel, Field
 from app.config import CONFIG
 from app.db import entity_type_taxonomy
 from app.ingest.clustering import leader_cluster, normalize
-from app.llm import client, embeddings
+from app.ingest import json_completion
+from app.llm import embeddings
 from app.llm.settings import get as get_llm_settings
 from app.llm.prompts import load_prompt
 from app.wiki import filesystem, git as wiki_git
@@ -101,9 +101,6 @@ MERGE_ROUNDS = 20
 # tokens generated. It is a ceiling, not a guarantee: a page can still overflow it, which is why
 # ``_complete_json`` now reports truncation instead of mistaking it for malformed JSON.
 MAX_OUTPUT_TOKENS = 16384
-
-# Retries on MALFORMED output only. Truncation is deterministic, so it is never retried.
-_JSON_RETRIES = 1
 
 # Concurrency for the two per-item LLM stages. Run sequentially, 147 pages took ~1.5 hours in
 # production and a pod restart killed it before it could record anything — the calls are
@@ -253,99 +250,18 @@ class EntityType(BaseModel):
 
 # --- vector helpers (no numpy in the backend) -------------------------------------------
 # --- LLM steps --------------------------------------------------------------------------
-def _is_truncated(stop_reason: str) -> bool:
-    """Whether a response was cut short rather than finished.
-
-    Each provider passes its own vocabulary through: "max_tokens" (anthropic, bedrock, and
-    gemini's MAX_TOKENS), "length" (ollama, custom), and "incomplete" — what the OpenAI Responses
-    API reports via status, and what ``client.complete`` reports when a stream ends with no
-    terminal event at all.
-    """
-    lowered = stop_reason.lower()
-    return any(token in lowered for token in ("max_token", "length", "incomplete"))
-
-
 def _complete_json(
     system: str, user: str, *, model: str | None, ctx: str = ""
 ) -> dict[str, Any] | None:
-    """One completion parsed as a JSON object. Returns None rather than raising — a single
-    failed page or group must not abort a corpus-wide derivation.
-
-    ``ctx`` names what was being extracted (a page path, a group) so a failure is attributable.
-    Without it the log said only "unparseable JSON (N chars)", which cannot be acted on: it
-    identifies neither the page nor the reason.
-
-    Retries once on malformed JSON, feeding the error back — but NOT on truncation, which is
-    deterministic. A retry there pays for the same overflowing response twice and needs a bigger
-    cap, not a re-prompt.
-    """
-    label = ctx or "(unknown)"
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    last_error: str | None = None
-
-    for attempt in range(_JSON_RETRIES + 1):
-        convo = (
-            messages
-            if last_error is None
-            else [
-                *messages[:-1],
-                {
-                    "role": "user",
-                    "content": (
-                        f"{user}\n\nYOUR PREVIOUS OUTPUT WAS REJECTED: {last_error}\n"
-                        "Return corrected JSON."
-                    ),
-                },
-            ]
-        )
-        try:
-            result = client.complete(convo, model=model, max_tokens=MAX_OUTPUT_TOKENS)
-        except Exception:
-            log.warning("entity_types: completion failed for %s", label, exc_info=True)
-            return None
-
-        text = (result.text or "").strip()
-        if _is_truncated(result.stop_reason):
-            # Distinct from a parse failure because the fix is distinct: raise the cap (or split
-            # the input), rather than ask again. Returning here also spares the retry, which
-            # would truncate identically.
-            log.warning(
-                "entity_types: response for %s was cut off at the %d-token output cap "
-                "(stop_reason=%r, %d chars) — its referents are incomplete and were dropped",
-                label,
-                MAX_OUTPUT_TOKENS,
-                result.stop_reason,
-                len(text),
-            )
-            return None
-
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end <= start:
-            last_error = "response was not a JSON object"
-        else:
-            try:
-                parsed = cast(object, json.loads(text[start : end + 1]))
-            except json.JSONDecodeError as exc:
-                last_error = f"invalid JSON ({exc.msg})"
-            else:
-                if isinstance(parsed, dict):
-                    return cast(dict[str, Any], parsed)
-                last_error = "top-level JSON value was not an object"
-
-        if attempt == _JSON_RETRIES:
-            log.warning(
-                "entity_types: giving up on %s after %d attempt(s) — %s (%d chars)",
-                label,
-                attempt + 1,
-                last_error,
-                len(text),
-            )
-    return None
+    """One completion parsed as a JSON object — see ``app.ingest.json_completion``."""
+    return json_completion.complete_json(
+        system, user, model=model, ctx=ctx, module="entity_types", max_tokens=MAX_OUTPUT_TOKENS
+    )
 
 
 def extract_page(path: str, body: str, *, model: str | None = None) -> list[Mention]:
     """Open extraction over one whole page. No type menu — see module docstring."""
-    system = load_prompt("entity_types.extract")
+    system = load_prompt("entity_types_extract.system")
     data = _complete_json(
         system, f"path:\n{path}\ncontent:\n{body}", model=model, ctx=path
     )
@@ -365,17 +281,7 @@ def extract_page(path: str, body: str, *, model: str | None = None) -> list[Ment
 
 def _member_indices(entry: dict[str, Any], upper: int) -> list[int]:
     """Zero-based member indices from an LLM payload, dropping anything out of range."""
-    raw = entry.get("member_indices")
-    if not isinstance(raw, list):
-        return []
-    out: list[int] = []
-    for value in cast(list[Any], raw):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            continue
-        index = int(value)
-        if 1 <= index <= upper:
-            out.append(index - 1)
-    return out
+    return json_completion.member_indices(entry, upper)
 
 
 def _placeholder_name(members: list[Referent]) -> str:
@@ -398,7 +304,7 @@ def _placeholder_name(members: list[Referent]) -> str:
 
 def name_group(group: list[Referent], *, model: str | None = None) -> list[EntityType]:
     """Name the kind a group shares. May split a group that turns out to be mixed."""
-    system = load_prompt("entity_types.name")
+    system = load_prompt("entity_types_name.system")
     listing = "\n".join(
         f"[{i}] {r.canonical}"
         + (f" -- {r.roles[0]}" if r.roles else "")
@@ -532,7 +438,7 @@ def _merge_once(types: list[EntityType], *, model: str | None) -> list[EntityTyp
     be persisted as a stable answer when it was only the point the failure happened."""
     if len(types) < 3:
         return types
-    system = load_prompt("entity_types.merge")
+    system = load_prompt("entity_types_merge.system")
     listing = "\n".join(
         f"[{i}] {t.name}  ({t.n_referents} referents, {t.n_docs} pages)\n"
         f"     {t.definition}\n"

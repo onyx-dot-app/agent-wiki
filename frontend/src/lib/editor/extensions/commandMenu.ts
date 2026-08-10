@@ -31,6 +31,7 @@ import {
   SvgListTree,
   SvgMinus,
   SvgQuoteStart,
+  SvgSpreadsheetFile,
   SvgTextLines,
 } from "@onyx-ai/opal/icons";
 import {
@@ -134,6 +135,19 @@ const COMMANDS: CommandItem[] = [
         .insertContent(node.toJSON())
         .run();
     },
+  },
+  {
+    title: "Table",
+    icon: SvgSpreadsheetFile,
+    run: (editor, range) =>
+      editor
+        .chain()
+        .focus()
+        .deleteRange(range)
+        // A header row is not optional: GFM has no table without one, so a
+        // headerless insert would not survive its first checkpoint.
+        .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+        .run(),
   },
   {
     title: "Image",

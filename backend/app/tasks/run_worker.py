@@ -45,6 +45,7 @@ _TASK_MODULES = (
     "app.tasks.automanage",
     "app.tasks.coedit_checkpoint",
     "app.tasks.coedit_rebase",
+    "app.tasks.need_map",
     "app.tasks.craft",
     "app.tasks.wiki_update",
     "app.tasks.entity_types",
