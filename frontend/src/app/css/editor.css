@@ -280,20 +280,71 @@
   white-space: pre-wrap;
   color: var(--text-03);
 }
-/* Values mirror `.markdown table` in globals.css so the same page reads the
-   same in the editor and in the history diff. */
+/* A table stops where the document stops and scrolls past it, so the shell
+   never exceeds the reading column nor reaches the margin-comments lane. */
+.editor-prose .tableShell {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.editor-prose .tableWrapper {
+  overflow-x: auto;
+}
+
+/* A hard cut reads as the table's real edge, so the side with more table past
+   it fades out. Flags come from ScrollFollowTableView, since no selector can
+   ask whether an element is scrolled. */
+.editor-prose
+  .tableShell:is([data-fade-start="true"], [data-fade-end="true"])
+  .tableWrapper {
+  mask-image: linear-gradient(
+    to right,
+    var(--table-fade-start, var(--background-tint-inverted-00)),
+    var(--background-tint-inverted-00) 1rem,
+    var(--background-tint-inverted-00) calc(100% - 1rem),
+    var(--table-fade-end, var(--background-tint-inverted-00))
+  );
+}
+.editor-prose .tableShell[data-fade-start="true"] {
+  --table-fade-start: transparent;
+}
+.editor-prose .tableShell[data-fade-end="true"] {
+  --table-fade-end: transparent;
+}
+
+/* The fade alone leaves the grid trailing off into nothing, so the cut keeps a
+   hard edge. It sits on the shell because the fade would dissolve a border
+   drawn on the scroller itself. */
+.editor-prose .tableShell[data-fade-end="true"]::after,
+.editor-prose .tableShell[data-fade-start="true"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-01);
+  pointer-events: none;
+}
+.editor-prose .tableShell[data-fade-end="true"]::after {
+  right: 0;
+}
+.editor-prose .tableShell[data-fade-start="true"]::before {
+  left: 0;
+}
+
+/* Column widths are the table's width. `table-layout: fixed` spreads any
+   surplus evenly, so a width floor turns one column's drag into a resize of all. */
 .editor-prose table {
   border-collapse: collapse;
   margin: 0.75rem 0;
-  /* `min-width`, never `width`: the resize node view sets an explicit inline
-     width once every column is sized, and a `width: 100%` here would fight it
-     mid-drag, displacing a cell out of the grid. */
-  min-width: 100%;
   /* Widths land on `<col>` elements, and under `auto` layout a browser treats
      those as suggestions its content may override, so a column would refuse to
      shrink below its text. */
   table-layout: fixed;
 }
+/* Cell values mirror `.markdown table` in globals.css so a page reads the same
+   in the editor and in the history diff. */
 .editor-prose th,
 .editor-prose td {
   border: 1px solid var(--border-01);

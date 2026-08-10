@@ -13,6 +13,7 @@ import {
   ModeTabs,
   ModelBar,
   ToolbarPanel,
+  usePublishedSize,
   type ToolbarContext,
   type ToolbarMode,
 } from "@/components/wiki/toolbar/chatParts";
@@ -45,7 +46,6 @@ interface WikiToolbarDockProps {
   context?: ToolbarContext | null;
   /** Reading-column width for float mode. Column mode takes the parent's. */
   width?: "sm" | "sm-md";
-  defaultFolded?: boolean;
   surface?: string;
   variant?: "float" | "column";
   /** Anchored float: fixed strip spanning the matched, page-padded column. */
@@ -56,7 +56,6 @@ export function WikiToolbarDock({
   tabs,
   context,
   width = "sm-md",
-  defaultFolded,
   surface,
   variant = "float",
   anchorSelector,
@@ -79,7 +78,16 @@ export function WikiToolbarDock({
       }
       measure = () => {
         const r = el.getBoundingClientRect();
-        setAnchorBox({ left: r.left, width: r.width });
+        // Content box, not border box. The margin-comments lane is reserved as
+        // padding on this element, so the border box spans the lane too and
+        // anchoring to it stretches the strip out under the comment cards.
+        const cs = getComputedStyle(el);
+        const padLeft = parseFloat(cs.paddingLeft);
+        const padRight = parseFloat(cs.paddingRight);
+        setAnchorBox({
+          left: r.left + padLeft,
+          width: r.width - padLeft - padRight,
+        });
       };
       measure();
       ro = new ResizeObserver(() => measure());
@@ -94,11 +102,21 @@ export function WikiToolbarDock({
     };
   }, [anchorSelector]);
 
+  // Column docks sit in flow and take their own room, so only the fixed and
+  // absolute variants publish a height for `.dock-clearance` to reserve.
+  const { ref: overlayDockRef, publish: republishDockHeight } =
+    usePublishedSize(
+      "--wiki-dock-height",
+      "height",
+      anchorSelector ? anchorBox !== null : variant === "float",
+    );
+
   if (anchorSelector) {
     if (!anchorBox) return null;
     return (
       // raw-ok: style-only fixed shell, geometry comes from the measured anchor column, no layout classes.
       <div
+        ref={overlayDockRef}
         style={{
           // The panel's own 4px margin supplies the mock's bottom gap.
           position: "fixed",
@@ -119,8 +137,8 @@ export function WikiToolbarDock({
           <WikiToolbar
             tabs={tabs}
             context={context}
-            defaultFolded={defaultFolded}
             surface={surface}
+            onGeometryChange={republishDockHeight}
           />
         </Section>
       </div>
@@ -133,7 +151,7 @@ export function WikiToolbarDock({
         padding={0}
         height="fit"
         alignItems="center"
-        className="pointer-events-none sticky bottom-0 z-30"
+        className="pointer-events-none sticky bottom-0 z-30 mt-auto"
       >
         <Section
           gap={0}
@@ -142,18 +160,14 @@ export function WikiToolbarDock({
           alignItems="center"
           className="pointer-events-auto w-full"
         >
-          <WikiToolbar
-            tabs={tabs}
-            context={context}
-            defaultFolded={defaultFolded}
-            surface={surface}
-          />
+          <WikiToolbar tabs={tabs} context={context} surface={surface} />
         </Section>
       </Section>
     );
   }
   return (
     <Section
+      ref={overlayDockRef}
       alignItems="center"
       justifyContent="end"
       gap={0}
@@ -175,8 +189,8 @@ export function WikiToolbarDock({
         <WikiToolbar
           tabs={tabs}
           context={context}
-          defaultFolded={defaultFolded}
           surface={surface}
+          onGeometryChange={republishDockHeight}
         />
       </Section>
     </Section>
@@ -186,20 +200,20 @@ export function WikiToolbarDock({
 interface WikiToolbarProps {
   tabs?: ToolbarMode[];
   context?: ToolbarContext | null;
-  /** First-visit fold state. The surface's stored preference wins. */
-  defaultFolded?: boolean;
   /** Fold preference is remembered per surface, so folding on a doc
    *  page never folds home. */
   surface?: string;
+  /** Overlay docks reserve this strip's height as scroll space. */
+  onGeometryChange?: () => void;
 }
 
 export function WikiToolbar({
   tabs = ["chat"],
   context,
-  defaultFolded = true,
   surface = "wiki",
+  onGeometryChange,
 }: WikiToolbarProps) {
-  const [folded, setFolded] = useState(defaultFolded);
+  const [folded, setFolded] = useState(false);
   const [mode, setMode] = useState<ToolbarMode>("chat");
   const [panelOpen, setPanelOpen] = useState(false);
   const {
@@ -214,11 +228,11 @@ export function WikiToolbar({
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(storageKey);
-      setFolded(stored === null ? defaultFolded : stored === "1");
+      setFolded(stored === "1");
     } catch {
-      setFolded(defaultFolded);
+      setFolded(false);
     }
-  }, [defaultFolded, storageKey]);
+  }, [storageKey]);
   const setFoldedPersistent = useCallback(
     (next: boolean) => {
       setFolded(next);
@@ -228,6 +242,12 @@ export function WikiToolbar({
     },
     [storageKey],
   );
+
+  // Every render: the strip's height is derived from too much state for any
+  // dependency list to track, and a stale reservation is visible.
+  useEffect(() => {
+    onGeometryChange?.();
+  });
 
   const unfold = useCallback(
     () => setFoldedPersistent(false),

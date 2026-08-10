@@ -413,7 +413,7 @@ export function TipTapEditor({
   );
 
   return (
-    <div ref={scrollRef} className="editor-prose">
+    <div ref={scrollRef} className="editor-prose dock-clearance">
       <EditorContent editor={editor} />
       <TableGrips editor={editor} />
     </div>

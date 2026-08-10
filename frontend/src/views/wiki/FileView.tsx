@@ -1283,7 +1283,7 @@ export function FileView({ path }: FileViewProps) {
           the cards. */}
       <div
         ref={docRowRef}
-        className={`@container relative flex min-h-0 min-w-0 flex-1 flex-col ${
+        className={`chat-panel-reserved @container relative flex min-h-0 min-w-0 flex-1 flex-col ${
           railActive ? "rail-reserved" : ""
         } ${panelScrollDocked ? "panel-anchored" : ""}`}
       >

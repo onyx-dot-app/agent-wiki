@@ -25,8 +25,6 @@ from app.models.file_system import (
     FileDiffResponse,
     FileHistoryResponse,
     FolderHitView,
-    GenerateDraftRequest,
-    GenerateDraftResponse,
     GetDocumentResponse,
     ListDocumentsResponse,
     ListRecentPagesResponse,
@@ -58,7 +56,7 @@ from app.models.file_system import (
     TrashItemView,
     TrashListResponse,
 )
-from app.llm.agents import draft_generator, draft_reviser
+from app.llm.agents import draft_reviser
 from app.tasks.reindex import index_path
 from app.triggers import repo as triggers_repo
 from app.wiki import (
@@ -881,17 +879,6 @@ def reindex_document_by_path(
     require_can("read", rel, user)
     index_path(rel)
     return ReindexResponse(path=rel, queued=True)
-
-
-@router.post("/generate", response_model=GenerateDraftResponse)
-def generate_draft(
-    req: GenerateDraftRequest,
-    user: User = Depends(require_user),
-) -> GenerateDraftResponse:
-    """Generate a draft (title + body) from a free-text prompt for review."""
-
-    result = draft_generator.generate(req.prompt)
-    return GenerateDraftResponse(title=result["title"], body=result["body"])
 
 
 @router.post("/revise", response_model=ReviseDraftResponse)

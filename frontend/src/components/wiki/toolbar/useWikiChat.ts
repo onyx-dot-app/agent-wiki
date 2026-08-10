@@ -136,7 +136,7 @@ export function useWikiChat(opts: WikiChatOptions): WikiChat {
 
   // A drafting identity change snapshots the chat and starts a hidden kickoff
   // stream. Clearing drafting restores the snapshot. The key distinguishes
-  // templates, prompts, blank drafts, and deleted templates.
+  // templates, blank drafts, and deleted templates.
   const preDraftingRef = useRef<{
     sessionId: string | null;
     items: ChatItem[];
@@ -150,9 +150,7 @@ export function useWikiChat(opts: WikiChatOptions): WikiChat {
       ? null
       : drafting.kind === "template"
         ? `tpl:${drafting.templateId ?? "deleted"}`
-        : drafting.prompt
-          ? `ai:${drafting.prompt}`
-          : "blank";
+        : "blank";
 
   useEffect(() => {
     const activeDrafting = draftingRef.current;
@@ -172,11 +170,7 @@ export function useWikiChat(opts: WikiChatOptions): WikiChat {
       onActivateRef.current?.();
       const tidForInit =
         activeDrafting.kind === "template" ? activeDrafting.templateId : null;
-      const promptForInit =
-        activeDrafting.kind === "blank"
-          ? (activeDrafting.prompt ?? null)
-          : null;
-      setItems(promptForInit ? [{ kind: "user", content: promptForInit }] : []);
+      setItems([]);
       setSending(true);
       void (async () => {
         try {
@@ -195,7 +189,7 @@ export function useWikiChat(opts: WikiChatOptions): WikiChat {
                 setItems((prev) => markRunningToolsAsError(prev));
               } else setItems((prev) => reduceEvent(prev, ev));
             },
-            { prompt: promptForInit, signal: operation.controller.signal },
+            { signal: operation.controller.signal },
           );
         } catch (e) {
           if (

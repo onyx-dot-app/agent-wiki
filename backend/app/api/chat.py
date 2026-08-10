@@ -378,19 +378,6 @@ def _compose_blank_seed_message() -> str:
     )
 
 
-def _compose_ai_followup_instruction() -> str:
-    """Hidden turn for the "Start writing with AI" flow. The user's real prompt
-    follows this; a complete first draft for it is already in the editor."""
-    return (
-        "The user's request follows. A complete first draft for it has already "
-        "been generated and placed in the editor for them to review. When you "
-        "reply, do NOT reproduce the draft and do NOT call any tools. Just give "
-        "one short, welcoming sentence acknowledging the draft is ready in the "
-        "editor, then invite them to tell you any changes (tone, length, "
-        "sections, title). Keep it to 1-2 sentences."
-    )
-
-
 def _compose_drafting_seed_message(template: dict[str, Any]) -> str:
     """Synthetic user turn that primes the agent for drafting from a
     template. Sent hidden so the user only sees the agent's response."""
@@ -470,20 +457,12 @@ async def drafting_init(
             hidden=hidden,
         )
 
-    if req.prompt is not None and tmpl is None:
-        # "Start writing with AI": the prompt is the user's real first turn
-        # (shown), preceded by a hidden instruction — a draft for it is already
-        # in the editor, so the agent just acknowledges and offers to refine.
-        prompt = req.prompt
-        await run_in_threadpool(lambda: _append(_compose_ai_followup_instruction(), hidden=True))
-        await run_in_threadpool(lambda: _append(prompt, hidden=False))
-    else:
-        seed_text = (
-            _compose_drafting_seed_message(tmpl)
-            if tmpl is not None
-            else _compose_blank_seed_message()
-        )
-        await run_in_threadpool(lambda: _append(seed_text, hidden=True))
+    seed_text = (
+        _compose_drafting_seed_message(tmpl)
+        if tmpl is not None
+        else _compose_blank_seed_message()
+    )
+    await run_in_threadpool(lambda: _append(seed_text, hidden=True))
 
     history = await run_in_threadpool(
         lambda: sessions_repo.get_messages(session_id, include_hidden=True),

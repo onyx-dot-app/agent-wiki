@@ -78,7 +78,6 @@ import {
   DestinationSelect,
   FilenameRow,
 } from "@/views/wiki/FileView";
-import { AI_DRAFT_KEY } from "@/lib/wiki/constants";
 import { pageTitle, updateWarnLevel } from "@/lib/wiki/utils";
 import {
   useUpdateHealth,
@@ -599,7 +598,7 @@ function Explorer({ dir }: ExplorerProps) {
       />
       <div
         ref={dirScrollRef}
-        className={`scroll-y-hidden min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
+        className={`scroll-y-hidden dock-clearance chat-panel-reserved min-w-0 flex-1 overflow-y-auto ${isMobile ? "px-3 py-4" : "px-8 py-6"}`}
       >
         {/* Desktop docks the editor inside the Watching tab; the modal is
             the mobile path only. */}
@@ -943,25 +942,8 @@ function NewDocView({ dir }: NewDocViewProps) {
   const host = useHeaderActionsHost();
   const rightHost = useRightPanelHost();
   const { setDrafting, requestExpand, registerDraftBridge } = useDrafting();
-  // "Start writing with AI" hands a generated draft (+ the prompt) here via
-  // sessionStorage, paired with ?ai=1. Read it synchronously so the editor and
-  // the drafting chat seed on the first render (no blank→ai re-init flash).
-  const isAiSeed = searchParams?.get("ai") === "1";
-  const [aiSeed] = useState<{
-    title?: string;
-    body?: string;
-    prompt?: string;
-  } | null>(() => {
-    if (!isAiSeed || typeof window === "undefined") return null;
-    try {
-      const raw = sessionStorage.getItem(AI_DRAFT_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [filename, setFilename] = useState(aiSeed?.title ?? "");
-  const [draft, setDraft] = useState(aiSeed?.body ?? "");
+  const [filename, setFilename] = useState("");
+  const [draft, setDraft] = useState("");
   const [templates, setTemplates] = useState<DocumentTemplateSummary[] | null>(
     null,
   );
@@ -977,22 +959,11 @@ function NewDocView({ dir }: NewDocViewProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Destination folder for the new doc — defaults to the route's folder but is
-  // user-selectable (the AI flow lands at root, so the picker is how you place it).
+  // Destination folder for the new doc. Defaults to the route's folder, and
+  // stays user-selectable so a page started from root can still be placed.
   const [destDir, setDestDir] = useState(dir);
   const { entries } = useWikiTree();
   const folders = useMemo(() => collectFolders(entries), [entries]);
-
-  // Drop the stash once consumed so it doesn't re-apply on remount / back-nav.
-  useEffect(() => {
-    if (aiSeed && typeof window !== "undefined") {
-      try {
-        sessionStorage.removeItem(AI_DRAFT_KEY);
-      } catch {
-        // ignore
-      }
-    }
-  }, [aiSeed]);
 
   // Bridge the editor to the drafting chat so it can live-edit this unsaved
   // draft. Keep a ref of the latest body so the chat reads current content.
@@ -1038,9 +1009,9 @@ function NewDocView({ dir }: NewDocViewProps) {
         templateName: t?.name ?? null,
       });
     } else {
-      setDrafting({ kind: "blank", path: null, prompt: aiSeed?.prompt });
+      setDrafting({ kind: "blank", path: null });
     }
-  }, [appliedTemplateId, templates, setDrafting, aiSeed]);
+  }, [appliedTemplateId, templates, setDrafting]);
   // Clear drafting on unmount except during create handoff. FileView re-syncs
   // drafting from the saved document's server-side draft row.
   const createHandoffRef = useRef(false);

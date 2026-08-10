@@ -113,6 +113,31 @@ export function TableGrips({ editor }: { editor: Editor | null }) {
     };
   }, [editor, update]);
 
+  /** Placed from rects measured while hovering and rendered fixed, so a scroll
+   * strands them over whatever slid underneath. The pointer goes too, so an
+   * edit cannot re-derive them from a spot the reader has scrolled away from. */
+  useEffect(() => {
+    if (!editor) return;
+    const clear = (event: Event) => {
+      // Same guard as the pointer and resync paths. Unmounting the popover
+      // never reports itself closed, so tearing one down here would strand
+      // `menuOpen` and the grips would stop appearing entirely.
+      if (menuOpen.current || dragRef.current) return;
+      // Only a scroll that carries the editor strands them. The chat panel
+      // scrolls itself on every streamed turn.
+      const target = event.target;
+      if (!(target instanceof Node) || !target.contains(editor.view.dom))
+        return;
+      pointer.current = null;
+      setGeo(null);
+    };
+    // Capture: scroll does not bubble, and it is a descendant that moves.
+    document.addEventListener("scroll", clear, true);
+    return () => {
+      document.removeEventListener("scroll", clear, true);
+    };
+  }, [editor]);
+
   /** Re-derived after every document change. Adding a row or column moves the
    * table, and a pointer that has not moved since would otherwise leave the
    * affordances sitting over the old layout. */

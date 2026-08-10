@@ -1,16 +1,5 @@
 import { apiFetch, apiFetchBlob } from "@/lib/api";
-import type {
-  FileDiffResponse,
-  FileHistoryResponse,
-  GeneratedDraft,
-} from "@/lib/wiki/types";
-
-export async function generateDraft(prompt: string): Promise<GeneratedDraft> {
-  return apiFetch<GeneratedDraft>("/wiki/generate", {
-    method: "POST",
-    body: JSON.stringify({ prompt }),
-  });
-}
+import type { FileDiffResponse, FileHistoryResponse } from "@/lib/wiki/types";
 
 /** Apply an instruction to an unsaved draft body; returns the revised body. */
 export async function reviseDraft(

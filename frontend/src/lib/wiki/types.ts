@@ -49,12 +49,6 @@ export interface FileDiffResponse {
   is_creation: boolean;
 }
 
-/** An auto-generated draft for the home "Start writing with AI" flow. */
-export interface GeneratedDraft {
-  title: string;
-  body: string;
-}
-
 export interface CommitInfo {
   sha: string;
   author: string;

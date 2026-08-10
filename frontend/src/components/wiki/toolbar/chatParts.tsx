@@ -2,7 +2,7 @@
 
 // Shared visual pieces for wiki toolbar chrome, modes, responses, and input.
 // Layout and styling follow the toolbar mock tokens.
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Button,
@@ -47,6 +47,36 @@ import type { ChatFeedback } from "@/lib/chat";
 import { toast } from "@/hooks/useToast";
 import { updateUserSettings, useUserSettings } from "@/lib/userSettings";
 import { useWikiTree } from "@/lib/wiki/hooks";
+
+/** Publishes an element's measured size as a root CSS property, so surfaces
+ *  that cannot see this component's state still reserve room for it. */
+export function usePublishedSize(
+  property: string,
+  axis: "height" | "width",
+  active = true,
+) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Returned so a caller can republish before the observer's first delivery,
+  // which lands after the strip has already painted at a stale size.
+  const publish = useCallback(() => {
+    const el = ref.current;
+    if (!active || !el) return;
+    const px = axis === "height" ? el.offsetHeight : el.offsetWidth;
+    document.documentElement.style.setProperty(property, `${px}px`);
+  }, [property, axis, active]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!active || !el) return;
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty(property);
+    };
+  }, [property, active, publish]);
+  return { ref, publish };
+}
 
 export type ToolbarMode = "chat" | "watch" | "launch";
 

@@ -37,6 +37,7 @@ import {
   SourceChips,
   ThinkingShimmer,
   docBaseName,
+  usePublishedSize,
   type ToolbarContext,
   type ToolbarMode,
 } from "@/components/wiki/toolbar/chatParts";
@@ -96,6 +97,12 @@ export function ChatSidePanel({
   onClose,
 }: ChatSidePanelProps) {
   const router = useRouter();
+  // The surfaces that reserve this width sit outside the panel's React tree,
+  // so the width travels as a CSS property rather than a prop.
+  const { ref: panelRef, publish: republishPanelWidth } = usePublishedSize(
+    "--wiki-chat-panel-width",
+    "width",
+  );
   const [mode, setMode] = useState<ToolbarMode>("chat");
   const [draft, setDraft] = useState("");
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -119,6 +126,10 @@ export function ChatSidePanel({
   useEffect(() => {
     scroller?.scrollTo({ top: scroller.scrollHeight });
   }, [scroller, chat.items.length, chat.sending]);
+
+  useEffect(() => {
+    republishPanelWidth();
+  });
 
   function submit() {
     const text = draft.trim();
@@ -157,6 +168,7 @@ export function ChatSidePanel({
 
   return (
     <Section
+      ref={panelRef}
       gap={0}
       padding={0}
       height="full"
