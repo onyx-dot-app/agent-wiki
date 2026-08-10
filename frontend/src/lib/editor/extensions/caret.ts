@@ -28,12 +28,11 @@ import type { EditorView } from "@tiptap/pm/view";
 // Stay solid this long after a move, then resume blinking — so typing/arrowing
 // doesn't strobe.
 const IDLE_BLINK_MS = 500;
-// Glide duration scales with distance so every move animates *visibly*: a small
-// step stays snappy, a page jump is a longer (still quick) glide rather than an
-// imperceptible zip. Clamped at both ends.
-const GLIDE_MS_PER_PX = 0.5;
-const GLIDE_MIN_MS = 70;
-const GLIDE_MAX_MS = 240;
+// How long every caret move animates, small or large — the single glide-speed
+// knob. Lower = quicker; a large jump covers more ground in this same time, so
+// it reads as a faster streak rather than a longer glide (fixed duration, not
+// distance-scaled). Reduced-motion no-ops the glide in CSS regardless.
+const GLIDE_MS = 70;
 
 interface CaretPos {
   x: number;
@@ -226,12 +225,7 @@ class CaretView {
       void this.el.offsetWidth; // commit the un-transitioned move
       this.el.style.transition = "";
     } else {
-      const dist = Math.hypot(pos.x - this.last.x, pos.y - this.last.y);
-      const dur = Math.min(
-        GLIDE_MAX_MS,
-        Math.max(GLIDE_MIN_MS, dist * GLIDE_MS_PER_PX),
-      );
-      this.el.style.transitionDuration = `${dur}ms`;
+      this.el.style.transitionDuration = `${GLIDE_MS}ms`;
       this.el.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
     }
     this.last = pos;
