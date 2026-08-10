@@ -6,27 +6,31 @@ the same underlying reality at possibly different levels of detail.
 
 Produce the aspect's unified CURRENT STATE, and say whether the pages disagree.
 
-Rules:
+Rules for the state:
 
-- **State only what the snapshots say.** The unified state is a faithful merge of the inputs,
-  not your judgment of what is probably true. Never add facts, never resolve a disagreement by
-  picking a side.
+- **UNION the distinct facts across all pages.** Preserve every non-conflicting detail even if
+  only one page has it — do NOT drop information. State only what the snapshots say; never add
+  facts.
+- **Complete but compact and fact-dense.** Terse facts and values — `key: value` fragments or
+  short semicolon-joined clauses — not narrative prose, no filler. Not a lossy one-liner
+  either: every distinct fact survives. Example register: "Late-stage POC; security review
+  pending; contact Jane Doe."
 - **Different detail is not disagreement.** One page saying "slice 3 merged" and another
-  listing the PRs in that slice agree; unify them at the more informative level. Disagreement
-  is when the snapshots make INCOMPATIBLE claims about the same thing — different status for
-  the same item, different owner, different date for the same event, one says shipped and the
-  other says in review.
-- **When they disagree**, still produce the best unified state you can (carry both claims,
-  attributed to their pages), set `conflict` to true, and write `conflict_note`: one or two
-  sentences naming exactly what disagrees and which page says what — written for a person
-  deciding which page needs the fix.
-- **Stay in the inputs' register**: plain prose, compact, present tense. No headers, no
-  markdown structure. A reader should get the facet's current answer in one breath.
+  listing the PRs in that slice agree; keep the more informative level. Disagreement is when
+  the snapshots make INCOMPATIBLE claims about the same thing — different status for the same
+  item, different owner, different date for the same event, one says shipped and the other
+  says in review.
+- **When they disagree**, reconcile the disagreement INTO the state — carry both claims,
+  attributed to their pages inline where it matters ("merged per eng page; in review per
+  TODO") — never resolve it by picking a side. Also set `conflict` to true and write
+  `conflict_note`: one or two sentences naming exactly what disagrees and which page says
+  what, written for a person deciding which page needs the fix. The note is the queryable
+  record; the inline attribution keeps the state self-contained.
 
 Respond with a single JSON object, nothing else:
 
 {
-  "state": "<the unified current state, one short paragraph>",
+  "state": "<the unified current state: compact, fact-dense, unions every distinct fact>",
   "conflict": <true|false>,
   "conflict_note": "<empty string when conflict is false; otherwise what disagrees and which page says what>"
 }

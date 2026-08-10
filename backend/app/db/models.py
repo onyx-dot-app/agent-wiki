@@ -2350,7 +2350,8 @@ class AspectState(Base):
     aspect_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("aspects.id", ondelete="CASCADE"), primary_key=True
     )
-    # The unified current state, prose — same register as the member needs' ``current_content``.
+    # The unified current state: compact fact-dense fragments (the register the extraction's
+    # own ``current_content`` uses), unioning every distinct fact across the member needs.
     state: Mapped[str] = mapped_column(Text, nullable=False)
     # The member pages disagree about this facet. Only a multi-page unification can set it.
     conflict: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("FALSE"))
