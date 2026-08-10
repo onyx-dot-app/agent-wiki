@@ -32,7 +32,7 @@ const IDLE_BLINK_MS = 500;
 // knob. Lower = quicker; a large jump covers more ground in this same time, so
 // it reads as a faster streak rather than a longer glide (fixed duration, not
 // distance-scaled). Reduced-motion no-ops the glide in CSS regardless.
-const GLIDE_MS = 70;
+const GLIDE_MS = 60;
 
 interface CaretPos {
   x: number;

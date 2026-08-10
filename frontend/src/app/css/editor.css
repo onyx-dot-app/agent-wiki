@@ -461,9 +461,13 @@
   /* Above the peer caret (z-index: 1) and positioned image nodes. */
   z-index: 2;
   will-change: transform, opacity;
-  /* Glide between positions; disabled inline for line changes / big jumps. */
-  transition: transform 90ms ease;
-  animation: editor-caret-blink 1.06s ease-in-out infinite;
+  /* What glides and how it eases; *how long* is set inline per move from
+     GLIDE_MS (caret.ts) — hence no duration here, so an un-set move snaps.
+     `transform` must be named explicitly: the initial `all` would drag the
+     inline height and the blink's opacity into the same transition. */
+  transition-property: transform;
+  transition-timing-function: ease;
+  animation: editor-caret-blink 1s ease-in-out infinite;
 }
 /* Solid while moving/typing; the fade-blink resumes once still (caret.ts). */
 .editor-caret.is-moving {
