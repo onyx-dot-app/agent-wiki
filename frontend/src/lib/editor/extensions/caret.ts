@@ -33,11 +33,17 @@
  * one you mean. The browser keeps that bit internally and exposes no way to
  * read or write it.
  *
- * We deliberately don't model it: keyboard motion paints wherever
- * `coordsAtPos` defaults to. So arrowing right onto a wrap puts the caret at
- * the start of line N+1 rather than the end of line N — which reads wrong at
- * first, but is what the browser does natively and what Notion does too. It's
- * the convention, not a defect. Don't "fix" it.
+ * We deliberately don't model it. Ordinary motion paints wherever `coordsAtPos`
+ * defaults to, so arrowing right onto a wrap puts the caret at the start of
+ * line N+1 rather than the end of line N — which reads wrong at first, but is
+ * what the browser does natively and what Notion does too. It's the convention,
+ * not a defect. Don't "fix" it.
+ *
+ * The one exception is a key that *names* a side: End and Cmd+ArrowRight mean
+ * "end of this visual line", and the default would paint them at the start of
+ * the next one, contradicting both the command and the native caret. Those keys
+ * are honoured (`affinityForKey`). That is the whole of it — a lookup on the
+ * key, no state machine, no inference from direction of travel.
  *
  * It has been tried. Guessing the bit from the last key worked but bought
  * nothing; *leading* it — making a wrap two caret stops, with an arrow press
@@ -70,9 +76,27 @@ interface CaretPos {
 }
 
 /** Which side of a soft-wrap boundary to measure — end of visual line N or
- * start of line N+1 — as `coordsAtPos`'s signed `side` argument. Only the click
- * path picks between them now; keyboard motion takes the default. */
-const SIDE = { upstream: -1, downstream: 1 };
+ * start of line N+1 — as `coordsAtPos`'s signed `side` argument. */
+type Affinity = "upstream" | "downstream";
+const SIDE: Record<Affinity, number> = { upstream: -1, downstream: 1 };
+
+/** The side a key *names*, for the few that name one at all.
+ *
+ * Ordinary motion returns null and takes `coordsAtPos`'s default, which is the
+ * convention at a wrap (see the docstring) — this is not affinity tracking and
+ * must not grow into it. But a key that means "end of this visual line" lands
+ * on a wrap boundary and the default paints it at the start of the *next* line,
+ * contradicting both the command and the native caret. Those keys say which
+ * side they meant, so use it.
+ *
+ * Meta only, not Ctrl: Cmd+Arrow is line-edge on macOS, while Ctrl+Arrow on
+ * Windows/Linux is word motion, which can land anywhere and names nothing. */
+function affinityForKey(event: KeyboardEvent): Affinity | null {
+  const k = event.key;
+  if (k === "End" || (event.metaKey && k === "ArrowRight")) return "upstream";
+  if (k === "Home" || (event.metaKey && k === "ArrowLeft")) return "downstream";
+  return null;
+}
 
 class CaretView {
   private el: HTMLElement;
@@ -83,6 +107,13 @@ class CaretView {
   private last: CaretPos | null = null;
   // Set on mousedown to disambiguate the caret's side by the click's x.
   private clickX: number | null = null;
+  // The side a line-edge key named, applied on the next render. Null for every
+  // other key, which is how ordinary motion keeps coordsAtPos's default.
+  // `pending` is set at keydown and moves to `side` once the selection has
+  // actually landed — the key names the side of a position that doesn't exist
+  // yet when it's pressed.
+  private pending: Affinity | null = null;
+  private side: Affinity | null = null;
   // Touch/coarse pointer: keep the native caret, render nothing.
   private readonly enabled: boolean;
 
@@ -120,7 +151,12 @@ class CaretView {
   }
 
   update(): void {
-    if (this.enabled) this.render();
+    if (!this.enabled) return;
+    // Consume whatever the last key named — null for almost every key, which
+    // clears any side a previous line-edge key set.
+    this.side = this.pending;
+    this.pending = null;
+    this.render();
   }
 
   private onComposeStart = () => {
@@ -137,13 +173,29 @@ class CaretView {
     this.clickX = event.clientX;
   };
 
+  /** Note the side a line-edge key named, for update() to apply once the
+   * selection has landed. **Never consumes a key** — always returns false;
+   * navigation belongs to the browser (see the docstring).
+   *
+   * A ProseMirror prop rather than a DOM listener, because PM installs its own
+   * keydown listener in the EditorView constructor, before any plugin view
+   * exists — a listener added from here runs after PM's entire handler chain,
+   * including after other plugins have consumed keys we'd then wrongly note. */
+  handleKeyDown = (event: KeyboardEvent): boolean => {
+    if (this.enabled) this.pending = affinityForKey(event);
+    return false;
+  };
+
   /** Doc position → the scroller's scroll-origin space. At an ambiguous
-   * position the side comes from the click's x if there was one, and otherwise
-   * from `coordsAtPos`'s own default — keyboard motion contributes nothing.
-   * Subtracts the scroller's border (`clientLeft/Top`) because
+   * position the side comes from the click's x if there was one, then from a
+   * line-edge key if one named a side, and otherwise from `coordsAtPos`'s own
+   * default. Subtracts the scroller's border (`clientLeft/Top`) because
    * `getBoundingClientRect` includes the border but absolute positioning is
    * relative to the padding box. */
-  private caretPos(clickX: number | null): CaretPos | null {
+  private caretPos(
+    clickX: number | null,
+    side: Affinity | null,
+  ): CaretPos | null {
     if (!this.scroller) return null;
     const head = this.view.state.selection.head;
     let coords: { left: number; top: number; bottom: number };
@@ -155,6 +207,8 @@ class CaretView {
           Math.abs(up.left - clickX) <= Math.abs(down.left - clickX)
             ? up
             : down;
+      } else if (side != null) {
+        coords = this.view.coordsAtPos(head, SIDE[side]);
       } else {
         coords = this.view.coordsAtPos(head);
       }
@@ -199,7 +253,7 @@ class CaretView {
       selection instanceof TextSelection &&
       selection.empty;
 
-    const pos = active ? this.caretPos(clickX) : null;
+    const pos = active ? this.caretPos(clickX, this.side) : null;
     if (!pos) {
       this.el.style.display = "none";
       // Re-appearance should snap, not glide from a stale position.
@@ -251,6 +305,17 @@ export const Caret = Extension.create({
   name: "caret",
 
   addProseMirrorPlugins() {
-    return [new Plugin({ view: (view) => new CaretView(view) })];
+    // The keydown prop and the plugin view must be the same Plugin so the prop
+    // can reach the instance; the closure is per-editor because
+    // addProseMirrorPlugins runs once per editor.
+    let caret: CaretView | null = null;
+    return [
+      new Plugin({
+        view: (view) => (caret = new CaretView(view)),
+        props: {
+          handleKeyDown: (_view, event) => caret?.handleKeyDown(event) ?? false,
+        },
+      }),
+    ];
   },
 });
