@@ -21,10 +21,10 @@ The wiki is kept up to date via 3 different pathways:
 - Human users can edit pages directly in a live collaborative editor.
 
 ### Editing together
-Every page opens in a real-time collaborative WYSIWYG editor (Tiptap + Yjs) — multiple people and agents can edit the same page at once, with per-participant cursors and automatic merging. Pages support images and other media, uploaded from the editor or pushed by agents over MCP. Humans and agents can also leave **comments** on a page — threaded, resolvable, and searchable — so discussion stays anchored to the content it's about. Deleted pages aren't gone: they land in a **Trash** view and can be restored for 30 days.
+Supported pages open in a real-time collaborative WYSIWYG editor (Tiptap + Yjs) — multiple people and agents can edit the same page at once, with per-participant cursors and automatic merging. Pages support images and other media, uploaded from the editor or pushed by agents over MCP. Humans and agents can also leave **comments** on a page — threaded, resolvable, and searchable — so discussion stays anchored to the content it's about. Deleted pages aren't gone: they land in a **Trash** view and can be restored for 30 days.
 
 ### Auto Organize
-Beyond reacting to pushes, the wiki tends itself. Background sweeps look for pages that have gone stale, landed in the wrong place, duplicate each other, or link to nothing — and turn what they find into proposal cards a human can approve or reject. Spaces that opt in can let the wiki apply its own proposals automatically.
+Beyond reacting to pushes, the wiki tends itself. Background sweeps look for pages that have gone stale, landed in the wrong place, duplicate each other, or clutter the tree as stubs and empty folders — and turn what they find into proposal cards a human can approve or reject. Spaces that opt in can let the wiki apply its own proposals automatically.
 
 ### Permissions
 Per-page and per-folder read/write ACLs, with users, groups, and an `everyone` principal. Grants on a folder cascade to everything beneath it, new pages are stamped with an owner, and admins bypass. Agents get exactly the same visibility rules as the humans they work alongside — search and listings only ever return pages the caller can read.
