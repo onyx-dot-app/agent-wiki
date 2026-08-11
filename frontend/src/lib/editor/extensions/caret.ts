@@ -22,13 +22,29 @@
  * selection, which all anchor to it. Only IME candidate windows still lean on
  * the native caret, so it's restored during composition (see below).
  *
- * Owning the caret means owning **affinity** — the side of an ambiguous
- * position the caret sits on. A soft wrap is one document position with two
- * visual homes (end of visual line N, start of line N+1), and ProseMirror's
- * selection has no field for which one you mean, so `bias` reconstructs it.
- * Here that bit is not just cosmetic: a wrap is two caret stops, and the
- * arrow key that moves between them is consumed rather than moving the
- * document position (`handleKeyDown`). */
+ * **We replaced the caret's pixels, not the caret.** `caret-color:
+ * transparent` hides the native caret; it does not disable it. The browser
+ * still owns where the cursor is, which visual line it sits on, and where every
+ * key we don't handle sends it. This file draws a rectangle to match.
+ *
+ * That matters for **affinity** — which side of a soft wrap the caret is on. A
+ * wrap is one document position with two visual homes (end of visual line N,
+ * start of line N+1), and neither the DOM nor ProseMirror has a field for which
+ * one you mean. The browser keeps that bit internally and exposes no way to
+ * read or write it, so `bias` here is a *guess at* the browser's bit, inferred
+ * from the key that caused the move, used only to pick which side to paint.
+ *
+ * The guess must **mirror** the browser, never lead it. An earlier version made
+ * a wrap two caret stops — arriving painted the side you came from, and a
+ * second arrow press flipped sides without moving the document. It worked, and
+ * it broke everything that reads the browser's bit instead of ours: cmd-left at
+ * a boundary no-opped, and Up/Down departed from the line the caret wasn't
+ * visibly on (it also carries the goal column). There is no fix from inside
+ * this file — two bits exist and we can only write one. Making a wrap two stops
+ * requires owning navigation outright (Left/Right by grapheme cluster, Up/Down
+ * with goal-column memory, line and word ops, Shift extension, bidi), the way
+ * CodeMirror and Monaco do. ProseMirror deliberately delegates all of it to the
+ * browser. See git history around `arrivingAffinity` for the working attempt. */
 import { Extension } from "@tiptap/core";
 import { Plugin, TextSelection } from "@tiptap/pm/state";
 import type { EditorState } from "@tiptap/pm/state";
@@ -49,30 +65,37 @@ interface CaretPos {
   height: number;
 }
 
-/** Which side of a soft-wrap boundary the caret sits on — the affinity bit the
- * browser keeps and hides from the DOM API. A wrap is one document position
- * with two visual homes, and this says which one to paint. */
+/** Which side of a soft-wrap boundary the caret sits on — end of visual line N
+ * or start of line N+1. */
 type Affinity = "upstream" | "downstream";
 
-/** Which way the last input travelled through the document. Not an `Affinity`:
- * at a wrap the caret lands on the side it came *from*, so the two are
- * opposites there and identical everywhere else. */
-type Direction = "backward" | "forward";
-
 /** `coordsAtPos`'s `side` argument, which is a signed number. The only place
- * either type above touches one. */
+ * this type touches one. */
 const SIDE: Record<Affinity, number> = { upstream: -1, downstream: 1 };
 
-/** Which side of the fence a move lands on, given the way it travelled.
+/** Guess the affinity the browser is about to pick, from the key causing the
+ * move. Mirrors it; see the docstring for why leading it doesn't work.
  *
- * Horizontal travel lands on the side it came *from* — you stay on the line you
- * were already on, and the arrow that crosses to the other side is the fence's
- * second stop (handleKeyDown's flip). Every other key names its own
- * destination: ArrowDown wants the line it arrives on, End wants the end of the
- * line even though it travels forward. Those map straight across. */
-function arrivingAffinity(from: Direction, horizontal: boolean): Affinity {
-  if (horizontal) return from === "forward" ? "upstream" : "downstream";
-  return from === "forward" ? "downstream" : "upstream";
+ * Most keys are just their direction of travel. The exceptions are the ones
+ * that name a line *edge* rather than a direction: End and Cmd/Ctrl+ArrowRight
+ * travel forward but mean "end of this visual line" (upstream), and Home and
+ * Cmd/Ctrl+ArrowLeft mean the start of it (downstream). Returns null for keys
+ * that don't move the caret, which leaves the last guess in place. */
+function affinityForKey(event: KeyboardEvent): Affinity | null {
+  const k = event.key;
+  const lineOp = event.metaKey || event.ctrlKey;
+  if (k === "End" || (lineOp && k === "ArrowRight")) return "upstream";
+  if (k === "Home" || (lineOp && k === "ArrowLeft")) return "downstream";
+  if (k === "ArrowLeft" || k === "ArrowUp" || k === "Backspace")
+    return "upstream";
+  if (
+    k === "ArrowRight" ||
+    k === "ArrowDown" ||
+    k === "Enter" ||
+    k.length === 1 // a printable character
+  )
+    return "downstream";
+  return null;
 }
 
 class CaretView {
@@ -84,20 +107,15 @@ class CaretView {
   private last: CaretPos | null = null;
   // Set on mousedown to disambiguate the caret's side by the click's x.
   private clickX: number | null = null;
-  // INVARIANT: non-null *only* while the caret is a collapsed cursor standing
-  // at a wrap boundary. Enter the fence, set it; leave, clear it. Everywhere
-  // else there is one place to paint and no side to record. That invariant is
-  // what lets handleKeyDown decide the flip from this bit alone without
-  // measuring — so it is re-derived on every move (update()) and dropped
-  // whenever a reflow moves the wrap points (the ResizeObserver above).
+  // Our guess at the browser's affinity, used only to pick which side of an
+  // ambiguous position to paint. Null means "no idea" — paint coordsAtPos's
+  // default. Only meaningful at a soft wrap; anywhere else both sides resolve
+  // to the same point, so a stale value is harmless.
   private bias: Affinity | null = null;
-  // Direction recorded on keydown, resolved into `bias` by update() once
-  // ProseMirror has actually moved the selection — the destination has to exist
-  // before we can measure whether it landed on a wrap boundary.
-  // `pendingHorizontal` marks Left/Right, the only keys that land on the side
-  // they came from rather than the side they point at.
-  private pending: Direction | null = null;
-  private pendingHorizontal = false;
+  // Set on keydown, applied by update() once ProseMirror has actually moved the
+  // selection. Two moments, because the key names the affinity of a position
+  // that doesn't exist yet when the key is pressed.
+  private pending: Affinity | null = null;
   // Touch/coarse pointer: keep the native caret, render nothing.
   private readonly enabled: boolean;
 
@@ -118,13 +136,9 @@ class CaretView {
       if (!this.scroller) return;
       this.scroller.appendChild(this.el);
       // Reflow/rewrap moves the caret without a transaction — snap (clear
-      // `last`) rather than gliding. It also moves the wrap points themselves,
-      // so the fence the caret was standing in may not be there any more: drop
-      // `bias` too, or the invariant ("non-null ⇒ at a boundary") quietly stops
-      // holding and the next arrow press spends itself on a flip that isn't.
+      // `last`) rather than gliding.
       this.resize = new ResizeObserver(() => {
         this.last = null;
-        this.bias = null;
         this.render();
       });
       this.resize.observe(this.scroller);
@@ -142,62 +156,23 @@ class CaretView {
     if (!this.enabled) return;
 
     const pending = this.pending;
-    const horizontal = this.pendingHorizontal;
     this.pending = null;
-    this.pendingHorizontal = false;
 
     const sel = this.view.state.selection;
-    const collapsed = sel instanceof TextSelection && sel.empty;
     const moved = prevState.selection.head !== sel.head;
-    if (moved || !collapsed) {
-      // Enter the fence, set the bit; leave it, clear the bit. `bias` is
-      // re-derived from scratch here on every move and never carried, which is
-      // what makes the invariant true and lets handleKeyDown trust it without
-      // measuring anything.
-      //
-      // It stays null unless all three hold: the caret actually moved (a
-      // stationary head can't have entered anywhere), it's a collapsed cursor
-      // (a range has no affinity), and there's a `pending` direction behind the
-      // move. A null `pending` means no key and no click caused it — a remote
-      // Yjs update, undo/redo, a programmatic setSelection — so there's nothing
-      // to infer from and guessing would cost the user a keystroke.
-      //
-      // Which side of the fence you land on is the side you came *from*: that's
-      // what makes the boundary two stops rather than one, with handleKeyDown's
-      // flip supplying the second. Horizontal keys only — Up/Down and Home/End
-      // already name the affinity they want (Down wants the line it arrives on,
-      // End wants upstream even though it travels right), so inverting those
-      // lands the caret a line off.
-      this.bias =
-        moved && collapsed && pending != null && this.isWrapBoundary(sel.head)
-          ? arrivingAffinity(pending, horizontal)
-          : null;
+    if (!(sel instanceof TextSelection) || !sel.empty) {
+      // A range has no affinity, and no caret is painted for one.
+      this.bias = null;
+    } else if (moved) {
+      // Apply the guess recorded at keydown. A null `pending` means no key
+      // caused this move — a remote Yjs update (ySyncPlugin restores the
+      // selection on every remote change), undo/redo, a programmatic
+      // setSelection — so there's nothing to mirror and coordsAtPos's default
+      // is as good as anything we'd invent.
+      this.bias = pending;
     }
 
     this.render();
-  }
-
-  /** Is `pos` inside the fence — a soft-wrap boundary, one document position
-   * with two visual homes? Nothing in the model records where the browser chose
-   * to wrap, so it has to be measured: ask for both sides and see where they
-   * landed. (`view.endOfTextblock()` can't answer this — it reports *textblock*
-   * edges, not wrap points.)
-   *
-   * Requires a step down *and* a jump left. A taller mark or an inline image
-   * also shifts `.top` between the two sides; only a wrap throws the downstream
-   * side back to the line's left edge. That second conjunct is also what keeps
-   * the flip from stealing a key from gapcursor, tableEditing, or atom
-   * traversal: those act only at textblock edges, and a position with content
-   * to its left on one line and to its right on the next is by definition not
-   * one. */
-  private isWrapBoundary(pos: number): boolean {
-    try {
-      const up = this.view.coordsAtPos(pos, SIDE.upstream);
-      const down = this.view.coordsAtPos(pos, SIDE.downstream);
-      return down.top > up.top + 1 && down.left < up.left;
-    } catch {
-      return false;
-    }
   }
 
   private onComposeStart = () => {
@@ -216,63 +191,23 @@ class CaretView {
     this.bias = null;
   };
 
-  /** Two jobs, in order: record the input's direction so update() can infer
-   * affinity once the selection lands, and consume the arrow key that crosses a
-   * soft-wrap boundary in place.
+  /** Record which side the browser is about to put the caret on, for update()
+   * to apply once the selection has actually moved. **Never consumes a key** —
+   * always returns false. Navigation belongs to the browser (see the docstring);
+   * this only watches it go by.
    *
-   * Must be a ProseMirror `handleKeyDown` prop rather than a DOM listener:
-   * ProseMirror installs its own `keydown` listener in the EditorView
-   * constructor, before any plugin view is constructed, so a listener added
-   * from here would always run after PM's whole handler chain — too late to
-   * preventDefault, and it would clobber `bias` on keys PM already consumed.
+   * Must be a ProseMirror prop rather than a DOM listener even so. PM installs
+   * its own keydown listener in the EditorView constructor, before any plugin
+   * view exists, so a listener added from here runs after PM's entire handler
+   * chain — including after other plugins have consumed keys we would then
+   * wrongly record, like the command menu's ArrowDown or a table's ArrowRight.
    *
-   * Returns true only for a genuine boundary flip. Everything else falls
-   * through to the plugins after us (tableEditing, gapcursor) and then PM's own
-   * atom traversal, none of which must ever lose a key to this. */
+   * Not correct inside RTL (bidi) runs, where the physical key direction and
+   * the logical one diverge; the browser tracks embedding levels and we don't.
+   * Cosmetic only — the caret paints a line off at a wrapped bidi boundary. */
   handleKeyDown = (event: KeyboardEvent): boolean => {
-    const k = event.key;
-    const left = k === "ArrowLeft";
-    const right = k === "ArrowRight";
-
-    if (left || k === "ArrowUp" || k === "End" || k === "Backspace") {
-      this.pending = "backward";
-    } else if (
-      right ||
-      k === "ArrowDown" ||
-      k === "Home" ||
-      k === "Enter" ||
-      k.length === 1 // a printable character
-    ) {
-      this.pending = "forward";
-    }
-    // Modifiers, Escape, etc. leave the last recorded direction in place.
-    this.pendingHorizontal = left || right;
-
-    if (!this.enabled || !(left || right)) return false;
-    // Never consume a modified arrow: Shift extends the selection, Cmd/Ctrl
-    // jumps the line, Alt jumps the word. They still record direction above,
-    // which is what makes Cmd+ArrowRight land upstream at a wrapped line end.
-    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey)
-      return false;
-
-    // Crossing the fence. `bias` is non-null only while the caret stands at a
-    // wrap boundary (see update()), so the bit alone answers both questions:
-    // are we in a fence, and are we at the end of it this press points away
-    // from. Nothing to re-measure. A null bias falls through and moves the
-    // document normally — a keystroke is never eaten on a guess.
-    //
-    // Not correct inside RTL (bidi) runs, where the physical key direction and
-    // the logical one diverge. Same punt as the rest of the file; the cost is
-    // one extra press, since the flip lands on the far side and the next press
-    // finds `bias` no longer pointing against it.
-    const from: Affinity = right ? "upstream" : "downstream";
-    if (this.bias !== from) return false;
-
-    this.bias = right ? "downstream" : "upstream";
-    this.pending = null; // consumed here — no transaction, so no update()
-    this.pendingHorizontal = false;
-    this.render();
-    return true;
+    if (this.enabled) this.pending = affinityForKey(event) ?? this.pending;
+    return false;
   };
 
   /** Doc position → the scroller's scroll-origin space. The caret's side at an
@@ -296,14 +231,10 @@ class CaretView {
             ? "upstream"
             : "downstream";
         coords = picked === "upstream" ? up : down;
-        // Keep the side the click picked, but only if the click landed in a
-        // fence — the same invariant update() maintains, checked against the
-        // rects already in hand rather than a second layout read. Persisting it
-        // is what lets click-then-arrow behave like arrow-then-arrow at a
-        // wrapped position; off a boundary the two sides coincide and recording
-        // a side would plant exactly the stale bit the invariant forbids.
-        this.bias =
-          down.top > up.top + 1 && down.left < up.left ? picked : null;
+        // Keep the side the click picked, so a later render without a fresh
+        // click still paints it. Off a wrap the two sides coincide and the
+        // choice is between identical points, so recording one is harmless.
+        this.bias = picked;
       } else if (bias != null) {
         coords = this.view.coordsAtPos(head, SIDE[bias]);
       } else {
@@ -339,8 +270,8 @@ class CaretView {
     this.clickX = null;
 
     const { selection } = this.view.state;
-    // `bias` is whatever the last move left behind — non-null only if that move
-    // ended inside a fence; `clickX` is one-shot, consumed above.
+    // `bias` is whatever the last move left behind; `clickX` is one-shot,
+    // consumed above.
     // Only a plain collapsed text cursor gets a caret. A range selection shows
     // the native band; NodeSelection/GapCursor have their own rendering and
     // `coordsAtPos(head)` isn't meaningful for them.
