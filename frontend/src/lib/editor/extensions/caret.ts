@@ -49,6 +49,32 @@ interface CaretPos {
   height: number;
 }
 
+/** Which side of a soft-wrap boundary the caret sits on — the affinity bit the
+ * browser keeps and hides from the DOM API. A wrap is one document position
+ * with two visual homes, and this says which one to paint. */
+type Affinity = "upstream" | "downstream";
+
+/** Which way the last input travelled through the document. Not an `Affinity`:
+ * at a wrap the caret lands on the side it came *from*, so the two are
+ * opposites there and identical everywhere else. */
+type Direction = "backward" | "forward";
+
+/** `coordsAtPos`'s `side` argument, which is a signed number. The only place
+ * either type above touches one. */
+const SIDE: Record<Affinity, number> = { upstream: -1, downstream: 1 };
+
+/** Which side of the fence a move lands on, given the way it travelled.
+ *
+ * Horizontal travel lands on the side it came *from* — you stay on the line you
+ * were already on, and the arrow that crosses to the other side is the fence's
+ * second stop (handleKeyDown's flip). Every other key names its own
+ * destination: ArrowDown wants the line it arrives on, End wants the end of the
+ * line even though it travels forward. Those map straight across. */
+function arrivingAffinity(from: Direction, horizontal: boolean): Affinity {
+  if (horizontal) return from === "forward" ? "upstream" : "downstream";
+  return from === "forward" ? "downstream" : "upstream";
+}
+
 class CaretView {
   private el: HTMLElement;
   private scroller: HTMLElement | null = null;
@@ -58,17 +84,19 @@ class CaretView {
   private last: CaretPos | null = null;
   // Set on mousedown to disambiguate the caret's side by the click's x.
   private clickX: number | null = null;
-  // Reconstructed caret affinity (the bit the browser keeps but hides from the
-  // DOM API): which side of an ambiguous position — a soft-wrap/bidi/mark
-  // boundary — the caret belongs to, inferred from the last input's direction.
-  // -1 = upstream (end of prev line), +1 = downstream (start of next line).
-  private bias: number | null = null;
+  // INVARIANT: non-null *only* while the caret is a collapsed cursor standing
+  // at a wrap boundary. Enter the fence, set it; leave, clear it. Everywhere
+  // else there is one place to paint and no side to record. That invariant is
+  // what lets handleKeyDown decide the flip from this bit alone without
+  // measuring — so it is re-derived on every move (update()) and dropped
+  // whenever a reflow moves the wrap points (the ResizeObserver above).
+  private bias: Affinity | null = null;
   // Direction recorded on keydown, resolved into `bias` by update() once
   // ProseMirror has actually moved the selection — the destination has to exist
   // before we can measure whether it landed on a wrap boundary.
-  // `pendingHorizontal` marks Left/Right, the only keys the boundary inversion
-  // applies to.
-  private pending: number | null = null;
+  // `pendingHorizontal` marks Left/Right, the only keys that land on the side
+  // they came from rather than the side they point at.
+  private pending: Direction | null = null;
   private pendingHorizontal = false;
   // Touch/coarse pointer: keep the native caret, render nothing.
   private readonly enabled: boolean;
@@ -90,9 +118,13 @@ class CaretView {
       if (!this.scroller) return;
       this.scroller.appendChild(this.el);
       // Reflow/rewrap moves the caret without a transaction — snap (clear
-      // `last`) rather than gliding.
+      // `last`) rather than gliding. It also moves the wrap points themselves,
+      // so the fence the caret was standing in may not be there any more: drop
+      // `bias` too, or the invariant ("non-null ⇒ at a boundary") quietly stops
+      // holding and the next arrow press spends itself on a flip that isn't.
       this.resize = new ResizeObserver(() => {
         this.last = null;
+        this.bias = null;
         this.render();
       });
       this.resize.observe(this.scroller);
@@ -114,50 +146,54 @@ class CaretView {
     this.pending = null;
     this.pendingHorizontal = false;
 
-    const moved = prevState.selection.head !== this.view.state.selection.head;
-    if (moved && pending != null) {
-      // Resolve the recorded intent now that the selection has landed. At a
-      // soft-wrap boundary the arriving caret belongs to the line it came
-      // *from* — that's what makes the boundary two stops rather than one,
-      // with handleKeyDown's flip supplying the second. Everywhere else the
-      // affinity is simply the direction of travel.
+    const sel = this.view.state.selection;
+    const collapsed = sel instanceof TextSelection && sel.empty;
+    const moved = prevState.selection.head !== sel.head;
+    if (moved || !collapsed) {
+      // Enter the fence, set the bit; leave it, clear the bit. `bias` is
+      // re-derived from scratch here on every move and never carried, which is
+      // what makes the invariant true and lets handleKeyDown trust it without
+      // measuring anything.
       //
-      // Horizontal keys only: Up/Down and Home/End already name the affinity
-      // they want (Down wants the line it arrives on, End wants upstream even
-      // though it travels right), so inverting them lands the caret a line off.
+      // It stays null unless all three hold: the caret actually moved (a
+      // stationary head can't have entered anywhere), it's a collapsed cursor
+      // (a range has no affinity), and there's a `pending` direction behind the
+      // move. A null `pending` means no key and no click caused it — a remote
+      // Yjs update, undo/redo, a programmatic setSelection — so there's nothing
+      // to infer from and guessing would cost the user a keystroke.
+      //
+      // Which side of the fence you land on is the side you came *from*: that's
+      // what makes the boundary two stops rather than one, with handleKeyDown's
+      // flip supplying the second. Horizontal keys only — Up/Down and Home/End
+      // already name the affinity they want (Down wants the line it arrives on,
+      // End wants upstream even though it travels right), so inverting those
+      // lands the caret a line off.
       this.bias =
-        horizontal && this.isWrapBoundary(this.view.state.selection.head)
-          ? -pending
-          : pending;
-    } else if (moved) {
-      // The head moved with no key and no click behind it: a remote Yjs update
-      // (ySyncPlugin restores the selection on every remote change), undo/redo,
-      // or any programmatic setSelection. Whatever `bias` described, it
-      // described a different position — and a stale one would spend the user's
-      // next arrow press on a bogus flip. Drop it and re-derive from input.
-      this.bias = null;
+        moved && collapsed && pending != null && this.isWrapBoundary(sel.head)
+          ? arrivingAffinity(pending, horizontal)
+          : null;
     }
 
     this.render();
   }
 
-  /** Is `pos` a soft-wrap boundary — one document position with two visual
-   * homes? Nothing in the model records where the browser chose to wrap, so it
-   * has to be measured: ask for both sides and see if they landed on different
-   * lines. (`view.endOfTextblock()` can't answer this — it reports *textblock*
+  /** Is `pos` inside the fence — a soft-wrap boundary, one document position
+   * with two visual homes? Nothing in the model records where the browser chose
+   * to wrap, so it has to be measured: ask for both sides and see where they
+   * landed. (`view.endOfTextblock()` can't answer this — it reports *textblock*
    * edges, not wrap points.)
    *
-   * Requires a step down *and* a jump left. An inline image or a taller mark
+   * Requires a step down *and* a jump left. A taller mark or an inline image
    * also shifts `.top` between the two sides; only a wrap throws the downstream
    * side back to the line's left edge. That second conjunct is also what keeps
-   * the flip from ever stealing a key from gapcursor, tableEditing, or atom
+   * the flip from stealing a key from gapcursor, tableEditing, or atom
    * traversal: those act only at textblock edges, and a position with content
    * to its left on one line and to its right on the next is by definition not
-   * one. Deliberately narrow — a false positive costs a swallowed keystroke. */
+   * one. */
   private isWrapBoundary(pos: number): boolean {
     try {
-      const up = this.view.coordsAtPos(pos, -1);
-      const down = this.view.coordsAtPos(pos, 1);
+      const up = this.view.coordsAtPos(pos, SIDE.upstream);
+      const down = this.view.coordsAtPos(pos, SIDE.downstream);
       return down.top > up.top + 1 && down.left < up.left;
     } catch {
       return false;
@@ -199,7 +235,7 @@ class CaretView {
     const right = k === "ArrowRight";
 
     if (left || k === "ArrowUp" || k === "End" || k === "Backspace") {
-      this.pending = -1;
+      this.pending = "backward";
     } else if (
       right ||
       k === "ArrowDown" ||
@@ -207,36 +243,32 @@ class CaretView {
       k === "Enter" ||
       k.length === 1 // a printable character
     ) {
-      this.pending = 1;
+      this.pending = "forward";
     }
-    // Modifiers, Escape, etc. leave the last inferred affinity in place.
+    // Modifiers, Escape, etc. leave the last recorded direction in place.
     this.pendingHorizontal = left || right;
 
-    // Cheap tests first — isWrapBoundary forces a layout read, and this keeps
-    // it off the hot path of a held-down arrow.
     if (!this.enabled || !(left || right)) return false;
     // Never consume a modified arrow: Shift extends the selection, Cmd/Ctrl
-    // jumps the line, Alt jumps the word. They still record intent above, which
-    // is what makes Cmd+ArrowRight land upstream at a wrapped line end.
+    // jumps the line, Alt jumps the word. They still record direction above,
+    // which is what makes Cmd+ArrowRight land upstream at a wrapped line end.
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey)
       return false;
 
-    const dir = right ? 1 : -1;
-    // `bias === -dir` — affinity pointing against the press — is exactly
-    // "standing at the far end of a two-ended position". Anything else,
-    // including a null (unknown) bias, falls through and moves normally: a
-    // keystroke is never eaten on a guess.
-    if (this.bias !== -dir) return false;
-    const { selection } = this.view.state;
-    if (!(selection instanceof TextSelection) || !selection.empty) return false;
-    if (!this.isWrapBoundary(selection.head)) return false;
+    // Crossing the fence. `bias` is non-null only while the caret stands at a
+    // wrap boundary (see update()), so the bit alone answers both questions:
+    // are we in a fence, and are we at the end of it this press points away
+    // from. Nothing to re-measure. A null bias falls through and moves the
+    // document normally — a keystroke is never eaten on a guess.
+    //
+    // Not correct inside RTL (bidi) runs, where the physical key direction and
+    // the logical one diverge. Same punt as the rest of the file; the cost is
+    // one extra press, since the flip lands on the far side and the next press
+    // finds `bias` no longer pointing against it.
+    const from: Affinity = right ? "upstream" : "downstream";
+    if (this.bias !== from) return false;
 
-    // The flip sets bias to the direction just pressed, so the next press can't
-    // flip again — a false-positive boundary costs one extra keypress, never a
-    // stuck caret. Not correct inside RTL (bidi) runs, where the physical key
-    // direction and the logical one diverge; same punt as before, and it
-    // self-heals for the same reason.
-    this.bias = dir;
+    this.bias = right ? "downstream" : "upstream";
     this.pending = null; // consumed here — no transaction, so no update()
     this.pendingHorizontal = false;
     this.render();
@@ -250,26 +282,30 @@ class CaretView {
    * includes the border but absolute positioning is relative to the padding box. */
   private caretPos(
     clickX: number | null,
-    bias: number | null,
+    bias: Affinity | null,
   ): CaretPos | null {
     if (!this.scroller) return null;
     const head = this.view.state.selection.head;
     let coords: { left: number; top: number; bottom: number };
     try {
       if (clickX != null) {
-        const before = this.view.coordsAtPos(head, -1);
-        const after = this.view.coordsAtPos(head, 1);
-        const upstream =
-          Math.abs(before.left - clickX) <= Math.abs(after.left - clickX);
-        coords = upstream ? before : after;
-        // Keep the side the click picked. The click's x is the most direct
-        // affinity signal there is, and persisting it is what lets
-        // click-then-arrow behave like arrow-then-arrow at a wrapped position —
-        // otherwise `bias` is null there and the first press can't flip. Off a
-        // boundary the two sides coincide, so whichever wins is harmless.
-        this.bias = upstream ? -1 : 1;
+        const up = this.view.coordsAtPos(head, SIDE.upstream);
+        const down = this.view.coordsAtPos(head, SIDE.downstream);
+        const picked: Affinity =
+          Math.abs(up.left - clickX) <= Math.abs(down.left - clickX)
+            ? "upstream"
+            : "downstream";
+        coords = picked === "upstream" ? up : down;
+        // Keep the side the click picked, but only if the click landed in a
+        // fence — the same invariant update() maintains, checked against the
+        // rects already in hand rather than a second layout read. Persisting it
+        // is what lets click-then-arrow behave like arrow-then-arrow at a
+        // wrapped position; off a boundary the two sides coincide and recording
+        // a side would plant exactly the stale bit the invariant forbids.
+        this.bias =
+          down.top > up.top + 1 && down.left < up.left ? picked : null;
       } else if (bias != null) {
-        coords = this.view.coordsAtPos(head, bias);
+        coords = this.view.coordsAtPos(head, SIDE[bias]);
       } else {
         coords = this.view.coordsAtPos(head);
       }
@@ -303,8 +339,8 @@ class CaretView {
     this.clickX = null;
 
     const { selection } = this.view.state;
-    // `bias` persists across renders (it's the last known intent); `clickX` is
-    // one-shot, consumed above.
+    // `bias` is whatever the last move left behind — non-null only if that move
+    // ended inside a fence; `clickX` is one-shot, consumed above.
     // Only a plain collapsed text cursor gets a caret. A range selection shows
     // the native band; NodeSelection/GapCursor have their own rendering and
     // `coordsAtPos(head)` isn't meaningful for them.
