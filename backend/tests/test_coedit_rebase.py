@@ -353,3 +353,52 @@ def test_live_read_reflects_a_folded_commit(repo):
     coedit_rebase.rebase_session(sid, new_sha)
 
     assert coedit_live.read_body(sid) == "EDIT-one\ntwo\nTHREE\n"
+
+
+# --- clean session + conflicting rewrite (the stranded-page case) ----------- #
+
+
+# All-"1." ordered list on purpose: the codec's serializer renumbers it
+# (1./2./3.) and writes it loose, so the document's own text *rewrites* the
+# git base's lines — and a full out-of-band rewrite overlaps that phantom
+# delta. A deterministic CONFLICT with zero local edits pending.
+_TIGHT_LIST = "1. one\n1. two\n1. three\n"
+_REWRITE = "# Rewritten\n\nEntirely new content.\n"
+
+
+def test_conflicting_rewrite_reaches_a_clean_session(repo):
+    """A conflicting fold on a session with no local edits defers to the
+    checkpoint engine — which must fold HEAD into the document rather than
+    no-op on its clean-by-seq gate. Left unfolded, the editor serves the old
+    snapshot indefinitely while git already has the rewrite."""
+    from app.wiki.coedit_checkpoint import checkpoint_session
+
+    sha = _seed(_TIGHT_LIST)
+    sid = _session(_TIGHT_LIST, sha)
+    new_sha = wiki_git.commit_file(_PATH, _REWRITE, "agent rewrite", author="A <a@x.com>")
+
+    assert coedit_rebase.rebase_session(sid, new_sha) == coedit_rebase.RebaseOutcome.CONFLICT
+
+    outcome = checkpoint_session(sid)
+    assert outcome is None  # fold only — no commit was made
+
+    doc, _seq = _rebuild(sid)
+    assert "Entirely new content." in reconstruct_body(doc)
+    st = coedit.get_session(sid)
+    assert st is not None and st.base_sha == new_sha
+    # Git untouched: the rewrite is already HEAD; the fold must not re-commit.
+    assert wiki_git.read_file_opt(_PATH) == _REWRITE
+
+
+def test_conflicting_rewrite_folds_via_the_rebase_task(repo):
+    """End to end through the trigger: the rebase task's conflict fallback
+    enqueues the checkpoint, and the session ends up on the rewrite."""
+    sha = _seed(_TIGHT_LIST)
+    sid = _session(_TIGHT_LIST, sha)
+    new_sha = wiki_git.commit_file(_PATH, _REWRITE, "agent rewrite", author="A <a@x.com>")
+
+    with coedit_queue.immediate_mode():
+        coedit_rebase_task.rebase_coedit_session(sid, new_sha)
+
+    doc, _seq = _rebuild(sid)
+    assert "Entirely new content." in reconstruct_body(doc)

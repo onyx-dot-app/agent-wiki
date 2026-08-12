@@ -928,3 +928,28 @@ def test_drop_restated_blocks_leaves_a_few_repeated_lines_alone() -> None:
     doc = seed_doc_from_markdown(base + "\nalpha\n")
     assert drop_restated_blocks(doc, base) == 0
     assert reconstruct_body(doc) == base + "\nalpha\n"
+
+
+def test_scan_heals_a_clean_session_stranded_behind_git(repo):
+    """A conflicting fold's checkpoint handoff can be lost (worker crash or
+    deploy between the rebase task and the checkpoint task). The seq-based
+    scan query can never see the result — the session has no local edits —
+    so the scan checks git divergence for clean sessions and enqueues those."""
+    uid = users_repo.create(email="ada@x.com", password="hunter2-x", name="Ada")
+    body = "1. one\n1. two\n1. three\n"
+    sha = _seed_page(body)
+    sess = coedit.open_session(_PATH, base_sha=sha)
+    coedit.join(sess.id, uid)
+    _client(sess, body)  # seeds the initial snapshot; no edits follow
+
+    rewrite = "# Rewritten\n\nEntirely new content.\n"
+    wiki_git.commit_file(_PATH, rewrite, "agent rewrite", author="A <a@x.com>")
+
+    with coedit_queue.immediate_mode():
+        coedit_checkpoint_task.scan_coedit_checkpoints()
+
+    st = coedit.get_active_session(_PATH)
+    assert st is not None  # participant present — session stays open
+    assert st.base_sha == wiki_git.head_sha_for_path(_PATH)
+    live = coedit_live.read_body(st.id)
+    assert live is not None and "Entirely new content." in live
