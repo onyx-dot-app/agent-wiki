@@ -253,9 +253,20 @@ def test_on_pages_deleted_ignores_non_pages_and_missing_rows(users):
     assert count_rows(WikiDocument) == 0
 
 
+def test_advance_offline_refuses_while_a_session_is_open(page_id):
+    s = coedit.open_session(_PATH, base_sha="sha1")
+    coedit.set_initial_snapshot(s.id, b"snap0", "hello")
+    # An open session owns the page — the offline fold yields even with a
+    # matching expected base (the check runs inside the write transaction).
+    assert not wiki_documents.advance_offline(
+        _PATH, snapshot=b"snap1", body="new", base_sha="sha2", expected_base_sha="sha1"
+    )
+
+
 def test_advance_offline_cas_yields_to_newer_state(page_id):
     s = coedit.open_session(_PATH, base_sha="sha1")
     coedit.set_initial_snapshot(s.id, b"snap0", "hello")
+    _force_close(s.id)
     # Expected base doesn't match the row's — a checkpoint or re-mirror won;
     # the offline fold must report False and leave the row alone.
     assert not wiki_documents.advance_offline(
