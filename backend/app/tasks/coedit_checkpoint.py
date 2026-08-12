@@ -113,7 +113,12 @@ def scan_coedit_checkpoints() -> None:
     for sess in coedit.list_active_sessions():
         if sess.ydoc_seq != sess.ydoc_checkpointed_seq:
             continue  # dirty — the seq-based scan owns it
-        if sess.base_sha != wiki_git.head_sha_for_path(sess.path):
+        # None means no commit touches the path (or the git call itself
+        # failed — head_sha_for_path runs check=False): nothing to fold,
+        # and the engine's own gate would no-op, so enqueueing would just
+        # re-run every scan pass forever.
+        head = wiki_git.head_sha_for_path(sess.path)
+        if head is not None and sess.base_sha != head:
             checkpoint_coedit_session_task(sess.id)
             stranded += 1
     if stranded:
