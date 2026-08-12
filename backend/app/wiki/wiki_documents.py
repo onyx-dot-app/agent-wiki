@@ -2,9 +2,10 @@
 
 One row per page holding the page's Yjs document state, keyed by the page's
 ``wiki_doc_ids`` id (see the model docstring in ``app/db/models.py``).
-Nothing reads the table yet: the ``mirror_*`` functions keep each row in
-lockstep with its page's session snapshot state so cutover can flip opens to
-read from here against already-correct data.
+Opens attach from here (``_seed_snapshot_sync`` transplants the row's
+snapshot as the new session's seq-0 state); the ``mirror_*`` functions keep
+each row in lockstep with its page's session snapshot state, and
+``advance_offline`` folds out-of-band commits in while no session is open.
 
 Keying by id is what removes the move hook: renames re-key the *registry*
 (``doc_ids.on_path_moved``) and never touch a document row, so a missed
@@ -161,6 +162,45 @@ def mirror_base_sha(s: Session, path: str, base_sha: str) -> None:
         .values(base_sha=base_sha, updated_at=_now_iso())
         .execution_options(synchronize_session=False)
     )
+
+
+def advance_offline(
+    path: str,
+    *,
+    snapshot: bytes,
+    body: str,
+    base_sha: str,
+    expected_base_sha: str | None,
+) -> bool:
+    """Advance a row folded outside any session (``rebase_document_row``).
+
+    Compare-and-swap on ``base_sha``: a checkpoint or move re-mirror that
+    landed since the caller read the row wins, and this write reports False
+    instead of clobbering the newer state. Seqs stay untouched — the fold is
+    not a logged update, and a transplant adopts the snapshot at seq 0
+    regardless.
+    """
+    with session() as s:
+        doc_id = doc_ids.id_for_path_in(s, path)
+        if doc_id is None:
+            return False
+        updated = s.scalars(
+            update(WikiDocument)
+            .where(
+                WikiDocument.doc_id == doc_id,
+                WikiDocument.base_sha.is_(None)
+                if expected_base_sha is None
+                else WikiDocument.base_sha == expected_base_sha,
+            )
+            .values(
+                ydoc_snapshot=snapshot,
+                ydoc_snapshot_body=body,
+                base_sha=base_sha,
+                updated_at=_now_iso(),
+            )
+            .returning(WikiDocument.doc_id)
+        ).one_or_none()
+        return updated is not None
 
 
 def on_pages_deleted(paths: list[str]) -> None:

@@ -1128,12 +1128,13 @@ class WikiDocument(Base):
     ``coedit_sessions`` row happens to exist, so a second lineage for a page
     becomes structurally impossible instead of detected after the fact.
 
-    **Dual-write phase**: nothing reads this table yet. The mirror writes in
-    ``app/wiki/wiki_documents.py`` keep each row in lockstep with its page's
-    session snapshot state — the row *follows* the session, including a
-    reseed overwriting it. Seed-once semantics (row created on a page's first
-    open, never reseeded) begin at cutover, when opens attach here and
-    ``coedit_updates`` re-keys from sessions to documents.
+    Opens attach from this row (``_seed_snapshot_sync`` in
+    ``app/api/coedit.py`` transplants its snapshot as the new session's
+    seq-0 state; markdown seeding is only the no-row fallback). The mirror
+    writes in ``app/wiki/wiki_documents.py`` keep each row in lockstep with
+    its page's session snapshot state, and out-of-band commits landing while
+    no session is open fold in via ``advance_offline`` — so the row tracks
+    the page, not just its checkpoints.
 
     Named generically rather than ``coedit_*``: this is "the wiki's documents
     as CRDT rows", scoped today to live editing with git still authoritative.

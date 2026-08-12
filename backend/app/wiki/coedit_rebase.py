@@ -31,8 +31,11 @@ from enum import Enum
 
 from pycrdt import create_update_message
 
-from app.wiki import coedit, coedit_live, coedit_channel
+from pycrdt import Doc
+
+from app.wiki import coedit, coedit_live, coedit_channel, wiki_documents
 from app.wiki import git as wiki_git
+from app.wiki import markdown_splice
 
 log = logging.getLogger(__name__)
 
@@ -96,4 +99,56 @@ def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         return RebaseOutcome.SKIP  # session closed underneath us
     coedit_channel.broadcast_yjs(session_id, create_update_message(update_bytes), seq)
     coedit.set_base_sha(session_id, head_sha)
+    return RebaseOutcome.APPLIED
+
+
+def rebase_document_row(path: str, head_sha: str) -> RebaseOutcome:
+    """Fold an out-of-band commit into the page's ``wiki_documents`` row when
+    no session is open.
+
+    The row otherwise advances only on checkpoints, so a stretch of git-only
+    writes (agent edits, ingestion) leaves it holding old content — and every
+    later open transplants that old content into the new session, riding the
+    conflict path to reconcile drift that could have been folded here flat.
+
+    With no session there are no concurrent edits: the row's own body is the
+    merge base, so the fold is a pure splice of HEAD onto the row's lineage —
+    no three-way, no conflict outcome. ``SKIP`` when there is nothing to do
+    (no row, already current, stale trigger) or when the splice finds no safe
+    block pairing — the open-time fold handles that page as before.
+    """
+    sess = coedit.get_active_session(path)
+    if sess is not None:
+        return RebaseOutcome.SKIP  # the session fold path owns the page
+    row = wiki_documents.get(path)
+    if row is None:
+        return RebaseOutcome.SKIP
+    row_base = row["base_sha"]
+    assert row_base is None or isinstance(row_base, str)
+    if row_base == head_sha:
+        return RebaseOutcome.SKIP
+    if row_base is not None and wiki_git.is_ancestor(head_sha, row_base):
+        return RebaseOutcome.SKIP  # stale trigger — the row moved past it
+    head_body = wiki_git.read_file_opt(path, ref=head_sha) or ""
+    row_snapshot, row_body = row["ydoc_snapshot"], row["ydoc_snapshot_body"]
+    assert isinstance(row_snapshot, bytes) and isinstance(row_body, str)
+
+    doc = Doc()
+    doc.apply_update(row_snapshot)
+    if not markdown_splice.apply_markdown_diff(doc, row_body, head_body):
+        # No safe block pairing (the same positional-drift guard the
+        # checkpoint splice has). Reseeding would mint a fresh lineage a
+        # disconnected client may still hold the old one of — leave the row
+        # and let the open-time fold reconcile, as before this function.
+        log.info("coedit row-rebase: no safe splice for %s; leaving row", path)
+        return RebaseOutcome.SKIP
+    markdown_splice.restamp_block_ids(doc, head_body)
+    if not wiki_documents.advance_offline(
+        path,
+        snapshot=doc.get_update(),
+        body=head_body,
+        base_sha=head_sha,
+        expected_base_sha=row_base,
+    ):
+        return RebaseOutcome.SKIP  # a session opened or a checkpoint landed first
     return RebaseOutcome.APPLIED

@@ -19,7 +19,7 @@ import logging
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
 from app.tasks.queues import coedit_queue
 from app.wiki import coedit
-from app.wiki.coedit_rebase import RebaseOutcome, rebase_session
+from app.wiki.coedit_rebase import RebaseOutcome, rebase_document_row, rebase_session
 
 log = logging.getLogger(__name__)
 
@@ -40,11 +40,22 @@ def rebase_coedit_session(session_id: int, head_sha: str) -> None:
         checkpoint_coedit_session_task(session_id)
 
 
+@coedit_queue.task()
+def rebase_wiki_document(rel_path: str, head_sha: str) -> None:
+    """Fold the commit at ``head_sha`` into the page's document row (no
+    session open). Pure splice — see ``rebase_document_row``."""
+    rebase_document_row(rel_path, head_sha)
+
+
 def on_wiki_commit(rel_path: str, sha: str) -> None:
-    """Enqueue a live-rebase if an active session exists for ``rel_path`` and the
-    commit is external to it (``base_sha`` hasn't already advanced to ``sha``,
-    which is the case for the session's own checkpoint commit)."""
+    """Enqueue the fold for the commit at ``sha``: into the open session when
+    one exists (skipping the session's own checkpoint commit), else into the
+    page's ``wiki_documents`` row, so the next open transplants current
+    content instead of reconciling drift at attach time."""
     sess = coedit.get_active_session(rel_path)
-    if sess is None or sess.base_sha == sha:
+    if sess is None:
+        rebase_wiki_document(rel_path, sha)
+        return
+    if sess.base_sha == sha:
         return
     rebase_coedit_session(sess.id, sha)
