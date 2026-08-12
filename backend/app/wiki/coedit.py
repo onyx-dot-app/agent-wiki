@@ -39,7 +39,7 @@ from sqlalchemy.dialects.postgresql import aggregate_order_by
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
-from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User
+from app.db.models import CoeditParticipant, CoeditSession, CoeditUpdate, User, WikiDocument
 from app.models.wiki import PathMove
 from app.db.session import session, try_advisory_xact_lock
 from app.wiki import doc_ids, wiki_documents
@@ -278,7 +278,7 @@ def open_session(path: str, *, base_sha: str | None) -> SessionRow:
     A fresh row is otherwise inserted — never a reactivated closed one. The
     page's CRDT lineage doesn't live here: the attach path transplants it
     from the page's ``wiki_documents`` row into the new session
-    (``transplant_snapshot``; ``_seed_snapshot_sync`` in
+    (``transplant_from_document``; ``_seed_snapshot_sync`` in
     ``app/api/coedit.py``), so a reconnecting client's retained document
     always meets the lineage it already holds, whatever became of the old
     session row.
@@ -374,11 +374,11 @@ def set_initial_snapshot(session_id: int, snapshot: bytes, body: str) -> bool:
         return row is not None
 
 
-def transplant_snapshot(
-    session_id: int, *, snapshot: bytes, body: str, base_sha: str | None
-) -> bool:
+def transplant_from_document(session_id: int, path: str) -> tuple[bool, str | None]:
     """Adopt the page's persistent document as this session's own seq-0 state
-    — the attach path of the one-lineage-per-page model.
+    — the attach path of the one-lineage-per-page model. Returns
+    ``(attached, document_base_sha)``; ``(False, None)`` when the page has no
+    document row (the caller seeds from markdown instead).
 
     A pure byte copy from the ``wiki_documents`` row (no ``Doc`` is built):
     the transplanted snapshot *is* the page's CRDT lineage, so a client
@@ -390,6 +390,12 @@ def transplant_snapshot(
     is folded in afterwards as an ordinary live-rebase (see
     ``_seed_snapshot_sync`` in ``app/api/coedit.py``).
 
+    The row read and the session write share one transaction under
+    ``wiki_documents.attach_lock``, serializing the attach against the
+    offline fold (``advance_offline``) — without it, a fold could advance
+    the row between this read and write, leaving the session on a snapshot
+    the row no longer holds.
+
     Same conditionality as ``set_initial_snapshot`` (``ydoc_snapshot IS
     NULL``), so concurrent connectors race harmlessly — and unlike a markdown
     seed, even the loser lost nothing: both transplant the same lineage.
@@ -398,18 +404,25 @@ def transplant_snapshot(
     *source* of this state, already current.
     """
     with session() as s:
-        row = s.scalars(
+        doc_id = doc_ids.id_for_path_in(s, path)
+        if doc_id is None:
+            return (False, None)
+        wiki_documents.attach_lock(s, doc_id)
+        doc_row = s.scalar(select(WikiDocument).where(WikiDocument.doc_id == doc_id))
+        if doc_row is None:
+            return (False, None)
+        s.scalars(
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.ydoc_snapshot.is_(None))
             .values(
-                ydoc_snapshot=snapshot,
+                ydoc_snapshot=doc_row.ydoc_snapshot,
                 ydoc_snapshot_seq=0,
-                ydoc_snapshot_body=body,
-                base_sha=base_sha,
+                ydoc_snapshot_body=doc_row.ydoc_snapshot_body,
+                base_sha=doc_row.base_sha,
             )
             .returning(CoeditSession.id)
         ).one_or_none()
-        return row is not None
+        return (True, doc_row.base_sha)
 
 
 class UpdateRow(BaseModel):
@@ -890,7 +903,7 @@ def purge_closed_sessions(*, limit: int = 500) -> int:
     A closed *clean* row is pure dead weight: its updates were pruned by its
     final checkpoint, its participants left (FK cascade catches stragglers),
     and the page's lineage lives on its ``wiki_documents`` row — the next
-    open transplants from there (``transplant_snapshot``), so nothing ever
+    open transplants from there (``transplant_from_document``), so nothing ever
     reactivates or rebuilds from a closed session. That is what lets this be
     unconditional: the age gate and the keep-the-newest-row-per-path subquery
     that used to live here protected the row session *reuse* needed, and

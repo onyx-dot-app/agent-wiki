@@ -493,7 +493,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 "coedit checkpoint: %s (session %s) held identical duplicate "
                 "top-level blocks %s; dropped the repeats and committing the "
                 "repaired document. The one-lineage-per-page invariant broke — "
-                "see transplant_snapshot / _seed_snapshot_sync.",
+                "see transplant_from_document / _seed_snapshot_sync.",
                 path,
                 session_id,
                 repair.deleted,
@@ -520,7 +520,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 "coedit checkpoint: %s (session %s) held %d block(s) restating the "
                 "page back onto itself; dropped them and committing the repaired "
                 "document. The one-lineage-per-page invariant broke — see "
-                "transplant_snapshot / _seed_snapshot_sync.",
+                "transplant_from_document / _seed_snapshot_sync.",
                 path,
                 session_id,
                 restated,

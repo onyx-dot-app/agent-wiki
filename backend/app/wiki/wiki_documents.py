@@ -44,6 +44,7 @@ semantics begin at cutover.
 from __future__ import annotations
 
 import logging
+import zlib
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select, update
@@ -51,7 +52,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.db.models import CoeditSession, WikiDocument
-from app.db.session import session
+from app.db.session import advisory_xact_lock, session
 from app.wiki import doc_ids
 
 log = logging.getLogger(__name__)
@@ -164,6 +165,27 @@ def mirror_base_sha(s: Session, path: str, base_sha: str) -> None:
     )
 
 
+# Distinct from coedit's checkpoint-lock namespace (0xC0ED): this one keys
+# on the *document*, serializing the attach read+transplant against the
+# offline fold.
+_ATTACH_LOCK_NS = 0xA77A
+
+
+def attach_lock(s: Session, doc_id: str) -> None:
+    """Transaction-scoped advisory lock on the page's document.
+
+    Held by both writers whose interleaving could fork row and session onto
+    different snapshots: ``advance_offline`` (offline fold: active-session
+    check + row write) and ``coedit.transplant_from_document`` (attach: row
+    read + session write). Under the lock, a transplant either waits out an
+    in-flight fold and reads the advanced row, or commits first — in which
+    case the fold's own active-session re-check sees the session and yields.
+    """
+    advisory_xact_lock(
+        s, (_ATTACH_LOCK_NS << 32) | (zlib.crc32(doc_id.encode()) & 0xFFFFFFFF)
+    )
+
+
 def advance_offline(
     path: str,
     *,
@@ -192,6 +214,7 @@ def advance_offline(
         doc_id = doc_ids.id_for_path_in(s, path)
         if doc_id is None:
             return False
+        attach_lock(s, doc_id)
         # "active" matches the coedit_sessions status constraint; the enum
         # lives in app.wiki.coedit, which imports this module.
         active = s.scalar(
