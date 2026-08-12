@@ -50,7 +50,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.db.models import WikiDocument
+from app.db.models import CoeditSession, WikiDocument
 from app.db.session import session
 from app.wiki import doc_ids
 
@@ -179,10 +179,28 @@ def advance_offline(
     instead of clobbering the newer state. Seqs stay untouched — the fold is
     not a logged update, and a transplant adopts the snapshot at seq 0
     regardless.
+
+    The active-session re-check runs inside this same transaction, not just
+    in the caller: a session opening between the caller's check and this
+    write would transplant the pre-advance row, and the write landing anyway
+    would fork row and session onto different snapshots of the lineage until
+    the session's next checkpoint overwrote it. Checked here, either this
+    write commits before the open (the transplant reads the advanced row) or
+    the open wins and this write yields.
     """
     with session() as s:
         doc_id = doc_ids.id_for_path_in(s, path)
         if doc_id is None:
+            return False
+        # "active" matches the coedit_sessions status constraint; the enum
+        # lives in app.wiki.coedit, which imports this module.
+        active = s.scalar(
+            select(CoeditSession.id).where(
+                CoeditSession.path == path,
+                CoeditSession.status == "active",
+            )
+        )
+        if active is not None:
             return False
         updated = s.scalars(
             update(WikiDocument)
