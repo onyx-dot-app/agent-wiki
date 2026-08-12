@@ -22,6 +22,7 @@ from app.models.coedit import CheckpointResultFrame
 from app.tasks.queue import crontab
 from app.tasks.queues import coedit_queue
 from app.wiki import coedit, coedit_channel
+from app.wiki import git as wiki_git
 from app.wiki.coedit_checkpoint import checkpoint_session
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,28 @@ def scan_coedit_checkpoints() -> None:
         checkpoint_coedit_session_task(sess.id)
     if due:
         log.info("coedit checkpoint scan: enqueued %d session(s)", len(due))
+    # A clean session can still be stranded behind git: a conflicting
+    # out-of-band fold hands off to the checkpoint engine, and if that
+    # enqueue is lost (crash, deploy) nothing else retries — the seq-based
+    # query above never sees a session with no local edits. One page-scoped
+    # git lookup per active session; the active set is small.
+    stranded = 0
+    for sess in coedit.list_active_sessions():
+        if sess.ydoc_seq != sess.ydoc_checkpointed_seq:
+            continue  # dirty — the seq-based scan owns it
+        # None means no commit touches the path (or the git call itself
+        # failed — head_sha_for_path runs check=False): nothing to fold,
+        # and the engine's own gate would no-op, so enqueueing would just
+        # re-run every scan pass forever.
+        head = wiki_git.head_sha_for_path(sess.path)
+        if head is not None and sess.base_sha != head:
+            checkpoint_coedit_session_task(sess.id)
+            stranded += 1
+    if stranded:
+        log.info(
+            "coedit checkpoint scan: enqueued %d clean-but-diverged session(s)",
+            stranded,
+        )
     abandoned = coedit.close_abandoned_sessions()
     if abandoned:
         log.info("coedit presence scan: closed %d abandoned session(s)", len(abandoned))

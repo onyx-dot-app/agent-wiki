@@ -588,13 +588,14 @@ def advance_checkpoint(
     impossible: there is no code path that prunes without also advancing
     the snapshot to the same seq.
 
-    Conditional on ``ydoc_checkpointed_seq < seq`` so a slow in-flight
+    Conditional on ``ydoc_checkpointed_seq <= seq`` so a slow in-flight
     checkpoint can't clobber a faster concurrent one's more-advanced state
     — belt-and-suspenders alongside ``coedit.checkpoint_lock``'s own
-    per-session serialization, not a substitute for it (matches the old
-    ``mark_checkpointed``'s regression guard, which this replaces —
-    snapshot advancement was never optional here, so there's no longer a
-    narrower "just advance the watermark" operation to keep around).
+    per-session serialization, not a substitute for it. Equality is
+    allowed on purpose: a clean session folding an out-of-band commit
+    re-advances at the *same* seq — new snapshot, new ``base_sha``, no new
+    local update — and a strictly-less guard would silently discard that
+    fold.
     """
     now = _iso(_now())
     with session() as s:
@@ -605,7 +606,7 @@ def advance_checkpoint(
         # isn't typed on the generic Result[Any] this execute() returns.
         updated_path = s.scalars(
             update(CoeditSession)
-            .where(CoeditSession.id == session_id, CoeditSession.ydoc_checkpointed_seq < seq)
+            .where(CoeditSession.id == session_id, CoeditSession.ydoc_checkpointed_seq <= seq)
             .values(
                 ydoc_snapshot=snapshot,
                 ydoc_snapshot_seq=seq,
@@ -630,6 +631,18 @@ def advance_checkpoint(
             wiki_documents.mirror_checkpoint(
                 s, updated_path, seq=seq, snapshot=snapshot, body=body, base_sha=base_sha
             )
+
+
+def list_active_sessions() -> list[SessionRow]:
+    """Every ACTIVE session — the periodic scan's working set for checks
+    that aren't expressible as a SQL predicate (git divergence)."""
+    with session() as s:
+        rows = s.scalars(
+            select(CoeditSession).where(
+                CoeditSession.status == SessionStatus.ACTIVE.value
+            )
+        ).all()
+        return [_session_row(r) for r in rows]
 
 
 def sessions_due_for_checkpoint(

@@ -431,7 +431,16 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 )
             return None
         if sess.ydoc_seq == sess.ydoc_checkpointed_seq:
-            return None  # nothing new to commit
+            # Clean by seq — but an out-of-band commit may still have moved
+            # the page past ``base_sha``. That is exactly the state a
+            # conflicting live-rebase hands off here (``rebase_session``
+            # leaves the document alone on overlap), and with no local edit
+            # pending nothing else would ever fold the commit in: the page
+            # would stay on the old content in the editor indefinitely.
+            # Skip only when git agrees there is nothing to reconcile.
+            head = wiki_git.head_sha_for_path(sess.path)
+            if head is None or head == sess.base_sha:
+                return None  # nothing new to commit, nothing to fold
         if sess.ydoc_snapshot is None:
             # This session's very first connection hasn't finished
             # set_initial_snapshot yet — momentary, the next trigger retries.
@@ -605,14 +614,18 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                     )
             replayed_seq = late.head_seq if late.head_seq is not None else replayed_seq
 
-        if result is None:
-            # The merge produced exactly the current HEAD (doc already
-            # matches committed content). Still advance the snapshot/watermark
-            # against current HEAD so we don't re-attempt this seq forever —
-            # the rebuilt doc's own state (post-replay) is the new snapshot,
-            # even though nothing was actually committed.
-            head = wiki_git.head_sha_for_path(path)
-            if head is None:
+        if result is not None:
+            new_body, new_sha = result.new_body, result.sha
+        else:
+            # The merge collapsed to the current HEAD — nothing was
+            # committed. HEAD's content still becomes the snapshot state:
+            # when an out-of-band commit is what the merge collapsed to
+            # (this document had nothing of its own to add), that content
+            # differs from what the document holds, and advancing the
+            # watermark without folding it in would stamp the session
+            # synced while editors keep reading the old content.
+            new_sha = wiki_git.head_sha_for_path(path)
+            if new_sha is None:
                 # Shouldn't happen — a no-op merge implies HEAD exists. Surface
                 # it rather than silently leaving the session dirty forever.
                 log.warning(
@@ -621,21 +634,28 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                     session_id,
                 )
                 return None
-            # Restamp before snapshotting: this doc is kept as-is (not
-            # reseeded from markdown text), so its block/row ids would
-            # otherwise drift out of sync with base_body's own numbering
-            # the moment a future checkpoint re-parses a base_body whose
-            # block count/order has since changed — see
-            # restamp_block_ids's own docstring.
-            markdown_splice.restamp_block_ids(doc, body)
-            coedit.advance_checkpoint(
-                session_id, seq=replayed_seq, snapshot=doc.get_update(), body=body, base_sha=head
-            )
-            return None
+            new_body = wiki_git.read_file_opt(path, ref=new_sha) or ""
+            # This HEAD read races other writers: the merge's no-op proved the
+            # doc collapses cleanly into the HEAD *it* saw, not necessarily
+            # into whatever is HEAD now. Folding an unmerged revision would
+            # bypass the three-way path entirely, so re-verify against the
+            # revision actually being folded; on any doubt, finalize nothing —
+            # the newer commit's own rebase trigger (and the scan's diverged
+            # check) re-runs this checkpoint against the settled HEAD.
+            recheck = wiki_git.merge_content(base_body, new_body, body)
+            if not recheck.clean or recheck.merged != new_body:
+                log.info(
+                    "coedit checkpoint: HEAD of %s moved past the no-op merge "
+                    "(session %s); deferring to the next trigger",
+                    path,
+                    session_id,
+                )
+                return None
 
-        # If the AI/3-way merge changed the content beyond what this doc
-        # held (a concurrent external commit folded in), the *committed*
-        # result must become the new snapshot's content. Splice it onto
+        # If the merge produced content beyond what this doc held (a
+        # concurrent external commit folded in — whether or not a new
+        # commit was made for it), that result must become the new
+        # snapshot's content. Splice it onto
         # this doc's own lineage (apply_markdown_diff) rather than
         # discarding that lineage for a fresh seed_doc_from_markdown parse
         # — any edit logged *up to* replayed_seq is already folded into
@@ -647,14 +667,14 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         # either way (confirmed in review — silent, total loss, not an
         # error) — preserving lineage here is strictly better regardless.
         # See apply_markdown_diff's own docstring.
-        diverged = result.new_body != body
+        diverged = new_body != body
         # The state connected clients are on, captured before the finalizing
         # mutations below, so a divergence can be handed to them as a plain
         # delta (see the broadcast after advance_checkpoint).
         pre_finalize = doc.get_state()
         reseeded = False
         if diverged:
-            if not markdown_splice.apply_markdown_diff(doc, body, result.new_body):
+            if not markdown_splice.apply_markdown_diff(doc, body, new_body):
                 # doc's children don't correspond 1:1 to a fresh parse of
                 # their own body — the same positional drift
                 # restamp_block_ids guards against, just discovered here
@@ -662,10 +682,10 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 # pairing; fall back to the old, lineage-discarding
                 # behavior rather than risk misapplying the diff (no worse
                 # than before this fix for this rarer, compounding case).
-                doc = markdown_yjs.seed_doc_from_markdown(result.new_body)
+                doc = markdown_yjs.seed_doc_from_markdown(new_body)
                 reseeded = True
             else:
-                markdown_splice.restamp_block_ids(doc, result.new_body)
+                markdown_splice.restamp_block_ids(doc, new_body)
         else:
             markdown_splice.restamp_block_ids(doc, body)
         snapshot = doc.get_update()
@@ -674,10 +694,11 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             session_id,
             seq=replayed_seq,
             snapshot=snapshot,
-            body=result.new_body,
-            base_sha=result.sha,
+            body=new_body,
+            base_sha=new_sha,
         )
-        wiki_drafts.clear_if_diverged(path, result.new_body)
+        if result is not None:
+            wiki_drafts.clear_if_diverged(path, new_body)
         if diverged:
             if reseeded:
                 # A fresh lineage shares no history with what clients hold, so
@@ -698,9 +719,13 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 coedit_channel.broadcast_yjs(
                     session_id, create_update_message(doc.get_update(pre_finalize))
                 )
+        if result is None:
+            # No commit was made; None keeps the "nothing committed"
+            # contract for callers even though the session state advanced.
+            return None
         return CheckpointOutcome(
             session_id=session_id,
-            sha=result.sha,
-            body=result.new_body,
+            sha=new_sha,
+            body=new_body,
             diverged=diverged,
         )
