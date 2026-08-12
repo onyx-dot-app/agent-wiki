@@ -635,6 +635,22 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 )
                 return None
             new_body = wiki_git.read_file_opt(path, ref=new_sha) or ""
+            # This HEAD read races other writers: the merge's no-op proved the
+            # doc collapses cleanly into the HEAD *it* saw, not necessarily
+            # into whatever is HEAD now. Folding an unmerged revision would
+            # bypass the three-way path entirely, so re-verify against the
+            # revision actually being folded; on any doubt, finalize nothing —
+            # the newer commit's own rebase trigger (and the scan's diverged
+            # check) re-runs this checkpoint against the settled HEAD.
+            recheck = wiki_git.merge_content(base_body, new_body, body)
+            if not recheck.clean or recheck.merged != new_body:
+                log.info(
+                    "coedit checkpoint: HEAD of %s moved past the no-op merge "
+                    "(session %s); deferring to the next trigger",
+                    path,
+                    session_id,
+                )
+                return None
 
         # If the merge produced content beyond what this doc held (a
         # concurrent external commit folded in — whether or not a new
