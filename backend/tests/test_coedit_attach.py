@@ -1,4 +1,4 @@
-"""The attach path (``_seed_snapshot_sync`` + ``coedit.transplant_snapshot``)
+"""The attach path (``_seed_snapshot_sync`` + ``coedit.transplant_from_document``)
 — a new session adopts the page's persistent document from ``wiki_documents``
 instead of seeding a fresh lineage from markdown.
 

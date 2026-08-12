@@ -24,7 +24,7 @@ from pycrdt import Doc, XmlFragment
 from app.auth import users as users_repo
 from app.tasks import coedit_rebase as coedit_rebase_task
 from app.tasks.queues import coedit_queue
-from app.wiki import coedit, coedit_live, coedit_rebase
+from app.wiki import coedit, coedit_live, coedit_rebase, doc_ids, wiki_documents
 from app.wiki import git as wiki_git
 from app.wiki.markdown_yjs import ROOT_XML_KEY, reconstruct_body, seed_doc_from_markdown
 
@@ -402,3 +402,67 @@ def test_conflicting_rewrite_folds_via_the_rebase_task(repo):
 
     doc, _seq = _rebuild(sid)
     assert "Entirely new content." in reconstruct_body(doc)
+
+
+# --- document-row fold (no session open) ------------------------------------ #
+
+
+def test_no_session_commit_folds_the_document_row(repo):
+    """Out-of-band commits landing while nobody has the page open advance the
+    page's document row, so the next open transplants current content instead
+    of old content plus a drift fold."""
+    doc_ids.mint_for_page(_PATH)
+    body = "# Title\n\nalpha\n"
+    sha = _seed(body)
+    sid = _session(body, sha)  # set_initial_snapshot mirrors the document row
+    coedit.close_session(sid)
+
+    rewrite = "# Title\n\nalpha\n\nA brand new section.\n"
+    new_sha = wiki_git.commit_file(_PATH, rewrite, "agent edit", author="A <a@x.com>")
+
+    assert (
+        coedit_rebase.rebase_document_row(_PATH, new_sha)
+        == coedit_rebase.RebaseOutcome.APPLIED
+    )
+    row = wiki_documents.get(_PATH)
+    assert row is not None
+    assert row["base_sha"] == new_sha
+    assert row["ydoc_snapshot_body"] == rewrite
+    snap = row["ydoc_snapshot"]
+    assert isinstance(snap, bytes)
+    doc = Doc()
+    doc.apply_update(snap)
+    assert "A brand new section." in reconstruct_body(doc)
+
+
+def test_row_fold_skips_while_a_session_is_open(repo):
+    doc_ids.mint_for_page(_PATH)
+    body = "# Title\n\nalpha\n"
+    sha = _seed(body)
+    _session(body, sha)  # stays active — the session fold path owns the page
+
+    new_sha = wiki_git.commit_file(_PATH, "other\n", "agent edit", author="A <a@x.com>")
+    assert (
+        coedit_rebase.rebase_document_row(_PATH, new_sha)
+        == coedit_rebase.RebaseOutcome.SKIP
+    )
+    row = wiki_documents.get(_PATH)
+    assert row is not None and row["base_sha"] == sha  # untouched
+
+
+def test_on_wiki_commit_routes_to_the_row_when_no_session(repo):
+    doc_ids.mint_for_page(_PATH)
+    body = "# Title\n\nalpha\n"
+    sha = _seed(body)
+    sid = _session(body, sha)
+    coedit.close_session(sid)
+
+    rewrite = "# Title\n\nalpha\n\nAdded by an agent.\n"
+    new_sha = wiki_git.commit_file(_PATH, rewrite, "agent edit", author="A <a@x.com>")
+    with coedit_queue.immediate_mode():
+        coedit_rebase_task.on_wiki_commit(_PATH, new_sha)
+
+    row = wiki_documents.get(_PATH)
+    assert row is not None
+    assert row["base_sha"] == new_sha
+    assert row["ydoc_snapshot_body"] == rewrite

@@ -2,9 +2,10 @@
 
 One row per page holding the page's Yjs document state, keyed by the page's
 ``wiki_doc_ids`` id (see the model docstring in ``app/db/models.py``).
-Nothing reads the table yet: the ``mirror_*`` functions keep each row in
-lockstep with its page's session snapshot state so cutover can flip opens to
-read from here against already-correct data.
+Opens attach from here (``_seed_snapshot_sync`` transplants the row's
+snapshot as the new session's seq-0 state); the ``mirror_*`` functions keep
+each row in lockstep with its page's session snapshot state, and
+``advance_offline`` folds out-of-band commits in while no session is open.
 
 Keying by id is what removes the move hook: renames re-key the *registry*
 (``doc_ids.on_path_moved``) and never touch a document row, so a missed
@@ -43,14 +44,15 @@ semantics begin at cutover.
 from __future__ import annotations
 
 import logging
+import zlib
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.db.models import WikiDocument
-from app.db.session import session
+from app.db.models import CoeditSession, WikiDocument
+from app.db.session import advisory_xact_lock, session
 from app.wiki import doc_ids
 
 log = logging.getLogger(__name__)
@@ -161,6 +163,85 @@ def mirror_base_sha(s: Session, path: str, base_sha: str) -> None:
         .values(base_sha=base_sha, updated_at=_now_iso())
         .execution_options(synchronize_session=False)
     )
+
+
+# Distinct from coedit's checkpoint-lock namespace (0xC0ED): this one keys
+# on the *document*, serializing the attach read+transplant against the
+# offline fold.
+_ATTACH_LOCK_NS = 0xA77A
+
+
+def attach_lock(s: Session, doc_id: str) -> None:
+    """Transaction-scoped advisory lock on the page's document.
+
+    Held by both writers whose interleaving could fork row and session onto
+    different snapshots: ``advance_offline`` (offline fold: active-session
+    check + row write) and ``coedit.transplant_from_document`` (attach: row
+    read + session write). Under the lock, a transplant either waits out an
+    in-flight fold and reads the advanced row, or commits first — in which
+    case the fold's own active-session re-check sees the session and yields.
+    """
+    advisory_xact_lock(
+        s, (_ATTACH_LOCK_NS << 32) | (zlib.crc32(doc_id.encode()) & 0xFFFFFFFF)
+    )
+
+
+def advance_offline(
+    path: str,
+    *,
+    snapshot: bytes,
+    body: str,
+    base_sha: str,
+    expected_base_sha: str | None,
+) -> bool:
+    """Advance a row folded outside any session (``rebase_document_row``).
+
+    Compare-and-swap on ``base_sha``: a checkpoint or move re-mirror that
+    landed since the caller read the row wins, and this write reports False
+    instead of clobbering the newer state. Seqs stay untouched — the fold is
+    not a logged update, and a transplant adopts the snapshot at seq 0
+    regardless.
+
+    The active-session re-check runs inside this same transaction, not just
+    in the caller: a session opening between the caller's check and this
+    write would transplant the pre-advance row, and the write landing anyway
+    would fork row and session onto different snapshots of the lineage until
+    the session's next checkpoint overwrote it. Checked here, either this
+    write commits before the open (the transplant reads the advanced row) or
+    the open wins and this write yields.
+    """
+    with session() as s:
+        doc_id = doc_ids.id_for_path_in(s, path)
+        if doc_id is None:
+            return False
+        attach_lock(s, doc_id)
+        # "active" matches the coedit_sessions status constraint; the enum
+        # lives in app.wiki.coedit, which imports this module.
+        active = s.scalar(
+            select(CoeditSession.id).where(
+                CoeditSession.path == path,
+                CoeditSession.status == "active",
+            )
+        )
+        if active is not None:
+            return False
+        updated = s.scalars(
+            update(WikiDocument)
+            .where(
+                WikiDocument.doc_id == doc_id,
+                WikiDocument.base_sha.is_(None)
+                if expected_base_sha is None
+                else WikiDocument.base_sha == expected_base_sha,
+            )
+            .values(
+                ydoc_snapshot=snapshot,
+                ydoc_snapshot_body=body,
+                base_sha=base_sha,
+                updated_at=_now_iso(),
+            )
+            .returning(WikiDocument.doc_id)
+        ).one_or_none()
+        return updated is not None
 
 
 def on_pages_deleted(paths: list[str]) -> None:

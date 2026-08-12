@@ -60,7 +60,7 @@ from app.models.coedit import (
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
 from app.tasks.coedit_rebase import rebase_coedit_session
-from app.wiki import acl, coedit, coedit_channel, coedit_live, git, wiki_documents
+from app.wiki import acl, coedit, coedit_channel, coedit_live, git
 from app.wiki.markdown_yjs import seed_doc_from_markdown
 
 router = APIRouter()
@@ -447,7 +447,7 @@ def _seed_snapshot_sync(session_id: int, path: str, base_sha: str | None) -> boo
     transplants as this session's seq-0 state — a pure byte copy that carries
     the page's one CRDT lineage across sessions, so a reconnecting client's
     retained document syncs onto the lineage it already holds and nothing
-    duplicates (see ``coedit.transplant_snapshot``). If the document's
+    duplicates (see ``coedit.transplant_from_document``). If the document's
     ``base_sha`` is behind the page's HEAD (out-of-band commits landed while
     nobody had the page open), the drift is folded in as an ordinary
     live-rebase — the same queued fold an agent commit gets mid-session, so
@@ -467,16 +467,8 @@ def _seed_snapshot_sync(session_id: int, path: str, base_sha: str | None) -> boo
     """
     if coedit.has_snapshot(session_id):
         return True
-    doc_row = wiki_documents.get(path)
-    if doc_row is not None:
-        doc_snapshot = doc_row["ydoc_snapshot"]
-        doc_body = doc_row["ydoc_snapshot_body"]
-        doc_base = doc_row["base_sha"]
-        assert isinstance(doc_snapshot, bytes) and isinstance(doc_body, str)
-        assert doc_base is None or isinstance(doc_base, str)
-        coedit.transplant_snapshot(
-            session_id, snapshot=doc_snapshot, body=doc_body, base_sha=doc_base
-        )
+    attached, doc_base = coedit.transplant_from_document(session_id, path)
+    if attached:
         head = git.head_sha_for_path(path)
         if head is not None and doc_base != head:
             rebase_coedit_session(session_id, head)
