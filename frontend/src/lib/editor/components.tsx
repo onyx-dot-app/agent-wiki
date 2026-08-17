@@ -17,6 +17,7 @@ import {
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { tiptapExtensions } from "@/lib/editor/extensions";
+import { normalizeUrl } from "@/lib/editor/extensions/components";
 import {
   commentHighlights as commentHighlightPlugin,
   sourceHighlights as sourceHighlightPlugin,
@@ -38,6 +39,26 @@ import type {
   CommentHighlightTarget,
   SelectionFormatState,
 } from "@/lib/editor/types";
+
+/** The selection's current top-level block style — shared by
+ * `formatState` (drives the toolbar's checked state) and `setBlockStyle`
+ * (whose commands are toggles: re-applying the checked style must be a
+ * no-op, not a toggle-off). */
+function currentBlockStyle(editor: Editor): BlockStyle {
+  return editor.isActive("heading", { level: 1 })
+    ? "h1"
+    : editor.isActive("heading", { level: 2 })
+      ? "h2"
+      : editor.isActive("heading", { level: 3 })
+        ? "h3"
+        : editor.isActive("taskList")
+          ? "taskList"
+          : editor.isActive("bulletList")
+            ? "bulletList"
+            : editor.isActive("orderedList")
+              ? "orderedList"
+              : "paragraph";
+}
 
 /** Highlight ids whose spans contain a collapsed caret or intersect a
  * selection, half-open at span ends so a caret just past a span misses —
@@ -409,19 +430,6 @@ export function TipTapEditor({
       },
       formatState: (): SelectionFormatState | null => {
         if (!editor) return null;
-        const block: BlockStyle = editor.isActive("heading", { level: 1 })
-          ? "h1"
-          : editor.isActive("heading", { level: 2 })
-            ? "h2"
-            : editor.isActive("heading", { level: 3 })
-              ? "h3"
-              : editor.isActive("taskList")
-                ? "taskList"
-                : editor.isActive("bulletList")
-                  ? "bulletList"
-                  : editor.isActive("orderedList")
-                    ? "orderedList"
-                    : "paragraph";
         return {
           marks: {
             bold: editor.isActive("bold"),
@@ -429,7 +437,7 @@ export function TipTapEditor({
             strike: editor.isActive("strike"),
             code: editor.isActive("code"),
           },
-          block,
+          block: currentBlockStyle(editor),
           link: editor.isActive("link")
             ? ((editor.getAttributes("link").href as string | undefined) ?? "")
             : null,
@@ -445,6 +453,9 @@ export function TipTapEditor({
       },
       setBlockStyle: (style) => {
         if (!editor) return;
+        // Tiptap's block commands are toggles — re-applying the style the
+        // selection already has would remove it instead of keeping it.
+        if (currentBlockStyle(editor) === style) return;
         const chain = editor.chain().focus();
         if (style === "paragraph") {
           // Clear whichever structure the selection is in: lifting out of a
@@ -469,7 +480,7 @@ export function TipTapEditor({
             .chain()
             .focus()
             .extendMarkRange("link")
-            .setLink({ href })
+            .setLink({ href: normalizeUrl(href) })
             .run();
         } else {
           editor.chain().focus().extendMarkRange("link").unsetLink().run();

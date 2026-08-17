@@ -104,7 +104,7 @@ export function CommandMenu({ ref, items, command }: CommandMenuProps) {
  * explicit one (`https:`, `mailto:`, …) untouched. Deliberately permissive —
  * no strict validation gate — because a mistyped link is fixed by unlinking,
  * not by blocking submit; the only hard stop is an empty URL. */
-function normalizeUrl(raw: string): string {
+export function normalizeUrl(raw: string): string {
   const url = raw.trim();
   if (!url) return "";
   return /^[a-z][\w+.-]*:/i.test(url) ? url : `https://${url}`;

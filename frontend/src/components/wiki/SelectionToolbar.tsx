@@ -4,6 +4,7 @@ import { useState, type SVGProps } from "react";
 import {
   Button,
   Divider,
+  InputTypeIn,
   LineItemButton,
   Popover,
 } from "@onyx-ai/opal/components";
@@ -198,21 +199,22 @@ export function SelectionToolbar({
         />
       </div>
       {linkDraft !== null && (
-        <input
-          autoFocus
-          value={linkDraft}
-          placeholder="Paste or type a URL…"
-          onChange={(e) => setLinkDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              submitLink();
-            } else if (e.key === "Escape") {
-              setLinkDraft(null);
-            }
-          }}
-          className="mx-1 mb-1 rounded-(--radius-06) border border-(--border-01) bg-(--background-tint-00) px-2 py-1 text-sm text-(--text-04) outline-none focus:border-(--border-02)"
-        />
+        <div className="px-1 pb-1">
+          <InputTypeIn
+            autoFocus
+            value={linkDraft}
+            placeholder="https://…"
+            onChange={(e) => setLinkDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitLink();
+              } else if (e.key === "Escape") {
+                setLinkDraft(null);
+              }
+            }}
+          />
+        </div>
       )}
       <Divider paddingParallel="sm" paddingPerpendicular="xs" />
       <LineItemButton
