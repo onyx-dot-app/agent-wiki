@@ -272,7 +272,7 @@ export function CommentMessage({
         // button (Section's inline padding style rules out padding classes).
         // Wider right inset than left so the button's hover pill clears the
         // rounded corner instead of hugging it.
-        className="mt-1 mr-3 ml-1"
+        className="mt-1 mr-2 ml-1"
       >
         <CommentAvatar name={authorName} />
         <span className="min-w-0 flex-1">
