@@ -284,7 +284,10 @@ export function TipTapEditor({
               endOffset: pmPosToTextOffset(editor, to),
               quotedText,
             };
-            const coords = editor.view.coordsAtPos(to);
+            // Anchor at the selection's *start* (doc order), so the menu
+            // opens where the selection begins instead of trailing its far
+            // end on long selections.
+            const coords = editor.view.coordsAtPos(from);
             cb(draft, { x: coords.left, y: coords.top });
           }
         }

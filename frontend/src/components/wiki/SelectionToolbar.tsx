@@ -135,7 +135,7 @@ export function SelectionToolbar({
   };
 
   return (
-    <div className="flex w-56 flex-col p-1">
+    <div className="flex w-48 flex-col">
       <Popover open={styleOpen} onOpenChange={setStyleOpen}>
         <Popover.Trigger asChild>
           <span className="inline-flex w-full">
