@@ -53,12 +53,11 @@ _ROW_TAGS = ("tableRow", "tableSeparator")
 
 # Family form of a positional block id: ``b5.1``, ``b5.2``, ... — stamped by
 # restamp_block_ids when several doc children map onto one reparsed block
-# range (family base ``b5``). Ids on the wire stay unique per child: the
-# frontend's UniqueBlockIdentity extension (frontend/src/lib/editor/blocks.ts)
-# nulls the id of any top-level node that duplicates another's, and an
-# id-less child looks brand-new to checkpoint_body — which then serializes it
-# *in addition to* the verbatim base_body range that already contains its
-# text, compounding one copy per checkpoint (the Value Proposition storm).
+# range (family base ``b5``). Ids on the wire must stay unique per child:
+# the frontend's UniqueBlockIdentity extension (blocks.ts) nulls the id of
+# any top-level node duplicating another's, and an id-less child reads as
+# brand-new here — serialized on top of the verbatim base_body range that
+# already contains its text, one extra copy per checkpoint.
 _FAMILY_ID_RE = re.compile(r"^(b\d+)\.\d+$")
 
 
@@ -200,16 +199,25 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
         touched_rows_by_base.setdefault(_family_base(raw_block_id), set()).update(
             _family_row(r) for r in raw_row_ids
         )
-    # Family bases already emitted as an untouched, verbatim range — that
-    # one range covers every member's text, so emitting it once per member
-    # would duplicate it outright, and the duplicated output becomes the
-    # *next* checkpoint's own base_body, compounding every round.
-    #
-    # Deliberately NOT applied to the table branch just below: unlike this
-    # branch (one shared base_body range covering everything, requiring
-    # dedup to avoid duplicating it per sharing child), _splice_table
-    # already emits only *this specific child's own rows* — dropping a
-    # second table of the family entirely would lose it, not dedup it.
+    # An untouched family's content must reach the output exactly once, and
+    # the two emission styles cannot mix within one family: the generic
+    # branch emits the family's *whole* base_body range verbatim (every
+    # member's text at once, deduped via emitted_untouched_bases), while the
+    # table branch emits only *one child's own rows*. So the row-level
+    # branch is reserved for families made entirely of tables — there, no
+    # member ever emits the whole range, and each table must emit its own
+    # rows (skipping one would drop it, not dedup it). A family that mixes
+    # a table with anything else (reparse folds table lines into an
+    # adjacent block's range in either direction) routes every member —
+    # tables included — through the generic emit-once path, because the one
+    # verbatim range already carries the table bytes; re-emitting rows on
+    # top compounds one table copy into git per checkpoint.
+    family_tags: dict[str, set[str]] = {}
+    for child in root.children:
+        if isinstance(child, XmlElement):
+            base = _family_base(dict(child.attributes).get(BLOCK_ID_ATTR))
+            if base is not None:
+                family_tags.setdefault(base, set()).add(child.tag)
     emitted_untouched_bases: set[str] = set()
     for child in root.children:
         if not isinstance(child, XmlElement):
@@ -218,7 +226,13 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
         base_id = _family_base(block_id)
         orig = orig_by_id.get(base_id) if base_id else None
 
-        if base_id is not None and orig is not None and child.tag == "table" and base_id not in touched_bases:
+        if (
+            base_id is not None
+            and orig is not None
+            and child.tag == "table"
+            and base_id not in touched_bases
+            and family_tags.get(base_id) == {"table"}
+        ):
             gap = base_body[leading_gap_start[base_id] : orig.start]
             parts.append(gap + _splice_table(base_body, orig, child, touched_rows_by_base.get(base_id, set())))
             continue
@@ -284,12 +298,7 @@ def restamp_block_ids(doc: Doc, body: str) -> None:
     literal id: every consumer in this module resolves them through
     ``_family_base``, while the ids each individual child carries stay
     unique document-wide. That uniqueness is load-bearing for the round
-    trip through connected clients — the frontend's UniqueBlockIdentity
-    extension nulls the ``_blockId`` of any top-level node duplicating
-    another's, and once a family member's id is gone, ``checkpoint_body``
-    would re-serialize it as brand-new on top of the verbatim base range
-    that already contains its text: one extra copy committed per
-    checkpoint, compounding for as long as the session stays dirty.
+    trip through connected clients — see the note on ``_FAMILY_ID_RE``.
     """
     root = doc.get(ROOT_XML_KEY, type=XmlFragment)
     children = [c for c in root.children if isinstance(c, XmlElement)]

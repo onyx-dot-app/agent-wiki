@@ -15,11 +15,14 @@ from app.wiki.markdown_splice import (
     checkpoint_body,
     restamp_block_ids,
 )
+from app.wiki.markdown_blocks import top_level_block_ranges
 from app.wiki.markdown_yjs import (
     BLOCK_ID_ATTR,
     ROOT_XML_KEY,
+    build_block_element,
     reconstruct_body,
     seed_doc_from_markdown,
+    serialize_block,
 )
 
 _SAMPLE = """# Heading
@@ -376,9 +379,9 @@ def test_restamp_assigns_family_ids_when_reparse_merges_adjacent_lists() -> None
     same base keeps checkpoint_body's range lookups correct, while the ids
     each child carries stay unique document-wide — a literally-shared id
     round-trips through a connected client's UniqueBlockIdentity extension
-    as a nulled ``_blockId``, which checkpoint_body then re-serializes as a
-    brand-new block on top of the verbatim range that already contains its
-    text (the compounding-duplication storm)."""
+    as a nulled ``_blockId``, which checkpoint_body re-serializes as a
+    brand-new block on top of the verbatim range already containing its
+    text."""
     from app.wiki.markdown_blocks import top_level_block_ranges
     from app.wiki.markdown_yjs import build_block_element
 
@@ -460,20 +463,13 @@ def test_checkpoint_body_does_not_dedup_family_id_tables() -> None:
 
 
 def test_family_ids_survive_client_id_nulling_without_compounding() -> None:
-    """The duplication-storm regression test, from the live incident's git
-    forensics: an image paragraph moved to sit directly under a bullet whose
-    line ends in a markdown hard-break (trailing spaces), no blank line
-    between. The reparse folds the image line into the list block (lazy
-    continuation), so the two doc children form one id family. A connected
-    client's UniqueBlockIdentity nulls any *duplicated* ``_blockId`` it
-    sees; with family ids there is no duplicate to null, so repeated
-    checkpoints while the user types elsewhere must keep exactly one image
-    forever (pre-fix: the nulled child re-serialized as brand-new next to
-    the verbatim range that already contained it — plus one copy per
-    checkpoint, unbounded)."""
-    from app.wiki.markdown_blocks import top_level_block_ranges
-    from app.wiki.markdown_yjs import build_block_element, serialize_block
-
+    """An image paragraph moved directly under a bullet whose line ends in a
+    markdown hard-break (trailing spaces), no blank line between: the
+    reparse folds the image line into the list block (lazy continuation),
+    so the two doc children form one id family. A connected client's
+    UniqueBlockIdentity nulls any *duplicated* ``_blockId`` it sees; family
+    ids leave it nothing to null, so repeated checkpoints while the user
+    types elsewhere must keep exactly one image."""
     bullet = "- some bullet ending in a hard break   \n"
     image = "![img.png](/api/wiki/media/abc123#w=236)\n"
     para = "Unrelated paragraph below.\n"
@@ -531,14 +527,86 @@ def test_family_ids_survive_client_id_nulling_without_compounding() -> None:
         body = new_body
 
 
+def test_mixed_family_table_member_does_not_reemit_rows() -> None:
+    """A table as a *non-first* family member: text typed on the blank line
+    directly above a table makes the reparse fold the table lines into the
+    text's own block (a table can't interrupt a paragraph/quote), so the
+    first member's verbatim range already carries the table bytes. The
+    table branch must then skip — re-emitting its rows adds one whole table
+    per checkpoint. A family of adjacent *tables* keeps per-child row
+    emission (covered above); only a whole-range-already-emitted base
+    suppresses it."""
+    body = "> quote 3\n\n| a4 | b4 |\n| --- | --- |\n| 1 | 2 |\n"
+    doc = seed_doc_from_markdown(body)
+    root = _root(doc)
+    tracker = TouchedTracker(doc)
+
+    # Type on the blank line between the quote and the table.
+    blank = next(
+        c
+        for c in root.children
+        if isinstance(c, XmlElement)
+        and c.tag == "paragraph"
+        and not serialize_block(c).strip()
+    )
+    with doc.transaction():
+        if len(blank.children):
+            blank.children[0].insert(0, "q")  # type: ignore[union-attr]
+        else:
+            blank.children.append(XmlText("q"))
+
+    body1 = checkpoint_body(body, doc, tracker)
+    assert body1.count("| a4 | b4 |") == 1, body1
+    restamp_block_ids(doc, body1)
+    tracker.reset()
+
+    # Two untouched rounds must be byte-identical — the table member's
+    # rows are already inside the first member's verbatim range.
+    body2 = checkpoint_body(body1, doc, tracker)
+    assert body2 == body1, f"{len(body1)} -> {len(body2)}: {body2!r}"
+    restamp_block_ids(doc, body2)
+    tracker.reset()
+    body3 = checkpoint_body(body2, doc, tracker)
+    assert body3 == body2
+
+
+def test_mixed_family_with_leading_tables_stays_stable() -> None:
+    """The mirror order: table members *first*, the whole-range-emitting
+    member last (reparse folds a trailing text line into the table block's
+    range). The tables must route through the generic emit-once path — the
+    first member's verbatim range carries every member's bytes — rather
+    than each re-emitting rows the range already contains."""
+    table = "| a | b |\n| --- | --- |\n| 1 | 2 |\n"
+    doc = Doc()
+    root = _root(doc)
+    with doc.transaction():
+        for text in (table, table, "tail line\n"):
+            el, finishers = build_block_element(text, top_level_block_ranges(text)[0])
+            root.children.append(el)
+            for f in finishers:
+                f()
+
+    body = checkpoint_body("", doc, TouchedTracker(doc))
+    ranges = top_level_block_ranges(body)
+    # Only meaningful if the reparse actually folds everything into one
+    # block (the family condition this test exists for).
+    assert len(ranges) == 1, [body[r.start : r.end] for r in ranges]
+
+    restamp_block_ids(doc, body)
+    for _ in range(2):
+        tracker = TouchedTracker(doc)
+        body2 = checkpoint_body(body, doc, tracker)
+        assert body2 == body, f"{len(body)} -> {len(body2)}: {body2!r}"
+        restamp_block_ids(doc, body2)
+        tracker.stop()
+        body = body2
+
+
 def test_checkpoint_body_still_dedups_legacy_literally_shared_ids() -> None:
     """Snapshots persisted before the family-id scheme can hold several
     children carrying the literal same id. Those normalize to the same
     family base, so the untouched path still emits their shared range
     exactly once — neither duplicated nor dropped."""
-    from app.wiki.markdown_blocks import top_level_block_ranges
-    from app.wiki.markdown_yjs import build_block_element
-
     doc = Doc()
     root = _root(doc)
     for text in ("- new\n", "- old\n"):
