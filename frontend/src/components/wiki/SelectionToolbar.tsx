@@ -26,11 +26,17 @@ const BLOCK_LABELS: Record<BlockStyle, string> = {
   h1: "Heading 1",
   h2: "Heading 2",
   h3: "Heading 3",
+  h4: "Heading 4",
+  h5: "Heading 5",
+  h6: "Heading 6",
   bulletList: "Bullet list",
   orderedList: "Numbered list",
   taskList: "To-do list",
+  codeBlock: "Code block",
 };
 
+/** Offered styles — deeper headings (h4-h6) still *display* via
+ * BLOCK_LABELS when the selection is in one, they're just not offered. */
 const BLOCK_ORDER: BlockStyle[] = [
   "paragraph",
   "h1",
@@ -39,6 +45,7 @@ const BLOCK_ORDER: BlockStyle[] = [
   "bulletList",
   "orderedList",
   "taskList",
+  "codeBlock",
 ];
 
 /** The glyphs are typography samples of their own effect (a bold B, an

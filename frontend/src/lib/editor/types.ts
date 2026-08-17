@@ -39,15 +39,21 @@ export interface CommentDraft {
  * would render live and then silently vanish on the next checkpoint. */
 export type ToggleMark = "bold" | "italic" | "strike" | "code";
 
-/** Top-level block styles the selection toolbar can switch between. */
+/** Top-level block styles the selection toolbar can switch between.
+ * h4-h6 exist so deeper headings report truthfully in the current-style
+ * label; the dropdown only offers h1-h3. */
 export type BlockStyle =
   | "paragraph"
   | "h1"
   | "h2"
   | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
   | "bulletList"
   | "orderedList"
-  | "taskList";
+  | "taskList"
+  | "codeBlock";
 
 /** Snapshot of the current selection's formatting, driving the toolbar's
  * active states. `link` is the active link mark's href ("" when a link is

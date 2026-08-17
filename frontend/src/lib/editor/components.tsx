@@ -45,19 +45,22 @@ import type {
  * (whose commands are toggles: re-applying the checked style must be a
  * no-op, not a toggle-off). */
 function currentBlockStyle(editor: Editor): BlockStyle {
-  return editor.isActive("heading", { level: 1 })
-    ? "h1"
-    : editor.isActive("heading", { level: 2 })
-      ? "h2"
-      : editor.isActive("heading", { level: 3 })
-        ? "h3"
-        : editor.isActive("taskList")
-          ? "taskList"
-          : editor.isActive("bulletList")
-            ? "bulletList"
-            : editor.isActive("orderedList")
-              ? "orderedList"
-              : "paragraph";
+  if (editor.isActive("codeBlock")) return "codeBlock";
+  if (editor.isActive("heading")) {
+    // Attr-less check + explicit coercion: a codec-seeded doc carries the
+    // level as the *string* Yjs XML attribute ("3"), so an attr-matched
+    // isActive("heading", { level: 3 }) never fires on loaded content.
+    const level = Number(editor.getAttributes("heading").level);
+    if (level >= 1 && level <= 6) return `h${level}` as BlockStyle;
+    return "paragraph";
+  }
+  return editor.isActive("taskList")
+    ? "taskList"
+    : editor.isActive("bulletList")
+      ? "bulletList"
+      : editor.isActive("orderedList")
+        ? "orderedList"
+        : "paragraph";
 }
 
 /** Highlight ids whose spans contain a collapsed caret or intersect a
@@ -473,12 +476,14 @@ export function TipTapEditor({
           else if (editor.isActive("orderedList"))
             chain.toggleOrderedList().run();
           else chain.setParagraph().run();
-        } else if (style === "h1") chain.toggleHeading({ level: 1 }).run();
-        else if (style === "h2") chain.toggleHeading({ level: 2 }).run();
-        else if (style === "h3") chain.toggleHeading({ level: 3 }).run();
+        } else if (style === "codeBlock") chain.toggleCodeBlock().run();
         else if (style === "bulletList") chain.toggleBulletList().run();
         else if (style === "orderedList") chain.toggleOrderedList().run();
-        else chain.toggleTaskList().run();
+        else if (style === "taskList") chain.toggleTaskList().run();
+        else {
+          const level = Number(style.slice(1)) as 1 | 2 | 3 | 4 | 5 | 6;
+          chain.toggleHeading({ level }).run();
+        }
       },
       setLink: (href) => {
         if (!editor) return;
