@@ -1535,29 +1535,17 @@ export function FileView({ path }: FileViewProps) {
             if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
           }}
           className="fixed z-[80] rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-popover)"
-          style={(() => {
-            // Per the design mock: the panel docks just right of the
-            // content column, top-aligned with the selection's first line —
-            // not floating over the text. Falls back to the selection
-            // coordinates if the editor isn't mounted. Clamped inside the
-            // viewport on both axes (the panel is ~200px wide and up to
-            // ~240px tall with the link input open).
-            const pm = document
-              .querySelector(".editor-prose .ProseMirror")
-              ?.getBoundingClientRect();
-            const left = Math.max(
+          style={{
+            // Opens to the right of the cursor (the selection head),
+            // top-aligned with its line, clamped inside the viewport on
+            // both axes (the panel is ~200px wide and up to ~240px tall
+            // with the link input open).
+            left: Math.max(
               8,
-              Math.min(
-                (pm ? pm.right : selTool.x) + 16,
-                window.innerWidth - 208,
-              ),
-            );
-            const top = Math.max(
-              8,
-              Math.min(selTool.y, window.innerHeight - 248),
-            );
-            return { left, top };
-          })()}
+              Math.min(selTool.x + 12, window.innerWidth - 208),
+            ),
+            top: Math.max(8, Math.min(selTool.y, window.innerHeight - 248)),
+          }}
         >
           {!viewingVersion && coedit.active && coedit.canWrite && selFmt ? (
             <SelectionToolbar
