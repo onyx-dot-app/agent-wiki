@@ -28,9 +28,7 @@
   color: var(--text-04);
   font-family: var(--font-hanken-grotesk), ui-sans-serif;
   font-size: 1rem;
-  /* Unitless, so larger text inherits a ratio, not a fixed length — a fixed
-     1.5rem gave 2em headings a 24px line box (0.75), overlapping wrapped
-     heading lines. Body text is unchanged: 1rem * 1.5 is the same 24px. */
+  /* Unitless so line boxes scale with descendant font sizes. */
   line-height: 1.5;
   font-weight: 450;
 }
