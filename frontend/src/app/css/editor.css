@@ -28,7 +28,8 @@
   color: var(--text-04);
   font-family: var(--font-hanken-grotesk), ui-sans-serif;
   font-size: 1rem;
-  line-height: 1.5rem;
+  /* Unitless so line boxes scale with descendant font sizes. */
+  line-height: 1.5;
   font-weight: 450;
 }
 
@@ -55,7 +56,16 @@
   padding-right: var(--cm-gutter, 0rem);
 }
 
-/* Headings — same size scale as the old CM6 WYSIWYG decorations. */
+/* Headings — same size scale as the old CM6 WYSIWYG decorations. Tighter
+   than the body's 1.5 ratio, the usual display-type treatment. */
+.editor-prose h1,
+.editor-prose h2,
+.editor-prose h3,
+.editor-prose h4,
+.editor-prose h5,
+.editor-prose h6 {
+  line-height: 1.2;
+}
 .editor-prose h1 {
   font-size: 2em;
   font-weight: bold;
