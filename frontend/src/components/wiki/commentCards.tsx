@@ -263,9 +263,16 @@ export function CommentMessage({
         flexDirection="row"
         justifyContent="start"
         alignItems="center"
+        width="auto"
         height="fit"
         gap={0.25}
-        className="mx-1 mt-1"
+        // width="auto", not the default w-full: the flex-column parent then
+        // stretches the row between these margins. With w-full the margins
+        // push the row past the card's edge and overflow-clip eats the More
+        // button (Section's inline padding style rules out padding classes).
+        // Wider right inset than left so the button's hover pill clears the
+        // rounded corner instead of hugging it.
+        className="mt-1 mr-2 ml-1"
       >
         <CommentAvatar name={authorName} />
         <span className="min-w-0 flex-1">
