@@ -266,9 +266,10 @@ export function CommentMessage({
         height="fit"
         gap={0.25}
         // Wider right inset than left: the card clips at its rounded corner
-        // (overflow-clip), and the action cluster's More button sits flush
-        // against that edge on hover.
-        className="mt-1 mr-2 ml-1"
+        // (overflow-clip), and the action cluster's More button sits against
+        // that edge on hover. 12px matches the card's own vertical rhythm so
+        // the cluster reads centered rather than cramped.
+        className="mt-1 mr-3 ml-1"
       >
         <CommentAvatar name={authorName} />
         <span className="min-w-0 flex-1">
