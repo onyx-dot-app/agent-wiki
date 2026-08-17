@@ -406,7 +406,25 @@ const InlineCode = Mark.create({
             ? !!getMarkRange($from, type)
             : state.doc.rangeHasMark(from, to, type);
           if (active) {
-            const range = getMarkRange($from, type) ?? { from, to };
+            // The unwrap must cover the marked run's *own* bounds, not the
+            // selection's: a selection that merely overlaps the run would
+            // otherwise strip the mark from a slice and leave the literal
+            // backticks behind — which the next checkpoint's reparse turns
+            // straight back into a code span. When the selection starts
+            // outside the run, resolve inside its first marked character.
+            // (Several runs in one selection unwrap first-run-only — same
+            // fuzziness as Tiptap's own mark toggles.)
+            let range = getMarkRange($from, type);
+            if (!range) {
+              let marked: number | null = null;
+              state.doc.nodesBetween(from, to, (node, pos) => {
+                if (marked === null && node.isText && type.isInSet(node.marks))
+                  marked = pos;
+              });
+              if (marked !== null)
+                range = getMarkRange(state.doc.resolve(marked + 1), type);
+            }
+            if (!range) return false;
             if (!dispatch) return true;
             const { from: a, to: b } = range;
             tr.removeMark(a, b, type);
