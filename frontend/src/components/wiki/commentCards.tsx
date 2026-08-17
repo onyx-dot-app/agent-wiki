@@ -263,12 +263,15 @@ export function CommentMessage({
         flexDirection="row"
         justifyContent="start"
         alignItems="center"
+        width="auto"
         height="fit"
         gap={0.25}
-        // Wider right inset than left: the card clips at its rounded corner
-        // (overflow-clip), and the action cluster's More button sits against
-        // that edge on hover. 12px matches the card's own vertical rhythm so
-        // the cluster reads centered rather than cramped.
+        // width="auto", not the default w-full: the flex-column parent then
+        // stretches the row between these margins. With w-full the margins
+        // push the row past the card's edge and overflow-clip eats the More
+        // button (Section's inline padding style rules out padding classes).
+        // Wider right inset than left so the button's hover pill clears the
+        // rounded corner instead of hugging it.
         className="mt-1 mr-3 ml-1"
       >
         <CommentAvatar name={authorName} />
