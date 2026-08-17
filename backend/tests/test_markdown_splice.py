@@ -368,15 +368,17 @@ def test_editing_inside_code_block_leaves_everything_before_it_untouched() -> No
 # --- restamp_block_ids / apply_markdown_diff --------------------------------- #
 
 
-def test_restamp_assigns_shared_id_when_reparse_merges_adjacent_lists() -> None:
-    """Regression test (review): two doc children that reparse into *one*
-    CommonMark block (adjacent same-kind containers with no blank line
-    between them — plain markdown text can't distinguish "two lists" from
-    "one list with more items") must both land on that one block's id, not
-    drift onto distinct positional ids (b0, b1) that no longer correspond
-    to anything in the next base_body's own reparse — the exact drift that
-    caused checkpoint_body to duplicate content (see the module docstring
-    on restamp_block_ids)."""
+def test_restamp_assigns_family_ids_when_reparse_merges_adjacent_lists() -> None:
+    """Two doc children that reparse into *one* CommonMark block (adjacent
+    same-kind containers with no blank line between them — plain markdown
+    text can't distinguish "two lists" from "one list with more items")
+    must land on that one block's id *family* (b0, b0.1): resolving to the
+    same base keeps checkpoint_body's range lookups correct, while the ids
+    each child carries stay unique document-wide — a literally-shared id
+    round-trips through a connected client's UniqueBlockIdentity extension
+    as a nulled ``_blockId``, which checkpoint_body then re-serializes as a
+    brand-new block on top of the verbatim range that already contains its
+    text (the compounding-duplication storm)."""
     from app.wiki.markdown_blocks import top_level_block_ranges
     from app.wiki.markdown_yjs import build_block_element
 
@@ -401,13 +403,13 @@ def test_restamp_assigns_shared_id_when_reparse_merges_adjacent_lists() -> None:
 
     restamp_block_ids(doc, cp1_body)
     ids = [dict(c.attributes).get(BLOCK_ID_ATTR) for c in root.children]
-    assert ids == ["b0", "b0"], ids
+    assert ids == ["b0", "b0.1"], ids
 
     # Editing only the second child must not duplicate the first — both
-    # children sharing "b0" means touching either marks the shared id
-    # touched, so checkpoint_body re-serializes both (harmless for the
-    # unedited one) instead of slicing child 0 verbatim from a stale range
-    # that (pre-fix) covered the *whole* former text.
+    # children resolving to base "b0" means touching either marks the whole
+    # family touched, so checkpoint_body re-serializes both (harmless for
+    # the unedited one) instead of slicing child 0 verbatim from a stale
+    # range that covered the *whole* former text.
     tracker = TouchedTracker(doc)
     old_item_text = root.children[1].children[0].children[0].children[0]
     with doc.transaction():
@@ -418,14 +420,12 @@ def test_restamp_assigns_shared_id_when_reparse_merges_adjacent_lists() -> None:
     assert cp2_body == "- new\n- EDITED\n", cp2_body
 
 
-def test_checkpoint_body_does_not_dedup_shared_id_tables() -> None:
-    """Regression test (review): the dedup guard added for the shared-id
-    duplication bug above must NOT apply to the table branch —
-    _splice_table already emits only its own child's rows (it was already
-    correct, per-child, for two identical adjacent tables sharing a
-    restamped id before that dedup guard existed), so applying the same
-    "emit once" guard there drops a second table sharing an id entirely
-    instead of just de-duplicating its content."""
+def test_checkpoint_body_does_not_dedup_family_id_tables() -> None:
+    """The emit-once guard for untouched family bases must NOT apply to the
+    table branch — _splice_table emits only its own child's rows, so two
+    family tables are already handled correctly per-child, and an "emit
+    once per base" guard there would drop the second table entirely
+    instead of de-duplicating anything."""
     from app.wiki.markdown_blocks import top_level_block_ranges
     from app.wiki.markdown_yjs import build_block_element
 
@@ -447,7 +447,7 @@ def test_checkpoint_body_does_not_dedup_shared_id_tables() -> None:
     assert len(top_level_block_ranges(cp0_body)) == 1
     restamp_block_ids(doc, cp0_body)
     ids = [dict(c.attributes).get(BLOCK_ID_ATTR) for c in root.children]
-    assert ids == ["b0", "b0"], ids
+    assert ids == ["b0", "b0.1"], ids
 
     cp1 = checkpoint_body(cp0_body, doc, TouchedTracker(doc))
     assert cp1 == cp0_body, cp1
@@ -457,6 +457,103 @@ def test_checkpoint_body_does_not_dedup_shared_id_tables() -> None:
     restamp_block_ids(doc, cp1)
     cp2 = checkpoint_body(cp1, doc, TouchedTracker(doc))
     assert cp2 == cp1, cp2
+
+
+def test_family_ids_survive_client_id_nulling_without_compounding() -> None:
+    """The duplication-storm regression test, from the live incident's git
+    forensics: an image paragraph moved to sit directly under a bullet whose
+    line ends in a markdown hard-break (trailing spaces), no blank line
+    between. The reparse folds the image line into the list block (lazy
+    continuation), so the two doc children form one id family. A connected
+    client's UniqueBlockIdentity nulls any *duplicated* ``_blockId`` it
+    sees; with family ids there is no duplicate to null, so repeated
+    checkpoints while the user types elsewhere must keep exactly one image
+    forever (pre-fix: the nulled child re-serialized as brand-new next to
+    the verbatim range that already contained it — plus one copy per
+    checkpoint, unbounded)."""
+    from app.wiki.markdown_blocks import top_level_block_ranges
+    from app.wiki.markdown_yjs import build_block_element, serialize_block
+
+    bullet = "- some bullet ending in a hard break   \n"
+    image = "![img.png](/api/wiki/media/abc123#w=236)\n"
+    para = "Unrelated paragraph below.\n"
+    seed = image + "\n" + bullet + "\n" + para
+    doc = seed_doc_from_markdown(seed)
+    root = _root(doc)
+
+    # The move: the image paragraph leaves its own safe spot and lands
+    # directly under the bullet, no blank-line block between them.
+    with doc.transaction():
+        img_idx = next(
+            i
+            for i, c in enumerate(root.children)
+            if isinstance(c, XmlElement) and "![img.png]" in serialize_block(c)
+        )
+        del root.children[img_idx]
+        list_idx = next(
+            i
+            for i, c in enumerate(root.children)
+            if isinstance(c, XmlElement) and c.tag == "bulletList"
+        )
+        el, finishers = build_block_element(image, top_level_block_ranges(image)[0])
+        root.children.insert(list_idx + 1, el)
+        for f in finishers:
+            f()
+
+    body = checkpoint_body(seed, doc, TouchedTracker(doc))
+    assert body.count("![img.png]") == 1, body
+    assert bullet + image in body, body
+    # Sanity: this is the incident's drift condition — the image line
+    # reparses as a continuation of the list, not its own block.
+    merged = next(
+        r for r in top_level_block_ranges(body) if body[r.start : r.end].startswith("- some")
+    )
+    assert image.strip() in body[merged.start : merged.end]
+
+    restamp_block_ids(doc, body)
+    ids = [dict(c.attributes).get(BLOCK_ID_ATTR) for c in root.children]
+    assert len([i for i in ids if i]) == len(set(i for i in ids if i)), (
+        f"restamp emitted a duplicated id — UniqueBlockIdentity would null it: {ids}"
+    )
+
+    # Two checkpoint rounds of typing in the unrelated paragraph.
+    for marker in ("X", "Y"):
+        tracker = TouchedTracker(doc)
+        target = next(
+            c for c in root.children if "Unrelated" in serialize_block(c)
+        )
+        with doc.transaction():
+            target.children[0].insert(0, marker)
+        new_body = checkpoint_body(body, doc, tracker)
+        assert new_body.count("![img.png]") == 1, new_body
+        restamp_block_ids(doc, new_body)
+        tracker.stop()
+        body = new_body
+
+
+def test_checkpoint_body_still_dedups_legacy_literally_shared_ids() -> None:
+    """Snapshots persisted before the family-id scheme can hold several
+    children carrying the literal same id. Those normalize to the same
+    family base, so the untouched path still emits their shared range
+    exactly once — neither duplicated nor dropped."""
+    from app.wiki.markdown_blocks import top_level_block_ranges
+    from app.wiki.markdown_yjs import build_block_element
+
+    doc = Doc()
+    root = _root(doc)
+    for text in ("- new\n", "- old\n"):
+        with doc.transaction():
+            el, finishers = build_block_element(text, top_level_block_ranges(text)[0])
+            root.children.append(el)
+            for f in finishers:
+                f()
+    body = "- new\n- old\n"
+    with doc.transaction():
+        for c in root.children:
+            c.attributes[BLOCK_ID_ATTR] = "b0"
+
+    cp = checkpoint_body(body, doc, TouchedTracker(doc))
+    assert cp == body, cp
 
 
 def test_apply_markdown_diff_preserves_lineage_of_untouched_blocks() -> None:

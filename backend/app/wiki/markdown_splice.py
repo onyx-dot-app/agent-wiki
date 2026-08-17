@@ -33,6 +33,8 @@ Two pieces:
 from __future__ import annotations
 
 import difflib
+import re
+from typing import overload
 
 from pycrdt import Doc, Subscription, XmlElement, XmlFragment
 
@@ -48,6 +50,44 @@ from app.wiki.markdown_yjs import (
 )
 
 _ROW_TAGS = ("tableRow", "tableSeparator")
+
+# Family form of a positional block id: ``b5.1``, ``b5.2``, ... — stamped by
+# restamp_block_ids when several doc children map onto one reparsed block
+# range (family base ``b5``). Ids on the wire stay unique per child: the
+# frontend's UniqueBlockIdentity extension (frontend/src/lib/editor/blocks.ts)
+# nulls the id of any top-level node that duplicates another's, and an
+# id-less child looks brand-new to checkpoint_body — which then serializes it
+# *in addition to* the verbatim base_body range that already contains its
+# text, compounding one copy per checkpoint (the Value Proposition storm).
+_FAMILY_ID_RE = re.compile(r"^(b\d+)\.\d+$")
+
+
+@overload
+def _family_base(block_id: str) -> str: ...
+@overload
+def _family_base(block_id: None) -> None: ...
+def _family_base(block_id: str | None) -> str | None:
+    """The base positional id a (possibly family-form) block id resolves to.
+
+    ``b5.1`` -> ``b5``; anything else (a plain ``b5``, a client-minted id, or
+    ``None``) passes through unchanged.
+    """
+    if block_id is None:
+        return None
+    m = _FAMILY_ID_RE.match(block_id)
+    return m.group(1) if m else block_id
+
+
+@overload
+def _family_row(row_id: str) -> str: ...
+@overload
+def _family_row(row_id: None) -> None: ...
+def _family_row(row_id: str | None) -> str | None:
+    """Row-id counterpart of ``_family_base``: ``b5.1:r0`` -> ``b5:r0``."""
+    if row_id is None or ":" not in row_id:
+        return row_id
+    prefix, rest = row_id.split(":", 1)
+    return f"{_family_base(prefix)}:{rest}"
 
 
 class TouchedTracker:
@@ -144,58 +184,54 @@ def checkpoint_body(base_body: str, doc: Doc, tracker: TouchedTracker) -> str:
 
     root = doc.get(ROOT_XML_KEY, type=XmlFragment)
     parts: list[str] = []
-    # Ids restamp_block_ids has already emitted an untouched, verbatim
-    # range for — restamp_block_ids can assign the *same* id to more than
-    # one doc child (when a fresh reparse of base_body merges what the doc
-    # still models as separate elements — e.g. two adjacent bullet lists;
-    # see its own docstring), and orig_by_id/leading_gap_start are keyed by
-    # id, not by child, so every child sharing an id resolves to the exact
-    # same base_body range in *this* (whole-range verbatim slice) branch.
-    # Emitting that range on more than one child duplicates it outright —
-    # and since the duplicated output becomes the *next* checkpoint's own
-    # base_body, still carrying the same shared id, it compounds on every
-    # subsequent untouched checkpoint rather than staying merely wrong once
-    # (confirmed in review — a real regression from restamp_block_ids' own
-    # id-sharing fix, not present before it).
+    # Every id-keyed structure here is keyed by *family base*
+    # (``_family_base``): restamp_block_ids stamps children that map onto
+    # one reparsed block range with per-child family ids (``b5``, ``b5.1``,
+    # ...), and orig_by_id/leading_gap_start come from base_body's own
+    # reparse, which only knows the base (``b5``). Touch-membership also
+    # resolves by base: touching any family member re-serializes them all —
+    # the shared range can only be replaced as a unit, and per-child
+    # serialization is concatenation, not duplication. (Legacy snapshots
+    # where several children carry the literal same id normalize to the
+    # same base too, so both generations behave identically here.)
+    touched_bases = {_family_base(i) for i in tracker.touched_block_ids}
+    touched_rows_by_base: dict[str, set[str]] = {}
+    for raw_block_id, raw_row_ids in tracker.touched_row_ids.items():
+        touched_rows_by_base.setdefault(_family_base(raw_block_id), set()).update(
+            _family_row(r) for r in raw_row_ids
+        )
+    # Family bases already emitted as an untouched, verbatim range — that
+    # one range covers every member's text, so emitting it once per member
+    # would duplicate it outright, and the duplicated output becomes the
+    # *next* checkpoint's own base_body, compounding every round.
     #
     # Deliberately NOT applied to the table branch just below: unlike this
     # branch (one shared base_body range covering everything, requiring
     # dedup to avoid duplicating it per sharing child), _splice_table
-    # already emits only *this specific child's own rows* — an id-sharing
-    # table child was already handled correctly per-child before this fix
-    # (confirmed in review: two identical adjacent tables were byte-exact
-    # stable across repeated checkpoints). Applying the same dedup there
-    # was a second, different regression this fix introduced: it drops a
-    # second table sharing an id entirely, not just its duplicate content.
-    #
-    # The *touched* path (below, for both branches) needs no such guard
-    # either way: touching any child sharing an id marks the whole shared
-    # id touched (the membership check there is by id, not by child), so
-    # every sharing child independently re-serializes its own actual
-    # content — concatenation, not duplication.
-    emitted_untouched_ids: set[str] = set()
+    # already emits only *this specific child's own rows* — dropping a
+    # second table of the family entirely would lose it, not dedup it.
+    emitted_untouched_bases: set[str] = set()
     for child in root.children:
         if not isinstance(child, XmlElement):
             raise NotImplementedError(f"unexpected top-level child: {type(child)!r}")
         block_id = dict(child.attributes).get(BLOCK_ID_ATTR)
-        orig = orig_by_id.get(block_id) if block_id else None
+        base_id = _family_base(block_id)
+        orig = orig_by_id.get(base_id) if base_id else None
 
-        if orig is not None and child.tag == "table" and block_id not in tracker.touched_block_ids:
-            gap = base_body[leading_gap_start[block_id] : orig.start]
-            parts.append(gap + _splice_table(base_body, orig, child, tracker.touched_row_ids.get(block_id, set())))
+        if base_id is not None and orig is not None and child.tag == "table" and base_id not in touched_bases:
+            gap = base_body[leading_gap_start[base_id] : orig.start]
+            parts.append(gap + _splice_table(base_body, orig, child, touched_rows_by_base.get(base_id, set())))
             continue
 
         touched = (
-            orig is None
-            or block_id in tracker.touched_block_ids
-            or block_id in tracker.touched_row_ids
+            orig is None or base_id in touched_bases or base_id in touched_rows_by_base
         )
         if not touched:
-            assert orig is not None and block_id is not None
-            if block_id in emitted_untouched_ids:
+            assert orig is not None and base_id is not None
+            if base_id in emitted_untouched_bases:
                 continue
-            emitted_untouched_ids.add(block_id)
-            parts.append(base_body[leading_gap_start[block_id] : orig.end])
+            emitted_untouched_bases.add(base_id)
+            parts.append(base_body[leading_gap_start[base_id] : orig.end])
             continue
 
         parts.append(serialize_block(child))
@@ -241,8 +277,19 @@ def restamp_block_ids(doc: Doc, body: str) -> None:
     fix. Handled here by diffing each child's own serialization against
     each reparsed block's raw text (``difflib``, not a bare index) — an
     "equal"/"replace" run of one-or-more children maps onto whichever
-    reparsed block(s) it actually corresponds to, so multiple children can
-    correctly collapse onto the same id instead of drifting apart.
+    reparsed block(s) it actually corresponds to.
+
+    Children that map onto the *same* reparsed block get **family ids**
+    (first child ``b5``, then ``b5.1``, ``b5.2``, ...), never the same
+    literal id: every consumer in this module resolves them through
+    ``_family_base``, while the ids each individual child carries stay
+    unique document-wide. That uniqueness is load-bearing for the round
+    trip through connected clients — the frontend's UniqueBlockIdentity
+    extension nulls the ``_blockId`` of any top-level node duplicating
+    another's, and once a family member's id is gone, ``checkpoint_body``
+    would re-serialize it as brand-new on top of the verbatim base range
+    that already contains its text: one extra copy committed per
+    checkpoint, compounding for as long as the session stays dirty.
     """
     root = doc.get(ROOT_XML_KEY, type=XmlFragment)
     children = [c for c in root.children if isinstance(c, XmlElement)]
@@ -250,12 +297,15 @@ def restamp_block_ids(doc: Doc, body: str) -> None:
     old_texts = [serialize_block(c) for c in children]
     new_texts = [body[b.start : b.end] for b in blocks]
     matcher = difflib.SequenceMatcher(a=old_texts, b=new_texts, autojunk=False)
+    family_counts: dict[int, int] = {}
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "insert":
             continue  # a reparsed block with no corresponding doc child — nothing to restamp
         for offset, child in enumerate(children[i1:i2]):
             j = min(j1 + offset, j2 - 1) if j2 > j1 else max(j1 - 1, 0)
-            block_id = f"b{j}"
+            n = family_counts.get(j, 0)
+            family_counts[j] = n + 1
+            block_id = f"b{j}" if n == 0 else f"b{j}.{n}"
             if dict(child.attributes).get(BLOCK_ID_ATTR) != block_id:
                 child.attributes[BLOCK_ID_ATTR] = block_id
             if child.tag == "table":
@@ -290,7 +340,11 @@ def _splice_table(
     orig_rows = {r.row_id: r for r in orig.rows}
     parts: list[str] = []
     for index, row_el in enumerate(table_el.children):
-        row_id = dict(row_el.attributes).get(ROW_ID_ATTR)
+        # Rows of a family-id table carry the child's family prefix
+        # (``b5.1:r0``); orig rows come from base_body's reparse, which
+        # only knows the base (``b5:r0``) — normalize before looking up.
+        # touched_row_ids arrives from checkpoint_body already normalized.
+        row_id = _family_row(dict(row_el.attributes).get(ROW_ID_ATTR))
         orig_row = orig_rows.get(row_id) if row_id else None
         if orig_row is None or row_id in touched_row_ids:
             touched = True
