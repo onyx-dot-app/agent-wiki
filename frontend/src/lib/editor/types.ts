@@ -34,6 +34,30 @@ export interface CommentDraft {
   quotedText: string;
 }
 
+/** Inline marks the selection toolbar can toggle. Underline is deliberately
+ * absent: the markdown<->Yjs codec has no representation for it, so the mark
+ * would render live and then silently vanish on the next checkpoint. */
+export type ToggleMark = "bold" | "italic" | "strike" | "code";
+
+/** Top-level block styles the selection toolbar can switch between. */
+export type BlockStyle =
+  | "paragraph"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "bulletList"
+  | "orderedList"
+  | "taskList";
+
+/** Snapshot of the current selection's formatting, driving the toolbar's
+ * active states. `link` is the active link mark's href ("" when a link is
+ * active without one), null when no link is active. */
+export interface SelectionFormatState {
+  marks: Record<ToggleMark, boolean>;
+  block: BlockStyle;
+  link: string | null;
+}
+
 /** Imperative handle for scrolling the editor to a raw-doc position — used
  * to bring an anchored comment into view (click-to-focus, `?comment=<id>`
  * deep links) and to back the margin-rail/custom-scrollbar UI. Shape
@@ -79,4 +103,14 @@ export interface CoeditorHandle {
    * synchronously inside the scroll event so overlays can repaint in the
    * same frame as the editor. Returns the unsubscriber. */
   subscribeLayout: (cb: (kind: "scroll" | "geometry") => void) => () => void;
+  /** The current selection's formatting, for the selection toolbar. Null
+   * before the editor mounts. */
+  formatState: () => SelectionFormatState | null;
+  /** Toggle an inline mark on the current selection. */
+  toggleMark: (mark: ToggleMark) => void;
+  /** Switch the current selection's top-level block style. */
+  setBlockStyle: (style: BlockStyle) => void;
+  /** Set (href non-empty) or clear (href "") the link mark on the current
+   * selection. */
+  setLink: (href: string) => void;
 }

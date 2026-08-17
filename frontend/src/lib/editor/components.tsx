@@ -32,9 +32,11 @@ import {
 import { opaqueId } from "@/lib/editor/ids";
 import type {
   AnchoredHighlightTarget,
+  BlockStyle,
   CoeditorHandle,
   CommentDraft,
   CommentHighlightTarget,
+  SelectionFormatState,
 } from "@/lib/editor/types";
 
 /** Highlight ids whose spans contain a collapsed caret or intersect a
@@ -404,6 +406,74 @@ export function TipTapEditor({
         return () => {
           layoutSubs.current.delete(cb);
         };
+      },
+      formatState: (): SelectionFormatState | null => {
+        if (!editor) return null;
+        const block: BlockStyle = editor.isActive("heading", { level: 1 })
+          ? "h1"
+          : editor.isActive("heading", { level: 2 })
+            ? "h2"
+            : editor.isActive("heading", { level: 3 })
+              ? "h3"
+              : editor.isActive("taskList")
+                ? "taskList"
+                : editor.isActive("bulletList")
+                  ? "bulletList"
+                  : editor.isActive("orderedList")
+                    ? "orderedList"
+                    : "paragraph";
+        return {
+          marks: {
+            bold: editor.isActive("bold"),
+            italic: editor.isActive("italic"),
+            strike: editor.isActive("strike"),
+            code: editor.isActive("code"),
+          },
+          block,
+          link: editor.isActive("link")
+            ? ((editor.getAttributes("link").href as string | undefined) ?? "")
+            : null,
+        };
+      },
+      toggleMark: (mark) => {
+        if (!editor) return;
+        const chain = editor.chain().focus();
+        if (mark === "bold") chain.toggleBold().run();
+        else if (mark === "italic") chain.toggleItalic().run();
+        else if (mark === "strike") chain.toggleStrike().run();
+        else chain.toggleCode().run();
+      },
+      setBlockStyle: (style) => {
+        if (!editor) return;
+        const chain = editor.chain().focus();
+        if (style === "paragraph") {
+          // Clear whichever structure the selection is in: lifting out of a
+          // list needs the list toggled off, a heading needs setParagraph.
+          if (editor.isActive("taskList")) chain.toggleTaskList().run();
+          else if (editor.isActive("bulletList"))
+            chain.toggleBulletList().run();
+          else if (editor.isActive("orderedList"))
+            chain.toggleOrderedList().run();
+          else chain.setParagraph().run();
+        } else if (style === "h1") chain.toggleHeading({ level: 1 }).run();
+        else if (style === "h2") chain.toggleHeading({ level: 2 }).run();
+        else if (style === "h3") chain.toggleHeading({ level: 3 }).run();
+        else if (style === "bulletList") chain.toggleBulletList().run();
+        else if (style === "orderedList") chain.toggleOrderedList().run();
+        else chain.toggleTaskList().run();
+      },
+      setLink: (href) => {
+        if (!editor) return;
+        if (href) {
+          editor
+            .chain()
+            .focus()
+            .extendMarkRange("link")
+            .setLink({ href })
+            .run();
+        } else {
+          editor.chain().focus().extendMarkRange("link").unsetLink().run();
+        }
       },
     }),
     // No deps: the handle re-attaches every render, so a live session never
