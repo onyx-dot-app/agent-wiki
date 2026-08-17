@@ -41,6 +41,7 @@ import {
 import { RunAgentPanel } from "@/components/wiki/RunAgentPanel";
 import { ShareDialog } from "@/components/wiki/ShareDialog";
 import { CommentsPanel } from "@/components/wiki/CommentsPanel";
+import { SelectionToolbar } from "@/components/wiki/SelectionToolbar";
 import { EdgeScrollbar } from "@/components/wiki/EdgeScrollbar";
 import { sourceKey } from "@/components/wiki/sources";
 import { SourcesPanel } from "@/components/wiki/SourcesPanel";
@@ -69,7 +70,7 @@ import { pageTitle } from "@/lib/wiki/utils";
 import { useAuth } from "@/lib/auth";
 import { CoeditPresenceBar, TipTapEditor } from "@/lib/editor/components";
 import { useCoeditSession } from "@/lib/editor/hooks";
-import type { CoeditorHandle } from "@/lib/editor/types";
+import type { CoeditorHandle, SelectionFormatState } from "@/lib/editor/types";
 import {
   useHeaderActionsHost,
   useHeaderCrumbHost,
@@ -210,6 +211,11 @@ export function FileView({ path }: FileViewProps) {
     y: number;
     draft: CommentDraft;
   } | null>(null);
+  // Formatting snapshot for the selection toolbar, refreshed whenever the
+  // selection changes and after every toolbar action (an action changes
+  // marks without moving the selection, so the selection callback alone
+  // would leave the buttons stale).
+  const [selFmt, setSelFmt] = useState<SelectionFormatState | null>(null);
   const coeditorRef = useRef<CoeditorHandle | null>(null);
   // `viewingVersion`: a history version is displayed in the main pane (no
   // live editor — DiffView instead). `viewingOld`: that version is not the
@@ -560,9 +566,16 @@ export function FileView({ path }: FileViewProps) {
   const handleSelectionForComment = useCallback(
     (draft: CommentDraft | null, coords: { x: number; y: number } | null) => {
       setSelTool(draft && coords ? { x: coords.x, y: coords.y, draft } : null);
+      setSelFmt(
+        draft && coords ? (coeditorRef.current?.formatState() ?? null) : null,
+      );
     },
     [],
   );
+
+  const refreshSelFmt = useCallback(() => {
+    setSelFmt(coeditorRef.current?.formatState() ?? null);
+  }, []);
 
   // Agent activity rows feeding the presence avatar cluster.
   const [agents, setAgents] = useState<DocumentActivity[]>([]);
@@ -1516,28 +1529,66 @@ export function FileView({ path }: FileViewProps) {
       )}
       {selTool && (
         <div
-          onMouseDown={(e) => e.preventDefault()}
-          className="fixed z-[80] -translate-x-1/2 -translate-y-full rounded-(--radius-08) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-popover)"
+          onMouseDown={(e) => {
+            // Keep the editor selection alive while interacting with the
+            // toolbar — except in its URL input, which needs real focus.
+            if (!(e.target instanceof HTMLInputElement)) e.preventDefault();
+          }}
+          className="fixed z-[80] rounded-(--radius-12) border border-(--border-01) bg-(--background-tint-01) p-1 shadow-(--shadow-popover)"
           style={{
-            left: selTool.x,
-            top: selTool.y - 8,
+            // Opens to the right of the cursor (the selection head),
+            // top-aligned with its line, clamped inside the viewport on
+            // both axes (the panel is ~200px wide and up to ~240px tall
+            // with the link input open).
+            left: Math.max(
+              8,
+              Math.min(selTool.x + 12, window.innerWidth - 208),
+            ),
+            top: Math.max(8, Math.min(selTool.y, window.innerHeight - 248)),
           }}
         >
-          <Button
-            prominence="tertiary"
-            size="sm"
-            onClick={() => {
-              setCommentDraft(selTool.draft);
-              // Match the lane's 920px container query at click time:
-              // anywhere the lane can't show, the draft routes to the panel.
-              const rowWide = (docRowRef.current?.clientWidth ?? 0) >= 920;
-              if (panelTab !== null || isMobile || !rowWide) openComments();
-              setSelTool(null);
-              window.getSelection()?.removeAllRanges();
-            }}
-          >
-            💬 Comment
-          </Button>
+          {!viewingVersion && coedit.active && coedit.canWrite && selFmt ? (
+            <SelectionToolbar
+              state={selFmt}
+              onToggleMark={(mark) => {
+                coeditorRef.current?.toggleMark(mark);
+                refreshSelFmt();
+              }}
+              onSetBlock={(style) => {
+                coeditorRef.current?.setBlockStyle(style);
+                refreshSelFmt();
+              }}
+              onSetLink={(href) => {
+                coeditorRef.current?.setLink(href);
+                refreshSelFmt();
+              }}
+              onComment={() => {
+                setCommentDraft(selTool.draft);
+                // Match the lane's 920px container query at click time:
+                // anywhere the lane can't show, the draft routes to the panel.
+                const rowWide = (docRowRef.current?.clientWidth ?? 0) >= 920;
+                if (panelTab !== null || isMobile || !rowWide) openComments();
+                setSelTool(null);
+                window.getSelection()?.removeAllRanges();
+              }}
+            />
+          ) : (
+            <Button
+              prominence="tertiary"
+              size="sm"
+              onClick={() => {
+                setCommentDraft(selTool.draft);
+                // Match the lane's 920px container query at click time:
+                // anywhere the lane can't show, the draft routes to the panel.
+                const rowWide = (docRowRef.current?.clientWidth ?? 0) >= 920;
+                if (panelTab !== null || isMobile || !rowWide) openComments();
+                setSelTool(null);
+                window.getSelection()?.removeAllRanges();
+              }}
+            >
+              💬 Comment
+            </Button>
+          )}
         </div>
       )}
     </main>

@@ -42,7 +42,9 @@ import {
   InputRule,
   Mark,
   Node,
+  getMarkRange,
   mergeAttributes,
+  type CommandProps,
 } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { Plugin, TextSelection, type Transaction } from "@tiptap/pm/state";
@@ -389,14 +391,58 @@ const InlineCode = Mark.create({
         () =>
         ({ commands }: { commands: { setMark: (name: string) => boolean } }) =>
           commands.setMark(this.name),
+      // Backtick-aware, because this mark's own invariant (see the
+      // appendTransaction net below) is that the marked run's first and
+      // last characters ARE literal backticks: a plain toggleMark applies
+      // a tickless mark that the net strips on the very next transaction —
+      // the command must create the same shape the input rule creates, and
+      // remove the ticks along with the mark on the way off.
       toggleCode:
         () =>
-        ({
-          commands,
-        }: {
-          commands: { toggleMark: (name: string) => boolean };
-        }) =>
-          commands.toggleMark(this.name),
+        ({ state, tr, dispatch }: CommandProps) => {
+          const type = this.type;
+          const { $from, $to, from, to, empty } = state.selection;
+          const active = empty
+            ? !!getMarkRange($from, type)
+            : state.doc.rangeHasMark(from, to, type);
+          if (active) {
+            // The unwrap must cover the marked run's *own* bounds, not the
+            // selection's: a selection that merely overlaps the run would
+            // otherwise strip the mark from a slice and leave the literal
+            // backticks behind — which the next checkpoint's reparse turns
+            // straight back into a code span. When the selection starts
+            // outside the run, resolve inside its first marked character.
+            // (Several runs in one selection unwrap first-run-only — same
+            // fuzziness as Tiptap's own mark toggles.)
+            let range = getMarkRange($from, type);
+            if (!range) {
+              let marked: number | null = null;
+              state.doc.nodesBetween(from, to, (node, pos) => {
+                if (marked === null && node.isText && type.isInSet(node.marks))
+                  marked = pos;
+              });
+              if (marked !== null)
+                range = getMarkRange(state.doc.resolve(marked + 1), type);
+            }
+            if (!range) return false;
+            if (!dispatch) return true;
+            const { from: a, to: b } = range;
+            tr.removeMark(a, b, type);
+            if (state.doc.textBetween(b - 1, b) === "`") tr.delete(b - 1, b);
+            if (state.doc.textBetween(a, a + 1) === "`") tr.delete(a, a + 1);
+            return true;
+          }
+          // Wrapping needs a real single-block selection with no interior
+          // backticks (the serializer's fence would misparse them).
+          if (empty || !$from.sameParent($to)) return false;
+          if (state.doc.textBetween(from, to).includes("`")) return false;
+          if (!dispatch) return true;
+          tr.insertText("`", to);
+          tr.insertText("`", from);
+          tr.addMark(from, to + 2, type.create());
+          tr.removeStoredMark(type);
+          return true;
+        },
       unsetCode:
         () =>
         ({

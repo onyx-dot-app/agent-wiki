@@ -17,6 +17,7 @@ import {
 import { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { tiptapExtensions } from "@/lib/editor/extensions";
+import { normalizeUrl } from "@/lib/editor/extensions/components";
 import {
   commentHighlights as commentHighlightPlugin,
   sourceHighlights as sourceHighlightPlugin,
@@ -32,10 +33,35 @@ import {
 import { opaqueId } from "@/lib/editor/ids";
 import type {
   AnchoredHighlightTarget,
+  BlockStyle,
   CoeditorHandle,
   CommentDraft,
   CommentHighlightTarget,
+  SelectionFormatState,
 } from "@/lib/editor/types";
+
+/** The selection's current top-level block style — shared by
+ * `formatState` (drives the toolbar's checked state) and `setBlockStyle`
+ * (whose commands are toggles: re-applying the checked style must be a
+ * no-op, not a toggle-off). */
+function currentBlockStyle(editor: Editor): BlockStyle {
+  if (editor.isActive("codeBlock")) return "codeBlock";
+  if (editor.isActive("heading")) {
+    // Attr-less check + explicit coercion: a codec-seeded doc carries the
+    // level as the *string* Yjs XML attribute ("3"), so an attr-matched
+    // isActive("heading", { level: 3 }) never fires on loaded content.
+    const level = Number(editor.getAttributes("heading").level);
+    if (level >= 1 && level <= 6) return `h${level}` as BlockStyle;
+    return "paragraph";
+  }
+  return editor.isActive("taskList")
+    ? "taskList"
+    : editor.isActive("bulletList")
+      ? "bulletList"
+      : editor.isActive("orderedList")
+        ? "orderedList"
+        : "paragraph";
+}
 
 /** Highlight ids whose spans contain a collapsed caret or intersect a
  * selection, half-open at span ends so a caret just past a span misses —
@@ -261,8 +287,15 @@ export function TipTapEditor({
               endOffset: pmPosToTextOffset(editor, to),
               quotedText,
             };
-            const coords = editor.view.coordsAtPos(to);
-            cb(draft, { x: coords.left, y: coords.top });
+            // Anchor at the selection *head* — where the cursor actually
+            // is after selecting (mouse-release point), regardless of
+            // selection direction — so the menu opens beside the cursor.
+            const head = Math.max(
+              from,
+              Math.min(to, editor.state.selection.head),
+            );
+            const coords = editor.view.coordsAtPos(head);
+            cb(draft, { x: coords.right, y: coords.top });
           }
         }
       }
@@ -404,6 +437,66 @@ export function TipTapEditor({
         return () => {
           layoutSubs.current.delete(cb);
         };
+      },
+      formatState: (): SelectionFormatState | null => {
+        if (!editor) return null;
+        return {
+          marks: {
+            bold: editor.isActive("bold"),
+            italic: editor.isActive("italic"),
+            strike: editor.isActive("strike"),
+            code: editor.isActive("code"),
+          },
+          block: currentBlockStyle(editor),
+          link: editor.isActive("link")
+            ? ((editor.getAttributes("link").href as string | undefined) ?? "")
+            : null,
+        };
+      },
+      toggleMark: (mark) => {
+        if (!editor) return;
+        const chain = editor.chain().focus();
+        if (mark === "bold") chain.toggleBold().run();
+        else if (mark === "italic") chain.toggleItalic().run();
+        else if (mark === "strike") chain.toggleStrike().run();
+        else chain.toggleCode().run();
+      },
+      setBlockStyle: (style) => {
+        if (!editor) return;
+        // Tiptap's block commands are toggles — re-applying the style the
+        // selection already has would remove it instead of keeping it.
+        if (currentBlockStyle(editor) === style) return;
+        const chain = editor.chain().focus();
+        if (style === "paragraph") {
+          // Clear whichever structure the selection is in: lifting out of a
+          // list needs the list toggled off, a heading needs setParagraph.
+          if (editor.isActive("taskList")) chain.toggleTaskList().run();
+          else if (editor.isActive("bulletList"))
+            chain.toggleBulletList().run();
+          else if (editor.isActive("orderedList"))
+            chain.toggleOrderedList().run();
+          else chain.setParagraph().run();
+        } else if (style === "codeBlock") chain.toggleCodeBlock().run();
+        else if (style === "bulletList") chain.toggleBulletList().run();
+        else if (style === "orderedList") chain.toggleOrderedList().run();
+        else if (style === "taskList") chain.toggleTaskList().run();
+        else {
+          const level = Number(style.slice(1)) as 1 | 2 | 3 | 4 | 5 | 6;
+          chain.toggleHeading({ level }).run();
+        }
+      },
+      setLink: (href) => {
+        if (!editor) return;
+        if (href) {
+          editor
+            .chain()
+            .focus()
+            .extendMarkRange("link")
+            .setLink({ href: normalizeUrl(href) })
+            .run();
+        } else {
+          editor.chain().focus().extendMarkRange("link").unsetLink().run();
+        }
       },
     }),
     // No deps: the handle re-attaches every render, so a live session never
