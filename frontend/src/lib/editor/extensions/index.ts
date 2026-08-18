@@ -28,6 +28,7 @@ import { CommandMenu } from "@/lib/editor/extensions/commandMenu";
 import { AnchoredHighlights } from "@/lib/editor/extensions/highlights";
 import { imageSupport } from "@/lib/editor/extensions/images";
 import { LinkHover } from "@/lib/editor/extensions/linkHover";
+import { TabIndent } from "@/lib/editor/extensions/tabIndent";
 import { LinkInput } from "@/lib/editor/extensions/linkInput";
 import { presenceExtension } from "@/lib/editor/extensions/presence";
 
@@ -86,6 +87,7 @@ export function tiptapExtensions(
     JoinAdjacentLists,
     UniqueBlockIdentity,
     HeadingBackspace,
+    TabIndent,
     ThematicBreak,
     InlineCode,
     MarkdownLink,
