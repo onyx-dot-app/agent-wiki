@@ -40,8 +40,15 @@ export const TabIndent = Extension.create({
         ) {
           return false; // the list/code handling owns Tab here
         }
-        const { $from } = editor.state.selection;
-        if ($from.depth === 1 && editor.isActive("paragraph")) {
+        const { $from, $to } = editor.state.selection;
+        // Single-line gesture only: a selection spanning several blocks
+        // would hand the list-toggle every selected block, converting them
+        // all — swallow instead.
+        if (
+          $from.depth === 1 &&
+          $from.sameParent($to) &&
+          editor.isActive("paragraph")
+        ) {
           // Walk back over blank-line blocks (every blank line is its own
           // empty paragraph in this editor) to the nearest real block — a
           // blank between a list and the line being indented still reads

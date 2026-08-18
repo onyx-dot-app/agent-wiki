@@ -133,6 +133,29 @@ describe("TabIndent", () => {
     expect(topLevelTypes(editor)).toEqual(["paragraph", "paragraph"]);
   });
 
+  it("swallows Tab when the selection spans multiple blocks", () => {
+    const editor = makeEditor();
+    editor.commands.setContent({
+      type: "doc",
+      content: [
+        { type: "bulletList", content: [listItem("a")] },
+        para("first"),
+        para("second"),
+      ],
+    });
+    // Select from inside "first" through "second".
+    editor.commands.setTextSelection({
+      from: editor.state.doc.content.size - 10,
+      to: editor.state.doc.content.size - 1,
+    });
+    expect(pressTab(editor)).toBe(true);
+    expect(topLevelTypes(editor)).toEqual([
+      "bulletList",
+      "paragraph",
+      "paragraph",
+    ]);
+  });
+
   it("leaves Tab to the list handling inside a list", () => {
     const editor = makeEditor();
     editor.commands.setContent({
