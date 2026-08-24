@@ -1004,6 +1004,16 @@ class CoeditSession(Base):
     # row at open (never-read pages in tests/seed scripts), carry NULL until
     # the next open stamps them.
     doc_id: Mapped[str | None] = mapped_column(Text)
+    # The session's CRDT lineage generation. Bumped whenever the server
+    # replaces the document with a freshly seeded one (the checkpoint
+    # engine's reseed-on-divergence fallback) instead of splicing onto the
+    # existing lineage. Updates are only accepted from clients on the
+    # current generation: a Yjs update generated against a replaced lineage
+    # can never converge with the new one — merging the two unions both
+    # documents' content (whole-page duplication) rather than conflicting.
+    ydoc_lineage: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
@@ -1102,6 +1112,13 @@ class CoeditUpdate(Base):
     # deliberately NOT unique — surviving rows from two sessions of one page
     # can share a seq.
     doc_id: Mapped[str | None] = mapped_column(Text)
+    # The session's ``ydoc_lineage`` when this update was logged. A rebuild
+    # replays only rows whose lineage matches the session's current one: a
+    # row stamped with a replaced lineage is unintegrable — applying it
+    # unions the old document's content into the new one.
+    lineage: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     update_payload: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
@@ -1183,6 +1200,15 @@ class WikiDocument(Base):
     # Git HEAD the document was last seeded from / checkpointed against —
     # the merge base for the checkpoint 3-way merge.
     base_sha: Mapped[str | None] = mapped_column(Text)
+    # The document's CRDT lineage generation — the durable, page-scoped home
+    # of the counter ``coedit_sessions.ydoc_lineage`` serves per session.
+    # Mirrored from checkpoints (which bump it on a reseed) and inherited by
+    # every session that transplants this row, so the generation survives
+    # session turnover: a client holding a replaced lineage is refused even
+    # when the session it rejoins is a brand-new row.
+    ydoc_lineage: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("0")
+    )
     # When the document last checkpointed to git — the overdue-detection
     # input once the checkpoint scan reads document state (cutover). NULL for
     # a document that has never checkpointed.

@@ -47,6 +47,14 @@ from app.wiki import doc_ids, wiki_documents
 log = logging.getLogger(__name__)
 
 
+class StaleLineageError(Exception):
+    """The update was produced against a lineage generation the session has
+    replaced (a checkpoint reseed bumped ``ydoc_lineage``). It must not be
+    logged: replaying it onto the current lineage would union the replaced
+    document's content into the page rather than converge. The sender needs a
+    resync — a fresh document built from the current snapshot."""
+
+
 # --------------------------------------------------------------------------- #
 # Time helpers (match agent_activity: ISO-8601 UTC text, second precision)    #
 # --------------------------------------------------------------------------- #
@@ -86,6 +94,7 @@ class SessionRow(BaseModel):
     ydoc_checkpointed_seq: int
     base_sha: str | None
     doc_id: str | None
+    ydoc_lineage: int
     status: str
     created_at: str
     updated_at: str
@@ -121,6 +130,7 @@ def _session_row(s: CoeditSession) -> SessionRow:
         ydoc_checkpointed_seq=s.ydoc_checkpointed_seq,
         base_sha=s.base_sha,
         doc_id=s.doc_id,
+        ydoc_lineage=s.ydoc_lineage,
         status=s.status,
         created_at=s.created_at,
         updated_at=s.updated_at,
@@ -235,6 +245,7 @@ class CheckpointSessionRow(BaseModel):
     status: str
     base_sha: str | None
     doc_id: str | None
+    ydoc_lineage: int
     ydoc_seq: int
     ydoc_checkpointed_seq: int
     ydoc_snapshot: bytes | None
@@ -257,6 +268,7 @@ def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
             status=row.status,
             base_sha=row.base_sha,
             doc_id=row.doc_id,
+            ydoc_lineage=row.ydoc_lineage,
             ydoc_seq=row.ydoc_seq,
             ydoc_checkpointed_seq=row.ydoc_checkpointed_seq,
             ydoc_snapshot=row.ydoc_snapshot,
@@ -419,6 +431,10 @@ def transplant_from_document(session_id: int, path: str) -> tuple[bool, str | No
                 ydoc_snapshot_seq=0,
                 ydoc_snapshot_body=doc_row.ydoc_snapshot_body,
                 base_sha=doc_row.base_sha,
+                # The generation travels with the lineage: a session serving a
+                # reseeded document must refuse the pre-reseed generation even
+                # though the session row itself is brand new.
+                ydoc_lineage=doc_row.ydoc_lineage,
             )
             .returning(CoeditSession.id)
         ).one_or_none()
@@ -433,6 +449,7 @@ class UpdateRow(BaseModel):
     seq: int
     author_user_id: str | None  # None for a server-produced update
     client_id: str | None
+    lineage: int  # the session's ydoc_lineage when this row was logged
     update_payload: bytes
     created_at: str
 
@@ -472,6 +489,7 @@ def apply_update(
     update_bytes: bytes,
     author_user_id: str | None,
     client_id: str | None = None,
+    expected_lineage: int | None = None,
 ) -> int | None:
     """Durably log a Yjs update, returning its assigned seq (or ``None`` if the
     session isn't active).
@@ -490,17 +508,46 @@ def apply_update(
 
     This just appends the row and advances the watermark, atomically via one
     ``RETURNING`` update.
+
+    ``expected_lineage`` is the lineage generation the update was produced
+    against (the value the caller learned when it built or joined the
+    document). When given and the session has since moved to a different
+    generation (a checkpoint reseed), the update is refused with
+    ``StaleLineageError`` instead of being logged: the lineage guard lives in
+    the same conditional UPDATE that assigns the seq, so a reseed committing
+    concurrently can't slip a stale row in between a check and the append.
+    ``None`` skips the guard — for callers that hold no document at all.
     """
     now = _iso(_now())
     with session() as s:
-        bumped = s.execute(
+        stmt = (
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.status == SessionStatus.ACTIVE.value)
             .values(ydoc_seq=CoeditSession.ydoc_seq + 1, updated_at=now)
-            .returning(CoeditSession.ydoc_seq, CoeditSession.doc_id)
+            .returning(
+                CoeditSession.ydoc_seq, CoeditSession.doc_id, CoeditSession.ydoc_lineage
+            )
             .execution_options(synchronize_session=False)
-        ).one_or_none()
+        )
+        if expected_lineage is not None:
+            stmt = stmt.where(CoeditSession.ydoc_lineage == expected_lineage)
+        bumped = s.execute(stmt).one_or_none()
         if bumped is None:
+            if expected_lineage is not None:
+                current = s.execute(
+                    select(CoeditSession.status, CoeditSession.ydoc_lineage).where(
+                        CoeditSession.id == session_id
+                    )
+                ).one_or_none()
+                if (
+                    current is not None
+                    and current.status == SessionStatus.ACTIVE.value
+                    and current.ydoc_lineage != expected_lineage
+                ):
+                    raise StaleLineageError(
+                        f"session {session_id}: update for lineage {expected_lineage}, "
+                        f"session is on {current.ydoc_lineage}"
+                    )
             return None
         s.add(
             CoeditUpdate(
@@ -512,6 +559,10 @@ def apply_update(
                 # own binding rather than re-resolved through the path (which
                 # can be transiently wrong mid-move).
                 doc_id=bumped.doc_id,
+                # Stamped from the row the guard just matched, so a replayer
+                # can tell current-generation rows from replaced-generation
+                # leftovers.
+                lineage=bumped.ydoc_lineage,
                 update_payload=update_bytes,
             )
         )
@@ -543,6 +594,7 @@ def updates_since(session_id: int, after_seq: int) -> UpdatesSince:
                     seq=u.seq,
                     author_user_id=u.author_user_id,
                     client_id=u.client_id,
+                    lineage=u.lineage,
                     update_payload=u.update_payload,
                     created_at=u.created_at,
                 )
@@ -578,7 +630,13 @@ def set_base_sha(session_id: int, base_sha: str) -> bool:
 
 
 def advance_checkpoint(
-    session_id: int, *, seq: int, snapshot: bytes, body: str, base_sha: str
+    session_id: int,
+    *,
+    seq: int,
+    snapshot: bytes,
+    body: str,
+    base_sha: str,
+    bump_lineage: bool = False,
 ) -> None:
     """Record a checkpoint's result — a real commit, or a no-op where the
     doc's content already matched HEAD — moving the snapshot, the
@@ -609,6 +667,13 @@ def advance_checkpoint(
     re-advances at the *same* seq — new snapshot, new ``base_sha``, no new
     local update — and a strictly-less guard would silently discard that
     fold.
+
+    ``bump_lineage`` marks a checkpoint that *reseeded* the document — the
+    snapshot being written is a fresh CRDT lineage, not a splice of the old
+    one. Bumping ``ydoc_lineage`` in the same UPDATE makes the swap and the
+    generation change atomic: from this statement on, updates produced
+    against the replaced lineage are refused (``apply_update``'s guard) and
+    skipped by rebuilds, instead of unioning the old document into the new.
     """
     now = _iso(_now())
     with session() as s:
@@ -617,22 +682,27 @@ def advance_checkpoint(
         # conditional-UPDATE call sites (e.g. close_if_clean), and sidesteps
         # a basedpyright strict-mode gap: SQLAlchemy's plain Result.rowcount
         # isn't typed on the generic Result[Any] this execute() returns.
-        updated_path = s.scalars(
+        values: dict[str, object] = dict(
+            ydoc_snapshot=snapshot,
+            ydoc_snapshot_seq=seq,
+            ydoc_snapshot_body=body,
+            ydoc_checkpointed_seq=seq,
+            base_sha=base_sha,
+            last_checkpoint_at=now,
+            updated_at=now,
+        )
+        if bump_lineage:
+            values["ydoc_lineage"] = CoeditSession.ydoc_lineage + 1
+        updated = s.execute(
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.ydoc_checkpointed_seq <= seq)
-            .values(
-                ydoc_snapshot=snapshot,
-                ydoc_snapshot_seq=seq,
-                ydoc_snapshot_body=body,
-                ydoc_checkpointed_seq=seq,
-                base_sha=base_sha,
-                last_checkpoint_at=now,
-                updated_at=now,
-            )
-            .returning(CoeditSession.path)
+            .values(**values)
+            # RETURNING yields the post-update row, so ydoc_lineage here is
+            # the possibly-bumped generation the mirror must record.
+            .returning(CoeditSession.path, CoeditSession.ydoc_lineage)
             .execution_options(synchronize_session=False)
         ).one_or_none()
-        if updated_path is not None:
+        if updated is not None:
             s.execute(
                 delete(CoeditUpdate).where(
                     CoeditUpdate.session_id == session_id, CoeditUpdate.seq <= seq
@@ -642,7 +712,13 @@ def advance_checkpoint(
             # ``wiki_documents`` row, in this same transaction so the two
             # stores can't disagree about which snapshot exists.
             wiki_documents.mirror_checkpoint(
-                s, updated_path, seq=seq, snapshot=snapshot, body=body, base_sha=base_sha
+                s,
+                updated.path,
+                seq=seq,
+                snapshot=snapshot,
+                body=body,
+                base_sha=base_sha,
+                lineage=updated.ydoc_lineage,
             )
 
 
@@ -818,6 +894,7 @@ def on_path_moved(moves: list[PathMove]) -> list[int]:
                             snapshot=newest.ydoc_snapshot,
                             body=newest.ydoc_snapshot_body,
                             base_sha=newest.base_sha,
+                            lineage=newest.ydoc_lineage,
                         )
             except IntegrityError:
                 # A racing open_session won the unique index between our check

@@ -248,6 +248,7 @@ def _ingest_yjs_frame(
     session_id: int,
     user: User,
     raw: bytes,
+    lineage: int,
 ) -> int | None:
     """Authorize, validate, durably log and refresh presence for one inbound
     frame — returning the ``ydoc_seq`` assigned, or ``None`` if nothing was
@@ -272,7 +273,21 @@ def _ingest_yjs_frame(
     update = _apply_yjs_frame(conn, session_id, user, raw)
     if update is None:
         return None
-    seq = coedit.apply_update(session_id, update_bytes=update, author_user_id=user.id)
+    try:
+        seq = coedit.apply_update(
+            session_id,
+            update_bytes=update,
+            author_user_id=user.id,
+            expected_lineage=lineage,
+        )
+    except coedit.StaleLineageError:
+        # This connection's document is a replaced lineage (the checkpoint
+        # engine reseeded the session after we joined). Logging its update
+        # would union the old document into the new one, so it's refused;
+        # tell this client to rebuild — a fresh join gets the current
+        # lineage and snapshot.
+        conn.post({"type": "resync_required", "reason": "stale_lineage"})
+        return None
     if seq is None:
         return None  # session closed underneath us
     coedit.touch(session_id, user.id, edited=True)
@@ -284,6 +299,7 @@ async def _recv_loop(
     conn: coedit_channel.Connection,
     session_id: int,
     user: User,
+    lineage: int,
 ) -> None:
     while True:
         # Low-level receive() (not receive_bytes()/receive_json()) so one
@@ -301,7 +317,7 @@ async def _recv_loop(
             # fetch what it missed. Relaying first would leave the gap
             # undetectable.
             seq = await asyncio.to_thread(
-                _ingest_yjs_frame, conn, session_id, user, data
+                _ingest_yjs_frame, conn, session_id, user, data, lineage
             )
             if seq is not None:
                 coedit_channel.broadcast_yjs(session_id, data, seq)
@@ -563,6 +579,7 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
                 session_id=sess.id,
                 base_sha=sess.base_sha,
                 can_write=can_write,
+                lineage=sess.ydoc_lineage,
                 participants=participants,
             ).model_dump()
         )
@@ -574,7 +591,9 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
             await asyncio.to_thread(coedit_live.initial_sync_message, sess.id)
         )
 
-        recv_task = asyncio.create_task(_recv_loop(websocket, conn, sess.id, user))
+        recv_task = asyncio.create_task(
+            _recv_loop(websocket, conn, sess.id, user, sess.ydoc_lineage)
+        )
         send_task = asyncio.create_task(_send_loop(websocket, conn, ready, sess.id, user))
         done, pending = await asyncio.wait(
             {recv_task, send_task}, return_when=asyncio.FIRST_COMPLETED

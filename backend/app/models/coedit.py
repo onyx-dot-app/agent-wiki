@@ -79,6 +79,11 @@ class JoinedFrame(BaseModel):
     session_id: int
     base_sha: str | None
     can_write: bool
+    # The session's CRDT lineage generation at join. A client that later
+    # receives ``resync_required`` (the server reseeded the document) must
+    # discard its local doc and rejoin — the fresh join carries the new
+    # generation.
+    lineage: int
     participants: list[ParticipantOut]
 
 

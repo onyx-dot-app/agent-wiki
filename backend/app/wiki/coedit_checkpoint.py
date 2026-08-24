@@ -354,6 +354,22 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     tracker = TouchedTracker(doc)
     since = coedit.updates_since(sess.id, sess.ydoc_snapshot_seq)
     for u in since.updates:
+        if u.lineage != sess.ydoc_lineage:
+            # A leftover from a replaced lineage (logged in the window between
+            # a reseed's snapshot read and its lineage bump). Integrating it
+            # would union the old document's content into the new one — the
+            # whole-page-duplication failure the lineage guard exists to kill.
+            # Its content (at most one client's in-flight burst) is lost;
+            # losing it is strictly better than doubling the page.
+            log.warning(
+                "coedit checkpoint: session %s seq %d is from replaced lineage "
+                "%d (current %d); skipping",
+                sess.id,
+                u.seq,
+                u.lineage,
+                sess.ydoc_lineage,
+            )
+            continue
         try:
             doc.apply_update(u.update_payload)
         except Exception:
@@ -603,6 +619,17 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             change_kind = ChangeKind.EDIT
             tracker.reset()
             for u in late.updates:
+                if u.lineage != sess.ydoc_lineage:
+                    # Same replaced-lineage guard as _rebuild_doc's replay.
+                    log.warning(
+                        "coedit checkpoint: session %s seq %d is from replaced "
+                        "lineage %d (current %d); skipping late fold",
+                        sess.id,
+                        u.seq,
+                        u.lineage,
+                        sess.ydoc_lineage,
+                    )
+                    continue
                 try:
                     doc.apply_update(u.update_payload)
                 except Exception:
@@ -696,17 +723,28 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             snapshot=snapshot,
             body=new_body,
             base_sha=new_sha,
+            # A reseed writes a fresh CRDT lineage: bump the generation in the
+            # same UPDATE, so updates produced against the replaced lineage
+            # are refused from this statement on instead of unioning the old
+            # document into the new (whole-page duplication).
+            bump_lineage=reseeded,
         )
         if result is not None:
             wiki_drafts.clear_if_diverged(path, new_body)
         if diverged:
             if reseeded:
-                # A fresh lineage shares no history with what clients hold, so
-                # there is no delta to send: they converge on their next
-                # reconnect handshake, against the snapshot just written.
+                # A fresh lineage shares no history with what clients hold —
+                # there is no delta to send, and any update they produce
+                # against the replaced lineage is refused from here on
+                # (``apply_update``'s lineage guard). Tell every connection to
+                # rebuild from the new snapshot now, rather than waiting for a
+                # chance reconnect while their editors show pre-merge content.
+                coedit_channel.publish_control(
+                    session_id, {"type": "resync_required", "reason": "reseeded"}
+                )
                 log.warning(
-                    "coedit checkpoint: session %s reseeded on divergence; connected "
-                    "clients stay on pre-merge content until they reconnect",
+                    "coedit checkpoint: session %s reseeded on divergence; "
+                    "resync_required sent to connected clients",
                     session_id,
                 )
             else:
