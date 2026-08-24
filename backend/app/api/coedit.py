@@ -286,6 +286,24 @@ def _ingest_yjs_frame(
         # would union the old document into the new one, so it's refused;
         # tell this client to rebuild — a fresh join gets the current
         # lineage and snapshot.
+        #
+        # Deliberately NOT closed server-side. A client that honors
+        # ``resync_required`` closes and rebuilds itself; a client that
+        # predates the frame is *safer* left on this connection, where its
+        # updates keep being refused — force-closing it would make its
+        # reconnect loop rejoin at the current generation, and the sync
+        # handshake would then push its replaced-lineage content through a
+        # connection this guard has no reason to distrust. Refusal here is
+        # the corruption barrier; the frame is only the recovery signal.
+        # Each refusal costs the sender a keystroke's worth of edits, which
+        # the WARNING below makes visible to operators.
+        log.warning(
+            "coedit: session %s refused a stale-lineage update from user %s "
+            "(connection joined at lineage %d); resync_required sent",
+            session_id,
+            user.id,
+            lineage,
+        )
         conn.post({"type": "resync_required", "reason": "stale_lineage"})
         return None
     if seq is None:
