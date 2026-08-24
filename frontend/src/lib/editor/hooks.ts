@@ -615,7 +615,11 @@ export function useCoeditSession(opts: {
           if (!cancelled) resync("reconnected onto a newer generation");
           return;
         }
-        docLineage = snap.lineage;
+        // `?? docLineage`: a join answered by a backend that predates the
+        // field (mid rolling deploy) must not erase a generation this pair
+        // already learned — nulling it would disarm the mismatch check on
+        // the next reconnect and let a reseeded lineage merge with this one.
+        docLineage = snap.lineage ?? docLineage;
         failedAttempts = 0;
         setReconnectAttempts(0);
         setJoinError(null);
