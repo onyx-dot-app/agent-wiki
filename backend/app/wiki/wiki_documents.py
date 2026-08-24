@@ -84,24 +84,37 @@ def mirror_seed(
     seq 0. Overwrites an existing row — a fresh seed means the session layer
     just minted a new lineage for this page, and while sessions own document
     state the mirror's job is to record whichever lineage is live, not to
-    defend the old one.
+    defend the old one. A markdown seed is by definition generation 0: it
+    only happens when no document row existed to transplant.
     """
-    _upsert(s, path, snapshot=snapshot, seq=0, body=body, base_sha=base_sha)
+    _upsert(s, path, snapshot=snapshot, seq=0, body=body, base_sha=base_sha, lineage=0)
 
 
 def mirror_checkpoint(
-    s: Session, path: str, *, seq: int, snapshot: bytes, body: str, base_sha: str
+    s: Session, path: str, *, seq: int, snapshot: bytes, body: str, base_sha: str, lineage: int
 ) -> None:
     """Mirror a checkpoint's advanced snapshot state onto the page's document
     row. Upsert, not update: the row can be missing for a session that
     predates the table (opened before the migration ran), and the checkpoint
     state is complete in itself — snapshot, body, and base all move together.
+    ``lineage`` is the session's generation after the checkpoint (bumped by a
+    reseed); mirroring it here is what lets a later session inherit it on
+    transplant, so the generation survives session turnover.
     """
-    _upsert(s, path, snapshot=snapshot, seq=seq, body=body, base_sha=base_sha)
+    _upsert(
+        s, path, snapshot=snapshot, seq=seq, body=body, base_sha=base_sha, lineage=lineage
+    )
 
 
 def _upsert(
-    s: Session, path: str, *, snapshot: bytes, seq: int, body: str, base_sha: str | None
+    s: Session,
+    path: str,
+    *,
+    snapshot: bytes,
+    seq: int,
+    body: str,
+    base_sha: str | None,
+    lineage: int,
 ) -> None:
     doc_id = doc_ids.id_for_path_in(s, path)
     if doc_id is None:
@@ -118,6 +131,7 @@ def _upsert(
         ydoc_snapshot_body=body,
         ydoc_seq=seq,
         base_sha=base_sha,
+        ydoc_lineage=lineage,
         created_at=now,
         updated_at=now,
     )
@@ -130,6 +144,7 @@ def _upsert(
                 "ydoc_snapshot_body": stmt.excluded.ydoc_snapshot_body,
                 "ydoc_seq": stmt.excluded.ydoc_seq,
                 "base_sha": stmt.excluded.base_sha,
+                "ydoc_lineage": stmt.excluded.ydoc_lineage,
                 "updated_at": stmt.excluded.updated_at,
             },
         )
@@ -137,7 +152,14 @@ def _upsert(
 
 
 def mirror_session_state(
-    s: Session, path: str, *, seq: int, snapshot: bytes, body: str, base_sha: str | None
+    s: Session,
+    path: str,
+    *,
+    seq: int,
+    snapshot: bytes,
+    body: str,
+    base_sha: str | None,
+    lineage: int,
 ) -> None:
     """Re-mirror a session's snapshot state wholesale — the move re-key's
     repair for the window where a checkpoint resolved the page's old path,
@@ -145,7 +167,9 @@ def mirror_session_state(
     ``coedit.on_path_moved``). Runs after the registry re-key, so ``path``
     is the page's live location and resolves its real id.
     """
-    _upsert(s, path, snapshot=snapshot, seq=seq, body=body, base_sha=base_sha)
+    _upsert(
+        s, path, snapshot=snapshot, seq=seq, body=body, base_sha=base_sha, lineage=lineage
+    )
 
 
 def mirror_base_sha(s: Session, path: str, base_sha: str) -> None:

@@ -94,7 +94,19 @@ def rebase_session(session_id: int, head_sha: str) -> RebaseOutcome:
         return RebaseOutcome.NOOP
 
     # author_user_id=None: the server produced this update, not a person.
-    seq = coedit.apply_update(session_id, update_bytes=update_bytes, author_user_id=None)
+    # expected_lineage: the delta was built from the document as of ``sess``;
+    # if a checkpoint reseeded the session in the meantime, folding it in
+    # would poison the new lineage — refuse and let the trigger re-run
+    # against the settled state.
+    try:
+        seq = coedit.apply_update(
+            session_id,
+            update_bytes=update_bytes,
+            author_user_id=None,
+            expected_lineage=sess.ydoc_lineage,
+        )
+    except coedit.StaleLineageError:
+        return RebaseOutcome.SKIP
     if seq is None:
         return RebaseOutcome.SKIP  # session closed underneath us
     coedit_channel.broadcast_yjs(session_id, create_update_message(update_bytes), seq)
