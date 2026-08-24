@@ -56,6 +56,12 @@ export interface CoeditSession {
   session_id: number;
   base_sha: string | null;
   can_write: boolean;
+  /** The session's CRDT lineage generation at join, or null when the server
+   * predates the field (mid rolling deploy). Changes only when the server
+   * reseeds the document (a checkpoint divergence it couldn't splice); a doc
+   * built against a different generation can never converge with the session
+   * again and must be discarded, not synced. */
+  lineage: number | null;
   participants: CoeditParticipant[];
 }
 
@@ -64,7 +70,12 @@ export interface CoeditSession {
  * settles at *join*, not at connection-end; `closed` is the separate handle
  * the reconnect loop awaits for the connection's whole lifetime. */
 export interface CoeditConnection extends CoeditSession {
-  closed: Promise<{ code: number; expected: boolean }>;
+  /** True when this join landed on a different lineage generation than the
+   * caller's doc was built against (`expectedLineage`). The connection has
+   * already suppressed every sync exchange; the caller must close it,
+   * rebuild the doc, and rejoin. */
+  staleLineage: boolean;
+  closed: Promise<{ code: number; expected: boolean; resync: boolean }>;
   /** Handle for `closeSession`/`checkpointSession` — identifies this socket,
    * not the session, so a reconnect can't be mistaken for it. */
   connectionId: number;
@@ -103,16 +114,26 @@ let nextConnectionId = 1;
  *
  * `onPresence` fires with the full roster on every membership change.
  *
- * There is no "the server replaced the document" signal to handle. A
- * checkpoint's merge or an out-of-band commit folded into the session arrives
- * as an ordinary Yjs update on this same connection, which Yjs integrates
- * against whatever this client has — so the caret stays put and pending local
- * edits rebase over it, instead of the connection being torn down.
+ * A checkpoint's merge or an out-of-band commit folded into the session
+ * normally arrives as an ordinary Yjs update on this same connection, which
+ * Yjs integrates against whatever this client has — the caret stays put and
+ * pending local edits rebase over it. The one exception is `resync_required`:
+ * the server *replaced* the document's CRDT lineage (a divergence it couldn't
+ * splice), so this doc can never converge again — the connection closes with
+ * `resync: true` and the caller must rebuild the doc and rejoin.
  */
 export function connectSession(
   path: string,
   doc: Y.Doc,
   awareness: Awareness,
+  // The lineage generation `doc` last synced against, or null for a fresh
+  // doc. If the `joined` frame reports a different generation, every sync
+  // exchange on this connection is suppressed immediately: the server's
+  // sync request arrives right behind `joined`, and answering it would push
+  // this replaced-lineage doc's content onto the reseeded session — on a
+  // connection the server has no reason to distrust. The caller still gets
+  // the resolved connection and does the visible handling (close + rebuild).
+  expectedLineage: number | null,
   onPresence: (participants: CoeditParticipant[]) => void,
 ): Promise<CoeditConnection> {
   return new Promise((resolve, reject) => {
@@ -127,18 +148,36 @@ export function connectSession(
     // overwrite that specific rejection with its own generic message.
     let failedWithDetail = false;
     let expectedClose = false;
+    // Set by a `resync_required` frame: the server replaced the document's
+    // CRDT lineage (a checkpoint reseed), so this doc must be discarded and
+    // the session rejoined fresh — syncing it further would union old and
+    // new content. Carried out through `closed` for the reconnect loop.
+    let resyncRequested = false;
     let sessionId: number | null = null;
     let resolveClosed:
-      | ((info: { code: number; expected: boolean }) => void)
+      | ((info: { code: number; expected: boolean; resync: boolean }) => void)
       | null = null;
-    const closed = new Promise<{ code: number; expected: boolean }>((res) => {
+    const closed = new Promise<{
+      code: number;
+      expected: boolean;
+      resync: boolean;
+    }>((res) => {
       resolveClosed = res;
     });
 
     // Local Yjs changes -> outbound binary frames. `origin === "remote"`
     // filters out re-broadcasting what handleMessage just applied *from*
     // the server — only genuine local edits/presence changes go back out.
+    // Nothing outbound before `joined` (and its lineage verdict), and nothing
+    // after the verdict goes stale: an edit typed in the open->joined window
+    // would otherwise be sent from a doc whose lineage the server hasn't
+    // vouched for yet — on a reconnect after a reseed, that's
+    // replaced-lineage content entering the log through a connection the
+    // server's own guard has no reason to distrust. Nothing is lost by
+    // waiting: the post-join sync exchange carries any local state the
+    // server is missing.
     const onDocUpdate = (update: Uint8Array, origin: unknown) => {
+      if (!joined || resyncRequested) return;
       if (origin === "remote" || ws.readyState !== WebSocket.OPEN) return;
       ws.send(encodeUpdateMessage(update));
     };
@@ -146,6 +185,7 @@ export function connectSession(
       changes: { added: number[]; updated: number[]; removed: number[] },
       origin: unknown,
     ) => {
+      if (!joined || resyncRequested) return;
       if (origin === "remote" || ws.readyState !== WebSocket.OPEN) return;
       const changed = changes.added.concat(changes.updated, changes.removed);
       if (changed.length === 0) return;
@@ -167,6 +207,10 @@ export function connectSession(
 
     ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
+        // Once a resync is known to be needed, this doc must neither absorb
+        // the session's frames nor answer the server's sync request — its
+        // reply would carry replaced-lineage content.
+        if (resyncRequested) return;
         const reply = handleMessage(new Uint8Array(event.data), doc, awareness);
         if (reply && ws.readyState === WebSocket.OPEN) ws.send(reply);
         return;
@@ -192,6 +236,18 @@ export function connectSession(
         case "joined": {
           joined = true;
           sessionId = msg.session_id as number;
+          // Absent/malformed lineage (a backend without the field, mid
+          // rolling deploy) is null — never compared, so a mixed-version
+          // window can't fire a spurious resync that discards local edits.
+          const lineage = typeof msg.lineage === "number" ? msg.lineage : null;
+          // Mismatched generation: suppress sync from this instant (see
+          // `expectedLineage`); the caller closes and rebuilds on seeing
+          // `staleLineage` on the resolved connection.
+          const staleLineage =
+            expectedLineage !== null &&
+            lineage !== null &&
+            lineage !== expectedLineage;
+          if (staleLineage) resyncRequested = true;
           sockets.set(connectionId, {
             ws,
             pendingCheckpoints,
@@ -203,10 +259,20 @@ export function connectSession(
             session_id: sessionId,
             base_sha: msg.base_sha as string | null,
             can_write: msg.can_write as boolean,
+            lineage,
+            staleLineage,
             participants: msg.participants as CoeditParticipant[],
             closed,
             connectionId,
           });
+          return;
+        }
+        case "resync_required": {
+          // The server reseeded the session's document; our doc is a replaced
+          // lineage and every further sync frame would only union the two.
+          // Close and let the reconnect loop rebuild the doc and rejoin.
+          resyncRequested = true;
+          ws.close();
           return;
         }
         case "ping":
@@ -259,7 +325,11 @@ export function connectSession(
         reject(new ApiError(0, "Failed to join the editing session."));
         return;
       }
-      resolveClosed?.({ code: event.code, expected: expectedClose });
+      resolveClosed?.({
+        code: event.code,
+        expected: expectedClose,
+        resync: resyncRequested,
+      });
     };
 
     // A no-op: onclose (which always follows an error per the WebSocket

@@ -290,6 +290,11 @@ export function useCoeditSession(opts: {
   // recovery is already running.
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [retryToken, setRetryToken] = useState(0);
+  // Bumped when the server replaces the session document's CRDT lineage (a
+  // checkpoint reseed): re-runs the whole session effect, so the doc pair,
+  // presence, timers, and status all reset through the one existing cleanup
+  // path instead of a second hand-rolled lifecycle inside the loop.
+  const [resyncToken, setResyncToken] = useState(0);
   const retryJoin = useCallback(() => {
     setJoinError(null);
     setJoinErrorRetryable(true);
@@ -499,6 +504,13 @@ export function useCoeditSession(opts: {
     // reconnect (so your own caret stays put) and lets anything typed while
     // disconnected merge on reconnect instead of being discarded.
     //
+    // The one exception is a server-signaled resync: the server *replaced* the
+    // document's CRDT lineage (a checkpoint divergence it couldn't splice), so
+    // this doc can never converge with the session again — syncing the two
+    // unions both documents' content into a duplicated page. That case bumps
+    // `resyncToken`, re-running this whole effect: the cleanup below tears the
+    // pair down and the next run builds a fresh one.
+    //
     // Still never the outer `doc`/`awareness` state: this effect re-runs on
     // every path change and React does not reset that state, so reusing it would
     // hand the previous path's populated doc to this path's session and risk it
@@ -528,6 +540,26 @@ export function useCoeditSession(opts: {
 
     void (async () => {
       let failedAttempts = 0;
+      // The lineage generation this run's pair has synced against, from the
+      // last successful join; null until the first one (a fresh doc belongs
+      // to no generation, so its first join can never mismatch). A reconnect
+      // that lands on a *different* generation means the server reseeded
+      // while we were away — the pair must be discarded before any further
+      // sync, same as an explicit resync frame. Both cases end this run via
+      // `resyncToken`; the effect re-run starts over with a fresh pair, which
+      // is also why a lineage disagreement can't loop: a fresh pair passes
+      // `null` and always joins cleanly.
+      let docLineage: number | null = null;
+      const resync = (why: string) => {
+        // Whatever this pair held beyond its last relayed update is
+        // unrecoverable by design — a replaced lineage can't be merged
+        // without duplicating the page — so leave a trace for support.
+        console.warn(
+          `[coedit] server replaced the document lineage (${why}); ` +
+            "rebuilding the editor — unsynced local edits are discarded",
+        );
+        setResyncToken((t) => t + 1);
+      };
       while (!cancelled) {
         let snap;
         try {
@@ -535,6 +567,7 @@ export function useCoeditSession(opts: {
             path,
             sessionDoc,
             sessionAwareness,
+            docLineage,
             (p) => {
               if (!cancelled) setParticipants(p);
             },
@@ -574,6 +607,15 @@ export function useCoeditSession(opts: {
           closeSession(snap.connectionId);
           return;
         }
+        if (snap.staleLineage) {
+          // The server reseeded the document while we were disconnected: this
+          // pair holds a replaced lineage (svc has already suppressed its
+          // sync). Drop the connection and start the effect over.
+          closeSession(snap.connectionId);
+          if (!cancelled) resync("reconnected onto a newer generation");
+          return;
+        }
+        docLineage = snap.lineage;
         failedAttempts = 0;
         setReconnectAttempts(0);
         setJoinError(null);
@@ -608,10 +650,15 @@ export function useCoeditSession(opts: {
           }, AUTOSAVE_IDLE_MS);
         }
 
-        const { expected } = await snap.closed;
+        const { expected, resync: resyncClose } = await snap.closed;
         if (ownedConnection.current === snap.connectionId)
           ownedConnection.current = null;
         if (cancelled || expected) return;
+        if (resyncClose) {
+          // The server reseeded this session's document mid-connection.
+          resync("resync_required");
+          return;
+        }
         // The connection dropped: the whole gap until the next successful
         // join renders as "Reconnecting…", not as a save failure — the save
         // machinery's rejections during this window are consequences of the
@@ -664,7 +711,7 @@ export function useCoeditSession(opts: {
       })();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, path, retryToken]);
+  }, [enabled, path, retryToken, resyncToken]);
 
   return {
     active,
