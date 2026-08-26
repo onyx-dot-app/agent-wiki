@@ -616,6 +616,56 @@ def updates_since(session_id: int, after_seq: int) -> UpdatesSince:
             ],
         )
 
+
+def replaced_lineage_update_payloads(session_id: int) -> list[bytes]:
+    """Payloads of surviving log rows from replaced generations, oldest first.
+
+    Read by the reseed's second retirement pass: because ``apply_update``
+    refuses old-generation rows once the bump lands, a post-bump read sees
+    every row that slipped into the pre-bump window — there is no later
+    straggler to miss. These rows are never replayed (``updates_since``
+    filters them) and are pruned by whichever future checkpoint advances
+    past their seq.
+    """
+    with session() as s:
+        return list(
+            s.scalars(
+                select(CoeditUpdate.update_payload)
+                .where(
+                    CoeditUpdate.session_id == session_id,
+                    CoeditUpdate.lineage
+                    != select(CoeditSession.ydoc_lineage)
+                    .where(CoeditSession.id == session_id)
+                    .scalar_subquery(),
+                )
+                .order_by(CoeditUpdate.seq.asc())
+            ).all()
+        )
+
+
+def extend_retired_client_ids(session_id: int, ids: set[int]) -> None:
+    """Merge ``ids`` into the session's retired set and its document mirror.
+
+    Plain read-merge-write: the only caller is the checkpoint engine, which
+    holds the per-session checkpoint lock, so nothing races the merge.
+    """
+    if not ids:
+        return
+    with session() as s:
+        row = s.get(CoeditSession, session_id)
+        if row is None:
+            return
+        merged = sorted(set(row.retired_client_ids) | ids)
+        row.retired_client_ids = merged
+        doc_id = doc_ids.id_for_path_in(s, row.path)
+        if doc_id is not None:
+            s.execute(
+                update(WikiDocument)
+                .where(WikiDocument.doc_id == doc_id)
+                .values(retired_client_ids=merged, updated_at=_iso(_now()))
+            )
+
+
 def set_base_sha(session_id: int, base_sha: str) -> bool:
     """Point an active session's merge base at ``base_sha``. True if it moved.
 

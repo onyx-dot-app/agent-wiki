@@ -151,6 +151,55 @@ def test_new_session_inherits_retired_ids(tmp_repo, monkeypatch):
     assert foreign
 
 
+def test_straggler_ids_are_retired_after_the_bump(tmp_repo, monkeypatch):
+    """A client's first-ever update logged in the reseed's pre-bump window
+    carries an id the discarded doc's state vector never saw. The post-bump
+    second pass must retire it, or that client's later mixed state vector
+    would slip past both foreign tests."""
+    from app.db.models import CoeditUpdate
+    from app.db.session import session as db_session
+    from app.wiki import coedit_checkpoint
+
+    sess, old_doc = _seed_session(_BODY)
+    _reseed(sess, old_doc, monkeypatch)
+
+    # Simulate the pre-bump straggler: an old-generation row (lineage 0) that
+    # survived the reseed's prune — exactly what a commit racing the bump
+    # leaves behind (apply_update would refuse it now, so insert directly).
+    straggler = markdown_yjs.seed_doc_from_markdown("STRAY typed blind\n")
+    row = coedit.get_session_for_checkpoint(sess.id)
+    assert row is not None
+    with db_session() as s:
+        s.add(
+            CoeditUpdate(
+                session_id=sess.id,
+                seq=row.ydoc_seq + 1000,
+                author_user_id=None,
+                client_id=None,
+                lineage=0,
+                update_payload=straggler.get_update(),
+            )
+        )
+    assert straggler.client_id not in row.retired_client_ids
+
+    # The second pass folds the straggler into the discarded doc and retires
+    # its id (old_doc's own state was already retired at the bump).
+    replay = Doc()
+    assert row.ydoc_snapshot is not None
+    replay.apply_update(old_doc.get_update())
+    coedit_checkpoint._retire_straggler_ids(sess.id, replay)
+
+    after = coedit.get_session_for_checkpoint(sess.id)
+    assert after is not None and straggler.client_id in after.retired_client_ids
+
+    # A mixed doc built from the straggler + current content is now foreign.
+    mixed = Doc()
+    mixed.apply_update(straggler.get_update())
+    mixed.apply_update(after.ydoc_snapshot or b"")
+    _reply, foreign = coedit_live.sync_reply(sess.id, create_sync_message(mixed))
+    assert foreign
+
+
 def test_foreign_step1_is_flagged_and_reply_withheld(tmp_repo):
     sess, _server_doc = _seed_session(_BODY)
     foreign_doc = markdown_yjs.seed_doc_from_markdown("POISON copy of the page\n")

@@ -378,6 +378,44 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     return doc, base_body, tracker, replayed_seq
 
 
+def _retire_straggler_ids(session_id: int, old_doc: Doc) -> None:
+    """Second retirement pass after a reseed's lineage bump.
+
+    The bump's initial retired set comes from the discarded doc's state
+    vector — which cannot contain the client id of an update logged *between*
+    the checkpoint's final log read and the bump (a client's first-ever
+    keystroke landing in that window). The bump is the fence: once it lands,
+    ``apply_update`` refuses old-generation rows, so the surviving
+    replaced-generation rows read here are ALL such stragglers. Folding them
+    into the discarded doc (their own lineage — they integrate; a fresh doc
+    would leave chained ones pending and invisible) surfaces every straggler
+    id for retirement. Runs under the caller's checkpoint lock.
+    """
+    stragglers = coedit.replaced_lineage_update_payloads(session_id)
+    if not stragglers:
+        return
+    for payload in stragglers:
+        try:
+            old_doc.apply_update(payload)
+        except Exception:
+            log.exception(
+                "coedit checkpoint: session %s straggler payload failed to apply "
+                "during retirement; skipping",
+                session_id,
+            )
+    sess = coedit.get_session_for_checkpoint(session_id)
+    already = set(sess.retired_client_ids) if sess is not None else set()
+    extra = coedit_live.state_vector_client_ids(old_doc.get_state()) - already
+    if extra:
+        coedit.extend_retired_client_ids(session_id, extra)
+        log.warning(
+            "coedit checkpoint: session %s retired %d straggler client id(s) "
+            "logged in the reseed's pre-bump window",
+            session_id,
+            len(extra),
+        )
+
+
 class CheckpointOutcome(BaseModel):
     """What a successful checkpoint produced, for the caller
     (``app/tasks/coedit_checkpoint.py``) to act on.
@@ -681,6 +719,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         # reseed, so the replaced lineage's client ids can be retired.
         pre_finalize = doc.get_state()
         reseeded = False
+        old_doc: Doc | None = None
         if diverged:
             if not markdown_splice.apply_markdown_diff(doc, body, new_body):
                 # doc's children don't correspond 1:1 to a fresh parse of
@@ -690,6 +729,9 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 # pairing; fall back to the old, lineage-discarding
                 # behavior rather than risk misapplying the diff (no worse
                 # than before this fix for this rarer, compounding case).
+                # The discarded doc is kept for the post-bump retirement
+                # pass below.
+                old_doc = doc
                 doc = markdown_yjs.seed_doc_from_markdown(new_body)
                 reseeded = True
             else:
@@ -722,6 +764,8 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 else None
             ),
         )
+        if reseeded and old_doc is not None:
+            _retire_straggler_ids(session_id, old_doc)
         if result is not None:
             wiki_drafts.clear_if_diverged(path, new_body)
         if diverged:
