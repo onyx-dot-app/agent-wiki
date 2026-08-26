@@ -33,8 +33,9 @@ from pydantic import BaseModel, ConfigDict
 
 from app.auth import User, set_current_user
 from app.auth import users as users_repo
+from app.models.coedit import ResyncRequiredFrame
 from app.models.wiki import ChangeKind
-from app.wiki import coedit, coedit_channel, filesystem
+from app.wiki import coedit, coedit_channel, coedit_live, filesystem
 from app.wiki import drafts as wiki_drafts
 from app.wiki import git as wiki_git
 from app.wiki import markdown_blocks, markdown_splice, markdown_yjs
@@ -352,24 +353,12 @@ def _rebuild_doc(sess: coedit.CheckpointSessionRow) -> tuple[Doc, str, TouchedTr
     doc.apply_update(sess.ydoc_snapshot)
     base_body = sess.ydoc_snapshot_body
     tracker = TouchedTracker(doc)
+    # Replaced-generation rows never reach here: ``updates_since`` filters
+    # them for every consumer at the query (their content — at most one
+    # client's in-flight burst caught in a reseed's pre-bump window — is
+    # lost, which is strictly better than unioning it into a doubled page).
     since = coedit.updates_since(sess.id, sess.ydoc_snapshot_seq)
     for u in since.updates:
-        if u.lineage != sess.ydoc_lineage:
-            # A leftover from a replaced lineage (logged in the window between
-            # a reseed's snapshot read and its lineage bump). Integrating it
-            # would union the old document's content into the new one — the
-            # whole-page-duplication failure the lineage guard exists to kill.
-            # Its content (at most one client's in-flight burst) is lost;
-            # losing it is strictly better than doubling the page.
-            log.warning(
-                "coedit checkpoint: session %s seq %d is from replaced lineage "
-                "%d (current %d); skipping",
-                sess.id,
-                u.seq,
-                u.lineage,
-                sess.ydoc_lineage,
-            )
-            continue
         try:
             doc.apply_update(u.update_payload)
         except Exception:
@@ -618,18 +607,9 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             base_body = result.new_body if result is not None else body
             change_kind = ChangeKind.EDIT
             tracker.reset()
+            # Replaced-generation rows never reach here — ``updates_since``
+            # filters them for every consumer at the query.
             for u in late.updates:
-                if u.lineage != sess.ydoc_lineage:
-                    # Same replaced-lineage guard as _rebuild_doc's replay.
-                    log.warning(
-                        "coedit checkpoint: session %s seq %d is from replaced "
-                        "lineage %d (current %d); skipping late fold",
-                        sess.id,
-                        u.seq,
-                        u.lineage,
-                        sess.ydoc_lineage,
-                    )
-                    continue
                 try:
                     doc.apply_update(u.update_payload)
                 except Exception:
@@ -697,7 +677,8 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
         diverged = new_body != body
         # The state connected clients are on, captured before the finalizing
         # mutations below, so a divergence can be handed to them as a plain
-        # delta (see the broadcast after advance_checkpoint).
+        # delta (see the broadcast after advance_checkpoint) — and, on a
+        # reseed, so the replaced lineage's client ids can be retired.
         pre_finalize = doc.get_state()
         reseeded = False
         if diverged:
@@ -726,8 +707,20 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
             # A reseed writes a fresh CRDT lineage: bump the generation in the
             # same UPDATE, so updates produced against the replaced lineage
             # are refused from this statement on instead of unioning the old
-            # document into the new (whole-page duplication).
+            # document into the new (whole-page duplication). The replaced
+            # lineage's client ids are retired alongside, so a client still
+            # holding them — even mixed with current-lineage ids it went on
+            # integrating — is recognized as foreign at its next sync
+            # (``coedit_live.sync_reply``).
             bump_lineage=reseeded,
+            retired_client_ids=(
+                sorted(
+                    set(sess.retired_client_ids)
+                    | coedit_live.state_vector_client_ids(pre_finalize)
+                )
+                if reseeded
+                else None
+            ),
         )
         if result is not None:
             wiki_drafts.clear_if_diverged(path, new_body)
@@ -740,7 +733,7 @@ def checkpoint_session(session_id: int) -> CheckpointOutcome | None:
                 # rebuild from the new snapshot now, rather than waiting for a
                 # chance reconnect while their editors show pre-merge content.
                 coedit_channel.publish_control(
-                    session_id, {"type": "resync_required", "reason": "reseeded"}
+                    session_id, ResyncRequiredFrame(reason="reseeded").model_dump()
                 )
                 log.warning(
                     "coedit checkpoint: session %s reseeded on divergence; "

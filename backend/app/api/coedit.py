@@ -57,6 +57,7 @@ from app.models.coedit import (
     JoinedFrame,
     JoinErrorFrame,
     ParticipantOut,
+    ResyncRequiredFrame,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
 from app.tasks.coedit_rebase import rebase_coedit_session
@@ -178,14 +179,14 @@ class _ConnectionGuard(BaseModel):
     """Mutable per-connection flags the recv loop threads through its hops.
 
     ``foreign``: this connection's document proved to be a replaced lineage
-    (its SYNC_STEP1 state vector shares no client id with the session's
-    document — see ``coedit_live.sync_reply``). Set once, never cleared: the
-    only recovery is a rebuilt document on a fresh connection. While set,
-    every content frame from the connection is dropped — its content can only
-    union into the page as a duplicate — and no sync reply is returned, so
-    the stale document isn't fed more content to union locally either. This
-    is the backstop for clients that predate ``resync_required``; a current
-    client never reaches this state (it rebuilds before syncing).
+    (its SYNC_STEP1 state vector — see ``coedit_live.sync_reply``). Set once,
+    never cleared: the only recovery is a rebuilt document on a fresh
+    connection. While set, every binary frame from the connection is dropped
+    (content would union into the page as a duplicate), and nothing feeds the
+    stale document either: no sync reply, no ``get_updates_since`` replay,
+    and no relayed broadcasts (``coedit_channel.suppress_yjs``). This is the
+    backstop for clients that predate ``resync_required``; a current client
+    all but never reaches this state (it rebuilds before syncing).
     """
 
     foreign: bool = False
@@ -216,6 +217,13 @@ def _apply_yjs_frame(
     """
     if not raw:
         return None
+    if guard.foreign:
+        # Everything from a foreign-lineage connection is dropped — content
+        # would union into the page as a duplicate, awareness carets reference
+        # a document nobody else holds, and repeat handshakes would only
+        # recompute a reply the guard withholds. The resync_required frame was
+        # sent when the guard tripped; recovery is a fresh connection.
+        return None
     msg_type = raw[0]
     if msg_type == YMessageType.SYNC:
         inner = raw[1:]
@@ -223,11 +231,6 @@ def _apply_yjs_frame(
             return None
         sync_type = inner[0]
         is_content = sync_type in (YSyncMessageType.SYNC_STEP2, YSyncMessageType.SYNC_UPDATE)
-        if is_content and guard.foreign:
-            # A foreign-lineage doc's content can only union into the page as
-            # a duplicate. Dropped silently — the resync_required frame was
-            # sent when the guard tripped.
-            return None
         if is_content and not _authorize(session_id, user, "write"):
             return None
         if not is_content:
@@ -241,17 +244,19 @@ def _apply_yjs_frame(
                 reply, foreign = coedit_live.sync_reply(session_id, raw)
             except coedit_live.SessionGone:
                 return None
-            if foreign and not guard.foreign:
+            if foreign:
                 guard.foreign = True
+                # Also stop feeding it broadcasts: every relayed frame would
+                # grow the client-side union it must ultimately discard.
+                coedit_channel.suppress_yjs(conn.id)
                 log.warning(
                     "coedit: session %s connection from user %s presented a "
-                    "foreign state vector (no client-id overlap with the "
-                    "current lineage); refusing its content and requesting a "
-                    "resync",
+                    "foreign state vector (replaced-lineage content); "
+                    "refusing its frames and requesting a resync",
                     session_id,
                     user.id,
                 )
-                conn.post({"type": "resync_required", "reason": "foreign_state"})
+                conn.post(ResyncRequiredFrame(reason="foreign_state").model_dump())
             if reply is not None and not guard.foreign:
                 conn.post(coedit_channel.YjsBytes(payload=reply))
             return None
@@ -339,7 +344,7 @@ def _ingest_yjs_frame(
             user.id,
             lineage,
         )
-        conn.post({"type": "resync_required", "reason": "stale_lineage"})
+        conn.post(ResyncRequiredFrame(reason="stale_lineage").model_dump())
         return None
     if seq is None:
         return None  # session closed underneath us
@@ -393,6 +398,8 @@ async def _recv_loop(
             # A client that saw a gap in the relay stream asks for what it
             # missed. Room-less this is the whole recovery path for a dropped
             # relay — without it a client stays diverged until it reconnects.
+            if guard.foreign:
+                continue  # a replaced-lineage doc gets no more content to union
             if not await asyncio.to_thread(_authorize, session_id, user, "read"):
                 continue
             missed = await asyncio.to_thread(coedit.updates_since, session_id, since.since_seq)

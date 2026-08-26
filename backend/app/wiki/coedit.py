@@ -246,6 +246,7 @@ class CheckpointSessionRow(BaseModel):
     base_sha: str | None
     doc_id: str | None
     ydoc_lineage: int
+    retired_client_ids: list[int]
     ydoc_seq: int
     ydoc_checkpointed_seq: int
     ydoc_snapshot: bytes | None
@@ -269,6 +270,7 @@ def get_session_for_checkpoint(session_id: int) -> CheckpointSessionRow | None:
             base_sha=row.base_sha,
             doc_id=row.doc_id,
             ydoc_lineage=row.ydoc_lineage,
+            retired_client_ids=row.retired_client_ids,
             ydoc_seq=row.ydoc_seq,
             ydoc_checkpointed_seq=row.ydoc_checkpointed_seq,
             ydoc_snapshot=row.ydoc_snapshot,
@@ -431,10 +433,12 @@ def transplant_from_document(session_id: int, path: str) -> tuple[bool, str | No
                 ydoc_snapshot_seq=0,
                 ydoc_snapshot_body=doc_row.ydoc_snapshot_body,
                 base_sha=doc_row.base_sha,
-                # The generation travels with the lineage: a session serving a
-                # reseeded document must refuse the pre-reseed generation even
-                # though the session row itself is brand new.
+                # The generation and the retired-id set travel with the
+                # lineage: a session serving a reseeded document must refuse
+                # replaced-lineage content even though the session row itself
+                # is brand new.
                 ydoc_lineage=doc_row.ydoc_lineage,
+                retired_client_ids=doc_row.retired_client_ids,
             )
             .returning(CoeditSession.id)
         ).one_or_none()
@@ -584,6 +588,16 @@ def updates_since(session_id: int, after_seq: int) -> UpdatesSince:
                 CoeditUpdate.session_id == session_id,
                 CoeditUpdate.seq > after_seq,
                 CoeditUpdate.seq <= seq,
+                # Replaced-generation leftovers (rows logged in a reseed's
+                # pre-bump window) are unintegrable poison for every
+                # consumer — rebuilds, late folds, and client catch-up
+                # relays alike: integrating one unions the replaced
+                # document's content into the current lineage. Filtered here
+                # once so no consumer can forget.
+                CoeditUpdate.lineage
+                == select(CoeditSession.ydoc_lineage)
+                .where(CoeditSession.id == session_id)
+                .scalar_subquery(),
             )
             .order_by(CoeditUpdate.seq.asc())
         ).all()
@@ -637,6 +651,7 @@ def advance_checkpoint(
     body: str,
     base_sha: str,
     bump_lineage: bool = False,
+    retired_client_ids: list[int] | None = None,
 ) -> None:
     """Record a checkpoint's result — a real commit, or a no-op where the
     doc's content already matched HEAD — moving the snapshot, the
@@ -693,13 +708,22 @@ def advance_checkpoint(
         )
         if bump_lineage:
             values["ydoc_lineage"] = CoeditSession.ydoc_lineage + 1
+        if retired_client_ids is not None:
+            # The caller (the reseed) supplies the complete merged set — the
+            # ids of every lineage this session has ever replaced.
+            values["retired_client_ids"] = retired_client_ids
         updated = s.execute(
             update(CoeditSession)
             .where(CoeditSession.id == session_id, CoeditSession.ydoc_checkpointed_seq <= seq)
             .values(**values)
-            # RETURNING yields the post-update row, so ydoc_lineage here is
-            # the possibly-bumped generation the mirror must record.
-            .returning(CoeditSession.path, CoeditSession.ydoc_lineage)
+            # RETURNING yields the post-update row, so ydoc_lineage /
+            # retired_client_ids here are the possibly-advanced values the
+            # mirror must record.
+            .returning(
+                CoeditSession.path,
+                CoeditSession.ydoc_lineage,
+                CoeditSession.retired_client_ids,
+            )
             .execution_options(synchronize_session=False)
         ).one_or_none()
         if updated is not None:
@@ -719,6 +743,7 @@ def advance_checkpoint(
                 body=body,
                 base_sha=base_sha,
                 lineage=updated.ydoc_lineage,
+                retired_client_ids=updated.retired_client_ids,
             )
 
 
@@ -895,6 +920,7 @@ def on_path_moved(moves: list[PathMove]) -> list[int]:
                             body=newest.ydoc_snapshot_body,
                             base_sha=newest.base_sha,
                             lineage=newest.ydoc_lineage,
+                            retired_client_ids=newest.retired_client_ids,
                         )
             except IntegrityError:
                 # A racing open_session won the unique index between our check

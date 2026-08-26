@@ -87,11 +87,28 @@ def mirror_seed(
     defend the old one. A markdown seed is by definition generation 0: it
     only happens when no document row existed to transplant.
     """
-    _upsert(s, path, snapshot=snapshot, seq=0, body=body, base_sha=base_sha, lineage=0)
+    _upsert(
+        s,
+        path,
+        snapshot=snapshot,
+        seq=0,
+        body=body,
+        base_sha=base_sha,
+        lineage=0,
+        retired_client_ids=[],
+    )
 
 
 def mirror_checkpoint(
-    s: Session, path: str, *, seq: int, snapshot: bytes, body: str, base_sha: str, lineage: int
+    s: Session,
+    path: str,
+    *,
+    seq: int,
+    snapshot: bytes,
+    body: str,
+    base_sha: str,
+    lineage: int,
+    retired_client_ids: list[int],
 ) -> None:
     """Mirror a checkpoint's advanced snapshot state onto the page's document
     row. Upsert, not update: the row can be missing for a session that
@@ -102,7 +119,14 @@ def mirror_checkpoint(
     transplant, so the generation survives session turnover.
     """
     _upsert(
-        s, path, snapshot=snapshot, seq=seq, body=body, base_sha=base_sha, lineage=lineage
+        s,
+        path,
+        snapshot=snapshot,
+        seq=seq,
+        body=body,
+        base_sha=base_sha,
+        lineage=lineage,
+        retired_client_ids=retired_client_ids,
     )
 
 
@@ -115,6 +139,7 @@ def _upsert(
     body: str,
     base_sha: str | None,
     lineage: int,
+    retired_client_ids: list[int],
 ) -> None:
     doc_id = doc_ids.id_for_path_in(s, path)
     if doc_id is None:
@@ -132,6 +157,7 @@ def _upsert(
         ydoc_seq=seq,
         base_sha=base_sha,
         ydoc_lineage=lineage,
+        retired_client_ids=retired_client_ids,
         created_at=now,
         updated_at=now,
     )
@@ -145,6 +171,7 @@ def _upsert(
                 "ydoc_seq": stmt.excluded.ydoc_seq,
                 "base_sha": stmt.excluded.base_sha,
                 "ydoc_lineage": stmt.excluded.ydoc_lineage,
+                "retired_client_ids": stmt.excluded.retired_client_ids,
                 "updated_at": stmt.excluded.updated_at,
             },
         )
@@ -160,6 +187,7 @@ def mirror_session_state(
     body: str,
     base_sha: str | None,
     lineage: int,
+    retired_client_ids: list[int],
 ) -> None:
     """Re-mirror a session's snapshot state wholesale — the move re-key's
     repair for the window where a checkpoint resolved the page's old path,
@@ -168,7 +196,14 @@ def mirror_session_state(
     is the page's live location and resolves its real id.
     """
     _upsert(
-        s, path, snapshot=snapshot, seq=seq, body=body, base_sha=base_sha, lineage=lineage
+        s,
+        path,
+        snapshot=snapshot,
+        seq=seq,
+        body=body,
+        base_sha=base_sha,
+        lineage=lineage,
+        retired_client_ids=retired_client_ids,
     )
 
 

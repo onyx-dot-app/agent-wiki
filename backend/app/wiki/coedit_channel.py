@@ -104,6 +104,10 @@ _queues: dict[str, queue.Queue[QueueItem]] = {}
 _notifiers: dict[str, Callable[[], None]] = {}  # conn_id -> wake its send loop
 _session_of: dict[str, int] = {}  # conn_id -> coedit_session_id
 _conns_by_session: dict[int, set[str]] = {}  # coedit_session_id -> {conn_id}
+# Connections whose document proved to be a replaced lineage: binary Yjs
+# frames are withheld from them (control frames still flow). See
+# ``suppress_yjs``.
+_suppressed_yjs: set[str] = set()
 _lock = threading.Lock()
 
 
@@ -128,6 +132,7 @@ def disconnect(conn_id: str) -> None:
         sid = _session_of.pop(conn_id, None)
         _queues.pop(conn_id, None)
         _notifiers.pop(conn_id, None)
+        _suppressed_yjs.discard(conn_id)
         if sid is not None:
             conns = _conns_by_session.get(sid)
             if conns is not None:
@@ -188,6 +193,17 @@ def _deliver_local(coedit_session_id: int, frame: ControlFrame) -> None:
     )
 
 
+def suppress_yjs(conn_id: str) -> None:
+    """Stop delivering binary Yjs frames to one connection. Control frames
+    still flow — ``resync_required`` must reach it. For a connection whose
+    document proved to be a replaced lineage: feeding it more content only
+    grows the client-side union it would try to sync back. Lasts for the
+    connection's lifetime (cleared by ``disconnect``); recovery is a rebuilt
+    document on a fresh connection."""
+    with _lock:
+        _suppressed_yjs.add(conn_id)
+
+
 def _deliver_local_bytes(
     coedit_session_id: int, payload: bytes, seq: int | None = None
 ) -> None:
@@ -195,6 +211,7 @@ def _deliver_local_bytes(
         targets = [
             (_queues.get(cid), _notifiers.get(cid))
             for cid in _conns_by_session.get(coedit_session_id, ())
+            if cid not in _suppressed_yjs
         ]
     item = YjsBytes(payload=payload, seq=seq)
     for q, notify in targets:

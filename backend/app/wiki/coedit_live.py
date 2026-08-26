@@ -51,8 +51,10 @@ class SessionGone(Exception):
     """The session isn't active, or has no snapshot to rebuild from."""
 
 
-def _load(session_id: int) -> tuple[Doc, int]:
-    """Rebuild a session's document; returns it with the seq it is current as of.
+def _load(session_id: int) -> tuple[Doc, int, coedit.CheckpointSessionRow]:
+    """Rebuild a session's document; returns it with the seq it is current as
+    of, plus the session row it was built from (already fetched — callers
+    that need lineage fields shouldn't re-read it).
 
     Private on purpose: the `Doc` must not leave the calling thread, so every
     caller in this module consumes it and drops it within its own function.
@@ -63,20 +65,9 @@ def _load(session_id: int) -> tuple[Doc, int]:
     doc = Doc()
     doc.apply_update(sess.ydoc_snapshot)
     since = coedit.updates_since(session_id, sess.ydoc_snapshot_seq)
+    # Replaced-generation rows never reach here: ``updates_since`` filters
+    # them for every consumer at the query.
     for u in since.updates:
-        if u.lineage != sess.ydoc_lineage:
-            # A leftover row from a replaced lineage — same guard as the
-            # checkpoint engine's replay: integrating it would union the old
-            # document's content into the current one.
-            log.warning(
-                "coedit live: session %s seq %d is from replaced lineage %d "
-                "(current %d); skipping",
-                session_id,
-                u.seq,
-                u.lineage,
-                sess.ydoc_lineage,
-            )
-            continue
         try:
             doc.apply_update(u.update_payload)
         except Exception:
@@ -88,7 +79,8 @@ def _load(session_id: int) -> tuple[Doc, int]:
                 session_id,
                 u.seq,
             )
-    return doc, since.head_seq if since.head_seq is not None else sess.ydoc_snapshot_seq
+    seq = since.head_seq if since.head_seq is not None else sess.ydoc_snapshot_seq
+    return doc, seq, sess
 
 
 def validate_update(payload: bytes) -> bool:
@@ -105,18 +97,30 @@ def validate_update(payload: bytes) -> bool:
         return False
 
 
+# A legitimate lib0 varint never exceeds 10 bytes (Yjs ids/clocks fit 64
+# bits). The cap keeps a crafted run of continuation bytes from turning the
+# decode into unbounded-bigint work on a shared threadpool worker.
+_VAR_UINT_MAX_SHIFT = 63
+
+
 def _read_var_uint(buf: bytes, pos: int) -> tuple[int, int]:
     """Decode one lib0 variable-length unsigned int (7 bits per byte, high
-    bit = continuation) — the primitive a Yjs state vector is built from."""
+    bit = continuation) — the primitive a Yjs state vector is built from.
+    Raises ``ValueError`` on truncated or over-long input; callers treat any
+    decode failure as "not a usable state vector"."""
     value = 0
     shift = 0
     while True:
+        if pos >= len(buf):
+            raise ValueError("truncated varint")
         b = buf[pos]
         pos += 1
         value |= (b & 0x7F) << shift
         if b < 0x80:
             return value, pos
         shift += 7
+        if shift > _VAR_UINT_MAX_SHIFT:
+            raise ValueError("varint exceeds 64 bits")
 
 
 def state_vector_client_ids(sv: bytes) -> set[int]:
@@ -126,10 +130,13 @@ def state_vector_client_ids(sv: bytes) -> set[int]:
     SYNC_STEP1: a count, then ``(client_id, clock)`` varint pairs. The id set
     is what makes lineages comparable without content: two documents that
     ever exchanged updates share ids; two independently seeded documents
-    share none.
+    share none. Raises ``ValueError`` on malformed input (each entry is at
+    least two bytes, so a count the buffer can't hold is rejected up front).
     """
     ids: set[int] = set()
     count, pos = _read_var_uint(sv, 0)
+    if count > (len(sv) - pos) // 2:
+        raise ValueError("state-vector count exceeds payload")
     for _ in range(count):
         client, pos = _read_var_uint(sv, pos)
         clock, pos = _read_var_uint(sv, pos)
@@ -146,33 +153,60 @@ def sync_reply(session_id: int, payload: bytes) -> tuple[bytes | None, bool]:
     missing) and STEP2/UPDATE the same way `pycrdt` does against a resident
     doc — the doc here is just built for the call.
 
-    ``foreign`` is True when a STEP1's state vector shares **no** client id
-    with the session's document while both are non-empty. That is the
-    signature of a replaced lineage: a document that ever synced with this
-    session shares most of its ids, while a doc retained across a server
-    reseed shares none — and letting it sync would union both documents'
-    content into a duplicated page. The lineage-generation guard cannot catch
-    this case when the sender reconnected *after* the reseed (its connection
+    ``foreign`` is True for a STEP1 whose state vector proves the client
+    holds replaced-lineage content — content that, if synced, would union
+    into the page as a duplicate. The lineage-generation guard cannot catch
+    this case when the sender reconnected *after* a reseed (its connection
     joined at the current generation; the foreignness is in the payload),
     which is exactly what a client that predates the ``resync_required``
-    protocol does. The one false positive — a client that joined, never
-    received server state, and typed before syncing — is refused too, which
-    costs those keystrokes but can't corrupt; only pre-``resync_required``
-    clients can reach that state.
+    protocol does. Two tests, either suffices:
+
+    - the state vector contains a **retired** client id (a lineage some
+      reseed replaced — recorded at reseed time). This is the precise test,
+      and the only one that catches a *mixed* document: a stale tab that
+      kept integrating current-lineage broadcasts holds both lineages' ids,
+      so overlap with the current document proves nothing.
+    - the state vector shares **no** client id with the session's document
+      while both are non-empty — the wholly-foreign case, kept as a backstop
+      for lineages replaced before retired ids were recorded. The
+      both-non-empty gate means this backstop self-disables against an empty
+      current document; that blind spot is covered by the retired-id test
+      for every reseed recorded since it exists, and an empty-doc STEP2
+      rescue (a client whose unsent edits are the page's only content) is
+      worth keeping.
+
+    False-positive scope: any client that joined, never exchanged a sync
+    frame, and typed before its next STEP1 trips the second test — including
+    a current client whose connection dropped in the joined-but-unsynced
+    window. The cost is bounded (those unsent keystrokes are discarded on
+    the resync; nothing corrupts) and the window is a few hundred
+    milliseconds on a healthy connection.
     """
-    doc, _seq = _load(session_id)
+    doc, _seq, sess = _load(session_id)
     sync = payload[1:]
-    foreign = False
     if sync and sync[0] == YSyncMessageType.SYNC_STEP1:
-        client_ids = state_vector_client_ids(read_message(sync[1:]))
+        try:
+            client_ids = state_vector_client_ids(read_message(sync[1:]))
+        except (ValueError, IndexError):
+            # Malformed state vector: no verdict possible from it. Fall
+            # through to pycrdt's own (Rust-side, bounded) handling, which
+            # rejects garbage in microseconds.
+            client_ids = set()
         doc_ids = state_vector_client_ids(doc.get_state())
-        foreign = bool(client_ids) and bool(doc_ids) and not (client_ids & doc_ids)
-    return handle_sync_message(sync, doc), foreign
+        foreign = bool(client_ids & set(sess.retired_client_ids)) or (
+            bool(client_ids) and bool(doc_ids) and not (client_ids & doc_ids)
+        )
+        if foreign:
+            # No reply for a foreign doc: STEP1's answer is essentially the
+            # whole document, which would only feed the client-side union —
+            # and computing it is dead work the route would discard anyway.
+            return None, True
+    return handle_sync_message(sync, doc), False
 
 
 def initial_sync_message(session_id: int) -> bytes:
     """The server's own STEP1, sent on connect so the client sends us its diff."""
-    doc, _seq = _load(session_id)
+    doc, _seq, _sess = _load(session_id)
     return create_sync_message(doc)
 
 
@@ -183,7 +217,7 @@ def read_body(session_id: int) -> str | None:
     that happens to live in one worker.
     """
     try:
-        doc, _seq = _load(session_id)
+        doc, _seq, _sess = _load(session_id)
     except SessionGone:
         return None
     return reconstruct_body(doc)
@@ -209,7 +243,7 @@ def rebase_delta(
     precisely what leaves concurrent edits unintegrable.
     """
     try:
-        doc, _seq = _load(session_id)
+        doc, _seq, _sess = _load(session_id)
     except SessionGone:
         return None
     ours = reconstruct_body(doc)

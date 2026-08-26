@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +21,7 @@ from pycrdt import Doc, YMessageType, create_sync_message, create_update_message
 
 from app.auth import users as users_repo
 from app.main import create_app
+from app.tasks.queues import coedit_queue
 from app.wiki import coedit, coedit_live, doc_ids, markdown_yjs
 from app.wiki import git as wiki_git
 from tests._auth import login_fastapi
@@ -32,7 +32,10 @@ _BODY = "alpha one\n\nbeta two\n"
 
 @pytest.fixture
 def client(tmp_db, tmp_repo):
-    return TestClient(create_app())
+    # Immediate mode makes the WS checkpoint request synchronous, so the
+    # end-to-end test's checkpoint-ack barrier resolves without a worker.
+    with coedit_queue.immediate_mode():
+        yield TestClient(create_app())
 
 
 def _seed_session(body: str) -> tuple[coedit.SessionRow, Doc]:
@@ -44,6 +47,37 @@ def _seed_session(body: str) -> tuple[coedit.SessionRow, Doc]:
     doc = markdown_yjs.seed_doc_from_markdown(body)
     coedit.set_initial_snapshot(sess.id, doc.get_update(), body)
     return sess, doc
+
+
+def _log_edit(sess: coedit.SessionRow, doc: Doc, prefix: str) -> None:
+    """Prepend ``prefix`` to the doc's first paragraph and log the delta —
+    a real local edit, so a checkpoint has something to commit."""
+    from pycrdt import XmlFragment
+
+    from app.wiki.markdown_yjs import ROOT_XML_KEY
+
+    before = doc.get_state()
+    root = doc.get(ROOT_XML_KEY, type=XmlFragment)
+    with doc.transaction():
+        root.children[0].children[0].insert(0, prefix)
+    coedit.apply_update(sess.id, update_bytes=doc.get_update(before), author_user_id=None)
+
+
+def _reseed(sess: coedit.SessionRow, doc: Doc, monkeypatch) -> None:
+    """Drive the checkpoint engine down its reseed-on-divergence branch: a
+    local edit plus an out-of-band commit diverge the merge, and a patched
+    splice forces the lineage-discarding fallback."""
+    import app.wiki.markdown_splice as markdown_splice
+    from app.wiki import coedit_checkpoint
+
+    _log_edit(sess, doc, "EDIT ")
+    wiki_git.commit_file(_PATH, "alpha one\n\nbeta CHANGED\n", "oob", author="X <x@x.com>")
+    # Restore the attribute explicitly — monkeypatch.undo() would also wipe
+    # the conftest's CONFIG patches, which share this monkeypatch instance.
+    orig = markdown_splice.apply_markdown_diff
+    monkeypatch.setattr(markdown_splice, "apply_markdown_diff", lambda *a, **k: False)
+    assert coedit_checkpoint.checkpoint_session(sess.id) is not None
+    monkeypatch.setattr(markdown_splice, "apply_markdown_diff", orig)
 
 
 def test_state_vector_client_ids_decodes_the_docs_own_ids():
@@ -66,13 +100,78 @@ def test_empty_client_step1_is_not_foreign(tmp_repo):
     assert not foreign
 
 
-def test_foreign_step1_is_flagged_and_reply_still_computed(tmp_repo):
+def test_mixed_lineage_client_is_flagged_via_retired_ids(tmp_repo, monkeypatch):
+    """The incident shape: a stale tab keeps integrating current-lineage
+    broadcasts after a reseed, so its state vector holds BOTH lineages' ids —
+    overlap with the current document proves nothing. The retired-id test is
+    what catches it."""
+    sess, old_doc = _seed_session(_BODY)
+    _reseed(sess, old_doc, monkeypatch)
+
+    refreshed = coedit.get_session_for_checkpoint(sess.id)
+    assert refreshed is not None and refreshed.ydoc_snapshot is not None
+    # The replaced lineage's ids were retired at the reseed.
+    assert old_doc.client_id in refreshed.retired_client_ids
+
+    # The stale tab: old doc that has ALSO integrated the current lineage.
+    stale = Doc()
+    stale.apply_update(old_doc.get_update())
+    stale.apply_update(refreshed.ydoc_snapshot)
+    # Sanity: it genuinely overlaps the current document's ids — the
+    # any-overlap rule alone would have waved it through.
+    server_now = Doc()
+    server_now.apply_update(refreshed.ydoc_snapshot)
+    stale_ids = coedit_live.state_vector_client_ids(stale.get_state())
+    assert stale_ids & coedit_live.state_vector_client_ids(server_now.get_state())
+    _reply, foreign = coedit_live.sync_reply(sess.id, create_sync_message(stale))
+    assert foreign, "mixed-lineage doc must be refused despite current-id overlap"
+
+    # A purely current client stays welcome.
+    current = Doc()
+    current.apply_update(refreshed.ydoc_snapshot)
+    _reply, foreign = coedit_live.sync_reply(sess.id, create_sync_message(current))
+    assert not foreign
+
+
+def test_new_session_inherits_retired_ids(tmp_repo, monkeypatch):
+    """Retired ids survive session turnover via the document-row mirror, so a
+    stale tab can't dodge the guard by rejoining a brand-new session."""
+    sess, old_doc = _seed_session(_BODY)
+    _reseed(sess, old_doc, monkeypatch)
+    coedit.close_session(sess.id)
+
+    sess2 = coedit.open_session(_PATH, base_sha=wiki_git.head_sha_for_path(_PATH))
+    assert sess2.id != sess.id
+    attached, _base = coedit.transplant_from_document(sess2.id, _PATH)
+    assert attached
+    row = coedit.get_session_for_checkpoint(sess2.id)
+    assert row is not None and old_doc.client_id in row.retired_client_ids
+
+    _reply, foreign = coedit_live.sync_reply(sess2.id, create_sync_message(old_doc))
+    assert foreign
+
+
+def test_foreign_step1_is_flagged_and_reply_withheld(tmp_repo):
     sess, _server_doc = _seed_session(_BODY)
     foreign_doc = markdown_yjs.seed_doc_from_markdown("POISON copy of the page\n")
     reply, foreign = coedit_live.sync_reply(sess.id, create_sync_message(foreign_doc))
     assert foreign
-    # sync_reply reports; withholding the reply is the route's decision.
-    assert reply is not None
+    # No reply for a foreign doc: STEP1's answer is essentially the whole
+    # document, which would only feed the client-side union.
+    assert reply is None
+
+
+def test_malformed_state_vector_is_not_a_dos(tmp_repo):
+    """A crafted varint run must fail fast (bounded decode), and a malformed
+    state vector must not crash the verdict — it falls through to pycrdt."""
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        coedit_live.state_vector_client_ids(b"\xff" * 64)  # over-long varint
+    with _pytest.raises(ValueError):
+        coedit_live.state_vector_client_ids(b"\x80")  # truncated
+    with _pytest.raises(ValueError):
+        coedit_live.state_vector_client_ids(b"\x7f")  # count exceeds payload
 
 
 def test_foreign_client_refused_end_to_end(client):
@@ -114,9 +213,24 @@ def test_foreign_client_refused_end_to_end(client):
         else:
             raise AssertionError("never received resync_required")
 
-        # Its content is dropped: nothing logged, nothing in the body.
+        # Its content is dropped: nothing logged, nothing in the body. The
+        # checkpoint request after it is the barrier — per-connection frames
+        # process in order, so its ack proves the poison frame was handled
+        # (a sleep would false-pass under CI load with the frame still
+        # queued).
         ws.send_bytes(create_update_message(foreign_doc.get_update()))
-        time.sleep(0.3)
+        ws.send_json({"type": "checkpoint", "request_id": "barrier-1"})
+        for _ in range(20):
+            msg = ws.receive()
+            text = msg.get("text")
+            if text is None:
+                continue
+            frame = json.loads(text)
+            if frame.get("type") == "checkpoint_result":
+                assert frame["request_id"] == "barrier-1"
+                break
+        else:
+            raise AssertionError("never received the checkpoint barrier ack")
         after = coedit.get_session(session_id)
         assert after is not None and after.ydoc_seq == before.ydoc_seq
         body = coedit_live.read_body(session_id)
