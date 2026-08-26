@@ -121,9 +121,12 @@ export interface TipTapEditorProps {
   /** Fires with the source ids whose spans contain the caret (or intersect
    * the selection), deduped against the last report. */
   onSourceCaret?: (ids: string[]) => void;
-  /** Fires on every selection change with the current selection as a
-   * comment draft (null if collapsed) plus its on-screen coordinates, for
-   * the caller to position a floating "Comment" affordance. */
+  /** Fires with the current selection as a comment draft (null if
+   * collapsed) plus its on-screen coordinates, for the caller to position a
+   * floating "Comment" affordance. While the mouse button is held down
+   * (the user is still dragging out a selection), reports are held back and
+   * only the final one — from the selection in place at mouseup — fires, so
+   * the affordance doesn't flicker in and out during the drag. */
   onSelectionForComment?: (
     draft: CommentDraft | null,
     coords: { x: number; y: number } | null,
@@ -263,6 +266,15 @@ export function TipTapEditor({
   const onSelectionForCommentRef = useRef(onSelectionForComment);
   onSelectionForCommentRef.current = onSelectionForComment;
   const lastSelectionForComment = useRef("\0");
+  // Suppress the comment-selection report while the mouse is down (the
+  // user is still dragging out a selection) so the floating affordance
+  // doesn't appear until the selection is finalized. The last computed
+  // report is stashed here and flushed on mouseup.
+  const isMouseDownRef = useRef(false);
+  const pendingSelectionForComment = useRef<{
+    draft: CommentDraft | null;
+    coords: { x: number; y: number } | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!editor) return;
@@ -276,11 +288,22 @@ export function TipTapEditor({
         lastSelectionForComment.current = selKey;
         const cb = onSelectionForCommentRef.current;
         if (cb) {
+          const emit = (
+            draft: CommentDraft | null,
+            coords: { x: number; y: number } | null,
+          ) => {
+            if (isMouseDownRef.current) {
+              pendingSelectionForComment.current = { draft, coords };
+            } else {
+              pendingSelectionForComment.current = null;
+              cb(draft, coords);
+            }
+          };
           const quotedText = docTextBetween(editor, from, to);
           // The server re-anchors by the quote, and a whitespace-only quote
           // matches anywhere.
           if (!quotedText.trim()) {
-            cb(null, null);
+            emit(null, null);
           } else {
             const draft: CommentDraft = {
               startOffset: pmPosToTextOffset(editor, from),
@@ -295,7 +318,7 @@ export function TipTapEditor({
               Math.min(to, editor.state.selection.head),
             );
             const coords = editor.view.coordsAtPos(head);
-            cb(draft, { x: coords.right, y: coords.top });
+            emit(draft, { x: coords.right, y: coords.top });
           }
         }
       }
@@ -326,6 +349,34 @@ export function TipTapEditor({
     editor.on("transaction", report);
     return () => {
       editor.off("transaction", report);
+    };
+  }, [editor]);
+
+  // Track whether the mouse button is down over the editor so the
+  // transaction listener above can hold back the comment-selection report
+  // until the drag finishes. Listens on the document (not just the editor
+  // DOM) for mouseup so a drag that ends outside the editor still clears
+  // the flag and flushes the held-back report.
+  useEffect(() => {
+    if (!editor) return;
+    const dom = editor.view.dom;
+    const handleMouseDown = () => {
+      isMouseDownRef.current = true;
+    };
+    const handleMouseUp = () => {
+      if (!isMouseDownRef.current) return;
+      isMouseDownRef.current = false;
+      const pending = pendingSelectionForComment.current;
+      if (pending) {
+        pendingSelectionForComment.current = null;
+        onSelectionForCommentRef.current?.(pending.draft, pending.coords);
+      }
+    };
+    dom.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      dom.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [editor]);
 
