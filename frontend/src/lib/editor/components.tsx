@@ -356,14 +356,17 @@ export function TipTapEditor({
   // transaction listener above can hold back the comment-selection report
   // until the drag finishes. Listens on the document (not just the editor
   // DOM) for mouseup so a drag that ends outside the editor still clears
-  // the flag and flushes the held-back report.
+  // the flag and flushes the held-back report. Also listens for window
+  // blur — a drag that ends outside the *browser window* (e.g. the mouse
+  // is released over another app, or the user alt-tabs away) never
+  // delivers a mouseup to document at all — and, belt-and-suspenders,
+  // checks on the next mousemove whether the button is actually still
+  // held (event.buttons === 0), for the rare case the window never loses
+  // focus either.
   useEffect(() => {
     if (!editor) return;
     const dom = editor.view.dom;
-    const handleMouseDown = () => {
-      isMouseDownRef.current = true;
-    };
-    const handleMouseUp = () => {
+    const releaseMouse = () => {
       if (!isMouseDownRef.current) return;
       isMouseDownRef.current = false;
       const pending = pendingSelectionForComment.current;
@@ -372,11 +375,21 @@ export function TipTapEditor({
         onSelectionForCommentRef.current?.(pending.draft, pending.coords);
       }
     };
+    const handleMouseDown = () => {
+      isMouseDownRef.current = true;
+    };
+    const handleMouseMove = (event: MouseEvent) => {
+      if (isMouseDownRef.current && event.buttons === 0) releaseMouse();
+    };
     dom.addEventListener("mousedown", handleMouseDown);
-    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mouseup", releaseMouse);
+    document.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("blur", releaseMouse);
     return () => {
       dom.removeEventListener("mousedown", handleMouseDown);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mouseup", releaseMouse);
+      document.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("blur", releaseMouse);
     };
   }, [editor]);
 
