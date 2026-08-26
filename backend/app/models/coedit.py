@@ -87,6 +87,18 @@ class JoinedFrame(BaseModel):
     participants: list[ParticipantOut]
 
 
+class ResyncRequiredFrame(BaseModel):
+    """Server -> client: the document this client holds can no longer sync
+    with the session — the server replaced the lineage (``reason:
+    "reseeded"``), refused a stale-generation update (``"stale_lineage"``),
+    or recognized a replaced-lineage state vector (``"foreign_state"``). The
+    client must discard its local doc and rejoin fresh; every further sync
+    frame from the old doc is refused server-side."""
+
+    type: str = "resync_required"
+    reason: str
+
+
 class PresenceFrame(BaseModel):
     """Server -> client, broadcast whenever the participant roster changes
     (join/leave) — distinct from Yjs Awareness (live cursor/color state);

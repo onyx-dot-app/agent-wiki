@@ -1014,6 +1014,15 @@ class CoeditSession(Base):
     ydoc_lineage: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
     )
+    # Yjs client ids belonging to lineages this session has replaced,
+    # accumulated at each reseed from the discarded document's state vector.
+    # A connecting client whose state vector contains any of them still holds
+    # replaced-lineage content — even when it also holds current-lineage ids
+    # from broadcasts it kept integrating — and must resync, not sync. JSON
+    # array of ints.
+    retired_client_ids: Mapped[list[int]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
     created_at: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=_NOW_TEXT_DEFAULT
@@ -1208,6 +1217,13 @@ class WikiDocument(Base):
     # when the session it rejoins is a brand-new row.
     ydoc_lineage: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("0")
+    )
+    # The page-scoped home of ``coedit_sessions.retired_client_ids`` —
+    # mirrored from checkpoints and inherited on transplant, so a client
+    # holding replaced-lineage content is recognized even across session
+    # turnover. JSON array of ints.
+    retired_client_ids: Mapped[list[int]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     # When the document last checkpointed to git — the overdue-detection
     # input once the checkpoint scan reads document state (cutover). NULL for

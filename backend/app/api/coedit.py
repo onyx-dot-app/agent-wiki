@@ -46,7 +46,7 @@ from pycrdt import (
     YSyncMessageType,
     read_message,
 )
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.auth import User, require_can
 from app.auth.deps import require_user_ws
@@ -57,6 +57,7 @@ from app.models.coedit import (
     JoinedFrame,
     JoinErrorFrame,
     ParticipantOut,
+    ResyncRequiredFrame,
 )
 from app.tasks.coedit_checkpoint import checkpoint_coedit_session_task
 from app.tasks.coedit_rebase import rebase_coedit_session
@@ -174,11 +175,29 @@ def _sync_update_frame(update: bytes) -> bytes:
     return create_update_message(update)
 
 
+class _ConnectionGuard(BaseModel):
+    """Mutable per-connection flags the recv loop threads through its hops.
+
+    ``foreign``: this connection's document proved to be a replaced lineage
+    (its SYNC_STEP1 state vector — see ``coedit_live.sync_reply``). Set once,
+    never cleared: the only recovery is a rebuilt document on a fresh
+    connection. While set, every binary frame from the connection is dropped
+    (content would union into the page as a duplicate), and nothing feeds the
+    stale document either: no sync reply, no ``get_updates_since`` replay,
+    and no relayed broadcasts (``coedit_channel.suppress_yjs``). This is the
+    backstop for clients that predate ``resync_required``; a current client
+    all but never reaches this state (it rebuilds before syncing).
+    """
+
+    foreign: bool = False
+
+
 def _apply_yjs_frame(
     conn: coedit_channel.Connection,
     session_id: int,
     user: User,
     raw: bytes,
+    guard: _ConnectionGuard,
 ) -> bytes | None:
     """Validate, then hand back the update bytes to durably log; ``None`` when
     nothing content-changing happened or the sender isn't allowed to send it.
@@ -198,6 +217,13 @@ def _apply_yjs_frame(
     """
     if not raw:
         return None
+    if guard.foreign:
+        # Everything from a foreign-lineage connection is dropped — content
+        # would union into the page as a duplicate, awareness carets reference
+        # a document nobody else holds, and repeat handshakes would only
+        # recompute a reply the guard withholds. The resync_required frame was
+        # sent when the guard tripped; recovery is a fresh connection.
+        return None
     msg_type = raw[0]
     if msg_type == YMessageType.SYNC:
         inner = raw[1:]
@@ -215,10 +241,23 @@ def _apply_yjs_frame(
             # Reply with whatever this client is missing, computed from a doc
             # built for this call and dropped with it.
             try:
-                reply = coedit_live.sync_reply(session_id, raw)
+                reply, foreign = coedit_live.sync_reply(session_id, raw)
             except coedit_live.SessionGone:
                 return None
-            if reply is not None:
+            if foreign:
+                guard.foreign = True
+                # Also stop feeding it broadcasts: every relayed frame would
+                # grow the client-side union it must ultimately discard.
+                coedit_channel.suppress_yjs(conn.id)
+                log.warning(
+                    "coedit: session %s connection from user %s presented a "
+                    "foreign state vector (replaced-lineage content); "
+                    "refusing its frames and requesting a resync",
+                    session_id,
+                    user.id,
+                )
+                conn.post(ResyncRequiredFrame(reason="foreign_state").model_dump())
+            if reply is not None and not guard.foreign:
                 conn.post(coedit_channel.YjsBytes(payload=reply))
             return None
         update = read_message(inner[1:])
@@ -249,6 +288,7 @@ def _ingest_yjs_frame(
     user: User,
     raw: bytes,
     lineage: int,
+    guard: _ConnectionGuard,
 ) -> int | None:
     """Authorize, validate, durably log and refresh presence for one inbound
     frame — returning the ``ydoc_seq`` assigned, or ``None`` if nothing was
@@ -270,7 +310,7 @@ def _ingest_yjs_frame(
     identical two-transaction shape, so this is a narrower version of a race that
     is inherent to checking permission outside the write.
     """
-    update = _apply_yjs_frame(conn, session_id, user, raw)
+    update = _apply_yjs_frame(conn, session_id, user, raw, guard)
     if update is None:
         return None
     try:
@@ -304,7 +344,7 @@ def _ingest_yjs_frame(
             user.id,
             lineage,
         )
-        conn.post({"type": "resync_required", "reason": "stale_lineage"})
+        conn.post(ResyncRequiredFrame(reason="stale_lineage").model_dump())
         return None
     if seq is None:
         return None  # session closed underneath us
@@ -318,6 +358,7 @@ async def _recv_loop(
     session_id: int,
     user: User,
     lineage: int,
+    guard: _ConnectionGuard,
 ) -> None:
     while True:
         # Low-level receive() (not receive_bytes()/receive_json()) so one
@@ -335,7 +376,7 @@ async def _recv_loop(
             # fetch what it missed. Relaying first would leave the gap
             # undetectable.
             seq = await asyncio.to_thread(
-                _ingest_yjs_frame, conn, session_id, user, data, lineage
+                _ingest_yjs_frame, conn, session_id, user, data, lineage, guard
             )
             if seq is not None:
                 coedit_channel.broadcast_yjs(session_id, data, seq)
@@ -357,6 +398,8 @@ async def _recv_loop(
             # A client that saw a gap in the relay stream asks for what it
             # missed. Room-less this is the whole recovery path for a dropped
             # relay — without it a client stays diverged until it reconnects.
+            if guard.foreign:
+                continue  # a replaced-lineage doc gets no more content to union
             if not await asyncio.to_thread(_authorize, session_id, user, "read"):
                 continue
             missed = await asyncio.to_thread(coedit.updates_since, session_id, since.since_seq)
@@ -610,7 +653,7 @@ async def ws(websocket: WebSocket, path: str, user: User = Depends(require_user_
         )
 
         recv_task = asyncio.create_task(
-            _recv_loop(websocket, conn, sess.id, user, sess.ydoc_lineage)
+            _recv_loop(websocket, conn, sess.id, user, sess.ydoc_lineage, _ConnectionGuard())
         )
         send_task = asyncio.create_task(_send_loop(websocket, conn, ready, sess.id, user))
         done, pending = await asyncio.wait(
