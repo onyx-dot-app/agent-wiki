@@ -121,9 +121,9 @@ export interface TipTapEditorProps {
   /** Fires with the source ids whose spans contain the caret (or intersect
    * the selection), deduped against the last report. */
   onSourceCaret?: (ids: string[]) => void;
-  /** Fires on every selection change with the current selection as a
-   * comment draft (null if collapsed) plus its on-screen coordinates, for
-   * the caller to position a floating "Comment" affordance. */
+  /** Fires with the selection as a comment draft (null if collapsed or
+   * whitespace-only) plus coordinates for a floating "Comment" affordance,
+   * deduped against the last report and held back during mouse drags. */
   onSelectionForComment?: (
     draft: CommentDraft | null,
     coords: { x: number; y: number } | null,
@@ -266,13 +266,18 @@ export function TipTapEditor({
 
   useEffect(() => {
     if (!editor) return;
+    // Hold the comment report while a drag selects, else the affordance
+    // flickers. Pointercancel, blur, and a buttons-free pointermove cover
+    // releases the browser never delivers (mouse pointers get no capture).
+    let mouseSelecting = false;
     const report = () => {
       // A cell selection reports its anchor and head cell positions, which quote
       // a run starting and ending mid-cell. Comment on what was marked instead.
       const cells = cellSelectionRange(editor.state);
       const { from, to } = cells ?? editor.state.selection;
       const selKey = `${from}:${to}`;
-      if (selKey !== lastSelectionForComment.current) {
+      // Drags skip without bumping the key so the release report passes dedupe.
+      if (!mouseSelecting && selKey !== lastSelectionForComment.current) {
         lastSelectionForComment.current = selKey;
         const cb = onSelectionForCommentRef.current;
         if (cb) {
@@ -323,9 +328,35 @@ export function TipTapEditor({
         lastSourceCaretIds,
       );
     };
+    const checkReleased = (event: PointerEvent) => {
+      if (event.buttons === 0) endDragSelect();
+    };
+    const beginDragSelect = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      mouseSelecting = true;
+      // Armed only while the hold is active, so idle mousemoves cost nothing.
+      document.addEventListener("pointermove", checkReleased);
+    };
+    const endDragSelect = () => {
+      if (!mouseSelecting) return;
+      mouseSelecting = false;
+      document.removeEventListener("pointermove", checkReleased);
+      report();
+    };
+    const dom = editor.view.dom;
+    // Drag starts are editor-scoped, but release can land anywhere.
+    dom.addEventListener("pointerdown", beginDragSelect);
+    document.addEventListener("pointerup", endDragSelect);
+    document.addEventListener("pointercancel", endDragSelect);
+    window.addEventListener("blur", endDragSelect);
     editor.on("transaction", report);
     return () => {
       editor.off("transaction", report);
+      dom.removeEventListener("pointerdown", beginDragSelect);
+      document.removeEventListener("pointerup", endDragSelect);
+      document.removeEventListener("pointercancel", endDragSelect);
+      document.removeEventListener("pointermove", checkReleased);
+      window.removeEventListener("blur", endDragSelect);
     };
   }, [editor]);
 
