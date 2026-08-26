@@ -121,12 +121,9 @@ export interface TipTapEditorProps {
   /** Fires with the source ids whose spans contain the caret (or intersect
    * the selection), deduped against the last report. */
   onSourceCaret?: (ids: string[]) => void;
-  /** Fires with the current selection as a comment draft (null if
-   * collapsed) plus its on-screen coordinates, for the caller to position a
-   * floating "Comment" affordance. While the mouse button is held down
-   * (the user is still dragging out a selection), reports are held back and
-   * only the final one — from the selection in place at mouseup — fires, so
-   * the affordance doesn't flicker in and out during the drag. */
+  /** Fires with the selection as a comment draft (null if collapsed or
+   * whitespace-only) plus coordinates for a floating "Comment" affordance,
+   * deduped against the last report and held back during mouse drags. */
   onSelectionForComment?: (
     draft: CommentDraft | null,
     coords: { x: number; y: number } | null,
@@ -266,44 +263,28 @@ export function TipTapEditor({
   const onSelectionForCommentRef = useRef(onSelectionForComment);
   onSelectionForCommentRef.current = onSelectionForComment;
   const lastSelectionForComment = useRef("\0");
-  // Suppress the comment-selection report while the mouse is down (the
-  // user is still dragging out a selection) so the floating affordance
-  // doesn't appear until the selection is finalized. The last computed
-  // report is stashed here and flushed on mouseup.
-  const isMouseDownRef = useRef(false);
-  const pendingSelectionForComment = useRef<{
-    draft: CommentDraft | null;
-    coords: { x: number; y: number } | null;
-  } | null>(null);
 
   useEffect(() => {
     if (!editor) return;
+    // Hold the comment report while a drag selects, else the affordance
+    // flickers. Blur also releases, an abandoned drag may never see mouseup.
+    let mouseSelecting = false;
     const report = () => {
       // A cell selection reports its anchor and head cell positions, which quote
       // a run starting and ending mid-cell. Comment on what was marked instead.
       const cells = cellSelectionRange(editor.state);
       const { from, to } = cells ?? editor.state.selection;
       const selKey = `${from}:${to}`;
-      if (selKey !== lastSelectionForComment.current) {
+      // Drags skip without bumping the key so the release report passes dedupe.
+      if (!mouseSelecting && selKey !== lastSelectionForComment.current) {
         lastSelectionForComment.current = selKey;
         const cb = onSelectionForCommentRef.current;
         if (cb) {
-          const emit = (
-            draft: CommentDraft | null,
-            coords: { x: number; y: number } | null,
-          ) => {
-            if (isMouseDownRef.current) {
-              pendingSelectionForComment.current = { draft, coords };
-            } else {
-              pendingSelectionForComment.current = null;
-              cb(draft, coords);
-            }
-          };
           const quotedText = docTextBetween(editor, from, to);
           // The server re-anchors by the quote, and a whitespace-only quote
           // matches anywhere.
           if (!quotedText.trim()) {
-            emit(null, null);
+            cb(null, null);
           } else {
             const draft: CommentDraft = {
               startOffset: pmPosToTextOffset(editor, from),
@@ -318,7 +299,7 @@ export function TipTapEditor({
               Math.min(to, editor.state.selection.head),
             );
             const coords = editor.view.coordsAtPos(head);
-            emit(draft, { x: coords.right, y: coords.top });
+            cb(draft, { x: coords.right, y: coords.top });
           }
         }
       }
@@ -346,50 +327,25 @@ export function TipTapEditor({
         lastSourceCaretIds,
       );
     };
+    const beginMouseSelect = () => {
+      mouseSelecting = true;
+    };
+    const endMouseSelect = () => {
+      if (!mouseSelecting) return;
+      mouseSelecting = false;
+      report();
+    };
+    const dom = editor.view.dom;
+    // Drag starts are editor-scoped, but release can land anywhere.
+    dom.addEventListener("mousedown", beginMouseSelect);
+    document.addEventListener("mouseup", endMouseSelect);
+    window.addEventListener("blur", endMouseSelect);
     editor.on("transaction", report);
     return () => {
       editor.off("transaction", report);
-    };
-  }, [editor]);
-
-  // Track whether the mouse button is down over the editor so the
-  // transaction listener above can hold back the comment-selection report
-  // until the drag finishes. Listens on the document (not just the editor
-  // DOM) for mouseup so a drag that ends outside the editor still clears
-  // the flag and flushes the held-back report. Also listens for window
-  // blur — a drag that ends outside the *browser window* (e.g. the mouse
-  // is released over another app, or the user alt-tabs away) never
-  // delivers a mouseup to document at all — and, belt-and-suspenders,
-  // checks on the next mousemove whether the button is actually still
-  // held (event.buttons === 0), for the rare case the window never loses
-  // focus either.
-  useEffect(() => {
-    if (!editor) return;
-    const dom = editor.view.dom;
-    const releaseMouse = () => {
-      if (!isMouseDownRef.current) return;
-      isMouseDownRef.current = false;
-      const pending = pendingSelectionForComment.current;
-      if (pending) {
-        pendingSelectionForComment.current = null;
-        onSelectionForCommentRef.current?.(pending.draft, pending.coords);
-      }
-    };
-    const handleMouseDown = () => {
-      isMouseDownRef.current = true;
-    };
-    const handleMouseMove = (event: MouseEvent) => {
-      if (isMouseDownRef.current && event.buttons === 0) releaseMouse();
-    };
-    dom.addEventListener("mousedown", handleMouseDown);
-    document.addEventListener("mouseup", releaseMouse);
-    document.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("blur", releaseMouse);
-    return () => {
-      dom.removeEventListener("mousedown", handleMouseDown);
-      document.removeEventListener("mouseup", releaseMouse);
-      document.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("blur", releaseMouse);
+      dom.removeEventListener("mousedown", beginMouseSelect);
+      document.removeEventListener("mouseup", endMouseSelect);
+      window.removeEventListener("blur", endMouseSelect);
     };
   }, [editor]);
 
