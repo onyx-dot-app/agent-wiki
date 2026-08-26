@@ -267,7 +267,8 @@ export function TipTapEditor({
   useEffect(() => {
     if (!editor) return;
     // Hold the comment report while a drag selects, else the affordance
-    // flickers. Blur also releases, an abandoned drag may never see mouseup.
+    // flickers. Pointercancel and blur also release, a drag can end with no
+    // pointerup (context menu, capture takeover, off-window release).
     let mouseSelecting = false;
     const report = () => {
       // A cell selection reports its anchor and head cell positions, which quote
@@ -327,25 +328,27 @@ export function TipTapEditor({
         lastSourceCaretIds,
       );
     };
-    const beginMouseSelect = () => {
-      mouseSelecting = true;
+    const beginDragSelect = (event: PointerEvent) => {
+      if (event.button === 0) mouseSelecting = true;
     };
-    const endMouseSelect = () => {
+    const endDragSelect = () => {
       if (!mouseSelecting) return;
       mouseSelecting = false;
       report();
     };
     const dom = editor.view.dom;
     // Drag starts are editor-scoped, but release can land anywhere.
-    dom.addEventListener("mousedown", beginMouseSelect);
-    document.addEventListener("mouseup", endMouseSelect);
-    window.addEventListener("blur", endMouseSelect);
+    dom.addEventListener("pointerdown", beginDragSelect);
+    document.addEventListener("pointerup", endDragSelect);
+    document.addEventListener("pointercancel", endDragSelect);
+    window.addEventListener("blur", endDragSelect);
     editor.on("transaction", report);
     return () => {
       editor.off("transaction", report);
-      dom.removeEventListener("mousedown", beginMouseSelect);
-      document.removeEventListener("mouseup", endMouseSelect);
-      window.removeEventListener("blur", endMouseSelect);
+      dom.removeEventListener("pointerdown", beginDragSelect);
+      document.removeEventListener("pointerup", endDragSelect);
+      document.removeEventListener("pointercancel", endDragSelect);
+      window.removeEventListener("blur", endDragSelect);
     };
   }, [editor]);
 
