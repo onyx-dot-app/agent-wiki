@@ -267,8 +267,8 @@ export function TipTapEditor({
   useEffect(() => {
     if (!editor) return;
     // Hold the comment report while a drag selects, else the affordance
-    // flickers. Pointercancel and blur also release, a drag can end with no
-    // pointerup (context menu, capture takeover, off-window release).
+    // flickers. Pointercancel, blur, and a buttons-free pointermove cover
+    // releases the browser never delivers (mouse pointers get no capture).
     let mouseSelecting = false;
     const report = () => {
       // A cell selection reports its anchor and head cell positions, which quote
@@ -328,12 +328,19 @@ export function TipTapEditor({
         lastSourceCaretIds,
       );
     };
+    const checkReleased = (event: PointerEvent) => {
+      if (event.buttons === 0) endDragSelect();
+    };
     const beginDragSelect = (event: PointerEvent) => {
-      if (event.button === 0) mouseSelecting = true;
+      if (event.button !== 0) return;
+      mouseSelecting = true;
+      // Armed only while the hold is active, so idle mousemoves cost nothing.
+      document.addEventListener("pointermove", checkReleased);
     };
     const endDragSelect = () => {
       if (!mouseSelecting) return;
       mouseSelecting = false;
+      document.removeEventListener("pointermove", checkReleased);
       report();
     };
     const dom = editor.view.dom;
@@ -348,6 +355,7 @@ export function TipTapEditor({
       dom.removeEventListener("pointerdown", beginDragSelect);
       document.removeEventListener("pointerup", endDragSelect);
       document.removeEventListener("pointercancel", endDragSelect);
+      document.removeEventListener("pointermove", checkReleased);
       window.removeEventListener("blur", endDragSelect);
     };
   }, [editor]);
