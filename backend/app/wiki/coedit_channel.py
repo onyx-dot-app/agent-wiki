@@ -199,9 +199,29 @@ def suppress_yjs(conn_id: str) -> None:
     document proved to be a replaced lineage: feeding it more content only
     grows the client-side union it would try to sync back. Lasts for the
     connection's lifetime (cleared by ``disconnect``); recovery is a rebuilt
-    document on a fresh connection."""
+    document on a fresh connection.
+
+    Binary frames already sitting in the connection's queue are drained too —
+    a broadcast enqueued between registration and this call would otherwise
+    still be delivered. A frame the send loop dequeued *before* this call can
+    still go out; that residue is harmless (the doc is already condemned: its
+    retired/old-lineage ids flag it foreign at its next sync regardless of
+    what else it integrated)."""
     with _lock:
         _suppressed_yjs.add(conn_id)
+        q = _queues.get(conn_id)
+    if q is None:
+        return
+    kept: list[QueueItem] = []
+    try:
+        while True:
+            item = q.get_nowait()
+            if not isinstance(item, YjsBytes):
+                kept.append(item)
+    except queue.Empty:
+        pass
+    for item in kept:
+        q.put_nowait(item)
 
 
 def _deliver_local_bytes(

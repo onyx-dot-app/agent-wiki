@@ -200,6 +200,26 @@ def test_straggler_ids_are_retired_after_the_bump(tmp_repo, monkeypatch):
     assert foreign
 
 
+def test_suppress_yjs_drains_queued_binary_frames(tmp_repo):
+    """Suppression must cover frames enqueued BEFORE the guard tripped — a
+    broadcast racing the foreign STEP1 would otherwise still be delivered."""
+    from app.wiki import coedit_channel
+
+    sess, _doc = _seed_session(_BODY)
+    conn = coedit_channel.connect(sess.id, lambda: None)
+    try:
+        coedit_channel.broadcast_yjs(sess.id, b"\x00pre-suppression frame")
+        assert conn.queue.qsize() == 1
+        coedit_channel.suppress_yjs(conn.id)
+        assert conn.queue.qsize() == 0  # queued binary drained
+        coedit_channel.broadcast_yjs(sess.id, b"\x00post-suppression frame")
+        assert conn.queue.qsize() == 0  # new binary withheld
+        coedit_channel.publish_control(sess.id, {"type": "resync_required", "reason": "t"})
+        assert conn.queue.qsize() == 1  # control frames still flow
+    finally:
+        coedit_channel.disconnect(conn.id)
+
+
 def test_foreign_step1_is_flagged_and_reply_withheld(tmp_repo):
     sess, _server_doc = _seed_session(_BODY)
     foreign_doc = markdown_yjs.seed_doc_from_markdown("POISON copy of the page\n")
