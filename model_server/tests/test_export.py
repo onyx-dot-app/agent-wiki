@@ -1,0 +1,66 @@
+"""Test the torch → ONNX export: the exported graph must match the torch scorer."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable
+
+import numpy as np
+import onnxruntime as ort
+
+from export import export_onnx
+from two_tower.scorer import BundleScorer
+
+
+def test_export_matches_torch(make_bundle: Callable[..., Path], embed_dim: int, tmp_path: Path):
+    bundle_path = make_bundle()
+    onnx_path = tmp_path / "model.onnx"
+
+    export_onnx(bundle_path, onnx_path)  # raises if parity fails
+    assert onnx_path.exists()
+
+    # The calibrated cutoff and embedding model ride in the graph so the served
+    # artifact is self-describing — the backend reads cutoff as its threshold.
+    meta = ort.InferenceSession(
+        str(onnx_path), providers=["CPUExecutionProvider"]
+    ).get_modelmeta().custom_metadata_map
+    assert meta["cutoff"] == str(0.4)  # make_bundle's default cutoff
+    assert meta["embedding_model"] == "text-embedding-3-small"
+
+    doc = [0.1] * embed_dim
+    pages = [[0.2] * embed_dim, [0.5] * embed_dim, [-0.3] * embed_dim]
+
+    # torch reference
+    torch_probs = BundleScorer.load(bundle_path).score_batch(doc, pages)
+
+    # onnxruntime: wiki = pages, doc tiled across them
+    session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+    onnx_out = np.asarray(
+        session.run(
+            None,
+            {
+                "wiki": np.asarray(pages, dtype=np.float32),
+                "doc": np.asarray([doc] * len(pages), dtype=np.float32),
+            },
+        )[0]
+    ).ravel()
+
+    assert onnx_out.shape == (len(pages),)
+    for t, o in zip(torch_probs, onnx_out):
+        assert abs(t - float(o)) < 1e-5
+
+
+def test_failed_parity_leaves_no_file(make_bundle: Callable[..., Path], tmp_path: Path, monkeypatch):
+    # A parity failure must not leave an unverified .onnx at the destination
+    # (deploy scripts key off the file's existence) — nor a stray temp file.
+    import export as export_mod
+
+    def boom(head, path, example):
+        raise RuntimeError("parity failed")
+
+    monkeypatch.setattr(export_mod, "_assert_parity", boom)
+    onnx_path = tmp_path / "model.onnx"
+    import pytest
+    with pytest.raises(RuntimeError):
+        export_mod.export_onnx(make_bundle(), onnx_path)
+    assert not onnx_path.exists()
+    assert not onnx_path.with_suffix(".onnx.tmp").exists()
